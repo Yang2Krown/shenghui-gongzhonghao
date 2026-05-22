@@ -1,0 +1,55 @@
+sequenceDiagram
+    participant U as 用户
+    participant F as 前端
+    participant B as 后端
+    participant A as Agent A
+    participant B as Agent B
+    participant C as Agent C
+    participant D as Agent D
+    participant AI as AI模型
+    
+    U->>F: 输入选题+大纲
+    F->>F: 表单验证
+    F->>B: POST /api/v1/titles/generate
+    B->>B: 数据验证
+    B->>B: 创建生成任务
+    
+    B->>A: 调用Agent A（标题创作员）
+    A->>AI: 发送提示词+输入数据
+    AI-->>A: 返回10-15个候选标题
+    A->>A: 验证候选数量和套路覆盖
+    A-->>B: 返回AgentAResponse
+    
+    B->>B: 调用Agent B（标题评审员）
+    B->>AI: 发送候选标题+评分提示词
+    AI-->>B: 返回一票否决结果+评分
+    B->>B: 计算加权总分
+    B->>B: 筛选Top 5
+    B-->>B: 返回AgentBResponse
+    
+    B->>C: 调用Agent C（读者点击预测员）
+    C->>AI: 发送Top 5标题+预测提示词
+    AI-->>C: 返回点击预测
+    C-->>B: 返回AgentCResponse
+    
+    B->>D: 调用Agent D（最终判定员）
+    D->>D: 综合评分（0.6×B + 0.4×C）
+    D->>D: 自检（Top 3综合分≥7.0？）
+    
+    alt 自检通过
+        D-->>B: 返回Top 3推荐标题
+        B-->>F: 返回TitleGenerationResponse
+        F-->>U: 显示3个推荐标题
+    else 自检失败（首次）
+        D->>B: 返回扣分理由
+        B->>A: 重生调用（含扣分理由）
+        A->>AI: 重新生成候选
+        AI-->>A: 返回新候选
+        A-->>B: 返回新AgentAResponse
+        B->>B: 重新执行B、C、D流程
+        B-->>F: 返回最终结果
+    else 自检失败（二次）
+        D-->>B: 返回"难以成标题"标记
+        B-->>F: 返回失败结果
+        F-->>U: 显示失败提示
+    end

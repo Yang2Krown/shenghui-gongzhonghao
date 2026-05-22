@@ -1,0 +1,131 @@
+classDiagram
+    class TitleGenerationRequest {
+        +Selection selection
+        +Outline outline
+        +validate() bool
+    }
+    
+    class Selection {
+        +string title
+        +string direction
+        +string template
+        +string valuePromise
+        +validate() bool
+    }
+    
+    class Outline {
+        +string[] sectionTitles
+        +string[] keyInfoPoints
+        +string[] spreadTags
+        +validate() bool
+    }
+    
+    class TitleCandidate {
+        +int id
+        +string title
+        +int wordCount
+        +string template
+        +string[] modifiers
+        +string description
+        +validate() bool
+    }
+    
+    class AgentAResponse {
+        +TitleCandidate[] candidates
+        +int totalCount
+        +string[] coveredTemplates
+        +validate() bool
+    }
+    
+    class AgentBResponse {
+        +int[] vetoedIds
+        +VetoReason[] vetoReasons
+        +TopCandidate[] top5
+        +validate() bool
+    }
+    
+    class TopCandidate {
+        +TitleCandidate candidate
+        +Score score
+        +float weightedTotal
+        +string evaluation
+    }
+    
+    class Score {
+        +int firstImpression
+        +int emotionTrigger
+        +int specificity
+        +int lengthCompliance
+        +int templateMaturity
+        +int outlineConsistency
+        +calculateWeighted() float
+    }
+    
+    class VetoReason {
+        +int candidateId
+        +string reason
+    }
+    
+    class AgentCResponse {
+        +ClickPrediction[] predictions
+        +validate() bool
+    }
+    
+    class ClickPrediction {
+        +string title
+        +int clickIntent
+        +string reason
+        +string improvement
+    }
+    
+    class AgentDResponse {
+        +FinalRecommendation[] top3
+        +GenerationProcess process
+        +bool passed
+        +validate() bool
+    }
+    
+    class FinalRecommendation {
+        +int rank
+        +TitleCandidate candidate
+        +float bScore
+        +float cScore
+        +float compositeScore
+        +string recommendationReason
+    }
+    
+    class GenerationProcess {
+        +int totalCandidates
+        +int coveredTemplates
+        +int vetoedCount
+        +bool selfCheckPassed
+        +int regenerationCount
+    }
+    
+    class TitleGenerationResponse {
+        +string id
+        +TitleGenerationRequest input
+        +AgentAResponse agentA
+        +AgentBResponse agentB
+        +AgentCResponse agentC
+        +AgentDResponse agentD
+        +FinalRecommendation[] finalTitles
+        +datetime createdAt
+        +string status
+    }
+    
+    TitleGenerationRequest --> Selection
+    TitleGenerationRequest --> Outline
+    AgentAResponse --> TitleCandidate
+    AgentBResponse --> TopCandidate
+    AgentBResponse --> VetoReason
+    TopCandidate --> TitleCandidate
+    TopCandidate --> Score
+    AgentCResponse --> ClickPrediction
+    AgentDResponse --> FinalRecommendation
+    AgentDResponse --> GenerationProcess
+    TitleGenerationResponse --> TitleGenerationRequest
+    TitleGenerationResponse --> AgentAResponse
+    TitleGenerationResponse --> AgentBResponse
+    TitleGenerationResponse --> AgentCResponse
+    TitleGenerationResponse --> AgentDResponse

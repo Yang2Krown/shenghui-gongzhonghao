@@ -1,0 +1,518 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 全局CSS变量 - 设计规范 */
+:root {
+  /* Brand */
+  --clay: #CC785C;
+  --clay-deep: #A85A40;
+  --clay-soft: #E9B79E;
+  --clay-tint: #F5E2D5;
+
+  /* Accent */
+  --pine: #3F5C52;
+  --pine-soft: #C9D4CD;
+  --sand: #C49B5C;
+  --sand-soft: #ECDCBF;
+
+  /* Neutral */
+  --paper: #FAF9F5;
+  --ivory: #F5F1EB;
+  --bone: #EFEAE0;
+  --line: #E4DDCE;
+  --ink: #1F1F1E;
+  --ink-2: #3A3935;
+  --ink-3: #6B6862;
+  --ink-4: #9A968D;
+
+  /* Semantic */
+  --leaf: #5C8A5C;
+  --crimson: #B85450;
+
+  /* Spacing */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  --s8: 64px;
+  --s9: 96px;
+  --s10: 128px;
+
+  /* Radius */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+  --r-pill: 999px;
+
+  /* Shadow */
+  --sh-1: 0 1px 2px rgba(31,31,30,.04), 0 0 0 1px rgba(31,31,30,.04);
+  --sh-2: 0 4px 12px rgba(31,31,30,.06), 0 0 0 1px rgba(31,31,30,.04);
+  --sh-3: 0 12px 32px rgba(31,31,30,.08), 0 0 0 1px rgba(31,31,30,.04);
+  --sh-clay: 0 8px 24px rgba(204,120,92,.18);
+
+  /* Legacy support */
+  --primary-color: #CC785C;
+  --primary-hover: #A85A40;
+  --primary-light: #F5E2D5;
+  --secondary-color: #3F5C52;
+  --success-color: #5C8A5C;
+  --warning-color: #C49B5C;
+  --danger-color: #B85450;
+  --text-primary: #1F1F1E;
+  --text-secondary: #3A3935;
+  --text-muted: #6B6862;
+  --bg-primary: #FAF9F5;
+  --bg-secondary: #F5F1EB;
+  --bg-tertiary: #EFEAE0;
+  --border-color: #E4DDCE;
+  --shadow-sm: var(--sh-1);
+  --shadow-md: var(--sh-2);
+  --shadow-lg: var(--sh-3);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+}
+
+/* 基础样式 */
+@layer base {
+  html {
+    @apply text-ink antialiased;
+  }
+  
+  body {
+    @apply bg-ivory;
+    font-family: var(--sans);
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif font-medium;
+    color: var(--ink);
+  }
+  
+  h1 {
+    font-size: 40px;
+    line-height: 1.15;
+  }
+  
+  h2 {
+    font-size: 30px;
+    line-height: 1.20;
+  }
+  
+  h3 {
+    font-size: 22px;
+    line-height: 1.30;
+    @apply font-sans font-semibold;
+  }
+  
+  h4 {
+    font-size: 18px;
+    line-height: 1.40;
+    @apply font-sans font-semibold;
+  }
+  
+  p, .body-text {
+    font-size: 15px;
+    line-height: 1.70;
+  }
+  
+  .small-text {
+    font-size: 13px;
+    line-height: 1.60;
+  }
+  
+  .caption-text {
+    font-size: 12px;
+    line-height: 1.50;
+    letter-spacing: 0.04em;
+    @apply font-medium;
+  }
+  
+  a {
+    @apply text-clay-deep hover:text-clay transition-colors;
+  }
+}
+
+/* 组件样式 */
+@layer components {
+  /* 按钮系统 */
+  .btn {
+    @apply font-medium transition-all duration-200 focus:outline-none;
+    border-radius: var(--r-md);
+    padding: 10px 18px; /* md 尺寸 */
+    font-size: 14px;
+  }
+  
+  .btn-sm {
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+  
+  .btn-lg {
+    padding: 13px 22px;
+    font-size: 15px;
+  }
+  
+  /* Primary Clay - 核心动作 */
+  .btn-clay {
+    @apply btn bg-clay text-white hover:bg-clay-deep;
+    box-shadow: var(--sh-clay);
+  }
+  
+  /* Primary Dark - 强行动 */
+  .btn-dark {
+    @apply btn bg-ink text-paper hover:bg-ink-2;
+  }
+  
+  /* Secondary Ghost - 次要操作 */
+  .btn-ghost {
+    @apply btn bg-transparent text-ink border border-line hover:bg-bone;
+  }
+  
+  /* Tertiary Text - 链接式操作 */
+  .btn-text {
+    @apply btn bg-transparent text-clay-deep hover:text-clay p-0;
+  }
+  
+  /* Legacy button support */
+  .btn-primary {
+    @apply btn-clay;
+  }
+  
+  .btn-secondary {
+    @apply btn-dark;
+  }
+  
+  .btn-success {
+    @apply btn bg-leaf text-white hover:bg-leaf/90;
+  }
+  
+  .btn-warning {
+    @apply btn bg-sand text-white hover:bg-sand/90;
+  }
+  
+  .btn-danger {
+    @apply btn bg-crimson text-white hover:bg-crimson/90;
+  }
+  
+  .btn-outline {
+    @apply btn-ghost;
+  }
+  
+  /* 卡片系统 */
+  .card {
+    @apply bg-paper border border-line overflow-hidden;
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-1);
+  }
+  
+  .card-hover {
+    @apply card transition-all duration-200;
+  }
+  
+  .card-hover:hover {
+    box-shadow: var(--sh-2);
+    transform: translateY(-2px);
+  }
+  
+  /* 输入系统 */
+  .input-field {
+    @apply w-full border border-line outline-none transition-all;
+    border-radius: var(--r-md);
+    padding: 11px 14px;
+    background: var(--paper);
+  }
+  
+  .input-field:focus {
+    border-color: var(--clay);
+    box-shadow: 0 0 0 3px rgba(204,120,92,.12);
+  }
+  
+  .input-field::placeholder {
+    color: var(--ink-4);
+  }
+  
+  .textarea-field {
+    @apply input-field resize-none;
+    padding: 14px;
+  }
+  
+  .label {
+    @apply block text-sm font-medium mb-1;
+    color: var(--ink-2);
+  }
+  
+  /* 标签系统 */
+  .badge {
+    @apply inline-flex items-center font-medium;
+    border-radius: var(--r-pill);
+    padding: 3px 8px;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+  }
+  
+  .badge-primary {
+    @apply badge bg-clay-tint text-clay-deep;
+    border: 1px solid var(--clay-soft);
+  }
+  
+  .badge-success {
+    @apply badge bg-leaf/10 text-leaf;
+  }
+  
+  .badge-warning {
+    @apply badge bg-sand-soft text-sand;
+  }
+  
+  .badge-danger {
+    @apply badge bg-crimson/10 text-crimson;
+  }
+  
+  .badge-info {
+    @apply badge bg-pine-soft text-pine;
+  }
+  
+  /* 标签/Chip */
+  .tag {
+    @apply inline-flex items-center font-medium;
+    border-radius: var(--r-pill);
+    padding: 5px 10px;
+    font-size: 13px;
+    background: var(--bone);
+    color: var(--ink-2);
+    border: 1px solid var(--line);
+  }
+  
+  .tag-selected {
+    @apply tag;
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
+  }
+  
+  .tag-brand {
+    @apply tag;
+    background: var(--clay-tint);
+    color: var(--clay-deep);
+    border-color: var(--clay-soft);
+  }
+}
+
+/* 自定义工具类 */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  /* 动画 - 基于设计规范 */
+  .animate-fade-in {
+    animation: fadeIn 0.24s cubic-bezier(.32, .72, 0, 1);
+  }
+  
+  .animate-slide-up {
+    animation: slideUp 0.24s cubic-bezier(.32, .72, 0, 1);
+  }
+  
+  .animate-slide-down {
+    animation: slideDown 0.24s cubic-bezier(.32, .72, 0, 1);
+  }
+  
+  .animate-micro {
+    animation-duration: 120ms;
+    animation-timing-function: cubic-bezier(.4, 0, .2, 1);
+  }
+  
+  .animate-transition {
+    animation-duration: 240ms;
+    animation-timing-function: cubic-bezier(.32, .72, 0, 1);
+  }
+}
+
+/* 动画定义 - 基于设计规范 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(8px); /* 设计规范：单次动画位移不超过 8px */
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-8px); /* 设计规范：单次动画位移不超过 8px */
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes typewriter {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+@keyframes blink {
+  0%, 100% {
+    border-color: var(--clay);
+  }
+  50% {
+    border-color: transparent;
+  }
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bone);
+  border-radius: var(--r-xs);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: var(--r-xs);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-4);
+}
+
+/* 富文本编辑器样式 */
+.tiptap-editor {
+  @apply border border-line p-4 min-h-[300px] focus:outline-none;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+}
+
+.tiptap-editor p {
+  @apply mb-3;
+  font-size: 15px;
+  line-height: 1.70;
+}
+
+.tiptap-editor h1 {
+  @apply font-serif font-medium mb-4;
+  font-size: 40px;
+  line-height: 1.15;
+}
+
+.tiptap-editor h2 {
+  @apply font-serif font-medium mb-3;
+  font-size: 30px;
+  line-height: 1.20;
+}
+
+.tiptap-editor h3 {
+  @apply font-sans font-semibold mb-2;
+  font-size: 22px;
+  line-height: 1.30;
+}
+
+.tiptap-editor h4 {
+  @apply font-sans font-semibold mb-2;
+  font-size: 18px;
+  line-height: 1.40;
+}
+
+.tiptap-editor ul {
+  @apply list-disc pl-6 mb-3;
+}
+
+.tiptap-editor ol {
+  @apply list-decimal pl-6 mb-3;
+}
+
+.tiptap-editor li {
+  @apply mb-1;
+}
+
+.tiptap-editor blockquote {
+  @apply border-l-4 pl-4 italic mb-3;
+  border-color: var(--clay-soft);
+  color: var(--ink-3);
+}
+
+.tiptap-editor code {
+  @apply px-1 py-0.5 text-sm font-mono;
+  background: var(--bone);
+  border-radius: var(--r-xs);
+}
+
+.tiptap-editor pre {
+  @apply p-4 mb-3 overflow-x-auto;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: var(--r-lg);
+}
+
+.tiptap-editor pre code {
+  @apply bg-transparent p-0;
+}
+
+.tiptap-editor a {
+  @apply underline;
+  color: var(--clay-deep);
+}
+
+.tiptap-editor a:hover {
+  color: var(--clay);
+}
+
+.tiptap-editor img {
+  @apply max-w-full h-auto;
+  border-radius: var(--r-lg);
+}
+
+.tiptap-editor table {
+  @apply w-full border-collapse mb-3;
+}
+
+.tiptap-editor th, .tiptap-editor td {
+  @apply border px-3 py-2;
+  border-color: var(--line);
+}
+
+.tiptap-editor th {
+  @apply font-semibold;
+  background: var(--bone);
+}
+
+/* 占位符样式 */
+.tiptap-editor p.is-editor-empty:first-child::before {
+  @apply float-left pointer-events-none h-0;
+  content: attr(data-placeholder);
+  color: var(--ink-4);
+}
+
+/* 选中样式 */
+.tiptap-editor ::selection {
+  background: var(--clay-tint);
+}

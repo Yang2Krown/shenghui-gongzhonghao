@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+.DS_Store
+*.log
+
+# Local DB
+*.db
+*.sqlite
+*.sqlite3
+seed_test.db
+smoke_test.db
+
+# Env (secrets)
+.env
+.env.production
+.env.local
+backend/.env
+backend/.env.production
+backend/.env.local
+
+# Cookies / secrets
+secrets/
+*.cookie
+*.cookies.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.tar.gz
+*.zip
+
+# Test / temp
+/tmp/
+seed_test.db
