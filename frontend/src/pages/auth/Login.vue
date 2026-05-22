@@ -1,5 +1,5 @@
 <template>
-  <div class="login-page min-h-screen bg-ivory flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+  <div class="login-page min-h-screen flex flex-col justify-center py-12 sm:px-6 lg:px-8">
     <div class="sm:mx-auto sm:w-full sm:max-w-md">
       <h2 class="mt-6 text-center text-h1 font-serif text-ink">
         登录到 AI公众号内容运营平台
@@ -14,52 +14,46 @@
 
     <div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
       <div class="card py-8 px-4 sm:px-10">
-        <form class="space-y-6" @submit.prevent="handleLogin">
+        <!-- Tab 切换 -->
+        <el-tabs v-model="activeTab" class="mb-6">
+          <el-tab-pane label="手机验证码" name="phone" />
+          <el-tab-pane label="邮箱密码" name="email" />
+        </el-tabs>
+
+        <!-- 手机验证码登录 -->
+        <form v-if="activeTab === 'phone'" class="space-y-6" @submit.prevent="handlePhoneLogin">
           <div>
-            <label for="email" class="block text-sm font-medium text-ink-2">
-              邮箱地址
-            </label>
+            <label class="block text-sm font-medium text-ink-2">手机号</label>
             <div class="mt-1">
               <el-input
-                id="email"
-                v-model="form.email"
-                type="email"
-                placeholder="请输入邮箱地址"
-                :class="{ 'is-error': errors.email }"
-                @blur="validateEmail"
+                v-model="phoneForm.phone"
+                placeholder="请输入手机号"
+                :class="{ 'is-error': phoneErrors.phone }"
+                @blur="validatePhone"
               />
-              <p v-if="errors.email" class="mt-1 text-sm text-crimson">{{ errors.email }}</p>
+              <p v-if="phoneErrors.phone" class="mt-1 text-sm text-crimson">{{ phoneErrors.phone }}</p>
             </div>
           </div>
 
           <div>
-            <label for="password" class="block text-sm font-medium text-ink-2">
-              密码
-            </label>
-            <div class="mt-1">
+            <label class="block text-sm font-medium text-ink-2">验证码</label>
+            <div class="mt-1 flex gap-2">
               <el-input
-                id="password"
-                v-model="form.password"
-                type="password"
-                placeholder="请输入密码"
-                show-password
-                :class="{ 'is-error': errors.password }"
-                @blur="validatePassword"
+                v-model="phoneForm.code"
+                placeholder="6位验证码"
+                maxlength="6"
+                :class="{ 'is-error': phoneErrors.code }"
               />
-              <p v-if="errors.password" class="mt-1 text-sm text-crimson">{{ errors.password }}</p>
+              <el-button
+                :disabled="cooldown > 0 || !phoneForm.phone"
+                :loading="sendingCode"
+                style="white-space: nowrap; min-width: 110px;"
+                @click="handleSendCode"
+              >
+                {{ cooldown > 0 ? `${cooldown}s 后重发` : '获取验证码' }}
+              </el-button>
             </div>
-          </div>
-
-          <div class="flex items-center justify-between">
-            <div class="flex items-center">
-              <el-checkbox v-model="form.remember">记住我</el-checkbox>
-            </div>
-
-            <div class="text-sm">
-              <a href="#" class="font-medium text-clay-deep hover:text-clay">
-                忘记密码？
-              </a>
-            </div>
+            <p v-if="phoneErrors.code" class="mt-1 text-sm text-crimson">{{ phoneErrors.code }}</p>
           </div>
 
           <div>
@@ -68,148 +62,190 @@
               native-type="submit"
               class="w-full"
               :loading="loading"
-              :disabled="!isFormValid"
+              :disabled="!phoneForm.phone || !phoneForm.code"
+            >
+              登录 / 注册
+            </el-button>
+          </div>
+        </form>
+
+        <!-- 邮箱密码登录 -->
+        <form v-else class="space-y-6" @submit.prevent="handleEmailLogin">
+          <div>
+            <label class="block text-sm font-medium text-ink-2">邮箱地址</label>
+            <div class="mt-1">
+              <el-input
+                v-model="emailForm.email"
+                type="email"
+                placeholder="请输入邮箱地址"
+                :class="{ 'is-error': emailErrors.email }"
+                @blur="validateEmail"
+              />
+              <p v-if="emailErrors.email" class="mt-1 text-sm text-crimson">{{ emailErrors.email }}</p>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-ink-2">密码</label>
+            <div class="mt-1">
+              <el-input
+                v-model="emailForm.password"
+                type="password"
+                placeholder="请输入密码"
+                show-password
+                :class="{ 'is-error': emailErrors.password }"
+                @blur="validatePassword"
+              />
+              <p v-if="emailErrors.password" class="mt-1 text-sm text-crimson">{{ emailErrors.password }}</p>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <el-checkbox v-model="emailForm.remember">记住我</el-checkbox>
+            <a href="#" class="text-sm font-medium text-clay-deep hover:text-clay">忘记密码？</a>
+          </div>
+
+          <div>
+            <el-button
+              type="primary"
+              native-type="submit"
+              class="w-full"
+              :loading="loading"
+              :disabled="!isEmailFormValid"
             >
               登录
             </el-button>
           </div>
         </form>
-
-        <div class="mt-6">
-          <div class="relative">
-            <div class="absolute inset-0 flex items-center">
-              <div class="w-full border-t border-line" />
-            </div>
-            <div class="relative flex justify-center text-sm">
-              <span class="px-2 bg-paper text-ink-3">或者</span>
-            </div>
-          </div>
-
-          <div class="mt-6 grid grid-cols-2 gap-3">
-            <div>
-              <el-button class="w-full" @click="handleWechatLogin">
-                <el-icon><ChatDotRound /></el-icon>
-                微信登录
-              </el-button>
-            </div>
-
-            <div>
-              <el-button class="w-full" @click="handleGithubLogin">
-                <el-icon><Link /></el-icon>
-                GitHub登录
-              </el-button>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { sendSmsCode, loginByPhone } from '@/api/auth'
 import { ElMessage } from 'element-plus'
-import { ChatDotRound, Link } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 
-// 表单数据
-const form = reactive({
-  email: '',
-  password: '',
-  remember: false
-})
-
-// 错误信息
-const errors = reactive({
-  email: '',
-  password: ''
-})
-
-// 状态
+const activeTab = ref('phone')
 const loading = ref(false)
+const sendingCode = ref(false)
+const cooldown = ref(0)
+let cooldownTimer = null
 
-// 计算属性
-const isFormValid = computed(() => {
-  return form.email && form.password && !errors.email && !errors.password
+// 手机登录表单
+const phoneForm = reactive({ phone: '', code: '' })
+const phoneErrors = reactive({ phone: '', code: '' })
+
+// 邮箱登录表单
+const emailForm = reactive({ email: '', password: '', remember: false })
+const emailErrors = reactive({ email: '', password: '' })
+
+const isEmailFormValid = computed(() =>
+  emailForm.email && emailForm.password && !emailErrors.email && !emailErrors.password
+)
+
+// --- 手机号验证 ---
+const validatePhone = () => {
+  if (!phoneForm.phone) {
+    phoneErrors.phone = '请输入手机号'
+    return false
+  }
+  if (!/^1[3-9]\d{9}$/.test(phoneForm.phone)) {
+    phoneErrors.phone = '请输入有效的手机号'
+    return false
+  }
+  phoneErrors.phone = ''
+  return true
+}
+
+// --- 发送验证码 ---
+const handleSendCode = async () => {
+  if (!validatePhone()) return
+  sendingCode.value = true
+  try {
+    await sendSmsCode(phoneForm.phone)
+    ElMessage.success('验证码已发送，请注意查收')
+    startCooldown()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '发送失败，请稍后重试')
+  } finally {
+    sendingCode.value = false
+  }
+}
+
+const startCooldown = () => {
+  cooldown.value = 60
+  cooldownTimer = setInterval(() => {
+    cooldown.value--
+    if (cooldown.value <= 0) {
+      clearInterval(cooldownTimer)
+      cooldownTimer = null
+    }
+  }, 1000)
+}
+
+onUnmounted(() => {
+  if (cooldownTimer) clearInterval(cooldownTimer)
 })
 
-// 验证邮箱
-const validateEmail = () => {
-  if (!form.email) {
-    errors.email = '请输入邮箱地址'
-    return false
-  }
-  
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  if (!emailRegex.test(form.email)) {
-    errors.email = '请输入有效的邮箱地址'
-    return false
-  }
-  
-  errors.email = ''
-  return true
-}
-
-// 验证密码
-const validatePassword = () => {
-  if (!form.password) {
-    errors.password = '请输入密码'
-    return false
-  }
-  
-  if (form.password.length < 6) {
-    errors.password = '密码长度不能少于6位'
-    return false
-  }
-  
-  errors.password = ''
-  return true
-}
-
-// 验证表单
-const validateForm = () => {
-  const emailValid = validateEmail()
-  const passwordValid = validatePassword()
-  return emailValid && passwordValid
-}
-
-// 处理登录
-const handleLogin = async () => {
-  if (!validateForm()) {
+// --- 手机验证码登录 ---
+const handlePhoneLogin = async () => {
+  if (!validatePhone()) return
+  if (!phoneForm.code) {
+    phoneErrors.code = '请输入验证码'
     return
   }
-  
+  phoneErrors.code = ''
   loading.value = true
-  
   try {
-    await userStore.login({
-      email: form.email,
-      password: form.password
-    })
-    
-    // 跳转到之前的页面或首页
-    const redirect = route.query.redirect || '/'
-    router.push(redirect)
+    const res = await loginByPhone(phoneForm.phone, phoneForm.code)
+    const { access_token, refresh_token } = res.data
+    userStore.token = access_token
+    userStore.refreshToken = refresh_token
+    localStorage.setItem('token', access_token)
+    localStorage.setItem('refreshToken', refresh_token)
+    await userStore.fetchUser()
+    ElMessage.success('登录成功')
+    router.push(route.query.redirect || '/')
   } catch (error) {
-    console.error('Login error:', error)
+    ElMessage.error(error.response?.data?.detail || '登录失败')
   } finally {
     loading.value = false
   }
 }
 
-// 微信登录
-const handleWechatLogin = () => {
-  ElMessage.info('微信登录功能开发中')
+// --- 邮箱密码登录 ---
+const validateEmail = () => {
+  if (!emailForm.email) { emailErrors.email = '请输入邮箱地址'; return false }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailForm.email)) { emailErrors.email = '请输入有效的邮箱地址'; return false }
+  emailErrors.email = ''
+  return true
+}
+const validatePassword = () => {
+  if (!emailForm.password) { emailErrors.password = '请输入密码'; return false }
+  if (emailForm.password.length < 6) { emailErrors.password = '密码长度不能少于6位'; return false }
+  emailErrors.password = ''
+  return true
 }
 
-// GitHub登录
-const handleGithubLogin = () => {
-  ElMessage.info('GitHub登录功能开发中')
+const handleEmailLogin = async () => {
+  if (!validateEmail() || !validatePassword()) return
+  loading.value = true
+  try {
+    await userStore.login({ email: emailForm.email, password: emailForm.password })
+    router.push(route.query.redirect || '/')
+  } catch (error) {
+    console.error('Login error:', error)
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 

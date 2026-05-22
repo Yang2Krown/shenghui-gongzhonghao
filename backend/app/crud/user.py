@@ -99,6 +99,42 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         """
         return await super().update(db, db_obj=db_obj, obj_in=obj_in)
     
+    async def get_by_phone(
+        self,
+        db: AsyncSession,
+        *,
+        phone: str
+    ) -> Optional[User]:
+        statement = select(User).where(User.phone == phone)
+        result = await db.execute(statement)
+        return result.scalars().first()
+
+    async def create_by_phone(
+        self,
+        db: AsyncSession,
+        *,
+        phone: str
+    ) -> User:
+        """通过手机号创建用户（无密码，自动生成用户名）"""
+        import secrets as _secrets
+        username = f"user_{_secrets.token_hex(5)}"
+        db_obj = User(
+            username=username,
+            phone=phone,
+            is_active=True,
+            is_superuser=False,
+            role="user",
+        )
+        db.add(db_obj)
+        await db.commit()
+        await db.refresh(db_obj)
+
+        profile = UserProfile(user_id=db_obj.id)
+        db.add(profile)
+        await db.commit()
+
+        return db_obj
+
     async def authenticate(
         self,
         db: AsyncSession,

@@ -21,8 +21,11 @@ from app.schemas.user import (
     UserResponse,
     Token,
     TokenRefresh,
-    LoginRequest
+    LoginRequest,
+    SendSmsCodeRequest,
+    PhoneLoginRequest,
 )
+from app.services.sms_service import send_sms_code, verify_sms_code
 
 router = APIRouter()
 
@@ -171,6 +174,58 @@ async def get_current_user_info(
         "code": 200,
         "message": "获取用户信息成功",
         "data": UserResponse.from_orm(current_user).dict()
+    }
+
+
+@router.post("/send-sms-code", response_model=dict)
+async def send_sms_code_endpoint(
+    req: SendSmsCodeRequest,
+) -> Any:
+    """发送手机短信验证码"""
+    result = await send_sms_code(req.phone)
+    if not result["ok"]:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=result["message"],
+        )
+    return {"code": 200, "message": result["message"], "data": None}
+
+
+@router.post("/login-by-phone", response_model=dict)
+async def login_by_phone(
+    req: PhoneLoginRequest,
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """手机验证码登录（不存在则自动注册）"""
+    valid = await verify_sms_code(req.phone, req.code)
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="验证码错误或已过期",
+        )
+
+    user = await user_crud.get_by_phone(db, phone=req.phone)
+    if not user:
+        user = await user_crud.create_by_phone(db, phone=req.phone)
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="用户已被禁用",
+        )
+
+    access_token = create_access_token(subject=user.id)
+    refresh_token = create_refresh_token(subject=user.id)
+
+    return {
+        "code": 200,
+        "message": "登录成功",
+        "data": {
+            "user": UserResponse.from_orm(user).dict(),
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+        },
     }
 
 
