@@ -236,23 +236,44 @@ class TitleReviewerAgent(BaseAgent):
         # 构建评分提示词
         prompt = self._build_scoring_prompt(candidates, topic, outline)
         
-        # 调用AI模型
+        logger.info(f"Agent B 评分 prompt 发送 {len(candidates)} 个候选")
+        
+        # 调用AI模型（使用 json_mode 确保结构化输出）
         response = await self.call_ai_model(
             prompt=prompt,
             system_prompt=self._get_system_prompt(),
-            temperature=0.3,  # 低温度确保评分一致性
+            temperature=0.3,
+            json_mode=True,
         )
         
         # 解析响应
         result = self.parse_json_response(response)
         
+        logger.info(f"Agent B LLM 原始响应前 500 字: {response[:500]}")
+        logger.info(f"Agent B 解析后 JSON keys: {list(result.keys()) if result else 'EMPTY'}")
+        
         # 合并评分结果
         scored_candidates = []
-        scores_map = {s.get("candidate_id"): s for s in result.get("scores", [])}
+        raw_scores = result.get("scores", [])
+        logger.info(f"Agent B 解析到 {len(raw_scores)} 条评分记录")
+        if raw_scores:
+            logger.info(f"Agent B 第一条评分样例: {raw_scores[0]}")
         
-        for candidate in candidates:
-            candidate_id = candidate.get("id", "")
-            score_data = scores_map.get(candidate_id, {})
+        
+        # 构建多维度索引：序号 → score（prompt 里用 1-based 序号作为 candidate_id）
+        scores_by_index = {}
+        for idx, s in enumerate(raw_scores):
+            cid = s.get("candidate_id", "")
+            # LLM 可能返回 int 或 str
+            scores_by_index[str(cid)] = s
+            scores_by_index[idx + 1] = s  # 兜底：按出现顺序
+
+        for idx, candidate in enumerate(candidates):
+            title = (candidate.get("title") or "").strip()
+            # 按序号匹配（prompt 里 candidate_id 就是 1-based 序号）
+            score_data = scores_by_index.get(idx + 1) or scores_by_index.get(str(idx + 1)) or {}
+            if not score_data and raw_scores:
+                logger.warning(f"Agent B 评分匹配失败: idx={idx+1}, title={title[:30]}")
             
             # 计算加权总分
             b_score = self._calculate_weighted_score(score_data)
@@ -355,84 +376,45 @@ class TitleReviewerAgent(BaseAgent):
         Returns:
             评分提示词
         """
-        # 格式化候选列表
+        # 格式化候选列表（用序号作为 ID，方便 LLM 复制）
         candidates_text = "\n".join([
-            f"{i+1}. ID: {c.get('id', '')}\n   标题: {c.get('title', '')}\n   套路: {c.get('method', '')}\n   修饰元素: {', '.join(c.get('modifiers', []))}"
+            f"[{i+1}] {c.get('title', '')} （套路：{c.get('method', '')}，{c.get('word_count', len(c.get('title', '')))}字）"
             for i, c in enumerate(candidates)
         ])
         
-        prompt = f"""【输入：候选标题】
+        prompt = f"""请对以下标题候选逐个评分。
+
+【候选标题】
 {candidates_text}
 
-【输入：选题 + 大纲】
-选题:
+【选题背景】
 - 标题: {topic.title}
 - 方向: {topic.direction}
 - 套路: {topic.method}
 - 价值承诺: {topic.value_promise}
 
-大纲:
-- 各节小标题: {', '.join(outline.section_titles)}
-- 关键信息点: {', '.join(outline.key_points)}
+【大纲要点】
+- 小标题: {', '.join(outline.section_titles[:6])}
+- 关键信息点: {', '.join(outline.key_points[:8])}
 
-【你的任务】
-对每个候选进行6维度评分:
+【评分维度】（每项 1-10 分，必须是具体数字）
+1. three_eyes（三个一眼达标度）: 1秒看出"讲什么/对我有什么用/跟我什么关系"
+2. emotion_trigger（情绪触发力度）: 焦虑/好奇/共鸣/反差
+3. specificity（具体性）: 数字/工具名/身份/场景
+4. length_compliance（长度合规）: 14-20字=10分，10-13字=8分，21-22字=6分
+5. method_maturity（套路成熟度）: 套路命中准确度
+6. outline_consistency（与大纲一致性）: 标题承诺能否被大纲兑现
 
-维度说明:
-1. 三个一眼达标度 (25%): 1秒内看出"讲什么"、"对我有什么用"、"跟我什么关系"
-   - 9-10: 三个一眼全到位
-   - 7-8: 达成2个，第3个隐含
-   - 4-6: 只达成1个
-   - 1-3: 三个一眼都模糊
+【输出要求】
+只输出 JSON，不要输出任何其他文字。scores 数组必须包含上面所有候选，candidate_id 填序号（1, 2, 3...）。
 
-2. 情绪触发力度 (20%): 焦虑/好奇/共鸣/装逼/反差
-   - 9-10: 强烈触发2个以上情绪
-   - 7-8: 明确触发1个情绪
-   - 4-6: 弱触发1个情绪
-   - 1-3: 无明显情绪触发
-
-3. 具体性 (15%): 数字/工具名/身份/场景
-   - 9-10: 含3个及以上具体元素
-   - 7-8: 含2个具体元素
-   - 4-6: 含1个具体元素
-   - 1-3: 无具体元素
-
-4. 长度合规 (10%):
-   - 10: 14-20字
-   - 8: 10-13字
-   - 6: 21-22字
-   - 1: <10字或>22字
-
-5. 套路成熟度 (15%):
-   - 9-10: 命中高爆款模式，使用准确
-   - 7-8: 命中套路，使用基本到位
-   - 4-6: 命中套路但生硬
-   - 1-3: 不属于已知套路
-
-6. 与大纲一致性 (15%):
-   - 9-10: 标题承诺被大纲完美兑现
-   - 7-8: 标题承诺被大纲兑现，但对应弱化
-   - 4-6: 标题承诺被大纲部分兑现
-   - 1-3: 标题与大纲明显脱节
-   - 0: 标题承诺无法被大纲兑现
-
-【输出格式】
-请严格按照以下JSON格式输出:
+```json
 {{
   "scores": [
-    {{
-      "candidate_id": "候选ID",
-      "three_eyes": 8,
-      "emotion_trigger": 7,
-      "specificity": 9,
-      "length_compliance": 10,
-      "method_maturity": 8,
-      "outline_consistency": 9,
-      "explanation": "评分说明"
-    }},
-    ...
+    {{"candidate_id": 1, "three_eyes": 8, "emotion_trigger": 7, "specificity": 9, "length_compliance": 10, "method_maturity": 8, "outline_consistency": 9}},
+    {{"candidate_id": 2, "three_eyes": 6, "emotion_trigger": 5, "specificity": 7, "length_compliance": 10, "method_maturity": 6, "outline_consistency": 7}}
   ]
-}}"""
+}}```"""
         
         return prompt
 

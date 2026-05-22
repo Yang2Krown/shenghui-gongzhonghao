@@ -35,6 +35,7 @@ class BaseAgent(ABC):
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        json_mode: bool = False,
     ) -> str:
         """
         调用AI模型
@@ -44,6 +45,7 @@ class BaseAgent(ABC):
             system_prompt: 系统提示词（可选）
             temperature: 温度参数
             max_tokens: 最大token数
+            json_mode: 是否要求 JSON 输出
 
         Returns:
             模型响应文本
@@ -59,6 +61,7 @@ class BaseAgent(ABC):
                 model=self.model,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                json_mode=json_mode,
             )
             return result.text or ""
         except Exception as e:

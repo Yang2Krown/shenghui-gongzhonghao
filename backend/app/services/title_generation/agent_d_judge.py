@@ -87,18 +87,31 @@ class FinalJudgeAgent(BaseAgent):
                 "feedback": "没有Top 5候选，无法进行最终判定",
             }
         
-        # 获取点击预测
+        # 获取点击预测（多维度索引：candidate_id → title）
         predictions = c_result.get("predictions", [])
-        predictions_map = {p.get("candidate_id"): p for p in predictions}
-        
+        predictions_by_id = {}
+        predictions_by_title = {}
+        for p in predictions:
+            cid = p.get("candidate_id", "")
+            if cid:
+                predictions_by_id[str(cid)] = p
+            t = (p.get("title") or p.get("original_title") or "").strip()
+            if t:
+                predictions_by_title[t] = p
+
         # 计算综合评分
         scored_candidates = []
         for candidate in top5:
-            candidate_id = candidate.get("id", "")
-            b_score = candidate.get("b_score", 0)
-            
-            # 获取点击预测
-            prediction = predictions_map.get(candidate_id, {})
+            candidate_id = str(candidate.get("id", ""))
+            title = (candidate.get("title") or "").strip()
+            b_score = candidate.get("b_score", 0) or 0
+
+            # 获取点击预测（优先 id，其次 title）
+            prediction = (
+                predictions_by_id.get(candidate_id)
+                or predictions_by_title.get(title)
+                or {}
+            )
             c_click = prediction.get("click_willingness", 5)
             
             # 计算综合评分: 0.6 × B评分 + 0.4 × C点击预测

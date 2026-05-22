@@ -217,13 +217,23 @@ class ClickPredictorAgent(BaseAgent):
         Returns:
             格式化后的预测结果
         """
-        # 创建ID到候选的映射
-        candidate_map = {c.get("id"): c for c in top5}
-        
+        # 创建多维度映射：id → candidate, title → candidate
+        candidate_by_id = {str(c.get("id", "")): c for c in top5}
+        candidate_by_title = {(c.get("title") or "").strip(): c for c in top5}
+
         formatted = []
         for pred in predictions:
             candidate_id = pred.get("candidate_id", "")
-            candidate = candidate_map.get(candidate_id, {})
+            pred_title = (pred.get("title") or pred.get("original_title") or "").strip()
+            # 优先 id 匹配，其次 title 匹配
+            candidate = (
+                candidate_by_id.get(str(candidate_id))
+                or candidate_by_title.get(pred_title)
+                or {}
+            )
+            # 如果通过 title 匹配到了，修正 candidate_id
+            if not candidate_by_id.get(str(candidate_id)) and candidate:
+                candidate_id = candidate.get("id", candidate_id)
             
             formatted.append({
                 "candidate_id": candidate_id,
