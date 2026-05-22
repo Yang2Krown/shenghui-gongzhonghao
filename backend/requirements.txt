@@ -29,3 +29,4 @@ pytest-asyncio==0.23.7
 black==24.4.2
 ruff==0.5.1
 openpyxl==3.1.5
+playwright==1.45.0

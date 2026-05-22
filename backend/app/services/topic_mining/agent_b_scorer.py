@@ -123,8 +123,36 @@ def _calculate_weighted_score(scored: CandidateScored) -> float:
     )
 
 
+# 商务敏感关键词：用于从 LLM 输出的 veto_reasons 里抽出"商务敏感"型理由
+BUSINESS_SENSITIVE_KEYWORDS = [
+    "商务敏感", "国内厂商", "唱衰", "贬低国内", "诋毁",
+    "商务复核", "人工复核",
+]
+
+
+def _detect_business_sensitive(scored: CandidateScored) -> tuple[bool, list[str]]:
+    """从 veto_reasons 里识别"商务敏感"类原因。返回 (是否商务敏感, 剔除后的真正一票否决原因)。
+
+    设计文档 3.3 节：商务敏感不直接淘汰，标记后保留供人工复核。
+    """
+    if not scored.veto_reasons:
+        return False, []
+    bs_reasons = []
+    other_reasons = []
+    for r in scored.veto_reasons:
+        if any(kw in r for kw in BUSINESS_SENSITIVE_KEYWORDS):
+            bs_reasons.append(r)
+        else:
+            other_reasons.append(r)
+    return bool(bs_reasons), other_reasons
+
+
 def _determine_verdict(scored: CandidateScored) -> str:
-    """判定入选/备选/淘汰。"""
+    """判定入选/备选/淘汰。
+
+    商务敏感（business_sensitive=True 但只有 BS 类否决理由）→ 不算 vetoed，按分数走正常判定。
+    """
+    # 如果有 non-BS 的真正一票否决 → vetoed
     if not scored.veto_passed:
         return "vetoed"
     if scored.weighted_score >= THRESHOLD_SELECTED:
@@ -134,40 +162,8 @@ def _determine_verdict(scored: CandidateScored) -> str:
     return "rejected"
 
 
-async def score_candidates(
-    input_data: AgentBInput,
-    *,
-    llm_client: Optional[LLMClient] = None,
-    model: Optional[str] = None,
-) -> AgentBOutput:
-    """Agent B 主入口：对候选选题列表评分。"""
-    client = llm_client or get_llm_client()
-
-    system_prompt = _load_system_prompt()
-    score_card = _load_score_card()
-    user_prompt = _build_user_prompt(input_data)
-
-    messages = [
-        ChatMessage(role="system", content=system_prompt + "\n\n【参考资产】\n《选题评分卡》完整内容：\n" + score_card),
-        ChatMessage(role="user", content=user_prompt),
-    ]
-
-    logger.info(f"Agent B 开始处理: cluster_id={input_data.cluster_id}, 候选数={len(input_data.candidates)}")
-
-    result = await client.chat(
-        messages=messages,
-        model=model,
-        temperature=0.2,
-        max_tokens=8000,
-        json_mode=True,
-    )
-
-    parsed = parse_json_loose(result.text)
-    if not parsed or "candidates" not in parsed:
-        logger.error(f"Agent B 输出解析失败: {result.text[:300]}")
-        raise ValueError("Agent B 输出格式不符合 schema")
-
-    # 用 Agent A 原始 persona_reviews 覆盖 LLM 输出（防丢 rationale）
+def _normalize_persona_reviews(parsed: dict, input_data: AgentBInput) -> dict:
+    """用 Agent A 原始 persona_reviews 覆盖 LLM 输出（防丢 rationale + 防字段缺失）。"""
     a_reviews_by_id = {c.candidate_id: c.persona_reviews for c in input_data.candidates}
     a_divergence_by_id = {
         c.candidate_id: (c.persona_divergence, c.persona_divergence_flag)
@@ -179,16 +175,88 @@ async def score_candidates(
             cand["persona_reviews"] = [pr.model_dump() for pr in a_reviews_by_id[cid]]
             cand["persona_divergence"], cand["persona_divergence_flag"] = a_divergence_by_id[cid]
         elif "persona_reviews" in cand:
-            # 兜底：LLM 输出，归一化字段名
             cand["persona_reviews"] = [
                 PersonaReviewItem.from_llm_output(pr).model_dump()
                 for pr in cand["persona_reviews"]
             ]
+    return parsed
 
-    output = AgentBOutput(**parsed)
+
+async def _attempt_score(
+    input_data: AgentBInput,
+    client: LLMClient,
+    model: Optional[str],
+    system_full: str,
+    user_prompt: str,
+    extra_hint: str = "",
+):
+    """单次 score 尝试。失败抛异常。"""
+    messages = [
+        ChatMessage(role="system", content=system_full + extra_hint),
+        ChatMessage(role="user", content=user_prompt),
+    ]
+    result = await client.chat(
+        messages=messages,
+        model=model,
+        temperature=0.2,
+        max_tokens=8000,
+        json_mode=True,
+    )
+    parsed = parse_json_loose(result.text)
+    if not parsed or "candidates" not in parsed:
+        raise ValueError(f"Agent B 输出格式不符合 schema: {result.text[:200]}")
+    return parsed
+
+
+async def score_candidates(
+    input_data: AgentBInput,
+    *,
+    llm_client: Optional[LLMClient] = None,
+    model: Optional[str] = None,
+) -> AgentBOutput:
+    """Agent B 主入口：对候选选题列表评分。
+
+    对齐设计文档 4.2 节：
+    - schema 不符 → 重试 1 次
+    - 维度缺失 → 对该候选重新打分（由 Pydantic 校验触发重试）
+    """
+    client = llm_client or get_llm_client()
+    system_prompt = _load_system_prompt()
+    score_card = _load_score_card()
+    user_prompt = _build_user_prompt(input_data)
+    system_full = system_prompt + "\n\n【参考资产】\n《选题评分卡》完整内容：\n" + score_card
+
+    logger.info(f"Agent B 开始处理: cluster_id={input_data.cluster_id}, 候选数={len(input_data.candidates)}")
+
+    async def _full_attempt(extra_hint: str = ""):
+        parsed = await _attempt_score(input_data, client, model, system_full, user_prompt, extra_hint=extra_hint)
+        # 把 Pydantic 校验也包进来：维度缺失会触发 ValidationError → 当 schema 错误重试
+        normalized = _normalize_persona_reviews(parsed, input_data)
+        return AgentBOutput(**normalized)
+
+    try:
+        output = await _full_attempt()
+    except (ValueError, Exception) as e:
+        # 包括 ValidationError（缺维度/类型不对）+ ValueError（schema 不符）
+        if "AgentBOutput" in str(type(e).__name__) + str(e) or isinstance(e, ValueError):
+            logger.warning(f"Agent B schema/维度校验失败，重试 1 次: {type(e).__name__}: {str(e)[:120]}")
+            output = await _full_attempt(
+                extra_hint="\n\n【重要】上次输出有问题（schema 或维度缺失）。必须每个候选包含全部 6 个维度（痛点直击度/价值密度/传播触发器/差异化/新鲜度/受众适配度），每维度都有 score 和 evidence。",
+            )
+        else:
+            raise
 
     # 二次校验：重新计算 weighted_score 和 verdict
     for scored in output.candidates:
+        # 拆分"商务敏感"为独立标记（设计文档 3.3 节）
+        is_business_sensitive, real_veto_reasons = _detect_business_sensitive(scored)
+        if is_business_sensitive:
+            scored.business_sensitive = True
+            scored.veto_reasons = real_veto_reasons
+            # 若 LLM 因 BS 把候选标 veto_passed=False，现在拨回 True（除非有其他真否决）
+            if not scored.veto_passed and not real_veto_reasons:
+                scored.veto_passed = True
+
         scored.weighted_score = round(_calculate_weighted_score(scored), 2)
         scored.verdict = _determine_verdict(scored)
 
@@ -196,10 +264,12 @@ async def score_candidates(
     stats = {"total": len(output.candidates)}
     for v in ["selected", "backup", "rejected", "vetoed"]:
         stats[v] = sum(1 for c in output.candidates if c.verdict == v)
+    stats["business_sensitive"] = sum(1 for c in output.candidates if c.business_sensitive)
     output.stats = stats
 
     logger.info(
         f"Agent B 完成: cluster_id={input_data.cluster_id}, "
-        f"入选={stats['selected']}, 备选={stats['backup']}, 淘汰={stats['rejected']}, 否决={stats['vetoed']}"
+        f"入选={stats['selected']}, 备选={stats['backup']}, 淘汰={stats['rejected']}, "
+        f"否决={stats['vetoed']}, 商务敏感={stats['business_sensitive']}"
     )
     return output

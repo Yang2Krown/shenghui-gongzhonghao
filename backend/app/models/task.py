@@ -10,7 +10,7 @@ from sqlalchemy import Column, String, DateTime, Enum, JSON, Text
 from sqlalchemy.sql import func
 import enum
 
-from app.core.database import Base
+from app.db.base import Base
 
 
 class TaskStatus(str, enum.Enum):

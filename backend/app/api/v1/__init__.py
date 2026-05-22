@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation
 
 api_router = APIRouter()
 
@@ -72,4 +72,11 @@ api_router.include_router(
     content_generation.router,
     prefix="/content-generation",
     tags=["正文生成"]
+)
+
+# 标题生成路由
+api_router.include_router(
+    title_generation.router,
+    prefix="/title-generation",
+    tags=["标题生成"]
 )

@@ -127,6 +127,9 @@ services:
     environment:
       <<: *backend-env
       ROLE: worker
+    volumes:
+      # X cookie 文件挂载（playwright_x_adapter 用）
+      - ./backend/secrets:/app/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy

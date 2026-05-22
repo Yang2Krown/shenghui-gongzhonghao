@@ -31,8 +31,11 @@ backend/.env.local
 
 # Cookies / secrets
 secrets/
+backend/secrets/
 *.cookie
 *.cookies.json
+x_cookie.json
+!backend/secrets/README.md
 
 # IDE
 .idea/

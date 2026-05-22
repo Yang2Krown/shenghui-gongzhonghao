@@ -33,25 +33,13 @@
             <template #title>候选选题</template>
           </el-menu-item>
 
-          <el-menu-item index="outlines">
-            <el-icon><Document /></el-icon>
-            <template #title>大纲管理</template>
-          </el-menu-item>
-
-          <el-menu-item index="title-generation">
-            <el-icon><MagicStick /></el-icon>
-            <template #title>标题生成</template>
-          </el-menu-item>
-
-          <el-menu-item index="content-generation">
-            <el-icon><Notebook /></el-icon>
-            <template #title>正文生成</template>
-          </el-menu-item>
-
           <el-menu-item index="creation">
             <el-icon><Edit /></el-icon>
             <template #title>我的创作</template>
           </el-menu-item>
+          
+          <!-- 底部分隔 -->
+          <div class="flex-1"></div>
           
           <el-menu-item index="settings">
             <el-icon><Setting /></el-icon>
@@ -163,7 +151,7 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { Document, Edit, Setting, Brush, Bell, User, SwitchButton, ArrowDown, Expand, Fold, DataBoard, Folder, MagicStick, Notebook } from '@element-plus/icons-vue'
+import { Edit, Setting, Brush, Bell, User, SwitchButton, ArrowDown, Expand, Fold, DataBoard, Folder } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -177,9 +165,6 @@ const activeMenu = computed(() => {
   const path = route.path
   if (path === '/' || path.startsWith('/topic-clusters')) return 'topic-clusters'
   if (path.startsWith('/topic-candidates')) return 'topic-candidates'
-  if (path.startsWith('/outlines')) return 'outlines'
-  if (path.startsWith('/title-generation') || path.startsWith('/title-history')) return 'title-generation'
-  if (path.startsWith('/content-generation')) return 'content-generation'
   if (path.startsWith('/creation')) return 'creation'
   if (path === '/settings') return 'settings'
   if (path === '/settings/style') return 'style-settings'
@@ -205,9 +190,6 @@ const handleMenuSelect = (index) => {
   const menuRoutes = {
     'topic-clusters': '/topic-clusters',
     'topic-candidates': '/topic-candidates',
-    'outlines': '/outlines',
-    'title-generation': '/title-generation',
-    'content-generation': '/content-generation',
     'creation': '/creation',
     'settings': '/settings',
     'style-settings': '/settings/style'

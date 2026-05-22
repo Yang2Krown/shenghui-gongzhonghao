@@ -22,6 +22,7 @@ SOURCE_TYPE_GZH_EXPLOSIVE = "gzh_explosive"  # 公众号低粉爆款
 SOURCE_TYPE_V2EX = "v2ex"                 # V2EX 公开 API
 SOURCE_TYPE_REDDIT = "reddit"             # Reddit 公开 JSON API
 SOURCE_TYPE_XHS_DAILY = "xhs_daily"       # 小红书每日爆款（SkillHub API，0 cookie）
+SOURCE_TYPE_X_PLAYWRIGHT = "x_playwright" # X (Twitter) via Playwright + cookie
 SOURCE_TYPE_X = "x"                        # P1
 SOURCE_TYPE_WEIBO = "weibo"                # P1
 SOURCE_TYPE_XHS = "xhs"                    # P1

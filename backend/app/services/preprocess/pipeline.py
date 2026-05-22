@@ -28,6 +28,7 @@ from app.services.preprocess.rules import (
     compute_low_fan_hit,
     detect_direction,
     is_ai_related,
+    is_recent,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,10 +59,23 @@ class PreprocessPipeline:
 
         stats: Dict[str, Any] = {"pending": len(raws)}
 
-        # 2. AI 相关性过滤：跳过非 AI 内容
+        # 2a. 时效过滤：超过 90 天的老内容直接淘汰（防止 2023 古董出现）
+        fresh_raws = []
+        skipped_too_old = 0
+        for r in raws:
+            if is_recent(r.published_at):
+                fresh_raws.append(r)
+            else:
+                r.state = RAW_STATE_SKIPPED
+                skipped_too_old += 1
+        stats["skipped_too_old"] = skipped_too_old
+        if skipped_too_old:
+            logger.info(f"preprocess: 跳过 {skipped_too_old} 条超过 90 天的老内容")
+
+        # 2b. AI 相关性过滤：跳过非 AI 内容
         ai_related = []
         skipped_non_ai = 0
-        for r in raws:
+        for r in fresh_raws:
             if is_ai_related(r.title or "", r.summary or ""):
                 ai_related.append(r)
             else:

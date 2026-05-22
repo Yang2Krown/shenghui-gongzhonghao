@@ -6,6 +6,7 @@
 
 import logging
 from typing import List
+from pathlib import Path
 
 from app.services.llm import get_llm_client
 from app.services.llm.llm_client import ChatMessage, parse_json_loose
@@ -18,11 +19,20 @@ from app.services.content_generation.schemas import (
 
 logger = logging.getLogger(__name__)
 
+# 获取当前文件所在目录
+CURRENT_DIR = Path(__file__).parent
+
 # ──────────────────────────────────────────────
 # 提示词模板
 # ──────────────────────────────────────────────
 
-SYSTEM_PROMPT = """\
+def _load_system_prompt() -> str:
+    """从文件加载系统提示词"""
+    prompt_file = CURRENT_DIR / "prompts" / "agent_b_system.txt"
+    if prompt_file.exists():
+        return prompt_file.read_text(encoding="utf-8")
+    # 回退到硬编码版本
+    return """\
 你是一位金句精雕师，擅长把正文里的"准金句"打磨成可独立传播的金句。
 
 【金句要素】
@@ -148,7 +158,7 @@ async def catalyze_gold_sentences(
     logger.info(f"[Agent B] 开始催化金句，标题: {topic_title}")
 
     messages = [
-        ChatMessage(role="system", content=SYSTEM_PROMPT),
+        ChatMessage(role="system", content=_load_system_prompt()),
         ChatMessage(role="user", content=user_prompt),
     ]
 

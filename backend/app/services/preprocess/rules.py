@@ -9,6 +9,23 @@ from typing import Any, Dict, List, Optional
 from app.models.info_cluster import FRESHNESS_24H, FRESHNESS_7D, FRESHNESS_30D, FRESHNESS_EXPIRED
 
 
+# 内容保鲜期：超过此天数的话题直接过滤掉（防止 2023 老古董出现）
+MAX_CONTENT_AGE_DAYS = 90
+
+
+def is_recent(published_at: Optional[datetime], *, max_days: int = MAX_CONTENT_AGE_DAYS,
+              now: Optional[datetime] = None) -> bool:
+    """判断内容是否在保鲜期内。
+
+    - published_at 缺失视为新内容（保留，因为很多源不返回时间）
+    - published_at 早于 now - max_days → False（淘汰）
+    """
+    if not published_at:
+        return True
+    now = now or datetime.utcnow()
+    return (now - published_at) <= timedelta(days=max_days)
+
+
 def compute_freshness(published_at: Optional[datetime], *, now: Optional[datetime] = None) -> str:
     """根据发布时间打鲜度档位。"""
     if not published_at:

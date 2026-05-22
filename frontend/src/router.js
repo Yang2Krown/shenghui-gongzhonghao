@@ -86,38 +86,26 @@ const routes = [
         component: () => import('@/pages/settings/StyleSettings.vue'),
         meta: { title: '风格设置' }
       },
-      // ===== 大纲管理 =====
+      // ===== 旧路由 → 重定向到创作工作台 =====
       {
         path: 'outlines',
-        name: 'Outlines',
-        component: () => import('@/pages/outlines/OutlineList.vue'),
-        meta: { title: '大纲管理' }
+        redirect: '/creation'
       },
       {
         path: 'outlines/:id',
-        name: 'OutlineDetail',
-        component: () => import('@/pages/outlines/OutlineDetail.vue'),
-        meta: { title: '大纲详情' }
+        redirect: '/creation'
       },
-      // ===== 标题生成 =====
       {
         path: 'title-generation',
-        name: 'TitleGeneration',
-        component: () => import('@/pages/TitleGeneration.vue'),
-        meta: { title: '标题生成' }
+        redirect: '/creation'
       },
       {
         path: 'title-history',
-        name: 'TitleHistory',
-        component: () => import('@/pages/TitleHistory.vue'),
-        meta: { title: '标题生成历史' }
+        redirect: '/creation'
       },
-      // ===== 正文生成 =====
       {
         path: 'content-generation',
-        name: 'ContentGeneration',
-        component: () => import('@/pages/ContentGeneration.vue'),
-        meta: { title: '正文生成' }
+        redirect: '/creation'
       }
     ]
   },

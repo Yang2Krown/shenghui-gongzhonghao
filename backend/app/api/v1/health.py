@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as redis
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.db.session import get_db
 
 router = APIRouter()
 

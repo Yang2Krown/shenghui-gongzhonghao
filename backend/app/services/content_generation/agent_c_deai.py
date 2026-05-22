@@ -6,6 +6,7 @@
 
 import logging
 from typing import List, Optional
+from pathlib import Path
 
 from app.services.llm import get_llm_client
 from app.services.llm.llm_client import ChatMessage, parse_json_loose
@@ -18,11 +19,20 @@ from app.services.content_generation.schemas import (
 
 logger = logging.getLogger(__name__)
 
+# 获取当前文件所在目录
+CURRENT_DIR = Path(__file__).parent
+
 # ──────────────────────────────────────────────
-# 去 AI 味检查清单（内嵌，作为提示词的一部分）
+# 去 AI 味检查清单（从文件加载）
 # ──────────────────────────────────────────────
 
-DEAI_CHECKLIST = """\
+def _load_deai_checklist() -> str:
+    """从文件加载去 AI 味检查清单"""
+    checklist_file = CURRENT_DIR / "assets" / "去AI味检查清单.md"
+    if checklist_file.exists():
+        return checklist_file.read_text(encoding="utf-8")
+    # 回退到硬编码版本（如果文件不存在）
+    return """\
 # 去 AI 味检查清单
 
 ## 1. 结构性 AI 味（连接词 / 套话 / 对称）
@@ -179,11 +189,19 @@ DEAI_CHECKLIST = """\
 12. 每段都有加粗（导致加粗失效）
 """
 
-SYSTEM_PROMPT = f"""\
+
+def _load_system_prompt() -> str:
+    """从文件加载系统提示词"""
+    prompt_file = CURRENT_DIR / "prompts" / "agent_c_system.txt"
+    if prompt_file.exists():
+        template = prompt_file.read_text(encoding="utf-8")
+        return template.format(deai_checklist=_load_deai_checklist())
+    # 回退到硬编码版本
+    return f"""\
 你是去 AI 味改写员。任务是按《去 AI 味检查清单》对正文做净化。
 
 【参考资产】
-{DEAI_CHECKLIST}
+{_load_deai_checklist()}
 
 【你的工作流（4 步）】
 
@@ -320,7 +338,7 @@ async def deai_rewrite(
     logger.info(f"[Agent C] 开始去 AI 味改写，原文字数: {agent_a_output.total_word_count}")
 
     messages = [
-        ChatMessage(role="system", content=SYSTEM_PROMPT),
+        ChatMessage(role="system", content=_load_system_prompt()),
         ChatMessage(role="user", content=user_prompt),
     ]
 

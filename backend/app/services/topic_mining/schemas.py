@@ -104,6 +104,7 @@ class CandidateScored(BaseModel):
     # 一票否决
     veto_passed: bool
     veto_reasons: List[str] = Field(default_factory=list)
+    business_sensitive: bool = Field(default=False, description="商务敏感，需人工复核（不直接淘汰）")
 
     # 6 维度评分
     pain_point: DimensionScore

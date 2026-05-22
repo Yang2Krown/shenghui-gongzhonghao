@@ -220,6 +220,62 @@ async def publish_creation(
     }
 
 
+@router.post("/from-candidate", response_model=dict)
+async def create_creation_from_candidate(
+    request: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """从选题候选创建创作"""
+    candidate_id = request.get("candidate_id")
+    cluster_id = request.get("cluster_id")
+    
+    if not candidate_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="缺少 candidate_id"
+        )
+    
+    # 查询选题候选信息
+    from sqlalchemy import select
+    from app.models.topic_candidate import TopicCandidate
+    
+    result = await db.execute(
+        select(TopicCandidate).where(TopicCandidate.id == candidate_id)
+    )
+    candidate = result.scalar_one_or_none()
+    
+    if not candidate:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="选题候选不存在"
+        )
+    
+    # 创建创作记录
+    creation = ContentCreation(
+        user_id=current_user.id,
+        candidate_id=candidate_id,
+        cluster_id=cluster_id or candidate.cluster_id,
+        title=candidate.title,
+        topic_title=candidate.title,
+        topic_direction=candidate.direction,
+        status="draft",
+        outline_status="idle",
+        title_status="idle",
+        content_status="idle",
+    )
+    
+    db.add(creation)
+    await db.commit()
+    await db.refresh(creation)
+    
+    return {
+        "code": 200,
+        "message": "创作创建成功",
+        "data": ContentCreationResponse.from_orm(creation).dict()
+    }
+
+
 @router.post("/generate", response_model=dict)
 async def generate_content(
     request: ContentGenerationRequest,

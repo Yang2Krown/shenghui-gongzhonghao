@@ -43,7 +43,9 @@ class TopicCandidate(BaseModel):
 
     # Agent B：评分汇总
     veto_passed = Column(Boolean, default=True, index=True)            # 一票否决是否通过
-    veto_reasons = Column(JSONField, default=list)                          # ["商务敏感", ...]
+    veto_reasons = Column(JSONField, default=list)                          # ["纯标题党", ...]
+    # 商务敏感：设计文档 3.3 节"严厉唱衰国内厂商 → 标记不直接淘汰"
+    business_sensitive = Column(Boolean, default=False, index=True)    # 需人工复核
     weighted_score = Column(Float, nullable=True, index=True)          # 加权总分 0-10
     verdict = Column(String(20), nullable=True, index=True)            # 见 VERDICT_*
 

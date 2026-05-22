@@ -7,6 +7,7 @@ from openai import AsyncOpenAI, APIError
 
 from app.core.config import settings
 from app.services.llm.llm_client import ChatMessage, ChatResult, LLMClient, parse_json_loose
+from app.services.llm.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +44,12 @@ class DeepSeekClient(LLMClient):
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
-        try:
-            resp = await self._client.chat.completions.create(**kwargs)
-        except APIError as e:
-            logger.error(f"DeepSeek API 错误: {e}")
-            raise
+        # 设计文档 4.2 节：API 失败重试最多 3 次
+        resp = await with_retry(
+            lambda: self._client.chat.completions.create(**kwargs),
+            max_attempts=3,
+            description=f"DeepSeek chat ({kwargs['model']})",
+        )
 
         choice = resp.choices[0]
         text = choice.message.content or ""

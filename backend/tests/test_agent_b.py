@@ -11,7 +11,7 @@ Agent B - 标题评审员 单元测试
 import pytest
 from typing import Dict, Any, List
 
-from app.agents.agent_b import TitleReviewerAgent, SCORE_WEIGHTS, VETO_CONDITIONS
+from app.services.title_generation.agent_b_reviewer import TitleReviewerAgent, SCORE_WEIGHTS, VETO_CONDITIONS
 from app.core.config import settings
 from tests.conftest import make_candidate, make_candidates
 

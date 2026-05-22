@@ -43,6 +43,7 @@ class TitleGenerationRequest(BaseModel):
 class TitleGenerationResponse(BaseModel):
     """标题生成响应模式"""
     task_id: str = Field(..., description="任务ID")
+    run_id: Optional[str] = Field(None, description="进度流 ID，用于 SSE 连接")
     status: TaskStatus = Field(..., description="任务状态")
     message: str = Field(..., description="响应消息")
 

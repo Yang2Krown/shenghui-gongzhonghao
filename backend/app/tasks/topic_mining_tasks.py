@@ -93,6 +93,7 @@ def mine_cluster(self, cluster_id: int) -> dict:
                 persona_divergence_flag=scored.persona_divergence_flag,
                 veto_passed=scored.veto_passed,
                 veto_reasons=scored.veto_reasons,
+                business_sensitive=scored.business_sensitive,
                 weighted_score=scored.weighted_score,
                 verdict=scored.verdict,
             )

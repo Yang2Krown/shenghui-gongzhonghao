@@ -169,6 +169,9 @@
 
                   <!-- 标签行 -->
                   <div class="flex flex-wrap gap-2 mb-2">
+                    <span v-if="candidate.business_sensitive" class="tag-business-sensitive" title="设计文档 3.3 节：需人工复核">
+                      ⚠️ 商务敏感
+                    </span>
                     <span v-if="candidate.direction" class="tag-direction-sm">{{ candidate.direction }}</span>
                     <span v-if="candidate.routine" class="tag-routine">{{ candidate.routine }}</span>
                     <span
@@ -191,7 +194,7 @@
                   </div>
                 </div>
 
-                <!-- 右侧评分 -->
+                <!-- 右侧评分 + 操作 -->
                 <div class="ml-4 text-right flex-shrink-0">
                   <div class="font-serif" :style="{ color: getScoreColor(candidate.weighted_score), fontSize: '32px', fontWeight: 500, lineHeight: 1.1 }">
                     {{ candidate.weighted_score?.toFixed(1) || '-' }}
@@ -200,6 +203,15 @@
                   <div v-if="!candidate.veto_passed" class="mt-2">
                     <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: #B85450; color: #fff;">一票否决</span>
                   </div>
+                  <!-- 去创作按钮 -->
+                  <el-button
+                    type="primary"
+                    size="small"
+                    class="mt-3"
+                    @click.stop="startCreation(candidate)"
+                  >
+                    去创作
+                  </el-button>
                 </div>
               </div>
 
@@ -341,6 +353,19 @@ const getScoreColor = (score) => {
   if (score >= 7) return '#5C8A5C'
   if (score >= 5) return '#C49B5C'
   return '#B85450'
+}
+
+// 去创作
+const startCreation = (candidate) => {
+  router.push({
+    path: '/creation/new',
+    query: {
+      candidate_id: candidate.id,
+      cluster_id: cluster.value?.id,
+      topic_title: candidate.title,
+      topic_direction: candidate.direction,
+    }
+  })
 }
 </script>
 
@@ -564,6 +589,18 @@ const getScoreColor = (score) => {
   font-weight: 500;
   background: #B85450;
   color: #fff;
+}
+
+.tag-business-sensitive {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #FFF3D6;
+  color: #B27800;
+  border: 1px solid #E8C880;
+  cursor: help;
 }
 
 .tag-routine {

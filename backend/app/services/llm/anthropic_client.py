@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 from app.services.llm.llm_client import ChatMessage, ChatResult, LLMClient, parse_json_loose
+from app.services.llm.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,12 @@ class AnthropicClient(LLMClient):
         if json_mode and "system" in kwargs:
             kwargs["system"] += "\n\n请仅输出严格的 JSON，不要包含 markdown fence 或解释文字。"
 
-        resp = await self._client.messages.create(**kwargs)
+        # 设计文档 4.2 节：API 失败重试最多 3 次
+        resp = await with_retry(
+            lambda: self._client.messages.create(**kwargs),
+            max_attempts=3,
+            description=f"Anthropic chat ({kwargs['model']})",
+        )
         text = "".join(block.text for block in resp.content if hasattr(block, "text"))
         parsed = parse_json_loose(text) if json_mode else None
 

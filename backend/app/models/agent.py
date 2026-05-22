@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any
 from sqlalchemy import Column, String, DateTime, Integer, Float, JSON, ForeignKey, Text
 from sqlalchemy.sql import func
 
-from app.core.database import Base
+from app.db.base import Base
 
 
 class AgentLog(Base):

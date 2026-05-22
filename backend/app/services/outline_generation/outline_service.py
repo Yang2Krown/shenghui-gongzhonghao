@@ -5,7 +5,7 @@ Agent A（大纲创作员）→ Agent B（大纲评审员）→ Agent C（读者
 """
 
 import logging
-from typing import Optional
+from typing import Callable, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +42,7 @@ async def generate_outline(
     *,
     llm_client=None,
     model: Optional[str] = None,
+    progress_callback: Optional[Callable] = None,
 ) -> FinalOutline:
     """大纲生成主入口。
     
@@ -85,6 +86,8 @@ async def generate_outline(
             logger.info(f"大纲生成第 {attempt + 1} 次尝试: outline_id={outline.id}")
             
             # 2. Agent A 生成 3 个候选大纲
+            if progress_callback:
+                await progress_callback({"event": "step_start", "data": {"step": 1, "agent": "Agent A", "action": "正在生成 3 个候选大纲..."}})
             candidates = await create_outline_candidates(
                 outline_input,
                 llm_client=llm_client,
@@ -102,8 +105,13 @@ async def generate_outline(
                     total_words=cand.total_words,
                 )
                 db.add(outline_candidate)
-            
+
+            if progress_callback:
+                await progress_callback({"event": "step_done", "data": {"step": 1, "agent": "Agent A"}})
+
             # 3. Agent B 评审
+            if progress_callback:
+                await progress_callback({"event": "step_start", "data": {"step": 2, "agent": "Agent B", "action": "正在评审大纲，选择最优方案..."}})
             b_input = AgentBInput(
                 outline_id=outline.id,
                 title=outline.title,
@@ -120,8 +128,13 @@ async def generate_outline(
                 reviewed_sections=[s.model_dump() for s in review_result.sections],
             )
             db.add(review)
-            
+
+            if progress_callback:
+                await progress_callback({"event": "step_done", "data": {"step": 2, "agent": "Agent B"}})
+
             # 4. Agent C 挑刺
+            if progress_callback:
+                await progress_callback({"event": "step_start", "data": {"step": 3, "agent": "Agent C", "action": "正在模拟读者挑刺，修订问题..."}})
             c_input = AgentCInput(
                 outline_id=outline.id,
                 title=outline.title,
@@ -137,8 +150,13 @@ async def generate_outline(
                 revised_sections=[s.model_dump() for s in criticism_result.revised_sections],
             )
             db.add(criticism)
-            
+
+            if progress_callback:
+                await progress_callback({"event": "step_done", "data": {"step": 3, "agent": "Agent C"}})
+
             # 5. Agent D 自检
+            if progress_callback:
+                await progress_callback({"event": "step_start", "data": {"step": 4, "agent": "Agent D", "action": "正在自检评分，输出最终大纲..."}})
             d_input = AgentDInput(
                 outline_id=outline.id,
                 title=outline.title,
@@ -189,6 +207,9 @@ async def generate_outline(
             
             # 如果通过，返回最终大纲
             if inspection_result.verdict == "passed":
+                if progress_callback:
+                    await progress_callback({"event": "step_done", "data": {"step": 4, "agent": "Agent D"}})
+                    await progress_callback({"event": "complete", "data": {"step": 4, "agent": "Agent D"}})
                 logger.info(f"大纲生成成功: outline_id={outline.id}, 总分={inspection_result.total_score}")
                 return FinalOutline(
                     outline_id=outline.id,
@@ -224,6 +245,10 @@ async def generate_outline(
             logger.warning(f"大纲生成失败: outline_id={outline.id}, 2 次自检均不通过")
             outline.passed = "failed"
             await db.commit()
+
+            if progress_callback:
+                await progress_callback({"event": "step_done", "data": {"step": 4, "agent": "Agent D"}})
+                await progress_callback({"event": "complete", "data": {"step": 4, "agent": "Agent D", "warning": "2 次自检均不通过"}})
             
             return FinalOutline(
                 outline_id=outline.id,
@@ -242,6 +267,8 @@ async def generate_outline(
             
         except Exception as e:
             logger.error(f"大纲生成异常: {e}")
+            if progress_callback:
+                await progress_callback({"event": "error", "data": {"message": str(e)}})
             if attempt < MAX_RETRIES:
                 continue
             raise

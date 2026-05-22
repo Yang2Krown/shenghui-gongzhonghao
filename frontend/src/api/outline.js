@@ -12,9 +12,19 @@ export const outlineApi = {
     return api.get(`/outlines/${id}`)
   },
 
-  // 生成大纲
+  // 生成大纲（4 个 Agent 串行，耗时较长，超时设 5 分钟）
   generateOutline(data) {
-    return api.post('/outlines/generate', data)
+    return api.post('/outlines/generate', data, { timeout: 300000 })
+  },
+
+  // 保存编辑后的大纲
+  updateOutline(id, data) {
+    return api.patch(`/outlines/${id}`, data)
+  },
+
+  // 重新评估大纲（只跑 B→C→D）
+  reevaluateOutline(id) {
+    return api.post(`/outlines/${id}/reevaluate`)
   },
 
   // 获取大纲统计

@@ -11,7 +11,7 @@ Agent D - 最终判定员 单元测试
 import pytest
 from typing import Dict, Any, List
 
-from app.agents.agent_d import FinalJudgeAgent
+from app.services.title_generation.agent_d_judge import FinalJudgeAgent
 from app.core.config import settings
 from tests.conftest import make_candidate_with_score, make_b_result, make_c_result, VALID_TOPIC, VALID_OUTLINE
 

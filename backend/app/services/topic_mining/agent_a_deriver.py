@@ -87,26 +87,19 @@ def _build_user_prompt(info: InfoClusterInput) -> str:
 }}"""
 
 
-async def derive_candidates(
+async def _attempt_derive(
     info: InfoClusterInput,
-    *,
-    llm_client: Optional[LLMClient] = None,
-    model: Optional[str] = None,
+    client: LLMClient,
+    model: Optional[str],
+    system_full: str,
+    user_prompt: str,
+    extra_hint: str = "",
 ) -> List[CandidateFromA]:
-    """Agent A 主入口：从 1 条信息衍生候选选题列表。"""
-    client = llm_client or get_llm_client()
-
-    system_prompt = _load_system_prompt()
-    routine_lib = _load_routine_library()
-    user_prompt = _build_user_prompt(info)
-
+    """单次 derive 尝试：调 LLM + 解析 + Pydantic 校验。失败抛异常。"""
     messages = [
-        ChatMessage(role="system", content=system_prompt + "\n\n【参考资产】\n《选题套路库》完整内容：\n" + routine_lib),
+        ChatMessage(role="system", content=system_full + extra_hint),
         ChatMessage(role="user", content=user_prompt),
     ]
-
-    logger.info(f"Agent A 开始处理: cluster_id={info.cluster_id}, type={info.info_type}")
-
     result = await client.chat(
         messages=messages,
         model=model,
@@ -117,24 +110,63 @@ async def derive_candidates(
 
     parsed = parse_json_loose(result.text)
     if not parsed or "candidates" not in parsed:
-        logger.error(f"Agent A 输出解析失败: {result.text[:300]}")
-        raise ValueError("Agent A 输出格式不符合 schema")
+        raise ValueError(f"Agent A 输出格式不符合 schema: {result.text[:200]}")
 
-    # 预处理：兼容 LLM 返回的 persona_reviews 变体字段名
+    # 兼容 LLM 返回的 persona_reviews 变体字段名
     for cand in parsed.get("candidates", []):
         if "persona_reviews" in cand:
             cand["persona_reviews"] = [
                 PersonaReviewItem.from_llm_output(pr).model_dump()
                 for pr in cand["persona_reviews"]
             ]
-
     output = AgentAOutput(**parsed)
-    candidates = output.candidates
+    return output.candidates
 
-    # 校验衍生量
+
+async def derive_candidates(
+    info: InfoClusterInput,
+    *,
+    llm_client: Optional[LLMClient] = None,
+    model: Optional[str] = None,
+) -> List[CandidateFromA]:
+    """Agent A 主入口：从 1 条信息衍生候选选题列表。
+
+    对齐设计文档 4.2 节异常处理：
+    - schema 不符 → 重试 1 次，仍失败抛
+    - 衍生数量低于下限 → 重试 1 次，仍不足则降级返回已有候选
+    """
+    client = llm_client or get_llm_client()
+    system_prompt = _load_system_prompt()
+    routine_lib = _load_routine_library()
+    user_prompt = _build_user_prompt(info)
+    system_full = system_prompt + "\n\n【参考资产】\n《选题套路库》完整内容：\n" + routine_lib
+
     lo, hi = DERIVE_LIMITS.get(info.info_type, (4, 6))
+    logger.info(f"Agent A 开始处理: cluster_id={info.cluster_id}, type={info.info_type}, expect {lo}-{hi}")
+
+    # 第一次：schema 失败允许重试 1 次
+    try:
+        candidates = await _attempt_derive(info, client, model, system_full, user_prompt)
+    except ValueError as e:
+        logger.warning(f"Agent A schema 失败，重试 1 次: {e}")
+        candidates = await _attempt_derive(
+            info, client, model, system_full, user_prompt,
+            extra_hint="\n\n【重要】上次输出格式不对，请严格按 JSON schema 输出 candidates 数组。",
+        )
+
+    # 数量低于下限 → 重试 1 次（要求模型补足）
     if len(candidates) < lo:
-        logger.warning(f"Agent A 衍生数量 {len(candidates)} 低于下限 {lo}")
+        logger.warning(f"Agent A 衍生数量 {len(candidates)} 低于下限 {lo}，重试补足")
+        try:
+            retry = await _attempt_derive(
+                info, client, model, system_full, user_prompt,
+                extra_hint=f"\n\n【重要】上次只衍生 {len(candidates)} 个，必须达到 {lo}-{hi} 个。请补足多角度候选。",
+            )
+            # 用新结果如果数量更多就替换
+            if len(retry) > len(candidates):
+                candidates = retry
+        except Exception as e:
+            logger.warning(f"Agent A 补足重试失败，降级返回 {len(candidates)} 个: {e}")
 
     logger.info(f"Agent A 完成: cluster_id={info.cluster_id}, 衍生 {len(candidates)} 个候选")
     return candidates

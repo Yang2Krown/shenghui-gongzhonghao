@@ -94,6 +94,22 @@ class Settings(BaseSettings):
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
     
+    # ====== 标题生成 Pipeline 配置 ======
+    MIN_CANDIDATES: int = 10
+    MAX_CANDIDATES: int = 15
+    MIN_COVERAGE_METHODS: int = 6
+    MAX_SAME_METHOD: int = 3
+    PRIORITY_METHOD_RATIO: float = 0.5
+    MIN_TITLE_LENGTH: int = 8
+    MAX_TITLE_LENGTH: int = 40
+    OPTIMAL_MIN_LENGTH: int = 14
+    OPTIMAL_MAX_LENGTH: int = 28
+    MAX_MODIFIERS_PER_TITLE: int = 5
+    B_SCORE_WEIGHT: float = 0.6
+    C_SCORE_WEIGHT: float = 0.4
+    PASS_THRESHOLD: float = 7.0
+    MAX_REGENERATIONS: int = 1
+
     # 数据抓取配置
     SCRAPE_INTERVAL_HOURS: int = 24  # 每24小时抓取一次
     SCRAPE_TIMEOUT: int = 30  # 抓取超时时间（秒）

@@ -43,7 +43,8 @@
       "Bash(curl -s \"https://onetotenvip.com/story/cozeSkill/getXhsCozeSkillDataOne?rankDate=2026-05-20&source=$\\(python3 -c 'from urllib.parse import quote; print\\(quote\\(\\\\\"小红书单日数据爆款文章-ClawHub\\\\\"\\)\\)'\\)&category=$\\(python3 -c 'from urllib.parse import quote; print\\(quote\\(\\\\\"综合全部\\\\\"\\)\\)'\\)\")",
       "Bash(python3 -c \"from urllib.parse import quote; print\\(quote\\('小红书单日数据爆款文章-ClawHub'\\)\\)\")",
       "Bash(python3 -c \"from urllib.parse import quote; print\\(quote\\('综合全部'\\)\\)\")",
-      "Bash(curl -s 'https://onetotenvip.com/story/cozeSkill/getXhsCozeSkillDataOne?rankDate=2026-05-20&source=__TRACKED_VAR__&category=__TRACKED_VAR__')"
+      "Bash(curl -s 'https://onetotenvip.com/story/cozeSkill/getXhsCozeSkillDataOne?rankDate=2026-05-20&source=__TRACKED_VAR__&category=__TRACKED_VAR__')",
+      "Bash(awk -F= '{print $1\"=\"\\(length\\($2\\)>0?\"<set, \"length\\($2\\)\" chars>\":\"<empty>\"\\)}')"
     ]
   }
 }

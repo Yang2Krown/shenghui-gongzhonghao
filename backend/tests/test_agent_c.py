@@ -10,7 +10,7 @@ Agent C - 读者点击预测员 单元测试
 
 import pytest
 
-from app.agents.agent_c import ClickPredictorAgent, READER_PROFILE
+from app.services.title_generation.agent_c_predictor import ClickPredictorAgent, READER_PROFILE
 from tests.conftest import make_candidate
 
 

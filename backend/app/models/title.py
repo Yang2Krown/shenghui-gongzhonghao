@@ -10,7 +10,7 @@ from sqlalchemy import Column, String, DateTime, Integer, Float, JSON, ForeignKe
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
-from app.core.database import Base
+from app.db.base import Base
 
 
 class TitleCandidate(Base):

@@ -18,7 +18,8 @@ from app.models.info_cluster import InfoCluster
 from app.models.raw_info import RawInfo
 from app.models.source_registry import SourceRegistry
 from app.models.topic_candidate import TopicCandidate
-from app.services.preprocess.rules import is_ai_related
+from datetime import datetime, timedelta
+from app.services.preprocess.rules import is_ai_related, MAX_CONTENT_AGE_DAYS
 from app.models.info_cluster import INFO_TYPE_WEIGHT
 
 router = APIRouter()
@@ -38,8 +39,12 @@ async def get_topic_clusters(
     sort_by: str = Query("display_score", description="display_score（按公众号价值加权）/ heat_score / created_at / source_count"),
     sort_order: str = Query("desc"),
 ) -> Any:
-    # 构建基础查询
-    query = select(InfoCluster)
+    # 构建基础查询：默认过滤掉超过 90 天的老话题（保留 published_at IS NULL 的，让新抓回的也能进）
+    cutoff = datetime.utcnow() - timedelta(days=MAX_CONTENT_AGE_DAYS)
+    from sqlalchemy import or_
+    query = select(InfoCluster).where(
+        or_(InfoCluster.published_at.is_(None), InfoCluster.published_at >= cutoff)
+    )
     if info_type:
         query = query.where(InfoCluster.info_type == info_type)
     if direction:
@@ -188,6 +193,7 @@ async def get_topic_cluster_detail(
             "persona_divergence_flag": c.persona_divergence_flag,
             "veto_passed": c.veto_passed,
             "veto_reasons": c.veto_reasons,
+            "business_sensitive": c.business_sensitive,
             "weighted_score": c.weighted_score,
             "verdict": c.verdict,
             "persona_reviews": persona_reviews,

@@ -164,6 +164,73 @@ docker compose -f docker-compose.prod.yml exec postgres \
 
 ---
 
+## 接 X (Twitter) 数据源（可选）
+
+playwright_x_adapter 用真浏览器跑 x.com，需要你的 cookie。
+
+### 1. 本机 Chrome 导 cookie
+
+1. 安装扩展：Cookie-Editor（https://cookie-editor.com/）
+2. 浏览器登录 x.com
+3. 点 Cookie-Editor 图标 → 右下角"Export" → "Export as JSON"
+4. 保存为 `backend/secrets/x_cookie.json`
+
+### 2. 把 cookie 文件上传到服务器
+
+```bash
+# 本机
+scp backend/secrets/x_cookie.json root@服务器:/www/wwwroot/gzh/backend/secrets/
+
+# 服务器：确认文件在
+ls -la /www/wwwroot/gzh/backend/secrets/x_cookie.json
+chmod 600 /www/wwwroot/gzh/backend/secrets/x_cookie.json
+```
+
+### 3. 注册 X source + 重启 worker
+
+```bash
+# 进 backend 容器
+docker compose -f docker-compose.prod.yml exec backend python3 -c "
+import asyncio
+from app.db.session import AsyncSessionLocal
+from app.models.source_registry import SourceRegistry, SOURCE_TYPE_X_PLAYWRIGHT
+async def main():
+    async with AsyncSessionLocal() as db:
+        db.add(SourceRegistry(
+            name='X 首页推荐流', platform='x_home', source_type=SOURCE_TYPE_X_PLAYWRIGHT,
+            tier=3, direction_tags=['AI'], weight=9,
+            requires_auth=True, auth_status='ok',
+            fetch_strategy='cron',
+            fetch_config={'mode':'home','limit':30}, enabled=True,
+            description='X 推荐流（需 cookie）',
+        ))
+        await db.commit()
+asyncio.run(main())
+"
+
+# 触发一次
+docker compose -f docker-compose.prod.yml exec celery-worker python3 -c "
+import asyncio
+from app.db.session import AsyncSessionLocal
+from app.services.scraping.adapters import register_adapters
+from app.services.scraping.orchestrator import orchestrator
+register_adapters()
+async def main():
+    async with AsyncSessionLocal() as db:
+        print(await orchestrator.fetch_all(db, source_types=['x_playwright']))
+asyncio.run(main())
+"
+```
+
+### 4. Cookie 过期处理
+
+X cookie 一般 30 天过期。过期表现：abstract 抓不到内容、log 显示登录跳转。
+- 本机重新导出新 cookie
+- scp 覆盖服务器旧文件
+- 重启 celery-worker：`docker compose -f docker-compose.prod.yml restart celery-worker`
+
+---
+
 ## SSL（可选）
 
 宝塔面板上"添加站点 → 反向代理 → 后端地址填 http://127.0.0.1:80 → 申请免费 SSL"。

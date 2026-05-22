@@ -6,7 +6,7 @@
 
 import logging
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from app.services.content_generation.schemas import (
     ContentGenerationInput,
@@ -23,7 +23,10 @@ from app.services.content_generation.agent_d_inspector import (
 logger = logging.getLogger(__name__)
 
 
-async def generate_content(inp: ContentGenerationInput) -> ContentGenerationOutput:
+async def generate_content(
+    inp: ContentGenerationInput,
+    progress_callback: Optional[Callable] = None,
+) -> ContentGenerationOutput:
     """正文生成主流程：Agent A → B → C → D。
 
     Args:
@@ -43,11 +46,16 @@ async def generate_content(inp: ContentGenerationInput) -> ContentGenerationOutp
     # Step 1: Agent A — 正文创作员
     # ──────────────────────────────────────────
     logger.info("[正文生成] Step 1/4: Agent A 生成正文骨干")
+    if progress_callback:
+        await progress_callback({"event": "step_start", "data": {"step": 1, "agent": "Agent A", "action": "正在按节撰写初稿（2500-3000 字）..."}})
     try:
         agent_a_output = await generate_article(inp)
     except Exception as e:
         logger.error(f"[正文生成] Agent A 失败: {e}")
         raise RuntimeError(f"正文生成失败（Agent A）: {e}") from e
+
+    if progress_callback:
+        await progress_callback({"event": "step_done", "data": {"step": 1, "agent": "Agent A"}})
 
     # 异常处理：字数严重不足
     if agent_a_output.total_word_count < 1700:
@@ -60,6 +68,8 @@ async def generate_content(inp: ContentGenerationInput) -> ContentGenerationOutp
     # Step 2: Agent B — 金句催化员
     # ──────────────────────────────────────────
     logger.info("[正文生成] Step 2/4: Agent B 催化金句")
+    if progress_callback:
+        await progress_callback({"event": "step_start", "data": {"step": 2, "agent": "Agent B", "action": "正在催化 3-5 个金句..."}})
     try:
         agent_b_output = await catalyze_gold_sentences(
             agent_a_output=agent_a_output,
@@ -69,10 +79,15 @@ async def generate_content(inp: ContentGenerationInput) -> ContentGenerationOutp
         logger.error(f"[正文生成] Agent B 失败: {e}")
         raise RuntimeError(f"正文生成失败（Agent B）: {e}") from e
 
+    if progress_callback:
+        await progress_callback({"event": "step_done", "data": {"step": 2, "agent": "Agent B"}})
+
     # ──────────────────────────────────────────
     # Step 3: Agent C — 去 AI 味改写员
     # ──────────────────────────────────────────
     logger.info("[正文生成] Step 3/4: Agent C 去 AI 味改写")
+    if progress_callback:
+        await progress_callback({"event": "step_start", "data": {"step": 3, "agent": "Agent C", "action": "正在去 AI 味改写..."}})
     try:
         agent_c_output = await deai_rewrite(
             agent_a_output=agent_a_output,
@@ -81,6 +96,9 @@ async def generate_content(inp: ContentGenerationInput) -> ContentGenerationOutp
     except Exception as e:
         logger.error(f"[正文生成] Agent C 失败: {e}")
         raise RuntimeError(f"正文生成失败（Agent C）: {e}") from e
+
+    if progress_callback:
+        await progress_callback({"event": "step_done", "data": {"step": 3, "agent": "Agent C"}})
 
     # 异常处理：改写字数变化超限
     if abs(agent_c_output.word_change_pct) > 10:
@@ -93,6 +111,8 @@ async def generate_content(inp: ContentGenerationInput) -> ContentGenerationOutp
     # Step 4: Agent D — 整合 + 自检诊断员
     # ──────────────────────────────────────────
     logger.info("[正文生成] Step 4/4: Agent D 整合 + 自检诊断")
+    if progress_callback:
+        await progress_callback({"event": "step_start", "data": {"step": 4, "agent": "Agent D", "action": "正在整合 + 8 维度自检诊断..."}})
     try:
         agent_d_output = await integrate_and_inspect(
             inp=inp,
@@ -103,6 +123,9 @@ async def generate_content(inp: ContentGenerationInput) -> ContentGenerationOutp
     except Exception as e:
         logger.error(f"[正文生成] Agent D 失败: {e}")
         raise RuntimeError(f"正文生成失败（Agent D）: {e}") from e
+
+    if progress_callback:
+        await progress_callback({"event": "step_done", "data": {"step": 4, "agent": "Agent D"}})
 
     # ──────────────────────────────────────────
     # 汇总输出
@@ -122,5 +145,8 @@ async def generate_content(inp: ContentGenerationInput) -> ContentGenerationOutp
         f"总分: {output.diagnosis.total_score}/10，"
         f"建议: {output.diagnosis.recommended_action}"
     )
+
+    if progress_callback:
+        await progress_callback({"event": "complete", "data": {"step": 4, "agent": "Agent D"}})
 
     return output

@@ -51,7 +51,7 @@ class TestScoreCalculationFlow:
 
     def test_b_score_weighted_correctly(self):
         """B评分应按6维度加权计算"""
-        from app.agents.agent_b import TitleReviewerAgent
+        from app.services.title_generation.agent_b_reviewer import TitleReviewerAgent
         agent = TitleReviewerAgent.__new__(TitleReviewerAgent)
 
         score_data = {
@@ -92,10 +92,10 @@ class TestEndToEndMock:
     @pytest.mark.asyncio
     async def test_full_pipeline_with_mock(self, topic, outline):
         """使用Mock测试完整流水线"""
-        from app.agents.agent_a import TitleCreatorAgent
-        from app.agents.agent_b import TitleReviewerAgent
-        from app.agents.agent_c import ClickPredictorAgent
-        from app.agents.agent_d import FinalJudgeAgent
+        from app.services.title_generation.agent_a_creator import TitleCreatorAgent
+        from app.services.title_generation.agent_b_reviewer import TitleReviewerAgent
+        from app.services.title_generation.agent_c_predictor import ClickPredictorAgent
+        from app.services.title_generation.agent_d_judge import FinalJudgeAgent
 
         # 准备Mock数据
         mock_candidates = make_candidates(12)
@@ -195,7 +195,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_parse_json_response_valid(self):
         """有效JSON应被正确解析"""
-        from app.agents.agent_a import TitleCreatorAgent
+        from app.services.title_generation.agent_a_creator import TitleCreatorAgent
         agent = TitleCreatorAgent.__new__(TitleCreatorAgent)
 
         response = '{"candidates": [{"title": "测试"}]}'
@@ -206,7 +206,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_parse_json_response_with_markdown(self):
         """带Markdown代码块的JSON应被正确解析"""
-        from app.agents.agent_a import TitleCreatorAgent
+        from app.services.title_generation.agent_a_creator import TitleCreatorAgent
         agent = TitleCreatorAgent.__new__(TitleCreatorAgent)
 
         response = '```json\n{"candidates": [{"title": "测试"}]}\n```'
@@ -216,7 +216,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_parse_json_response_with_prefix(self):
         """带前缀文字的JSON应被正确解析"""
-        from app.agents.agent_a import TitleCreatorAgent
+        from app.services.title_generation.agent_a_creator import TitleCreatorAgent
         agent = TitleCreatorAgent.__new__(TitleCreatorAgent)
 
         response = '以下是结果：\n{"candidates": [{"title": "测试"}]}'
@@ -226,7 +226,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_parse_json_response_invalid(self):
         """无效JSON应返回空字典"""
-        from app.agents.agent_a import TitleCreatorAgent
+        from app.services.title_generation.agent_a_creator import TitleCreatorAgent
         agent = TitleCreatorAgent.__new__(TitleCreatorAgent)
 
         response = '这不是JSON'
@@ -236,7 +236,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_parse_json_response_empty(self):
         """空字符串应返回空字典"""
-        from app.agents.agent_a import TitleCreatorAgent
+        from app.services.title_generation.agent_a_creator import TitleCreatorAgent
         agent = TitleCreatorAgent.__new__(TitleCreatorAgent)
 
         result = agent.parse_json_response("")

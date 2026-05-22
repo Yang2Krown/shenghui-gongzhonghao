@@ -6,7 +6,7 @@
 
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Callable, List, Dict, Any, Optional
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,10 +20,12 @@ from app.schemas.title_generation import (
     TopicInfo,
     OutlineInfo,
 )
-from app.agents.agent_a import TitleCreatorAgent
-from app.agents.agent_b import TitleReviewerAgent
-from app.agents.agent_c import ClickPredictorAgent
-from app.agents.agent_d import FinalJudgeAgent
+from app.services.title_generation import (
+    TitleCreatorAgent,
+    TitleReviewerAgent,
+    ClickPredictorAgent,
+    FinalJudgeAgent,
+)
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -36,14 +38,16 @@ class TitleGenerationService:
     负责编排4个Agent的协作流程，实现完整的标题生成流水线。
     """
     
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, progress_callback: Optional[Callable] = None):
         """
         初始化标题生成服务
-        
+
         Args:
             db: 数据库会话
+            progress_callback: 进度回调函数（可选）
         """
         self.db = db
+        self.progress_callback = progress_callback
         self.agent_a = TitleCreatorAgent()
         self.agent_b = TitleReviewerAgent()
         self.agent_c = ClickPredictorAgent()
@@ -91,6 +95,8 @@ class TitleGenerationService:
                 # 更新任务状态为完成
                 await self._update_task_status(task_id, TaskStatus.COMPLETED)
                 logger.info(f"标题生成任务 {task_id} 完成")
+                if self.progress_callback:
+                    await self.progress_callback({"event": "complete", "data": {"step": 4, "agent": "Agent D"}})
             else:
                 # 更新任务状态为失败
                 await self._update_task_status(
@@ -99,6 +105,8 @@ class TitleGenerationService:
                     "难以成标题，需要人工介入",
                 )
                 logger.warning(f"标题生成任务 {task_id} 失败，需要人工介入")
+                if self.progress_callback:
+                    await self.progress_callback({"event": "error", "data": {"message": "难以成标题，需要人工介入"}})
             
             # 计算耗时
             end_time = datetime.now()
@@ -110,10 +118,21 @@ class TitleGenerationService:
                 "duration_seconds": duration,
                 "regeneration_count": regeneration_count,
             })
-            
+
+            # 提交事务（确保 task / result / candidates / recommendations / agent_logs 持久化）
+            await self.db.commit()
+
         except Exception as e:
             logger.error(f"标题生成任务 {task_id} 异常: {str(e)}", exc_info=True)
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
             await self._update_task_status(task_id, TaskStatus.FAILED, str(e))
+            try:
+                await self.db.commit()
+            except Exception:
+                pass
             raise
     
     async def _execute_agent_pipeline(
@@ -237,7 +256,10 @@ class TitleGenerationService:
             候选标题列表
         """
         logger.info("执行 Agent A - 标题创作员")
-        
+
+        if self.progress_callback:
+            await self.progress_callback({"event": "step_start", "data": {"step": 1, "agent": "Agent A", "action": "正在生成 10-15 个标题候选..."}})
+
         # 创建Agent日志
         log = await self._create_agent_log(
             task_id=task_id,
@@ -287,7 +309,10 @@ class TitleGenerationService:
                 "output_data": {"candidates_count": len(candidates)},
                 "completed_at": datetime.now(),
             })
-            
+
+            if self.progress_callback:
+                await self.progress_callback({"event": "step_done", "data": {"step": 1, "agent": "Agent A"}})
+
             return candidates
             
         except Exception as e:
@@ -319,7 +344,10 @@ class TitleGenerationService:
             评审结果
         """
         logger.info("执行 Agent B - 标题评审员")
-        
+
+        if self.progress_callback:
+            await self.progress_callback({"event": "step_start", "data": {"step": 2, "agent": "Agent B", "action": "正在一票否决扫描 + 6 维度评分..."}})
+
         # 创建Agent日志
         log = await self._create_agent_log(
             task_id=task_id,
@@ -363,9 +391,12 @@ class TitleGenerationService:
                 "output_data": result,
                 "completed_at": datetime.now(),
             })
-            
+
+            if self.progress_callback:
+                await self.progress_callback({"event": "step_done", "data": {"step": 2, "agent": "Agent B"}})
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Agent B 执行失败: {str(e)}", exc_info=True)
             await self._update_agent_log(log.id, {
@@ -395,7 +426,10 @@ class TitleGenerationService:
             点击预测结果
         """
         logger.info("执行 Agent C - 读者点击预测员")
-        
+
+        if self.progress_callback:
+            await self.progress_callback({"event": "step_start", "data": {"step": 3, "agent": "Agent C", "action": "正在模拟读者场景，预测点击意愿..."}})
+
         # 创建Agent日志
         log = await self._create_agent_log(
             task_id=task_id,
@@ -429,9 +463,12 @@ class TitleGenerationService:
                 "output_data": result,
                 "completed_at": datetime.now(),
             })
-            
+
+            if self.progress_callback:
+                await self.progress_callback({"event": "step_done", "data": {"step": 3, "agent": "Agent C"}})
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Agent C 执行失败: {str(e)}", exc_info=True)
             await self._update_agent_log(log.id, {
@@ -463,7 +500,10 @@ class TitleGenerationService:
             最终判定结果
         """
         logger.info("执行 Agent D - 最终判定员")
-        
+
+        if self.progress_callback:
+            await self.progress_callback({"event": "step_start", "data": {"step": 4, "agent": "Agent D", "action": "正在综合评分，输出 Top 3 推荐..."}})
+
         # 创建Agent日志
         log = await self._create_agent_log(
             task_id=task_id,
@@ -489,9 +529,12 @@ class TitleGenerationService:
                 "output_data": result,
                 "completed_at": datetime.now(),
             })
-            
+
+            if self.progress_callback:
+                await self.progress_callback({"event": "step_done", "data": {"step": 4, "agent": "Agent D"}})
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Agent D 执行失败: {str(e)}", exc_info=True)
             await self._update_agent_log(log.id, {
@@ -649,7 +692,11 @@ class TitleGenerationService:
             execution_order=execution_order,
             status="running",
             started_at=datetime.now(),
-            model_name=settings.PRIMARY_MODEL if settings.USE_PRIMARY_MODEL else settings.FALLBACK_MODEL,
+            model_name=(
+                settings.ANTHROPIC_MODEL
+                if (settings.LLM_PROVIDER or "").lower() == "anthropic"
+                else settings.DEEPSEEK_MODEL
+            ),
         )
         
         self.db.add(log)

@@ -155,6 +155,7 @@ async def _mine_cluster_inner(db: AsyncSession, cluster: InfoCluster) -> dict:
             persona_divergence_flag=scored.persona_divergence_flag,
             veto_passed=scored.veto_passed,
             veto_reasons=scored.veto_reasons,
+            business_sensitive=scored.business_sensitive,
             weighted_score=scored.weighted_score,
             verdict=scored.verdict,
         )

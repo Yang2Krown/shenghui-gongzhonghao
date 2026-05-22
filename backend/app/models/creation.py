@@ -19,6 +19,24 @@ class ContentCreation(BaseModel):
     status = Column(String(20), default="draft")  # draft, published, archived
     style_profile_id = Column(Integer, ForeignKey("style_profiles.id"), nullable=True)
     
+    # 关联选题候选和话题簇
+    candidate_id = Column(Integer, ForeignKey("topic_candidates.id"), nullable=True)
+    cluster_id = Column(Integer, ForeignKey("info_clusters.id"), nullable=True)
+    
+    # 创作步骤关联
+    outline_id = Column(Integer, ForeignKey("outlines.id"), nullable=True)
+    title_task_id = Column(String(100), nullable=True)  # 标题生成任务 ID
+    content_task_id = Column(String(100), nullable=True)  # 正文生成任务 ID
+    
+    # 创作进度状态
+    outline_status = Column(String(20), default="idle")  # idle/generating/completed/failed
+    title_status = Column(String(20), default="idle")
+    content_status = Column(String(20), default="idle")
+    
+    # 选题快照（冗余，方便展示）
+    topic_title = Column(String(500), nullable=True)
+    topic_direction = Column(String(100), nullable=True)
+    
     # 内容元数据
     word_count = Column(Integer, default=0)
     reading_time = Column(Integer, default=0)  # 预计阅读时间（分钟）
@@ -55,10 +73,20 @@ class ContentCreation(BaseModel):
             "id": self.id,
             "user_id": self.user_id,
             "topic_id": self.topic_id,
+            "candidate_id": self.candidate_id,
+            "cluster_id": self.cluster_id,
             "title": self.title,
             "content": self.content,
             "status": self.status,
             "style_profile_id": self.style_profile_id,
+            "outline_id": self.outline_id,
+            "title_task_id": self.title_task_id,
+            "content_task_id": self.content_task_id,
+            "outline_status": self.outline_status,
+            "title_status": self.title_status,
+            "content_status": self.content_status,
+            "topic_title": self.topic_title,
+            "topic_direction": self.topic_direction,
             "word_count": self.word_count,
             "reading_time": self.reading_time,
             "featured_image": self.featured_image,

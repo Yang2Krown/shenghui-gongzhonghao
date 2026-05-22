@@ -13,7 +13,7 @@ Agent A - 标题创作员 单元测试
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from app.agents.agent_a import TitleCreatorAgent, TITLE_METHODS, MODIFIERS, ANTI_PATTERNS
+from app.services.title_generation.agent_a_creator import TitleCreatorAgent, TITLE_METHODS, MODIFIERS, ANTI_PATTERNS
 from app.core.config import settings
 
 

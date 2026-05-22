@@ -6,6 +6,7 @@
 
 import logging
 from typing import Optional
+from pathlib import Path
 
 from app.services.llm import get_llm_client
 from app.services.llm.llm_client import ChatMessage, parse_json_loose
@@ -18,11 +19,20 @@ from app.services.content_generation.schemas import (
 
 logger = logging.getLogger(__name__)
 
+# 获取当前文件所在目录
+CURRENT_DIR = Path(__file__).parent
+
 # ──────────────────────────────────────────────
 # 提示词模板
 # ──────────────────────────────────────────────
 
-SYSTEM_PROMPT = """\
+def _load_system_prompt() -> str:
+    """从文件加载系统提示词"""
+    prompt_file = CURRENT_DIR / "prompts" / "agent_a_system.txt"
+    if prompt_file.exists():
+        return prompt_file.read_text(encoding="utf-8")
+    # 回退到硬编码版本
+    return """\
 你是一位资深 AI 公众号正文写手。你的任务是基于选题、大纲、标题，一次性生成 2500-3000 字的正文。
 
 【硬约束】
@@ -185,7 +195,7 @@ async def generate_article(inp: ContentGenerationInput) -> AgentAOutput:
     logger.info(f"[Agent A] 开始生成正文，标题: {inp.topic_title}")
 
     messages = [
-        ChatMessage(role="system", content=SYSTEM_PROMPT),
+        ChatMessage(role="system", content=_load_system_prompt()),
         ChatMessage(role="user", content=user_prompt),
     ]
 

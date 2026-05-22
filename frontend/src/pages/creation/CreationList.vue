@@ -109,10 +109,31 @@
             {{ getExcerpt(creation.content) || '暂无内容' }}
           </p>
           
+          <!-- 创作进度 -->
+          <div class="creation-progress mb-3">
+            <span class="progress-step" :class="getProgressClass(creation.outline_status)">
+              <span class="step-dot"></span>
+              大纲
+            </span>
+            <span class="progress-arrow">→</span>
+            <span class="progress-step" :class="getProgressClass(creation.title_status)">
+              <span class="step-dot"></span>
+              标题
+            </span>
+            <span class="progress-arrow">→</span>
+            <span class="progress-step" :class="getProgressClass(creation.content_status)">
+              <span class="step-dot"></span>
+              正文
+            </span>
+          </div>
+
           <!-- 标签 -->
-          <div class="flex flex-wrap gap-1 mb-4">
+          <div class="flex flex-wrap gap-1 mb-3">
+            <span v-if="creation.topic_direction" class="badge-info text-xs">
+              {{ creation.topic_direction }}
+            </span>
             <span
-              v-for="tag in (creation.tags || []).slice(0, 3)"
+              v-for="tag in (creation.tags || []).slice(0, 2)"
               :key="tag"
               class="badge-primary text-xs"
             >
@@ -142,7 +163,7 @@
                 @click.stop="editCreation(creation)"
               >
                 <el-icon><Edit /></el-icon>
-                编辑
+                继续创作
               </el-button>
             </div>
           </div>
@@ -386,6 +407,13 @@ const getExcerpt = (content) => {
   return text.substring(0, 100) + (text.length > 100 ? '...' : '')
 }
 
+const getProgressClass = (status) => {
+  if (status === 'completed') return 'step-done'
+  if (status === 'generating') return 'step-active'
+  if (status === 'failed') return 'step-failed'
+  return 'step-pending'
+}
+
 const formatDate = (dateString) => {
   if (!dateString) return ''
   
@@ -426,5 +454,69 @@ const formatDate = (dateString) => {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.creation-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.progress-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.step-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.step-done .step-dot {
+  background: var(--leaf);
+}
+
+.step-done {
+  color: var(--leaf);
+}
+
+.step-active .step-dot {
+  background: var(--clay);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.step-active {
+  color: var(--clay);
+}
+
+.step-failed .step-dot {
+  background: var(--crimson);
+}
+
+.step-failed {
+  color: var(--crimson);
+}
+
+.step-pending .step-dot {
+  background: var(--line);
+}
+
+.step-pending {
+  color: var(--ink-4);
+}
+
+.progress-arrow {
+  color: var(--ink-4);
+  font-size: 10px;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 </style>
