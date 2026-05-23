@@ -374,21 +374,11 @@ const B_DIMENSIONS = [
   { key: 'outline_consistency', label: '与大纲一致性', weight: 0.15 },
 ]
 
-// 当前选中的候选对象（从 candidatesAll 中按 title 匹配）
-const selectedCandidate = computed(() => {
-  if (selectedIndex.value === null || !titles.value.length) return null
-  const t = titles.value[selectedIndex.value]
-  if (!t) return null
-  // 优先 id 匹配，其次 title 匹配
-  return candidatesAll.value.find((c) => c.id === t.id || c.title === t.title) || null
-})
-
 const agentFeedback = computed(() => {
   if (!candidatesAll.value.length && !titles.value.length) return []
 
   const cands = candidatesAll.value
   const eliminated = cands.filter((c) => c.is_eliminated)
-  const sel = selectedCandidate.value
 
   // 当前选中的标题
   const selected = selectedIndex.value !== null ? titles.value[selectedIndex.value] : null
@@ -412,97 +402,58 @@ const agentFeedback = computed(() => {
     })),
   }
 
-  // Agent B 评分（选中时显示单个详情，否则显示 Top 5 汇总）
+  // Agent B 评分（仅选中标题的 6 维度）
   const agentB = {
     id: 'B',
     code: 'B',
     name: '尚怀瑾 · 标题评审员',
     role: '6 维度评分 + 一票否决扫描',
+    avatar: '/agents/title-b.png',
+    score: sel?.b_score ?? null,
+    summary: sel ? `「${sel.title}」综合评分 ${(sel.b_score ?? 0).toFixed(1)}/10` : '请点击左侧标题查看评分',
   }
-
   if (sel) {
-    agentB.score = sel.b_score ?? null
-    agentB.summary = `当前标题评分 ${(sel.b_score ?? 0).toFixed(1)}/10`
     const details = sel.b_score_details || {}
     agentB.dimensions = B_DIMENSIONS.map((d) => ({
-      key: d.key,
       label: d.label,
-      weight: d.weight,
       score: details[d.key] ?? 0,
       max: 10,
     }))
-    agentB.issues = []
-  } else {
-    agentB.score = top5.length ? top5.reduce((s, c) => s + (c.b_score || 0), 0) / top5.length : null
-    agentB.summary = top5.length ? `Top 5 候选平均评分 ${(top5.reduce((s, c) => s + (c.b_score || 0), 0) / top5.length).toFixed(1)}` : ''
-    agentB.issues = top5.map((c) => {
-      const details = c.b_score_details || {}
-      const dimsStr = B_DIMENSIONS
-        .map((d) => `${d.label} ${(details[d.key] ?? 0).toFixed(1)}`)
-        .join(' · ')
-      return {
-        location: `${c.title} (${(c.b_score ?? 0).toFixed(1)}/10)`,
-        text: dimsStr,
-      }
-    })
   }
 
-  // Agent C 点击预测（选中时显示单个详情）
+  // Agent C 点击预测（仅选中标题）
   const agentC = {
     id: 'C',
     code: 'C',
     name: '于思齐 · 标题预测员',
     role: '模拟真实读者的点击意愿',
+    avatar: '/agents/title-c.png',
+    score: sel?.c_click_willingness ?? null,
+    summary: sel
+      ? `「${sel.title}」点击意愿 ${(sel.c_click_willingness ?? 0).toFixed(1)}/10`
+      : '请点击左侧标题查看预测',
   }
-
   if (sel) {
-    agentC.score = sel.c_click_willingness ?? null
-    agentC.summary = `点击意愿 ${(sel.c_click_willingness ?? 0).toFixed(1)}/10`
     agentC.issues = [
-      sel.c_click_reason ? { location: '✓ 会点', text: sel.c_click_reason } : null,
-      sel.c_no_click_reason ? { location: '✗ 不点', text: sel.c_no_click_reason } : null,
-      sel.c_improvement_suggestion ? { location: '→ 建议', text: sel.c_improvement_suggestion } : null,
+      sel.c_click_reason ? { location: '吸引点', text: sel.c_click_reason } : null,
+      sel.c_no_click_reason ? { location: '顾虑点', text: sel.c_no_click_reason } : null,
+      sel.c_improvement_suggestion ? { location: '改进建议', text: sel.c_improvement_suggestion } : null,
     ].filter(Boolean)
-  } else {
-    agentC.score = top5.length ? top5.reduce((s, c) => s + (c.c_click_willingness || 0), 0) / top5.length : null
-    agentC.summary = top5.length
-      ? `Top 5 平均点击意愿 ${(top5.reduce((s, c) => s + (c.c_click_willingness || 0), 0) / top5.length).toFixed(1)}/10`
-      : ''
-    agentC.issues = top5.map((c) => ({
-      location: `${c.title} (${(c.c_click_willingness ?? 0).toFixed(1)}/10)`,
-      text: [
-        c.c_click_reason ? `✓ 会点：${c.c_click_reason}` : '',
-        c.c_no_click_reason ? `✗ 不点：${c.c_no_click_reason}` : '',
-        c.c_improvement_suggestion ? `→ 建议：${c.c_improvement_suggestion}` : '',
-      ].filter(Boolean).join('\n'),
-    }))
   }
 
-  // Agent D 综合判定（选中时显示单个详情）
+  // Agent D 综合判定（仅选中标题）
   const agentD = {
     id: 'D',
     code: 'D',
-    name: 'Agent D · 最终判定员',
-    role: '加权综合评分 + Top 3 输出',
-  }
-
-  if (sel) {
-    agentD.score = sel.final_score ?? null
-    agentD.verdict = sel.is_top3 ? 'Top 3' : (meta.value?.self_check_passed === '1' ? '通过' : '未通过')
-    agentD.verdictPassed = sel.is_top3 || meta.value?.self_check_passed === '1'
-    agentD.summary = `综合 ${(sel.final_score ?? 0).toFixed(2)} = B ${(sel.b_score ?? 0).toFixed(1)} × 60% + C ${(sel.c_click_willingness ?? 0).toFixed(1)} × 40%`
-    if (sel.reason) {
-      agentD.issues = [{ location: '推荐理由', text: sel.reason }]
-    }
-  } else {
-    agentD.score = top3.length ? top3.reduce((s, c) => s + (c.final_score || 0), 0) / top3.length : null
-    agentD.verdict = meta.value?.self_check_passed === '1' ? '通过' : '未通过'
-    agentD.verdictPassed = meta.value?.self_check_passed === '1'
-    agentD.summary = `Top 3 平均综合分 ${top3.length ? (top3.reduce((s, c) => s + (c.final_score || 0), 0) / top3.length).toFixed(2) : '-'}/10`
-    agentD.issues = top3.map((c) => ({
-      location: `TOP · ${c.title}`,
-      text: `综合 ${(c.final_score ?? 0).toFixed(2)} = B ${(c.b_score ?? 0).toFixed(1)} × 60% + C ${(c.c_click_willingness ?? 0).toFixed(1)} × 40%`,
-    }))
+    name: '丁既明 · 标题判定员',
+    role: '加权综合评分，输出 Top 5',
+    avatar: '/agents/title-d.png',
+    score: sel?.final_score ?? null,
+    verdict: sel?.is_top3 ? 'Top 3' : sel?.is_top5 ? 'Top 5' : null,
+    verdictPassed: !!sel?.is_top3 || !!sel?.is_top5,
+    summary: sel
+      ? `综合 ${(sel.final_score ?? 0).toFixed(2)} = B ${(sel.b_score ?? 0).toFixed(1)} × 60% + C ${(sel.c_click_willingness ?? 0).toFixed(1)} × 40%`
+      : '',
   }
 
   return [agentA, agentB, agentC, agentD]
