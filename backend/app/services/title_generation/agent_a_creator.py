@@ -114,11 +114,12 @@ class TitleCreatorAgent(BaseAgent):
         # 构建提示词
         prompt = self._build_prompt(topic, outline, feedback)
         
-        # 调用AI模型
+        # 调用AI模型 —— 强制 JSON 模式
         response = await self.call_ai_model(
             prompt=prompt,
             system_prompt=self._get_system_prompt(),
             temperature=0.8,  # 稍高温度增加创造性
+            json_mode=True,
         )
         
         # 解析响应

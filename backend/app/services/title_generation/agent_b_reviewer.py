@@ -274,11 +274,12 @@ class TitleReviewerAgent(BaseAgent):
         # 构建评分提示词
         prompt = self._build_scoring_prompt(candidates, topic, outline)
         
-        # 调用AI模型
+        # 调用AI模型 —— 强制 JSON 模式，否则 LLM 容易返回带 markdown / 解释文本的非纯 JSON
         response = await self.call_ai_model(
             prompt=prompt,
             system_prompt=self._get_system_prompt(),
             temperature=0.3,  # 低温度确保评分一致性
+            json_mode=True,
         )
         
         # 解析响应

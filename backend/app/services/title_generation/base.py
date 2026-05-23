@@ -34,8 +34,8 @@ class BaseAgent(ABC):
         prompt: str,
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 4096,
-        json_mode: bool = True,   # 标题/大纲/正文这些 agent 都需要严格 JSON，默认开
+        max_tokens: int = 32000,  # 大幅放宽：推理模型(reasoning_content)需要充足预算，否则没机会输出最终 JSON
+        json_mode: bool = False,  # 由各 agent 显式传 True，保持你之前的默认
     ) -> str:
         """
         调用AI模型

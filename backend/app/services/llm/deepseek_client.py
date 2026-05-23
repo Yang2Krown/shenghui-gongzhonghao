@@ -54,12 +54,21 @@ class DeepSeekClient(LLMClient):
         choice = resp.choices[0]
         text = choice.message.content or ""
 
-        # 兼容 reasoning 类模型：如果 content 是空，但 reasoning_content 里有 JSON，可以兜底用它
+        # 推理模型空 content 的两类原因：
+        #  1) max_tokens 被推理耗光，模型还没写完答案就被截断 → finish_reason == "length"
+        #  2) 模型完成了但故意把答案写到 reasoning_content（少见，但 DeepSeek v4 系列有时这样）
         if not text:
             reasoning = getattr(choice.message, "reasoning_content", None) or ""
+            if choice.finish_reason == "length":
+                logger.error(
+                    f"DeepSeek 被 max_tokens 截断！推理还没写完最终答案就停了。"
+                    f"reasoning_content 长度={len(reasoning)}，"
+                    f"建议把 max_tokens 调大（当前 {kwargs.get('max_tokens')}）"
+                )
             if reasoning:
                 logger.warning(
-                    f"DeepSeek content 为空，尝试从 reasoning_content 解析（len={len(reasoning)}）"
+                    f"DeepSeek content 为空，尝试从 reasoning_content 解析（len={len(reasoning)}），"
+                    f"finish_reason={choice.finish_reason}"
                 )
                 text = reasoning
 

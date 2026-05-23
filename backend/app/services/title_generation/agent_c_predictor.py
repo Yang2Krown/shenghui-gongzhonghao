@@ -85,11 +85,12 @@ class ClickPredictorAgent(BaseAgent):
         # 构建预测提示词
         prompt = self._build_prediction_prompt(top5, topic, outline)
         
-        # 调用AI模型
+        # 调用AI模型 —— 强制 JSON 模式
         response = await self.call_ai_model(
             prompt=prompt,
             system_prompt=self._get_system_prompt(),
             temperature=0.5,  # 中等温度，模拟真实反应
+            json_mode=True,
         )
         
         # 解析响应
