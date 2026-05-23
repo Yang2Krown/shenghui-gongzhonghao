@@ -50,11 +50,15 @@ export function useAgentProgress() {
       steps.value[idx] = {
         agent: data.agent,
         action: data.action || '',
+        avatar: data.avatar || '',
       }
 
       // 如果正在冲刺上一个 Agent，记下来等冲刺完再切
       if (_rushing) {
-        _pendingStep = { idx }
+        // 只允许向前推进（更高 index），防止再生/快速步骤覆盖
+        if (_pendingStep === null || idx > _pendingStep.idx) {
+          _pendingStep = { idx }
+        }
       } else {
         // 没在冲刺，直接延迟切换
         _switchToStep(idx)

@@ -141,24 +141,27 @@ class TitleGenerationService:
         result_id: str,
         request: TitleGenerationRequest,
         regeneration_count: int,
+        feedback: Optional[str] = None,
     ) -> bool:
         """
         执行Agent流水线
-        
+
         Args:
             task_id: 任务ID
             result_id: 结果ID
             request: 标题生成请求
             regeneration_count: 当前重生次数
-            
+            feedback: 重生反馈（可选，仅在再生流程中传入）
+
         Returns:
             是否成功
         """
-        # Agent A: 生成候选标题
+        # Agent A: 生成候选标题（再生时带反馈）
         candidates = await self._execute_agent_a(
             task_id=task_id,
             result_id=result_id,
             request=request,
+            feedback=feedback,
         )
         
         if not candidates:
@@ -222,6 +225,18 @@ class TitleGenerationService:
                 result_id=result_id,
                 recommendations=d_result.get("recommendations", []),
             )
+
+            # 为所有候选计算并保存 final_score
+            from sqlalchemy import select, update
+            from app.models.title import TitleCandidate
+            cand_result = await self.db.execute(
+                select(TitleCandidate).where(TitleCandidate.result_id == result_id)
+            )
+            for cand in cand_result.scalars().all():
+                b = cand.b_score or 0
+                c = cand.c_click_willingness or 0
+                cand.final_score = round(b * 0.6 + c * 0.4, 2)
+            await self.db.flush()
             
             # 更新结果统计
             await self._update_result(result_id, {
@@ -258,7 +273,7 @@ class TitleGenerationService:
         logger.info("执行 Agent A - 标题创作员")
 
         if self.progress_callback:
-            await self.progress_callback({"event": "step_start", "data": {"step": 1, "agent": "Agent A", "action": "正在生成 10-15 个标题候选..."}})
+            await self.progress_callback({"event": "step_start", "data": {"step": 1, "agent": "甄意浓 · 标题创作员", "action": "正在生成 10-15 个标题候选...", "avatar": "/agents/title-a.png"}})
 
         # 创建Agent日志
         log = await self._create_agent_log(
@@ -346,7 +361,7 @@ class TitleGenerationService:
         logger.info("执行 Agent B - 标题评审员")
 
         if self.progress_callback:
-            await self.progress_callback({"event": "step_start", "data": {"step": 2, "agent": "Agent B", "action": "正在一票否决扫描 + 6 维度评分..."}})
+            await self.progress_callback({"event": "step_start", "data": {"step": 2, "agent": "尚怀瑾 · 标题评审员", "action": "正在一票否决扫描 + 6 维度评分...", "avatar": "/agents/title-b.png"}})
 
         # 创建Agent日志
         log = await self._create_agent_log(
@@ -366,19 +381,19 @@ class TitleGenerationService:
                 outline=request.outline,
             )
             
-            # 更新候选标题的评分
+            # 更新候选标题的评分（Agent B 返回 "id" 而非 "candidate_id"）
             for score_data in result.get("scores", []):
-                candidate_id = score_data.get("candidate_id")
+                candidate_id = score_data.get("candidate_id") or score_data.get("id")
                 if candidate_id:
                     await self._update_candidate_score(candidate_id, score_data)
-            
+
             # 标记一票否决的候选
             for eliminated in result.get("eliminated", []):
-                candidate_id = eliminated.get("candidate_id")
+                candidate_id = eliminated.get("candidate_id") or eliminated.get("id")
                 if candidate_id:
                     await self._update_candidate_elimination(
                         candidate_id,
-                        eliminated.get("reason", ""),
+                        eliminated.get("reason") or eliminated.get("elimination_reason", ""),
                     )
             
             # 标记Top 5
@@ -428,7 +443,7 @@ class TitleGenerationService:
         logger.info("执行 Agent C - 读者点击预测员")
 
         if self.progress_callback:
-            await self.progress_callback({"event": "step_start", "data": {"step": 3, "agent": "Agent C", "action": "正在模拟读者场景，预测点击意愿..."}})
+            await self.progress_callback({"event": "step_start", "data": {"step": 3, "agent": "于思齐 · 标题预测员", "action": "正在模拟读者场景，预测点击意愿...", "avatar": "/agents/title-c.png"}})
 
         # 创建Agent日志
         log = await self._create_agent_log(
@@ -502,7 +517,7 @@ class TitleGenerationService:
         logger.info("执行 Agent D - 最终判定员")
 
         if self.progress_callback:
-            await self.progress_callback({"event": "step_start", "data": {"step": 4, "agent": "Agent D", "action": "正在综合评分，输出 Top 3 推荐..."}})
+            await self.progress_callback({"event": "step_start", "data": {"step": 4, "agent": "丁既明 · 标题判定员", "action": "正在综合评分，输出 Top 5 推荐...", "avatar": "/agents/title-d.png"}})
 
         # 创建Agent日志
         log = await self._create_agent_log(
@@ -554,36 +569,26 @@ class TitleGenerationService:
     ) -> bool:
         """
         执行重生流程
-        
+
         Args:
             task_id: 任务ID
             result_id: 结果ID
             request: 标题生成请求
             regeneration_count: 重生次数
             feedback: 扣分理由反馈
-            
+
         Returns:
             是否成功
         """
         logger.info(f"执行重生流程，第 {regeneration_count} 次")
-        
-        # 重新执行Agent A（带反馈）
-        candidates = await self._execute_agent_a(
-            task_id=task_id,
-            result_id=result_id,
-            request=request,
-            feedback=feedback,
-        )
-        
-        if not candidates:
-            return False
-        
-        # 重新执行后续Agent
+
+        # 从头执行完整流水线（Agent A 带反馈，避免重复 step_start）
         return await self._execute_agent_pipeline(
             task_id=task_id,
             result_id=result_id,
             request=request,
             regeneration_count=regeneration_count,
+            feedback=feedback,
         )
     
     async def _save_recommendations(

@@ -19,7 +19,7 @@ from app.models.raw_info import RawInfo
 from app.models.source_registry import SourceRegistry
 from app.models.topic_candidate import TopicCandidate
 from datetime import datetime, timedelta
-from app.services.preprocess.rules import is_ai_related, MAX_CONTENT_AGE_DAYS
+from app.services.preprocess.rules import MAX_CONTENT_AGE_DAYS
 from app.models.info_cluster import INFO_TYPE_WEIGHT
 
 router = APIRouter()
@@ -39,11 +39,14 @@ async def get_topic_clusters(
     sort_by: str = Query("display_score", description="display_score（按公众号价值加权）/ heat_score / created_at / source_count"),
     sort_order: str = Query("desc"),
 ) -> Any:
-    # 构建基础查询：默认过滤掉超过 90 天的老话题（保留 published_at IS NULL 的，让新抓回的也能进）
+    # 构建基础查询：
+    # - 默认过滤掉超过 90 天的老话题（保留 published_at IS NULL 的）
+    # - 默认只取 is_ai_relevant=True（预处理时打的标）—— 避免每次请求都把全表拉到内存过滤
     cutoff = datetime.utcnow() - timedelta(days=MAX_CONTENT_AGE_DAYS)
     from sqlalchemy import or_
     query = select(InfoCluster).where(
-        or_(InfoCluster.published_at.is_(None), InfoCluster.published_at >= cutoff)
+        InfoCluster.is_ai_relevant.is_(True),
+        or_(InfoCluster.published_at.is_(None), InfoCluster.published_at >= cutoff),
     )
     if info_type:
         query = query.where(InfoCluster.info_type == info_type)
@@ -75,18 +78,13 @@ async def get_topic_clusters(
     else:
         query = query.order_by(order_col)
 
-    # 先拉所有满足条件的簇到内存做 AI 过滤（数据量不大，全拉）
-    result = await db.execute(query)
-    all_clusters = result.scalars().all()
+    # 总数（DB 层 count，不再把全表拉内存）
+    count_q = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_q)).scalar() or 0
 
-    # AI 过滤
-    ai_clusters = [c for c in all_clusters if is_ai_related(c.core_title, c.summary or "")]
-
-    # 手动分页
-    total = len(ai_clusters)
-    start = (page - 1) * page_size
-    end = start + page_size
-    page_clusters = ai_clusters[start:end]
+    # 当前页（SQL 层 LIMIT/OFFSET）
+    page_query = query.offset((page - 1) * page_size).limit(page_size)
+    page_clusters = (await db.execute(page_query)).scalars().all()
 
     # 批量查询每个 cluster 的候选选题数
     cluster_ids = [c.id for c in page_clusters]

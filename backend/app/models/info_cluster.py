@@ -62,6 +62,7 @@ class InfoCluster(BaseModel):
 
     # 处理状态
     mined = Column(Boolean, default=False, index=True)                 # 是否已被 Agent A/B 处理过
+    is_ai_relevant = Column(Boolean, default=True, index=True)         # 预处理时打的 AI 相关性标，列表 API 用它做 SQL 层过滤
 
     # 簇中心向量（簇内 RawInfo embedding 的平均）：用于"新条目找最近簇"
     centroid = Column(Vector(settings.EMBEDDING_DIM), nullable=True)

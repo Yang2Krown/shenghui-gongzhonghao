@@ -150,6 +150,9 @@
           <h3>
             正文预览
             <button class="btn-copy" @click="copyText">复制全文</button>
+            <button class="btn-save" @click="saveToMyCreations" :disabled="saving">
+              {{ saving ? '保存中...' : (saved ? '✓ 已保存' : '保存到我的创作') }}
+            </button>
           </h3>
           <div class="article-content" v-html="renderMarkdown(result.final_text)"></div>
         </div>
@@ -176,13 +179,20 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import axios from 'axios'
+import { ElMessage } from 'element-plus'
+import { createCreation } from '@/api/creation'
 
 const loading = ref(false)
 const result = ref(null)
 const showStyle = ref(false)
 const currentStep = ref(-1)
+const saving = ref(false)
+const saved = ref(false)
+
+// 每次重新生成都重置已保存状态
+watch(result, () => { saved.value = false })
 
 const steps = ['Agent A 正文创作', 'Agent B 金句催化', 'Agent C 去AI味改写', 'Agent D 整合自检']
 
@@ -257,6 +267,38 @@ const renderMarkdown = (text) => {
     .replace(/\n/g, '<br>')
     .replace(/^/, '<p>')
     .replace(/$/, '</p>')
+}
+
+const saveToMyCreations = async () => {
+  if (!result.value || saved.value) return
+  saving.value = true
+  try {
+    const finalText = result.value.final_text || ''
+    const plain = finalText.replace(/[#*`>_~\-]/g, '').trim()
+    const summary = plain.slice(0, 120)
+    const tags = []
+    if (form.topicDirection) tags.push(form.topicDirection)
+    if (form.topicRoutine) tags.push(form.topicRoutine)
+    await createCreation({
+      title: form.topicTitle || '未命名创作',
+      content: finalText,
+      summary,
+      topic_direction: form.topicDirection || null,
+      tags,
+      word_count: result.value.final_word_count || finalText.length,
+      status: 'draft',
+      outline_status: 'completed',
+      title_status: 'completed',
+      content_status: 'completed',
+    })
+    saved.value = true
+    ElMessage.success('已保存到我的创作')
+  } catch (e) {
+    console.error('保存失败:', e)
+    ElMessage.error('保存失败：' + (e.response?.data?.detail || e.message))
+  } finally {
+    saving.value = false
+  }
 }
 
 const copyText = () => {
@@ -353,7 +395,7 @@ const generateContent = async () => {
 
 /* 输入区 */
 .input-section {
-  background: #fff;
+  background: var(--paper);
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -443,7 +485,7 @@ const generateContent = async () => {
 .btn-remove {
   background: none;
   border: none;
-  color: #ff4d4f;
+  color: var(--crimson);
   cursor: pointer;
   font-size: 12px;
 }
@@ -458,7 +500,7 @@ const generateContent = async () => {
 
 .btn-primary {
   background: #1890ff;
-  color: #fff;
+  color: var(--paper);
   border: none;
   padding: 12px 32px;
   border-radius: 8px;
@@ -480,7 +522,7 @@ const generateContent = async () => {
 
 /* 加载状态 */
 .loading-section {
-  background: #fff;
+  background: var(--paper);
   border-radius: 12px;
   padding: 32px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -535,7 +577,7 @@ const generateContent = async () => {
 }
 
 .diagnosis-bar {
-  background: #fff;
+  background: var(--paper);
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -552,12 +594,12 @@ const generateContent = async () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--paper);
 }
 
-.score-good { background: linear-gradient(135deg, #52c41a, #73d13d); }
-.score-ok { background: linear-gradient(135deg, #faad14, #ffc53d); }
-.score-bad { background: linear-gradient(135deg, #ff4d4f, #ff7875); }
+.score-good { background: linear-gradient(135deg, var(--leaf), var(--leaf)); }
+.score-ok { background: linear-gradient(135deg, var(--sand), var(--sand)); }
+.score-bad { background: linear-gradient(135deg, var(--crimson), var(--crimson)); }
 
 .score-num { font-size: 24px; font-weight: 700; }
 .score-label { font-size: 11px; opacity: 0.9; }
@@ -567,9 +609,9 @@ const generateContent = async () => {
 }
 
 .action-label { color: #888; }
-.action-good { color: #52c41a; font-weight: 600; }
-.action-ok { color: #faad14; font-weight: 600; }
-.action-bad { color: #ff4d4f; font-weight: 600; }
+.action-good { color: var(--leaf); font-weight: 600; }
+.action-ok { color: var(--sand); font-weight: 600; }
+.action-bad { color: var(--crimson); font-weight: 600; }
 
 .score-stats {
   margin-left: auto;
@@ -581,7 +623,7 @@ const generateContent = async () => {
 
 /* 维度 */
 .dimensions-section {
-  background: #fff;
+  background: var(--paper);
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -614,9 +656,9 @@ const generateContent = async () => {
 
 .dim-name { font-size: 13px; color: #555; }
 .dim-score { font-size: 18px; font-weight: 700; }
-.dim-good { color: #52c41a; }
-.dim-ok { color: #faad14; }
-.dim-bad { color: #ff4d4f; }
+.dim-good { color: var(--leaf); }
+.dim-ok { color: var(--sand); }
+.dim-bad { color: var(--crimson); }
 
 .dim-bar {
   height: 4px;
@@ -640,7 +682,7 @@ const generateContent = async () => {
 
 /* 金句 */
 .gold-section {
-  background: #fff;
+  background: var(--paper);
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -659,7 +701,7 @@ const generateContent = async () => {
 }
 
 .gold-card {
-  background: linear-gradient(135deg, #fff7e6, #fffbe6);
+  background: var(--sand-soft);
   border: 1px solid #ffe58f;
   border-radius: 10px;
   padding: 16px;
@@ -667,11 +709,11 @@ const generateContent = async () => {
 
 .gold-type {
   font-size: 11px;
-  color: #d48806;
-  background: #fff7e6;
-  border: 1px solid #ffe58f;
+  color: var(--sand);
+  background: var(--sand-soft);
+  border: 1px solid var(--sand);
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
 }
 
 .gold-content {
@@ -689,7 +731,7 @@ const generateContent = async () => {
 
 /* 正文 */
 .article-section {
-  background: #fff;
+  background: var(--paper);
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -713,6 +755,19 @@ const generateContent = async () => {
   font-size: 12px;
   cursor: pointer;
 }
+
+.btn-save {
+  background: var(--clay);
+  color: var(--paper);
+  border: none;
+  padding: 4px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: 8px;
+}
+.btn-save:hover:not(:disabled) { background: var(--clay-deep); }
+.btn-save:disabled { background: var(--ink-4); cursor: not-allowed; }
 
 .article-content {
   font-size: 15px;
@@ -738,7 +793,7 @@ const generateContent = async () => {
 
 /* 建议 */
 .suggestions-section {
-  background: #fff;
+  background: var(--paper);
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -759,8 +814,8 @@ const generateContent = async () => {
   margin: 0 0 8px 0;
 }
 
-.suggestion-group.high h4 { color: #ff4d4f; }
-.suggestion-group.medium h4 { color: #faad14; }
+.suggestion-group.high h4 { color: var(--crimson); }
+.suggestion-group.medium h4 { color: var(--sand); }
 .suggestion-group.low h4 { color: #888; }
 
 .suggestion-group ul {

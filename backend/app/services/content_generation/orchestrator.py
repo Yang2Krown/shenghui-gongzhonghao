@@ -47,7 +47,7 @@ async def generate_content(
     # ──────────────────────────────────────────
     logger.info("[正文生成] Step 1/4: Agent A 生成正文骨干")
     if progress_callback:
-        await progress_callback({"event": "step_start", "data": {"step": 1, "agent": "Agent A", "action": "正在按节撰写初稿（2500-3000 字）..."}})
+        await progress_callback({"event": "step_start", "data": {"step": 1, "agent": "温如言 · 正文创作员", "action": "正在按节撰写初稿（2500-3000 字）...", "avatar": "/agents/content-a.png"}})
     try:
         agent_a_output = await generate_article(inp)
     except Exception as e:
@@ -69,7 +69,7 @@ async def generate_content(
     # ──────────────────────────────────────────
     logger.info("[正文生成] Step 2/4: Agent B 催化金句")
     if progress_callback:
-        await progress_callback({"event": "step_start", "data": {"step": 2, "agent": "Agent B", "action": "正在催化 3-5 个金句..."}})
+        await progress_callback({"event": "step_start", "data": {"step": 2, "agent": "居怀金 · 正文催化员", "action": "正在催化 3-5 个金句...", "avatar": "/agents/content-b.png"}})
     try:
         agent_b_output = await catalyze_gold_sentences(
             agent_a_output=agent_a_output,
@@ -87,7 +87,7 @@ async def generate_content(
     # ──────────────────────────────────────────
     logger.info("[正文生成] Step 3/4: Agent C 去 AI 味改写")
     if progress_callback:
-        await progress_callback({"event": "step_start", "data": {"step": 3, "agent": "Agent C", "action": "正在去 AI 味改写..."}})
+        await progress_callback({"event": "step_start", "data": {"step": 3, "agent": "景澄之 · 正文改写员", "action": "正在去 AI 味改写...", "avatar": "/agents/content-c.png"}})
     try:
         agent_c_output = await deai_rewrite(
             agent_a_output=agent_a_output,
@@ -112,7 +112,7 @@ async def generate_content(
     # ──────────────────────────────────────────
     logger.info("[正文生成] Step 4/4: Agent D 整合 + 自检诊断")
     if progress_callback:
-        await progress_callback({"event": "step_start", "data": {"step": 4, "agent": "Agent D", "action": "正在整合 + 8 维度自检诊断..."}})
+        await progress_callback({"event": "step_start", "data": {"step": 4, "agent": "钟可期 · 正文诊断员", "action": "正在整合 + 8 维度自检诊断...", "avatar": "/agents/content-d.png"}})
     try:
         agent_d_output = await integrate_and_inspect(
             inp=inp,

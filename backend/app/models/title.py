@@ -99,16 +99,16 @@ class TitleCandidate(Base):
             "modifiers": self.modifiers,
             "explanation": self.explanation,
             "b_score": self.b_score,
-            "b_score_details": self.b_score_details,
+            "b_score_details": self.b_score_details or {},
             "c_click_willingness": self.c_click_willingness,
             "c_click_reason": self.c_click_reason,
             "c_no_click_reason": self.c_no_click_reason,
             "c_improvement_suggestion": self.c_improvement_suggestion,
             "final_score": self.final_score,
-            "is_eliminated": self.is_eliminated,
+            "is_eliminated": self.is_eliminated == "1",
             "elimination_reason": self.elimination_reason,
-            "is_top5": self.is_top5,
-            "is_top3": self.is_top3,
+            "is_top5": self.is_top5 == "1",
+            "is_top3": self.is_top3 == "1",
         }
 
 

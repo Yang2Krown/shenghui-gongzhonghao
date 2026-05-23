@@ -35,6 +35,7 @@ class BaseAgent(ABC):
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        json_mode: bool = True,   # 标题/大纲/正文这些 agent 都需要严格 JSON，默认开
     ) -> str:
         """
         调用AI模型
@@ -44,6 +45,7 @@ class BaseAgent(ABC):
             system_prompt: 系统提示词（可选）
             temperature: 温度参数
             max_tokens: 最大token数
+            json_mode: 是否强制 JSON 输出（默认 True）
 
         Returns:
             模型响应文本
@@ -59,8 +61,16 @@ class BaseAgent(ABC):
                 model=self.model,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                json_mode=json_mode,
             )
-            return result.text or ""
+            text = result.text or ""
+            if not text:
+                # content 是空的话，多半是 reasoning 模型把答案放到了别处——把整个 result 打出来给定位
+                logger.error(
+                    f"[call_ai_model] LLM 返回空 content！model={self.model}, "
+                    f"json_mode={json_mode}, 完整 result={result!r}"
+                )
+            return text
         except Exception as e:
             logger.error(f"AI模型调用失败: {str(e)}", exc_info=True)
             raise
@@ -75,7 +85,10 @@ class BaseAgent(ABC):
         try:
             return json.loads(response)
         except (json.JSONDecodeError, TypeError):
-            logger.warning(f"无法解析JSON响应: {str(response)[:200]}...")
+            preview = (response or "")[:1200] if response else "<EMPTY>"
+            logger.warning(
+                f"无法解析JSON响应 (len={len(response or '')}): {preview!r}"
+            )
             return {}
 
     @abstractmethod

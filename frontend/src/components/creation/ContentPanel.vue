@@ -7,6 +7,7 @@
         :key="i"
         :agent-name="step.agent"
         :action="step.action"
+        :avatar="step.avatar"
         :is-active="i === currentStepIndex"
         :show-progress="i === currentStepIndex"
         :percent="i === currentStepIndex ? stepPercent : (i < currentStepIndex ? 100 : 0)"
@@ -132,17 +133,6 @@
           </div>
         </div>
 
-        <!-- 操作 -->
-        <div class="mt-6 flex justify-center gap-3">
-          <el-button @click="generateContent">重新生成</el-button>
-          <el-button @click="saveContent" :loading="saving">
-            <el-icon><Document /></el-icon>
-            保存编辑
-          </el-button>
-          <el-button type="primary" @click="confirmContent">
-            确认正文
-          </el-button>
-        </div>
       </div>
 
       <!-- 右侧：Agent 反馈 -->
@@ -164,13 +154,31 @@
         />
       </div>
     </div>
+
+    <!-- 固定底部操作栏 -->
+    <div v-if="status === 'completed' && content" class="content-bottom-bar">
+      <div class="bottom-bar-inner">
+        <el-button @click="generateContent" :loading="generating">
+          <el-icon><Refresh /></el-icon>
+          重新生成
+        </el-button>
+        <el-button @click="saveDraft" :loading="saving">
+          <el-icon><Document /></el-icon>
+          保存草稿
+        </el-button>
+        <el-button type="primary" @click="confirmContent">
+          确认正文
+          <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+        </el-button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Edit, MagicStick, CircleCloseFilled, DocumentCopy, Document, Refresh } from '@element-plus/icons-vue'
+import { Edit, MagicStick, CircleCloseFilled, DocumentCopy, Document, Refresh, ArrowRight } from '@element-plus/icons-vue'
 import AgentStatusBar from './AgentStatusBar.vue'
 import AgentFeedbackPanel from './AgentFeedbackPanel.vue'
 import { post } from '@/api/api'
@@ -181,9 +189,10 @@ const props = defineProps({
   candidateId: { type: [Number, String], default: null },
   outlineData: { type: Object, default: null },
   titleData: { type: Object, default: null },
+  initialContent: { type: Object, default: null },
 })
 
-const emit = defineEmits(['complete'])
+const emit = defineEmits(['complete', 'next-step', 'save-draft'])
 
 // 状态
 const status = ref('idle')
@@ -222,6 +231,15 @@ watch(() => progress.error.value, (newError) => {
   }
 })
 
+// 加载已有正文内容（从草稿恢复）
+watch(() => props.initialContent, (ic) => {
+  if (ic && !content.value) {
+    content.value = ic
+    editableText.value = ic.final_text || ic.content || ''
+    status.value = 'completed'
+  }
+}, { immediate: true })
+
 onUnmounted(() => {
   progress.stop()
   reevaluateProgress.stop()
@@ -258,7 +276,12 @@ const generateContent = async () => {
 
 const confirmContent = () => {
   emit('complete', { ...content.value, final_text: editableText.value })
+  emit('next-step')
   ElMessage.success('正文已确认')
+}
+
+const saveDraft = () => {
+  emit('save-draft', { ...content.value, final_text: editableText.value })
 }
 
 // 保存编辑后的正文（本地状态更新，正文暂无独立 PATCH 接口）
@@ -396,8 +419,9 @@ const agentFeedback = computed(() => {
   const agentA = {
     id: 'A',
     code: 'A',
-    name: 'Agent A · 正文撰写员',
+    name: '温如言 · 正文创作员',
     role: '定风格锚点 + 分节铺陈',
+    avatar: '/agents/content-a.png',
     summary: c.style_anchor ? `风格锚点：${c.style_anchor}` : '',
   }
 
@@ -406,8 +430,9 @@ const agentFeedback = computed(() => {
   const agentB = {
     id: 'B',
     code: 'B',
-    name: 'Agent B · 金句催化员',
+    name: '居怀金 · 正文催化员',
     role: '注入 3-5 个高传播金句',
+    avatar: '/agents/content-b.png',
     summary: gold.length
       ? `共催化 ${gold.length} 个金句，类型涵盖 ${[...new Set(gold.map((g) => g.sentence_type))].length} 种。`
       : '',
@@ -425,8 +450,9 @@ const agentFeedback = computed(() => {
   const agentC = {
     id: 'C',
     code: 'C',
-    name: 'Agent C · 去 AI 味改写员',
+    name: '景澄之 · 正文改写员',
     role: '扫描 6 类 AI 味并按优先级改写',
+    avatar: '/agents/content-c.png',
     summary: rewrites.length
       ? `共改写 ${rewrites.length} 处${highRewrites.length ? `（${highRewrites.length} 处高优先级）` : ''}。`
       : c.rewrite_count
@@ -444,8 +470,9 @@ const agentFeedback = computed(() => {
   const agentD = {
     id: 'D',
     code: 'D',
-    name: 'Agent D · 自检诊断员',
+    name: '钟可期 · 正文诊断员',
     role: '8 维度评分 + 三档修改建议',
+    avatar: '/agents/content-d.png',
     score: diag.total_score,
     verdict: diag.recommended_action,
     verdictPassed: diag.recommended_action === '接受发布',
@@ -562,11 +589,34 @@ const agentFeedback = computed(() => {
   display: inline-block;
   padding: 2px 8px;
   background: var(--sand);
-  color: #fff;
+  color: var(--paper);
   border-radius: var(--r-pill);
   font-size: 10px;
   font-weight: 700;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+/* 固定底部操作栏 */
+.content-bottom-bar {
+  position: fixed;
+  bottom: 0;
+  left: 240px;
+  right: 0;
+  z-index: 100;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
+  height: 65px;
+  display: flex;
+  align-items: center;
+}
+
+.content-bottom-bar .bottom-bar-inner {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 0 24px;
+  width: 100%;
 }
 </style>

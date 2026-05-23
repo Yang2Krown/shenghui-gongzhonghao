@@ -295,8 +295,18 @@ async def integrate_and_inspect(
     )
 
     parsed = parse_json_loose(result.text)
+    if parsed and "dimensions" not in parsed:
+        for alias in ("evaluations", "scores", "维度", "评分", "评估"):
+            if alias in parsed:
+                logger.warning(f"[Agent D] LLM 用了别名 key '{alias}'，已映射到 dimensions")
+                parsed["dimensions"] = parsed[alias]
+                break
     if not parsed or "dimensions" not in parsed:
-        logger.error(f"[Agent D] 输出解析失败: {result.text[:300]}")
+        logger.error(
+            f"[Agent D] 输出解析失败 (len={len(result.text or '')}): "
+            f"parsed_keys={list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__}, "
+            f"原始响应前 800 字: {(result.text or '')[:800]!r}"
+        )
         raise ValueError("Agent D 输出格式不符合 schema")
 
     output = _parse_llm_output(parsed, inp, agent_a_output, agent_b_output, agent_c_output)

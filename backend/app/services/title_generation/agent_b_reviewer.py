@@ -15,6 +15,44 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _robust_id_map(items: List[Dict[str, Any]], candidates: List[Dict[str, Any]], *, key: str = "candidate_id") -> Dict[str, Dict[str, Any]]:
+    """把 LLM 返回的 list（B 的 scores / C 的 predictions）按 candidate.id 索引。
+
+    三层兜底匹配，从精确到模糊：
+    1. 精确：LLM 回填的就是真 UUID
+    2. 短 ID：LLM 回填的是 "1" / "2" / "3"（我们 prompt 里用的就是这种）
+    3. 按位置：count 一致时按下标对应（LLM 完全没填 ID 也能救回）
+    """
+    if not items or not candidates:
+        return {}
+
+    out: Dict[str, Dict[str, Any]] = {}
+
+    # 1. 位置兜底（最先填，被后两步覆盖）
+    if len(items) == len(candidates):
+        for i, item in enumerate(items):
+            out[candidates[i]["id"]] = item
+
+    # 2. 短 ID（"1" / "2" ... 或纯数字）
+    for item in items:
+        sid = str(item.get(key, "")).strip()
+        try:
+            idx = int(sid) - 1
+            if 0 <= idx < len(candidates):
+                out[candidates[idx]["id"]] = item
+        except (ValueError, TypeError):
+            pass
+
+    # 3. 精确 UUID（最优先，覆盖前两步）
+    cand_ids = {c.get("id") for c in candidates}
+    for item in items:
+        cid = item.get(key, "")
+        if cid in cand_ids:
+            out[cid] = item
+
+    return out
+
 # 获取当前文件所在目录
 CURRENT_DIR = Path(__file__).parent
 
@@ -245,11 +283,32 @@ class TitleReviewerAgent(BaseAgent):
         
         # 解析响应
         result = self.parse_json_response(response)
-        
-        # 合并评分结果
+
+        # 🔍 诊断日志：看 LLM 实际回了什么形状
+        logger.info(
+            f"[Agent B 诊断] LLM 原始响应前 400 字: {(response or '')[:400]!r}"
+        )
+        logger.info(
+            f"[Agent B 诊断] parse_json_response 结果顶层 keys: {list(result.keys())}; "
+            f"scores 数量: {len(result.get('scores', []) or [])}"
+        )
+        first_score = (result.get("scores") or [{}])[0] if result.get("scores") else {}
+        logger.info(f"[Agent B 诊断] 第一条 score: {first_score}")
+
+        # 合并评分结果——三层鲁棒匹配
         scored_candidates = []
-        scores_map = {s.get("candidate_id"): s for s in result.get("scores", [])}
-        
+        raw_scores = result.get("scores", []) or []
+        scores_map = _robust_id_map(raw_scores, candidates, key="candidate_id")
+        unmatched = [i for i, c in enumerate(candidates) if c.get("id", "") not in scores_map]
+        logger.info(
+            f"[Agent B 诊断] 匹配上 {len(candidates) - len(unmatched)}/{len(candidates)} 个候选"
+        )
+        if unmatched:
+            logger.warning(
+                f"Agent B: {len(unmatched)}/{len(candidates)} 个候选未匹配到评分，"
+                f"将使用默认分 5（候选 #{[i+1 for i in unmatched]}）"
+            )
+
         for candidate in candidates:
             candidate_id = candidate.get("id", "")
             score_data = scores_map.get(candidate_id, {})
@@ -355,9 +414,10 @@ class TitleReviewerAgent(BaseAgent):
         Returns:
             评分提示词
         """
-        # 格式化候选列表
+        # 格式化候选列表：给 LLM 看的 candidate_id 直接用 1/2/3 短编号，
+        # 避免它在长 UUID 上截断 / 拼错导致回填的 scores 对不上
         candidates_text = "\n".join([
-            f"{i+1}. ID: {c.get('id', '')}\n   标题: {c.get('title', '')}\n   套路: {c.get('method', '')}\n   修饰元素: {', '.join(c.get('modifiers', []))}"
+            f"候选 #{i+1}\n   候选编号 (candidate_id): {i+1}\n   标题: {c.get('title', '')}\n   套路: {c.get('method', '')}\n   修饰元素: {', '.join(c.get('modifiers', []))}"
             for i, c in enumerate(candidates)
         ])
         
@@ -421,7 +481,7 @@ class TitleReviewerAgent(BaseAgent):
 {{
   "scores": [
     {{
-      "candidate_id": "候选ID",
+      "candidate_id": "1",
       "three_eyes": 8,
       "emotion_trigger": 7,
       "specificity": 9,

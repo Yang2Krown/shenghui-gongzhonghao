@@ -412,122 +412,137 @@ async def reevaluate_content(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    """重新评估正文（只跑 Agent D 8 维度诊断）。
+    """重新评估正文（只跑 Agent D 诊断，与生成流水线完全解耦）。
 
     接收当前编辑后的正文文本，运行 Agent D 诊断评分。
     返回 run_id，前端通过 SSE 获取实时进度。
     """
+    from app.services.llm import get_llm_client
+    from app.services.llm.llm_client import ChatMessage, parse_json_loose
+
     run_id = progress_store.create_run()
 
     async def _run():
-        from app.services.content_generation.schemas import (
-            ContentGenerationInput, SectionBrief, AgentAOutput, AgentBOutput,
-            AgentCOutput, GoldSentence, SectionContent, GoldSentenceSeed,
-        )
-        from app.services.content_generation.agent_d_inspector import integrate_and_inspect
-
         try:
             async def _progress_cb(event):
                 await progress_store.push(run_id, event)
 
             await _progress_cb({"event": "step_start", "data": {"step": 1, "agent": "Agent D", "action": "正在重新诊断评分..."}})
 
-            # 构建输入
-            sections = [
-                SectionBrief(
-                    section_number=s.section_number,
-                    subtitle=s.subtitle,
-                    core_points=s.core_points,
-                    spread_role=s.spread_role,
-                    word_estimate=s.word_estimate,
-                    notes=s.notes,
-                )
+            # 构建大纲文本
+            sections_text = "\n".join(
+                f"第{s.section_number}节: {s.subtitle}（字数预估: {s.word_estimate}）"
                 for s in req.sections
-            ] if req.sections else [SectionBrief(section_number=1, subtitle="", core_points=[])]
+            ) if req.sections else "无大纲"
 
-            inp = ContentGenerationInput(
-                topic_title=req.title,
-                sections=sections,
-                user_id=current_user.id,
+            # 构建金句文本
+            gold_text = "\n".join(
+                f"- [{g.get('sentence_type', '金句')}] \"{g.get('content', '')}\""
+                for g in (req.gold_sentences or [])
+            ) if req.gold_sentences else "无"
+
+            system_prompt = """\
+你是正文诊断员，负责对文章做 8 维度评分并输出诊断报告。
+
+【8 维度评分】
+| 维度 | 权重 | 评分依据 |
+|------|------|---------|
+| 标题承诺兑现度 | 20% | 标题说的事正文里都给到了吗 |
+| 大纲结构对应度 | 15% | 每节是否按大纲展开 |
+| 字数合规 | 10% | 总字数 + 单节字数是否合规 |
+| 风格统一性 | 15% | 全文语气是否一致 |
+| 去 AI 味彻底度 | 15% | 是否还有残留的 AI 味 |
+| 金句完整度 | 10% | 金句是否到位、分布是否合理 |
+| 开头质量 | 10% | 前 200 字是否抓人 |
+| 结尾升华度 | 5% | 是否避免烂尾 |
+
+评分锚点：
+- 9-10：优秀，无明显问题
+- 7-8：良好，有小瑕疵
+- 4-6：一般，有明显问题
+- 1-3：差，严重问题
+
+请严格按以下 JSON 格式输出（不加 markdown 包裹）：
+{
+  "dimensions": {
+    "title_fulfillment": { "score": 0, "weight": 0.20, "evaluation": "", "suggestions": [] },
+    "outline_alignment": { "score": 0, "weight": 0.15, "evaluation": "", "suggestions": [] },
+    "word_compliance": { "score": 0, "weight": 0.10, "evaluation": "", "suggestions": [] },
+    "style_consistency": { "score": 0, "weight": 0.15, "evaluation": "", "suggestions": [] },
+    "deai_thoroughness": { "score": 0, "weight": 0.15, "evaluation": "", "suggestions": [] },
+    "gold_sentence_completeness": { "score": 0, "weight": 0.10, "evaluation": "", "suggestions": [] },
+    "opening_quality": { "score": 0, "weight": 0.10, "evaluation": "", "suggestions": [] },
+    "ending_quality": { "score": 0, "weight": 0.05, "evaluation": "", "suggestions": [] }
+  },
+  "high_priority": [],
+  "medium_priority": [],
+  "low_priority": [],
+  "recommended_action": "接受发布"
+}"""
+
+            user_prompt = f"""【标题】{req.title}
+
+【大纲】
+{sections_text}
+
+【风格锚点】{req.style_anchor or '中性叙述'}
+
+【金句清单】
+{gold_text}
+
+【正文】
+{req.text}
+
+请对以上正文做 8 维度诊断评分，严格按 JSON 格式输出。"""
+
+            client = get_llm_client()
+            messages = [
+                ChatMessage(role="system", content=system_prompt),
+                ChatMessage(role="user", content=user_prompt),
+            ]
+
+            result = await client.chat(
+                messages=messages,
+                temperature=0.3,
+                max_tokens=4000,
+                json_mode=True,
             )
 
-            # 构造最小化的 Agent A 输出
-            agent_a = AgentAOutput(
-                style_anchor=req.style_anchor or "中性叙述",
-                full_text=req.text,
-                total_word_count=len(req.text),
-                section_count=len(sections),
-                sections=[
-                    SectionContent(
-                        section_number=s.section_number,
-                        subtitle=s.subtitle,
-                        content="",
-                        word_count=0,
-                    )
-                    for s in sections
-                ],
-                gold_seeds=[],
-            )
+            parsed = parse_json_loose(result.text)
+            if not parsed or "dimensions" not in parsed:
+                raise ValueError(f"诊断输出解析失败: {result.text[:300]}")
 
-            # 构造最小化的 Agent B 输出
-            gold = req.gold_sentences or []
-            agent_b = AgentBOutput(
-                sentences=[
-                    GoldSentence(
-                        sentence_id=i + 1,
-                        sentence_type=g.get("sentence_type", "金句"),
-                        location=g.get("location", ""),
-                        section_number=g.get("section_number", 1),
-                        insert_method="新增",
-                        content=g.get("content", ""),
-                        word_count=len(g.get("content", "")),
-                    )
-                    for i, g in enumerate(gold)
-                ] if gold else [
-                    GoldSentence(
-                        sentence_id=1, sentence_type="默认", location="全文",
-                        section_number=1, insert_method="新增", content="无", word_count=2,
-                    )
-                ],
-            )
-
-            # 构造最小化的 Agent C 输出
-            agent_c = AgentCOutput(
-                rewritten_text=req.text,
-                rewritten_word_count=len(req.text),
-                original_word_count=len(req.text),
-                word_change_pct=0.0,
-                rewrite_table=[],
-            )
-
-            # 调用 Agent D
-            diagnosis = await integrate_and_inspect(inp, agent_a, agent_b, agent_c)
-
-            await _progress_cb({"event": "step_done", "data": {"step": 1, "agent": "Agent D"}})
-
-            def _dim(d):
-                return {
-                    "score": d.score,
-                    "weight": d.weight,
-                    "evaluation": d.evaluation,
-                    "suggestions": d.suggestions,
-                }
+            dims = parsed["dimensions"]
+            total_score = 0.0
+            weights = {
+                "title_fulfillment": 0.20,
+                "outline_alignment": 0.15,
+                "word_compliance": 0.10,
+                "style_consistency": 0.15,
+                "deai_thoroughness": 0.15,
+                "gold_sentence_completeness": 0.10,
+                "opening_quality": 0.10,
+                "ending_quality": 0.05,
+            }
+            for key, weight in weights.items():
+                d = dims.get(key, {})
+                total_score += (d.get("score", 0) or 0) * weight
+            total_score = round(total_score, 1)
 
             result_data = {
-                "total_score": diagnosis.total_score,
-                "recommended_action": diagnosis.recommended_action,
-                "high_priority": diagnosis.high_priority,
-                "medium_priority": diagnosis.medium_priority,
-                "low_priority": diagnosis.low_priority,
+                "total_score": total_score,
+                "recommended_action": parsed.get("recommended_action", "局部手改"),
+                "high_priority": parsed.get("high_priority", []),
+                "medium_priority": parsed.get("medium_priority", []),
+                "low_priority": parsed.get("low_priority", []),
                 "dimensions": {
-                    "title_fulfillment": _dim(diagnosis.title_fulfillment),
-                    "outline_alignment": _dim(diagnosis.outline_alignment),
-                    "word_compliance": _dim(diagnosis.word_compliance),
-                    "style_consistency": _dim(diagnosis.style_consistency),
-                    "deai_thoroughness": _dim(diagnosis.deai_thoroughness),
-                    "gold_sentence_completeness": _dim(diagnosis.gold_sentence_completeness),
-                    "opening_quality": _dim(diagnosis.opening_quality),
-                    "ending_quality": _dim(diagnosis.ending_quality),
+                    key: {
+                        "score": dims.get(key, {}).get("score", 0),
+                        "weight": weights[key],
+                        "evaluation": dims.get(key, {}).get("evaluation", ""),
+                        "suggestions": dims.get(key, {}).get("suggestions", []),
+                    }
+                    for key in weights
                 },
             }
 
@@ -535,6 +550,7 @@ async def reevaluate_content(
                 "event": "result",
                 "data": result_data,
             })
+            await _progress_cb({"event": "step_done", "data": {"step": 1, "agent": "Agent D"}})
             await _progress_cb({"event": "complete", "data": {"step": 1, "agent": "Agent D"}})
 
         except Exception as e:

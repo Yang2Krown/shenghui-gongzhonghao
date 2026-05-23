@@ -123,17 +123,14 @@ class FinalJudgeAgent(BaseAgent):
             reverse=True,
         )
         
-        # 取Top 3
-        top3 = sorted_candidates[:3]
-        
+        # 取Top 5
+        top_n = sorted_candidates[:5]
+
         # 生成推荐理由
-        recommendations = self._generate_recommendations(top3, topic, outline)
-        
-        # 自检: Top 3综合分 ≥ 7.0 ?
-        self_check_passed = all(
-            rec.get("final_score", 0) >= settings.PASS_THRESHOLD
-            for rec in recommendations
-        )
+        recommendations = self._generate_recommendations(top_n, topic, outline)
+
+        # 自检：只要 Top 1（最高分）≥ 阈值，就算通过 —— 避免末位卡到阈值导致重生死循环
+        self_check_passed = bool(recommendations) and recommendations[0].get("final_score", 0) >= settings.PASS_THRESHOLD
         
         # 如果未通过，生成反馈
         need_regeneration = not self_check_passed
@@ -150,31 +147,31 @@ class FinalJudgeAgent(BaseAgent):
             "feedback": feedback,
             "self_check_details": {
                 "threshold": settings.PASS_THRESHOLD,
-                "top3_scores": [rec.get("final_score", 0) for rec in recommendations],
-                "all_passed": self_check_passed,
+                "top_scores": [rec.get("final_score", 0) for rec in recommendations],
+                "top1_passed": self_check_passed,
             },
         }
     
     def _generate_recommendations(
         self,
-        top3: List[Dict[str, Any]],
+        top_n: List[Dict[str, Any]],
         topic: TopicInfo,
         outline: OutlineInfo,
     ) -> List[Dict[str, Any]]:
         """
         生成推荐理由
-        
+
         Args:
-            top3: Top 3候选列表
+            top_n: Top N 候选列表（当前 Top 5）
             topic: 选题信息
             outline: 大纲信息
-            
+
         Returns:
-            带推荐理由的Top 3列表
+            带推荐理由的列表
         """
         recommendations = []
-        
-        for i, candidate in enumerate(top3):
+
+        for i, candidate in enumerate(top_n):
             # 生成推荐理由
             reason = self._generate_single_reason(candidate, i + 1, topic, outline)
             

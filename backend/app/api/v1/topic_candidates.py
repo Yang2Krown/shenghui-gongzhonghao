@@ -3,15 +3,19 @@
 提供候选选题列表、每日清单等接口。
 """
 
+import asyncio
+import logging
 from datetime import date
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.core.security import get_current_user
+from app.core.progress import progress_store
 from app.db.session import get_db
 from app.models.user import User
 from app.models.topic_candidate import TopicCandidate, PersonaReview, CandidateScore
@@ -23,10 +27,8 @@ from app.services.topic_mining.agent_b_scorer import score_candidates
 from app.services.topic_mining.schemas import InfoClusterInput, AgentBInput
 from app.services.preprocess.rules import is_ai_related
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-import asyncio
 
 @router.post("/mine", response_model=dict)
 async def trigger_mining(
@@ -50,8 +52,37 @@ async def trigger_mining(
     return {"code": 200, "message": "挖掘完成", "data": result}
 
 
+@router.get("/stream/{run_id}")
+async def stream_mining_progress(
+    run_id: str,
+    token: str = Query(None, description="认证 token（EventSource 不支持 header）"),
+) -> StreamingResponse:
+    """SSE 端点：实时推送选题挖掘进度。"""
+    if token:
+        from app.core.security import decode_token
+        payload = decode_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="无效的 token")
+
+    if not progress_store.exists(run_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"run {run_id} 不存在或已过期",
+        )
+
+    return StreamingResponse(
+        progress_store.stream(run_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 async def _mine_one(db: AsyncSession, cluster_id: int) -> dict:
-    """挖单个指定簇。失败时抛 HTTPException 让前端能看到具体原因。"""
+    """挖单个指定簇。返回 run_id，前端通过 SSE 获取实时进度。"""
     cluster = (await db.execute(
         select(InfoCluster).where(InfoCluster.id == cluster_id)
     )).scalar_one_or_none()
@@ -68,21 +99,48 @@ async def _mine_one(db: AsyncSession, cluster_id: int) -> dict:
             detail="该话题还未完成预处理（缺 info_type），请等预处理跑完再挖掘"
         )
 
-    if not is_ai_related(cluster.core_title, cluster.summary or ""):
+    _title = " ".join(filter(None, [cluster.core_title, getattr(cluster, "core_title_zh", None)]))
+    _summary = " ".join(filter(None, [cluster.summary, getattr(cluster, "summary_zh", None)]))
+    if not is_ai_related(_title, _summary):
         raise HTTPException(
             status_code=400,
             detail="该话题与 AI 无关，跳过挖掘"
         )
 
-    try:
-        stats = await _mine_cluster_inner(db, cluster)
-        await db.commit()
-        return {"code": 200, "message": "挖掘完成", "data": {"cluster_id": cluster_id, **stats}}
-    except Exception as e:
-        await db.rollback()
-        import logging
-        logging.getLogger(__name__).exception(f"挖掘 cluster {cluster_id} 失败")
-        raise HTTPException(status_code=500, detail=f"挖掘失败: {type(e).__name__}: {str(e)[:200]}")
+    run_id = progress_store.create_run()
+
+    async def _run():
+        from app.db.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as bg_db:
+            try:
+                async def _progress_cb(event):
+                    await progress_store.push(run_id, event)
+
+                # 关键：必须用 bg_db 重新 fetch cluster，
+                # 否则 cluster.mined = True 写到旧 session 上，commit 不到 DB
+                bg_cluster = (await bg_db.execute(
+                    select(InfoCluster).where(InfoCluster.id == cluster_id)
+                )).scalar_one_or_none()
+                if not bg_cluster:
+                    raise RuntimeError(f"cluster {cluster_id} 已不存在")
+
+                stats = await _mine_cluster_inner(bg_db, bg_cluster, progress_callback=_progress_cb)
+                await bg_db.commit()
+                await progress_store.push(run_id, {
+                    "event": "result",
+                    "data": {"cluster_id": cluster_id, **stats},
+                })
+            except Exception as e:
+                await bg_db.rollback()
+                logger.exception(f"挖掘 cluster {cluster_id} 失败")
+                await progress_store.push(run_id, {
+                    "event": "error",
+                    "data": {"message": f"挖掘失败: {type(e).__name__}: {str(e)[:200]}"},
+                })
+
+    asyncio.create_task(_run())
+
+    return {"code": 200, "message": "挖掘任务已提交", "data": {"run_id": run_id}}
 
 
 async def _run_mining_batch(db: AsyncSession, limit: int, min_heat_score: float) -> dict:
@@ -95,8 +153,12 @@ async def _run_mining_batch(db: AsyncSession, limit: int, min_heat_score: float)
         ).order_by(InfoCluster.heat_score.desc()).limit(limit * 3)  # 多取一些，过滤后可能不够
     )).scalars().all()
 
-    # 过滤非 AI 内容
-    clusters = [c for c in clusters if is_ai_related(c.core_title, c.summary or "")][:limit]
+    # 过滤非 AI 内容：原文 + 中文翻译都喂进去
+    def _passes(c):
+        title = " ".join(filter(None, [c.core_title, getattr(c, "core_title_zh", None)]))
+        summary = " ".join(filter(None, [c.summary, getattr(c, "summary_zh", None)]))
+        return is_ai_related(title, summary)
+    clusters = [c for c in clusters if _passes(c)][:limit]
 
     if not clusters:
         return {"mined": 0, "message": "没有待挖掘的话题"}
@@ -117,8 +179,17 @@ async def _run_mining_batch(db: AsyncSession, limit: int, min_heat_score: float)
     return {"mined": mined, "total_candidates": total_candidates, "errors": errors}
 
 
-async def _mine_cluster_inner(db: AsyncSession, cluster: InfoCluster) -> dict:
+async def _mine_cluster_inner(
+    db: AsyncSession,
+    cluster: InfoCluster,
+    progress_callback=None,
+) -> dict:
     """挖单个簇的核心逻辑：Agent A → Agent B → 写库（不 commit，调用方决定）。"""
+
+    async def _emit(event):
+        if progress_callback:
+            await progress_callback(event)
+
     info_input = InfoClusterInput(
         cluster_id=cluster.id,
         core_title=cluster.core_title,
@@ -131,7 +202,14 @@ async def _mine_cluster_inner(db: AsyncSession, cluster: InfoCluster) -> dict:
         low_fan_hit=cluster.low_fan_hit or False,
         source_urls=cluster.source_urls or [],
     )
+
+    # Agent A
+    await _emit({"event": "step_start", "data": {"step": 1, "agent": "沈知远 · 选题衍生员", "action": "正在衍生候选选题...", "avatar": "/agents/agent-a.png"}})
     candidates_a = await derive_candidates(info_input)
+    await _emit({"event": "step_done", "data": {"step": 1, "agent": "沈知远 · 选题衍生员"}})
+
+    # Agent B
+    await _emit({"event": "step_start", "data": {"step": 2, "agent": "白景明 · 选题评分员", "action": "正在评分评估候选选题...", "avatar": "/agents/agent-b.png"}})
     b_input = AgentBInput(
         cluster_id=cluster.id,
         core_title=cluster.core_title,
@@ -140,6 +218,7 @@ async def _mine_cluster_inner(db: AsyncSession, cluster: InfoCluster) -> dict:
         candidates=candidates_a,
     )
     result_b = await score_candidates(b_input)
+    await _emit({"event": "step_done", "data": {"step": 2, "agent": "Agent B"}})
 
     total_candidates = 0
     for scored in result_b.candidates:

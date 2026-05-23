@@ -152,9 +152,9 @@ class ClickPredictorAgent(BaseAgent):
         Returns:
             预测提示词
         """
-        # 格式化候选列表
+        # 格式化候选列表：给 LLM 看的 candidate_id 用 1/2/3 短编号，避免长 UUID 出错
         candidates_text = "\n".join([
-            f"{i+1}. ID: {c.get('id', '')}\n   标题: {c.get('title', '')}\n   套路: {c.get('method', '')}"
+            f"候选 #{i+1}\n   候选编号 (candidate_id): {i+1}\n   标题: {c.get('title', '')}\n   套路: {c.get('method', '')}"
             for i, c in enumerate(top5)
         ])
         
@@ -183,14 +183,14 @@ class ClickPredictorAgent(BaseAgent):
 {{
   "predictions": [
     {{
-      "candidate_id": "候选ID",
+      "candidate_id": "1",
       "click_willingness": 8,
       "click_reason": "反差感强 + 有具体数字 + 跟我的工作场景相关",
       "no_click_reason": "",
       "improvement_suggestion": "把'5个订阅'改成具体的服务名（如'5个SaaS'），更具体"
     }},
     {{
-      "candidate_id": "候选ID",
+      "candidate_id": "1",
       "click_willingness": 4,
       "click_reason": "",
       "no_click_reason": "感觉是另一篇Claude教程，已经看过类似的",
@@ -217,35 +217,28 @@ class ClickPredictorAgent(BaseAgent):
         Returns:
             格式化后的预测结果
         """
-        # 创建ID到候选的映射
-        candidate_map = {c.get("id"): c for c in top5}
-        
+        # 三层鲁棒匹配 LLM 回填的 candidate_id（UUID / 短 ID / 位置）
+        from app.services.title_generation.agent_b_reviewer import _robust_id_map
+        pred_map = _robust_id_map(predictions, top5, key="candidate_id")
+        unmatched = [i for i, c in enumerate(top5) if c.get("id", "") not in pred_map]
+        if unmatched:
+            logger.warning(
+                f"Agent C: {len(unmatched)}/{len(top5)} 个候选未匹配到预测，"
+                f"将使用默认 click_willingness=5（候选 #{[i+1 for i in unmatched]}）"
+            )
+
         formatted = []
-        for pred in predictions:
-            candidate_id = pred.get("candidate_id", "")
-            candidate = candidate_map.get(candidate_id, {})
-            
+        for candidate in top5:
+            real_id = candidate.get("id", "")
+            pred = pred_map.get(real_id, {})
             formatted.append({
-                "candidate_id": candidate_id,
+                "candidate_id": real_id,
                 "title": candidate.get("title", ""),
                 "click_willingness": pred.get("click_willingness", 5),
                 "click_reason": pred.get("click_reason", ""),
                 "no_click_reason": pred.get("no_click_reason", ""),
                 "improvement_suggestion": pred.get("improvement_suggestion", ""),
             })
-        
-        # 确保所有top5都有预测结果
-        predicted_ids = {p.get("candidate_id") for p in formatted}
-        for candidate in top5:
-            if candidate.get("id") not in predicted_ids:
-                formatted.append({
-                    "candidate_id": candidate.get("id"),
-                    "title": candidate.get("title", ""),
-                    "click_willingness": 5,
-                    "click_reason": "",
-                    "no_click_reason": "未进行预测",
-                    "improvement_suggestion": "",
-                })
         
         return formatted
     

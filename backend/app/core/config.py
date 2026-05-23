@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 
     # 默认 LLM provider 切换（deepseek / anthropic / openai）
     LLM_PROVIDER: str = "deepseek"
-    DEEPSEEK_MODEL: str = "deepseek-chat"
+    DEEPSEEK_MODEL: str = "deepseek-v4-flash"
     ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
 
     # ====== TopHub 榜眼数据 API ======
@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     EMBEDDING_DIM: int = 1024
 
     # 默认AI模型（旧字段，保留兼容）
-    DEFAULT_AI_MODEL: str = "deepseek-chat"
+    DEFAULT_AI_MODEL: str = "deepseek-v4-flash"
     DEFAULT_AI_PROVIDER: str = "deepseek"
     
     # CORS配置
@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     MAX_MODIFIERS_PER_TITLE: int = 5
     B_SCORE_WEIGHT: float = 0.6
     C_SCORE_WEIGHT: float = 0.4
-    PASS_THRESHOLD: float = 7.0
+    PASS_THRESHOLD: float = 6.5
     MAX_REGENERATIONS: int = 1
 
     # ====== 阿里云短信配置 ======

@@ -2,6 +2,207 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+ * Element Plus 主题覆盖 —— 对齐设计规范 V1.0
+ * 把 ep 默认的蓝/绿主题替换为 Clay 暖色体系
+ * ============================================================ */
+:root {
+  /* 主色 —— Clay 砖红 */
+  --el-color-primary: #CC785C;
+  --el-color-primary-light-3: #D8957D;
+  --el-color-primary-light-5: #E3B19E;
+  --el-color-primary-light-7: #EDCEBF;
+  --el-color-primary-light-8: #F2DDD2;
+  --el-color-primary-light-9: #F8ECE5;
+  --el-color-primary-dark-2: #A85A40;
+
+  /* Success —— Leaf */
+  --el-color-success: #5C8A5C;
+  --el-color-success-light-3: #84A684;
+  --el-color-success-light-5: #ADC2AD;
+  --el-color-success-light-7: #D5DED5;
+  --el-color-success-light-8: #E2E8E2;
+  --el-color-success-light-9: #EEF3EE;
+  --el-color-success-dark-2: #4A7A4A;
+
+  /* Warning —— Sand */
+  --el-color-warning: #C49B5C;
+  --el-color-warning-light-3: #D2B284;
+  --el-color-warning-light-5: #E0C9AD;
+  --el-color-warning-light-7: #EDDFD0;
+  --el-color-warning-light-8: #F2E8DD;
+  --el-color-warning-light-9: #F8F1EA;
+  --el-color-warning-dark-2: #B08A4B;
+
+  /* Danger —— Crimson */
+  --el-color-danger: #B85450;
+  --el-color-danger-light-3: #C97A77;
+  --el-color-danger-light-5: #DBA09E;
+  --el-color-danger-light-7: #ECC6C5;
+  --el-color-danger-light-8: #F2D9D8;
+  --el-color-danger-light-9: #F8ECEB;
+  --el-color-danger-dark-2: #A04844;
+
+  /* Error 等同于 Danger */
+  --el-color-error: #B85450;
+  --el-color-error-light-3: #C97A77;
+  --el-color-error-light-5: #DBA09E;
+  --el-color-error-light-7: #ECC6C5;
+  --el-color-error-light-8: #F2D9D8;
+  --el-color-error-light-9: #F8ECEB;
+  --el-color-error-dark-2: #A04844;
+
+  /* Info —— Pine */
+  --el-color-info: #3F5C52;
+  --el-color-info-light-3: #6B8278;
+  --el-color-info-light-5: #97A89F;
+  --el-color-info-light-7: #C3CDC6;
+  --el-color-info-light-8: #D6DDD8;
+  --el-color-info-light-9: #E8EDEA;
+  --el-color-info-dark-2: #2D4A3E;
+
+  /* 中性 / 文字 / 背景 —— 全部替换为暖色 token，禁用 ep 默认白灰 */
+  --el-bg-color: #FAF9F5;             /* paper */
+  --el-bg-color-page: #F5F1EB;        /* ivory */
+  --el-bg-color-overlay: #FAF9F5;     /* paper */
+  --el-fill-color-blank: #FAF9F5;
+  --el-fill-color: #EFEAE0;           /* bone */
+  --el-fill-color-light: #F5F1EB;
+  --el-fill-color-lighter: #FAF9F5;
+  --el-fill-color-extra-light: #FAF9F5;
+  --el-fill-color-dark: #EFEAE0;
+  --el-fill-color-darker: #E4DDCE;
+
+  --el-text-color-primary: #1F1F1E;   /* ink */
+  --el-text-color-regular: #3A3935;   /* ink-2 */
+  --el-text-color-secondary: #6B6862; /* ink-3 */
+  --el-text-color-placeholder: #9A968D; /* ink-4 */
+  --el-text-color-disabled: #9A968D;
+
+  --el-border-color: #E4DDCE;         /* line */
+  --el-border-color-light: #E4DDCE;
+  --el-border-color-lighter: #EFEAE0;
+  --el-border-color-extra-light: #EFEAE0;
+  --el-border-color-dark: #E4DDCE;
+  --el-border-color-darker: #9A968D;
+  --el-border-color-hover: #CC785C;
+
+  /* 圆角对齐设计规范 */
+  --el-border-radius-base: 10px;
+  --el-border-radius-small: 6px;
+  --el-border-radius-round: 999px;
+  --el-border-radius-circle: 999px;
+}
+
+/* ============================================================
+ * Element Plus 组件级补丁：input / textarea / upload / select / card
+ * 强制走设计规范的圆角 + 暖色
+ * ============================================================ */
+
+/* 普通输入框 */
+.el-input__wrapper {
+  border-radius: var(--r-md) !important;
+  background-color: var(--paper) !important;
+  box-shadow: 0 0 0 1px var(--line) inset !important;
+  padding: 4px 14px !important;
+}
+.el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--clay-soft) inset !important;
+}
+.el-input__wrapper.is-focus,
+.el-input__wrapper:focus-within {
+  box-shadow: 0 0 0 1px var(--clay) inset, 0 0 0 3px rgba(204,120,92,.12) !important;
+}
+
+/* 多行文本框 */
+.el-textarea__inner {
+  border-radius: var(--r-md) !important;
+  background-color: var(--paper) !important;
+  box-shadow: 0 0 0 1px var(--line) inset !important;
+  padding: 12px 14px !important;
+  font-family: inherit !important;
+}
+.el-textarea__inner:hover {
+  box-shadow: 0 0 0 1px var(--clay-soft) inset !important;
+}
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--clay) inset, 0 0 0 3px rgba(204,120,92,.12) !important;
+}
+
+/* Select 下拉 */
+.el-select .el-select__wrapper {
+  border-radius: var(--r-md) !important;
+  background-color: var(--paper) !important;
+  box-shadow: 0 0 0 1px var(--line) inset !important;
+}
+.el-select .el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--clay) inset, 0 0 0 3px rgba(204,120,92,.12) !important;
+}
+
+/* 上传拖拽区 —— 整个虚线框使用大圆角 */
+.el-upload-dragger {
+  border-radius: var(--r-lg) !important;
+  border: 1px dashed var(--line) !important;
+  background-color: var(--paper) !important;
+  padding: 32px 16px !important;
+}
+.el-upload-dragger:hover {
+  border-color: var(--clay) !important;
+  background-color: var(--clay-tint) !important;
+}
+.el-upload-dragger .el-icon--upload {
+  color: var(--clay) !important;
+}
+.el-upload__tip {
+  color: var(--ink-3) !important;
+}
+.el-upload-list__item {
+  border-radius: var(--r-sm) !important;
+}
+.el-upload-list__item:hover {
+  background-color: var(--bone) !important;
+}
+
+/* 按钮圆角统一 */
+.el-button {
+  border-radius: var(--r-md) !important;
+}
+.el-button--small {
+  border-radius: var(--r-sm) !important;
+}
+
+/* 卡片 / 弹窗 / 抽屉 */
+.el-card,
+.el-dialog,
+.el-drawer,
+.el-message-box {
+  border-radius: var(--r-lg) !important;
+  background-color: var(--paper) !important;
+}
+.el-dialog__header,
+.el-drawer__header {
+  background-color: var(--paper) !important;
+}
+
+/* 下拉菜单 / Popover */
+.el-popper,
+.el-select__popper,
+.el-dropdown__popper {
+  border-radius: var(--r-md) !important;
+  background-color: var(--paper) !important;
+}
+
+/* Tag */
+.el-tag {
+  border-radius: var(--r-pill) !important;
+}
+
+/* Message 提示 */
+.el-message {
+  border-radius: var(--r-md) !important;
+  background-color: var(--paper) !important;
+}
+
 /* 全局CSS变量 - 设计规范 */
 :root {
   /* Brand */

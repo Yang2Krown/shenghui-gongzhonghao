@@ -357,8 +357,9 @@ async def get_candidates(
     
     if not generation_result:
         raise HTTPException(status_code=404, detail="结果数据不存在")
-    
-    return generation_result.candidates
+
+    # to_dict() 已将 "0"/"1" 转为 bool
+    return [c.to_dict() for c in generation_result.candidates]
 
 
 @router.get("/{task_id}/recommendations", response_model=List[FinalRecommendationResponse])
@@ -569,14 +570,14 @@ async def reevaluate_title_candidate(
                     candidate.b_score = s.get("b_score", candidate.b_score)
                     candidate.b_score_details = s.get("b_score_details", candidate.b_score_details)
 
-                # Agent C 返回格式: { "predictions": [...] }
+                # Agent C 返回格式: { "predictions": [...] }，key 无 c_ 前缀
                 c_data = c_result.get("predictions", [])
                 if c_data:
                     c = c_data[0]
-                    candidate.c_click_willingness = c.get("c_click_willingness", candidate.c_click_willingness)
-                    candidate.c_click_reason = c.get("c_click_reason", candidate.c_click_reason)
-                    candidate.c_no_click_reason = c.get("c_no_click_reason", candidate.c_no_click_reason)
-                    candidate.c_improvement_suggestion = c.get("c_improvement_suggestion", candidate.c_improvement_suggestion)
+                    candidate.c_click_willingness = c.get("click_willingness", candidate.c_click_willingness)
+                    candidate.c_click_reason = c.get("click_reason", candidate.c_click_reason)
+                    candidate.c_no_click_reason = c.get("no_click_reason", candidate.c_no_click_reason)
+                    candidate.c_improvement_suggestion = c.get("improvement_suggestion", candidate.c_improvement_suggestion)
 
                 # 重新计算综合分
                 if candidate.b_score is not None and candidate.c_click_willingness is not None:

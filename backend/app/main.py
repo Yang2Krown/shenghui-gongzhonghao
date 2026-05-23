@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import time
 import uvicorn
 
@@ -117,6 +118,12 @@ async def validation_exception_handler(request: Request, exc):
         }
     )
 
+
+# 挂载静态文件服务（用于头像等上传文件）
+import os
+upload_dir = os.path.abspath("./uploads")
+os.makedirs(upload_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
 
 # 包含API路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
