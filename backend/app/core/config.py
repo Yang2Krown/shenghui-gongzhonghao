@@ -110,6 +110,12 @@ class Settings(BaseSettings):
     PASS_THRESHOLD: float = 7.0
     MAX_REGENERATIONS: int = 1
 
+    # ====== 阿里云短信配置 ======
+    ALIYUN_SMS_ACCESS_KEY_ID: Optional[str] = None
+    ALIYUN_SMS_ACCESS_KEY_SECRET: Optional[str] = None
+    ALIYUN_SMS_SIGN_NAME: Optional[str] = None
+    ALIYUN_SMS_TEMPLATE_CODE: Optional[str] = None
+
     # 数据抓取配置
     SCRAPE_INTERVAL_HOURS: int = 24  # 每24小时抓取一次
     SCRAPE_TIMEOUT: int = 30  # 抓取超时时间（秒）

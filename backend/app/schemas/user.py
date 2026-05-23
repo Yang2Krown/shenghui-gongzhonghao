@@ -6,15 +6,16 @@ from pydantic import BaseModel, EmailStr, Field, validator
 class UserBase(BaseModel):
     """用户基础模型"""
     username: str = Field(..., min_length=3, max_length=50, description="用户名")
-    email: EmailStr = Field(..., description="邮箱地址")
+    email: Optional[EmailStr] = Field(None, description="邮箱地址")
+    phone: Optional[str] = Field(None, description="手机号")
     full_name: Optional[str] = Field(None, max_length=100, description="全名")
     avatar_url: Optional[str] = Field(None, description="头像URL")
 
 
 class UserCreate(UserBase):
     """用户创建模型"""
-    password: str = Field(..., min_length=6, max_length=100, description="密码")
-    
+    password: Optional[str] = Field(None, min_length=6, max_length=100, description="密码")
+
     @validator("username")
     def validate_username(cls, v):
         """验证用户名"""
@@ -131,3 +132,14 @@ class PasswordChange(BaseModel):
     """密码修改模型"""
     current_password: str = Field(..., description="当前密码")
     new_password: str = Field(..., min_length=6, max_length=100, description="新密码")
+
+
+class SendSmsCodeRequest(BaseModel):
+    """发送短信验证码请求"""
+    phone: str = Field(..., description="手机号")
+
+
+class PhoneLoginRequest(BaseModel):
+    """手机验证码登录请求"""
+    phone: str = Field(..., description="手机号")
+    code: str = Field(..., min_length=6, max_length=6, description="6位验证码")

@@ -35,6 +35,16 @@ export const changePassword = (passwordData) => {
   return post('/users/change-password', passwordData)
 }
 
+// 发送短信验证码
+export const sendSmsCode = (phone) => {
+  return post('/auth/send-sms-code', { phone })
+}
+
+// 手机验证码登录
+export const loginByPhone = (phone, code) => {
+  return post('/auth/login-by-phone', { phone, code })
+}
+
 // 上传头像
 export const uploadAvatar = (formData) => {
   return post('/users/upload-avatar', formData, {
