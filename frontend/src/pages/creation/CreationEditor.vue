@@ -25,10 +25,7 @@
             <el-icon><Document /></el-icon>
             保存草稿
           </el-button>
-          <el-button type="primary" @click="publishCreation" :loading="publishing">
-            <el-icon><Upload /></el-icon>
-            发布
-          </el-button>
+          <!-- 发布按钮暂时隐藏 -->
         </div>
       </div>
     </header>
@@ -76,6 +73,7 @@
           :candidate-id="candidateId"
           :outline-id="currentOutlineId"
           @complete="onOutlineComplete"
+          @next-step="activeTab = 'title'"
         />
         <!-- 大纲数据由本步骤生成，后续步骤直接复用 currentOutlineData -->
       </el-tab-pane>
@@ -92,6 +90,7 @@
           :candidate-id="candidateId"
           :outline-data="currentOutlineData"
           @complete="onTitleComplete"
+          @next-step="activeTab = 'content'"
         />
       </el-tab-pane>
 
@@ -107,7 +106,9 @@
           :candidate-id="candidateId"
           :outline-data="currentOutlineData"
           :title-data="selectedTitle"
+          :initial-content="finalContent"
           @complete="onContentComplete"
+          @save-draft="onSaveDraft"
         />
       </el-tab-pane>
     </el-tabs>
@@ -118,7 +119,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, ArrowRight, Document, Upload, Check } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Document, Check } from '@element-plus/icons-vue'
 import { useCreationStore } from '@/stores/creation'
 import OutlinePanel from '@/components/creation/OutlinePanel.vue'
 import TitlePanel from '@/components/creation/TitlePanel.vue'
@@ -143,6 +144,7 @@ const publishing = ref(false)
 const currentOutlineId = ref(null)
 const currentOutlineData = ref(null)
 const selectedTitle = ref(null)
+const finalContent = ref(null)
 
 // 创作步骤状态
 const outlineStatus = ref('idle')
@@ -162,7 +164,11 @@ onMounted(async () => {
       await creationStore.fetchCreationById(route.params.id)
       const creation = creationStore.currentCreation
       if (creation) {
-        // 恢复状态
+        // 恢复标题
+        if (creation.title) {
+          selectedTitle.value = { title: creation.title }
+        }
+        // 恢复大纲
         if (creation.outline_id) {
           currentOutlineId.value = creation.outline_id
           outlineStatus.value = creation.outline_status || 'completed'
@@ -176,8 +182,18 @@ onMounted(async () => {
         if (creation.title_status === 'completed') {
           titleStatus.value = 'completed'
         }
-        if (creation.content_status === 'completed') {
-          contentStatus.value = 'completed'
+        // 恢复正文（兼容 JSON 存储与纯文本）
+        const contentRaw = creation.content
+        if (contentRaw && contentRaw !== 'null') {
+          let contentData = { final_text: contentRaw }
+          try {
+            const parsed = JSON.parse(contentRaw)
+            if (parsed && typeof parsed === 'object' && parsed.final_text) {
+              contentData = parsed
+            }
+          } catch {}
+          finalContent.value = { ...contentData, final_word_count: creation.word_count }
+          contentStatus.value = creation.content_status || 'completed'
         }
       }
     } catch (e) {
@@ -196,26 +212,47 @@ const onOutlineComplete = (outlineData) => {
   ElMessage.success('大纲生成完成，可切换到标题生成')
 }
 
-// 标题完成回调（留在当前 tab，不自动跳转）
+// 标题完成回调
 const onTitleComplete = (titleData) => {
   titleStatus.value = 'completed'
   selectedTitle.value = titleData
-  ElMessage.success('标题生成完成，可切换到正文生成')
 }
 
 // 正文完成回调
 const onContentComplete = (contentData) => {
   contentStatus.value = 'completed'
+  finalContent.value = contentData || null
   ElMessage.success('创作流程完成！')
+}
+
+// 从 ContentPanel 触发保存草稿（携带当前编辑内容）
+const onSaveDraft = (contentData) => {
+  if (contentData) {
+    finalContent.value = contentData
+  }
+  saveDraft()
 }
 
 // 保存草稿
 const saveDraft = async () => {
   saving.value = true
   try {
+    const finalTitle = selectedTitle.value?.title || topicTitle.value || '未命名创作'
+    const finalText = finalContent.value?.final_text || ''
+    const plain = finalText.replace(/[#*`>_~\-]/g, '').trim()
+    const summary = plain.slice(0, 120)
+    const tags = []
+    if (topicDirection.value) tags.push(topicDirection.value)
+
     const data = {
-      title: topicTitle.value || '未命名创作',
-      topic_id: clusterId.value ? Number(clusterId.value) : null,
+      title: finalTitle,
+      content: finalContent.value ? JSON.stringify(finalContent.value) : null,
+      summary: summary || null,
+      tags,
+      word_count: finalContent.value?.final_word_count || finalText.length || 0,
+      topic_title: topicTitle.value || null,
+      topic_direction: topicDirection.value || null,
+      topic_id: null,
       candidate_id: candidateId.value ? Number(candidateId.value) : null,
       outline_id: currentOutlineId.value,
       outline_status: outlineStatus.value,
@@ -229,7 +266,7 @@ const saveDraft = async () => {
     } else {
       const creation = await creationStore.createCreation(data)
       // 替换 URL 为编辑模式
-      router.replace(`/creation/${creation.id}`)
+      router.replace(`/creation/editor/${creation.id}`)
     }
     ElMessage.success('草稿已保存')
   } catch (e) {
@@ -274,6 +311,10 @@ const getStatusClass = (key) => {
 <style scoped>
 .workspace-tabs :deep(.el-tabs__header) {
   margin-bottom: 24px;
+}
+
+.creation-workspace {
+  padding-bottom: 73px;
 }
 
 .workspace-tabs :deep(.el-tabs__item) {
@@ -327,12 +368,12 @@ const getStatusClass = (key) => {
 
 .step-done {
   background: var(--leaf);
-  color: #fff;
+  color: var(--paper);
 }
 
 .step-active {
   background: var(--clay);
-  color: #fff;
+  color: var(--paper);
   animation: pulse 1.5s ease-in-out infinite;
 }
 

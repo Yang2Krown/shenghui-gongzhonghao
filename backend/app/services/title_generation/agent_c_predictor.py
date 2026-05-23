@@ -152,9 +152,9 @@ class ClickPredictorAgent(BaseAgent):
         Returns:
             预测提示词
         """
-        # 格式化候选列表
+        # 格式化候选列表：给 LLM 看的 candidate_id 用 1/2/3 短编号，避免长 UUID 出错
         candidates_text = "\n".join([
-            f"{i+1}. ID: {c.get('id', '')}\n   标题: {c.get('title', '')}\n   套路: {c.get('method', '')}"
+            f"候选 #{i+1}\n   候选编号 (candidate_id): {i+1}\n   标题: {c.get('title', '')}\n   套路: {c.get('method', '')}"
             for i, c in enumerate(top5)
         ])
         
@@ -183,14 +183,14 @@ class ClickPredictorAgent(BaseAgent):
 {{
   "predictions": [
     {{
-      "candidate_id": "候选ID",
+      "candidate_id": "1",
       "click_willingness": 8,
       "click_reason": "反差感强 + 有具体数字 + 跟我的工作场景相关",
       "no_click_reason": "",
       "improvement_suggestion": "把'5个订阅'改成具体的服务名（如'5个SaaS'），更具体"
     }},
     {{
-      "candidate_id": "候选ID",
+      "candidate_id": "1",
       "click_willingness": 4,
       "click_reason": "",
       "no_click_reason": "感觉是另一篇Claude教程，已经看过类似的",
@@ -224,38 +224,16 @@ class ClickPredictorAgent(BaseAgent):
         formatted = []
         for pred in predictions:
             candidate_id = pred.get("candidate_id", "")
-            pred_title = (pred.get("title") or pred.get("original_title") or "").strip()
-            # 优先 id 匹配，其次 title 匹配
-            candidate = (
-                candidate_by_id.get(str(candidate_id))
-                or candidate_by_title.get(pred_title)
-                or {}
-            )
-            # 如果通过 title 匹配到了，修正 candidate_id
-            if not candidate_by_id.get(str(candidate_id)) and candidate:
-                candidate_id = candidate.get("id", candidate_id)
+            candidate = candidate_map.get(candidate_id, {})
             
             formatted.append({
-                "candidate_id": candidate_id,
+                "candidate_id": real_id,
                 "title": candidate.get("title", ""),
                 "click_willingness": pred.get("click_willingness", 5),
                 "click_reason": pred.get("click_reason", ""),
                 "no_click_reason": pred.get("no_click_reason", ""),
                 "improvement_suggestion": pred.get("improvement_suggestion", ""),
             })
-        
-        # 确保所有top5都有预测结果
-        predicted_ids = {p.get("candidate_id") for p in formatted}
-        for candidate in top5:
-            if candidate.get("id") not in predicted_ids:
-                formatted.append({
-                    "candidate_id": candidate.get("id"),
-                    "title": candidate.get("title", ""),
-                    "click_willingness": 5,
-                    "click_reason": "",
-                    "no_click_reason": "未进行预测",
-                    "improvement_suggestion": "",
-                })
         
         return formatted
     

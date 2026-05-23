@@ -100,7 +100,7 @@ const handleSearch = () => {
 
 <style scoped>
 .not-found-page {
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  background-color: var(--ivory);
 }
 
 .text-9xl {

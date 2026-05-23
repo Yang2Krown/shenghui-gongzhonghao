@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class DeepSeekClient(LLMClient):
     provider = "deepseek"
-    default_model = "deepseek-chat"
+    default_model = settings.DEEPSEEK_MODEL
 
     def __init__(self):
         if not settings.DEEPSEEK_API_KEY:
@@ -53,6 +53,16 @@ class DeepSeekClient(LLMClient):
 
         choice = resp.choices[0]
         text = choice.message.content or ""
+
+        # 兼容 reasoning 类模型：如果 content 是空，但 reasoning_content 里有 JSON，可以兜底用它
+        if not text:
+            reasoning = getattr(choice.message, "reasoning_content", None) or ""
+            if reasoning:
+                logger.warning(
+                    f"DeepSeek content 为空，尝试从 reasoning_content 解析（len={len(reasoning)}）"
+                )
+                text = reasoning
+
         parsed = parse_json_loose(text) if json_mode else None
 
         usage = None

@@ -32,6 +32,7 @@ class User(BaseModel):
     collections = relationship("TopicCollection", back_populates="user", cascade="all, delete-orphan")
     creations = relationship("ContentCreation", back_populates="user", cascade="all, delete-orphan")
     style_profiles = relationship("StyleProfile", back_populates="user", cascade="all, delete-orphan")
+    style_sources = relationship("StyleSource", back_populates="user", cascade="all, delete-orphan")
     articles = relationship("ArticleForAnalysis", back_populates="user", cascade="all, delete-orphan")
     
     def __repr__(self):

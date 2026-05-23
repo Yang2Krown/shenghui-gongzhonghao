@@ -12,8 +12,8 @@ export const useUserStore = defineStore('user', () => {
 
   // 计算属性
   const isAuthenticated = computed(() => !!token.value)
-  const userName = computed(() => user.value?.name || user.value?.username || '未登录用户')
-  const userAvatar = computed(() => user.value?.avatar || '')
+  const userName = computed(() => user.value?.full_name || user.value?.username || '未登录用户')
+  const userAvatar = computed(() => user.value?.avatar_url || '')
 
   // 初始化 - 从本地存储恢复token
   const initialize = async () => {

@@ -15,6 +15,44 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _robust_id_map(items: List[Dict[str, Any]], candidates: List[Dict[str, Any]], *, key: str = "candidate_id") -> Dict[str, Dict[str, Any]]:
+    """把 LLM 返回的 list（B 的 scores / C 的 predictions）按 candidate.id 索引。
+
+    三层兜底匹配，从精确到模糊：
+    1. 精确：LLM 回填的就是真 UUID
+    2. 短 ID：LLM 回填的是 "1" / "2" / "3"（我们 prompt 里用的就是这种）
+    3. 按位置：count 一致时按下标对应（LLM 完全没填 ID 也能救回）
+    """
+    if not items or not candidates:
+        return {}
+
+    out: Dict[str, Dict[str, Any]] = {}
+
+    # 1. 位置兜底（最先填，被后两步覆盖）
+    if len(items) == len(candidates):
+        for i, item in enumerate(items):
+            out[candidates[i]["id"]] = item
+
+    # 2. 短 ID（"1" / "2" ... 或纯数字）
+    for item in items:
+        sid = str(item.get(key, "")).strip()
+        try:
+            idx = int(sid) - 1
+            if 0 <= idx < len(candidates):
+                out[candidates[idx]["id"]] = item
+        except (ValueError, TypeError):
+            pass
+
+    # 3. 精确 UUID（最优先，覆盖前两步）
+    cand_ids = {c.get("id") for c in candidates}
+    for item in items:
+        cid = item.get(key, "")
+        if cid in cand_ids:
+            out[cid] = item
+
+    return out
+
 # 获取当前文件所在目录
 CURRENT_DIR = Path(__file__).parent
 
@@ -254,26 +292,11 @@ class TitleReviewerAgent(BaseAgent):
         
         # 合并评分结果
         scored_candidates = []
-        raw_scores = result.get("scores", [])
-        logger.info(f"Agent B 解析到 {len(raw_scores)} 条评分记录")
-        if raw_scores:
-            logger.info(f"Agent B 第一条评分样例: {raw_scores[0]}")
+        scores_map = {s.get("candidate_id"): s for s in result.get("scores", [])}
         
-        
-        # 构建多维度索引：序号 → score（prompt 里用 1-based 序号作为 candidate_id）
-        scores_by_index = {}
-        for idx, s in enumerate(raw_scores):
-            cid = s.get("candidate_id", "")
-            # LLM 可能返回 int 或 str
-            scores_by_index[str(cid)] = s
-            scores_by_index[idx + 1] = s  # 兜底：按出现顺序
-
-        for idx, candidate in enumerate(candidates):
-            title = (candidate.get("title") or "").strip()
-            # 按序号匹配（prompt 里 candidate_id 就是 1-based 序号）
-            score_data = scores_by_index.get(idx + 1) or scores_by_index.get(str(idx + 1)) or {}
-            if not score_data and raw_scores:
-                logger.warning(f"Agent B 评分匹配失败: idx={idx+1}, title={title[:30]}")
+        for candidate in candidates:
+            candidate_id = candidate.get("id", "")
+            score_data = scores_map.get(candidate_id, {})
             
             # 计算加权总分
             b_score = self._calculate_weighted_score(score_data)
@@ -378,7 +401,7 @@ class TitleReviewerAgent(BaseAgent):
         """
         # 格式化候选列表（用序号作为 ID，方便 LLM 复制）
         candidates_text = "\n".join([
-            f"[{i+1}] {c.get('title', '')} （套路：{c.get('method', '')}，{c.get('word_count', len(c.get('title', '')))}字）"
+            f"{i+1}. ID: {c.get('id', '')}\n   标题: {c.get('title', '')}\n   套路: {c.get('method', '')}\n   修饰元素: {', '.join(c.get('modifiers', []))}"
             for i, c in enumerate(candidates)
         ])
         

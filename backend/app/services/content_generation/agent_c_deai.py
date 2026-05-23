@@ -350,8 +350,18 @@ async def deai_rewrite(
     )
 
     parsed = parse_json_loose(result.text)
-    if not parsed or "rewritten_text" not in parsed:
-        logger.error(f"[Agent C] 输出解析失败: {result.text[:300]}")
+    if parsed and "rewritten_text" not in parsed:
+        for alias in ("rewrite", "text", "content", "改写后", "result", "output"):
+            if alias in parsed and isinstance(parsed[alias], str):
+                logger.warning(f"[Agent C] LLM 用了别名 key '{alias}'，已映射到 rewritten_text")
+                parsed["rewritten_text"] = parsed[alias]
+                break
+    if not parsed or not isinstance(parsed.get("rewritten_text"), str):
+        logger.error(
+            f"[Agent C] 输出解析失败 (len={len(result.text or '')}): "
+            f"parsed_keys={list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__}, "
+            f"原始响应前 800 字: {(result.text or '')[:800]!r}"
+        )
         raise ValueError("Agent C 输出格式不符合 schema")
 
     output = _parse_llm_output(parsed, agent_a_output.total_word_count)

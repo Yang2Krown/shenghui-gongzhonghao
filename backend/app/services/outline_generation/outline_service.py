@@ -87,7 +87,7 @@ async def generate_outline(
             
             # 2. Agent A 生成 3 个候选大纲
             if progress_callback:
-                await progress_callback({"event": "step_start", "data": {"step": 1, "agent": "Agent A", "action": "正在生成 3 个候选大纲..."}})
+                await progress_callback({"event": "step_start", "data": {"step": 1, "agent": "顾清和 · 大纲创作员", "action": "正在生成 3 个候选大纲...", "avatar": "/agents/outline-a.png"}})
             candidates = await create_outline_candidates(
                 outline_input,
                 llm_client=llm_client,
@@ -111,7 +111,7 @@ async def generate_outline(
 
             # 3. Agent B 评审
             if progress_callback:
-                await progress_callback({"event": "step_start", "data": {"step": 2, "agent": "Agent B", "action": "正在评审大纲，选择最优方案..."}})
+                await progress_callback({"event": "step_start", "data": {"step": 2, "agent": "陆言之 · 大纲评审员", "action": "正在评审大纲，选择最优方案...", "avatar": "/agents/outline-b.png"}})
             b_input = AgentBInput(
                 outline_id=outline.id,
                 title=outline.title,
@@ -134,7 +134,7 @@ async def generate_outline(
 
             # 4. Agent C 挑刺
             if progress_callback:
-                await progress_callback({"event": "step_start", "data": {"step": 3, "agent": "Agent C", "action": "正在模拟读者挑刺，修订问题..."}})
+                await progress_callback({"event": "step_start", "data": {"step": 3, "agent": "刁亦凡 · 大纲挑刺员", "action": "正在模拟读者挑刺，修订问题...", "avatar": "/agents/outline-c.png"}})
             c_input = AgentCInput(
                 outline_id=outline.id,
                 title=outline.title,
@@ -156,7 +156,7 @@ async def generate_outline(
 
             # 5. Agent D 自检
             if progress_callback:
-                await progress_callback({"event": "step_start", "data": {"step": 4, "agent": "Agent D", "action": "正在自检评分，输出最终大纲..."}})
+                await progress_callback({"event": "step_start", "data": {"step": 4, "agent": "简行舟 · 大纲自检员", "action": "正在自检评分，输出最终大纲...", "avatar": "/agents/outline-d.png"}})
             d_input = AgentDInput(
                 outline_id=outline.id,
                 title=outline.title,

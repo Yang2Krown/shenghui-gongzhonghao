@@ -28,7 +28,8 @@
         <!-- 时间轴连接线 -->
         <div class="timeline-track">
           <div class="timeline-dot" :class="`dot-${(agent.code || 'x').toLowerCase()}`">
-            <span class="dot-letter">{{ agent.code || 'X' }}</span>
+            <img v-if="agent.avatar" :src="agent.avatar" class="dot-avatar" />
+            <span v-else class="dot-letter">{{ agent.code || 'X' }}</span>
           </div>
           <div v-if="i < agents.length - 1" class="timeline-line"></div>
         </div>
@@ -73,7 +74,7 @@
 
                 <!-- 雷达图 -->
                 <div class="radar-container">
-                  <svg :viewBox="`0 0 ${svgSize} ${svgSize}`" class="radar-svg">
+                  <svg :viewBox="`0 0 ${svgWidth} ${svgHeight}`" class="radar-svg">
                     <!-- 背景网格（同心多边形） -->
                     <polygon
                       v-for="level in gridLevels"
@@ -85,7 +86,7 @@
                     <line
                       v-for="(pt, idx) in axisPoints"
                       :key="'ax-' + idx"
-                      :x1="center" :y1="center"
+                      :x1="cx" :y1="cy"
                       :x2="pt.x" :y2="pt.y"
                       class="radar-axis-line"
                     />
@@ -93,8 +94,8 @@
                     <text
                       v-for="level in gridLevels"
                       :key="'t-' + level"
-                      :x="center + 4"
-                      :y="center - radarRadius * (level / 10) + 4"
+                      :x="cx + 4"
+                      :y="cy - radarRadius * (level / 10) + 4"
                       class="radar-grid-label"
                     >{{ level }}</text>
                     <!-- 数据多边形 -->
@@ -175,7 +176,7 @@
 
               <!-- 问题列表 -->
               <div v-if="agent.issues && agent.issues.length" class="section issues-section">
-                <div class="section-title">问题点</div>
+                <div class="section-title">{{ agent.issuesLabel || '问题点' }}</div>
                 <div class="issue-list">
                   <div v-for="(p, i) in agent.issues" :key="i" class="issue-item">
                     <span v-if="p.location" class="issue-loc">{{ p.location }}</span>
@@ -268,9 +269,11 @@ function barWidth(s, max = 10) {
 }
 
 // ── 雷达图 ──
-const svgSize = 320
-const radarRadius = 105
-const center = svgSize / 2
+const svgWidth = 520
+const svgHeight = 440
+const radarRadius = 120
+const cx = svgWidth / 2
+const cy = svgHeight / 2 + 10
 const gridLevels = [2, 4, 6, 8, 10]
 
 // 多边形顶点（n 边形，从正上方顺时针）
@@ -279,8 +282,8 @@ function polygonPoints(n, radius) {
   for (let i = 0; i < n; i++) {
     const angle = (Math.PI * 2 * i) / n - Math.PI / 2
     pts.push({
-      x: center + radius * Math.cos(angle),
-      y: center + radius * Math.sin(angle),
+      x: cx + radius * Math.cos(angle),
+      y: cy + radius * Math.sin(angle),
     })
   }
   return pts
@@ -317,7 +320,7 @@ const dataPoints = computed(() => {
     const ratio = Math.min(1, (Number(d.score) || 0) / (d.max || 10))
     const r = radarRadius * ratio
     const angle = (Math.PI * 2 * i) / n - Math.PI / 2
-    return { x: center + r * Math.cos(angle), y: center + r * Math.sin(angle) }
+    return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) }
   })
 })
 
@@ -330,9 +333,9 @@ const dataPolygon = computed(() => {
 function labelPoint(idx) {
   const n = currentDimCount.value
   if (!n) return { x: 0, y: 0 }
-  const r = radarRadius + 40
+  const r = radarRadius + 60
   const angle = (Math.PI * 2 * idx) / n - Math.PI / 2
-  return { x: center + r * Math.cos(angle), y: center + r * Math.sin(angle) }
+  return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) }
 }
 
 // 分数气泡位置（在数据点外侧偏移，避免遮挡）
@@ -344,9 +347,9 @@ function scoreBubble(dim) {
   const n = agent.dimensions.length
   if (idx < 0 || !n) return { x: 0, y: 0 }
   const ratio = Math.min(1, (Number(dim.score) || 0) / (dim.max || 10))
-  const r = radarRadius * ratio + 18
+  const r = radarRadius * ratio + 22
   const angle = (Math.PI * 2 * idx) / n - Math.PI / 2
-  return { x: center + r * Math.cos(angle), y: center + r * Math.sin(angle) }
+  return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) }
 }
 
 function labelAnchor(idx) {
@@ -369,9 +372,8 @@ function labelBaseline(idx) {
 }
 
 function shortLabel(label) {
-  // 截短过长的标签（雷达图空间有限）
   if (!label) return ''
-  return label.length > 8 ? label.slice(0, 7) + '…' : label
+  return label.length > 10 ? label.slice(0, 9) + '…' : label
 }
 </script>
 
@@ -438,8 +440,15 @@ function shortLabel(label) {
 .dot-letter {
   font-size: 13px;
   font-weight: 800;
-  color: #fff;
+  color: var(--paper);
   letter-spacing: -0.02em;
+}
+
+.dot-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
 }
 
 .dot-a {
@@ -448,17 +457,17 @@ function shortLabel(label) {
 }
 
 .dot-b {
-  background: linear-gradient(135deg, var(--pine), #2a4538);
+  background: linear-gradient(135deg, var(--pine), var(--pine));
   box-shadow: 0 2px 8px rgba(63, 92, 82, 0.3), 0 0 0 4px var(--paper);
 }
 
 .dot-c {
-  background: linear-gradient(135deg, var(--sand), #a07a3a);
+  background: linear-gradient(135deg, var(--sand), var(--sand));
   box-shadow: 0 2px 8px rgba(196, 155, 92, 0.3), 0 0 0 4px var(--paper);
 }
 
 .dot-d {
-  background: linear-gradient(135deg, var(--leaf), #3d6b3d);
+  background: linear-gradient(135deg, var(--leaf), var(--leaf));
   box-shadow: 0 2px 8px rgba(92, 138, 92, 0.3), 0 0 0 4px var(--paper);
 }
 
@@ -694,8 +703,7 @@ function shortLabel(label) {
 
 .radar-svg {
   width: 100%;
-  max-width: 340px;
-  aspect-ratio: 1;
+  max-width: 520px;
 }
 
 .radar-grid-line {
@@ -733,7 +741,7 @@ function shortLabel(label) {
 }
 
 .radar-dim-label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   fill: var(--ink-2);
 }
@@ -784,7 +792,7 @@ function shortLabel(label) {
   justify-content: center;
   font-size: 12px;
   font-weight: 800;
-  color: #fff;
+  color: var(--paper);
   flex-shrink: 0;
 }
 

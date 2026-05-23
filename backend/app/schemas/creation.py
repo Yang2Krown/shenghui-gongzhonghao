@@ -13,6 +13,16 @@ class ContentCreationBase(BaseModel):
     tags: Optional[List[str]] = Field(default=[], description="标签列表")
     summary: Optional[str] = Field(None, max_length=1000, description="摘要")
     featured_image: Optional[str] = Field(None, max_length=1000, description="特色图片URL")
+    # 选题快照 / 关联
+    topic_title: Optional[str] = Field(None, max_length=500, description="选题原标题")
+    topic_direction: Optional[str] = Field(None, max_length=100, description="选题方向")
+    candidate_id: Optional[int] = Field(None, description="候选选题ID")
+    cluster_id: Optional[int] = Field(None, description="话题簇ID")
+    outline_id: Optional[int] = Field(None, description="大纲ID")
+    # 创作进度
+    outline_status: Optional[str] = Field(None, description="大纲生成状态")
+    title_status: Optional[str] = Field(None, description="标题生成状态")
+    content_status: Optional[str] = Field(None, description="正文生成状态")
 
 
 class ContentCreationCreate(ContentCreationBase):
@@ -29,6 +39,14 @@ class ContentCreationUpdate(BaseModel):
     tags: Optional[List[str]] = Field(None, description="标签列表")
     summary: Optional[str] = Field(None, max_length=1000, description="摘要")
     featured_image: Optional[str] = Field(None, max_length=1000, description="特色图片URL")
+    topic_title: Optional[str] = Field(None, max_length=500)
+    topic_direction: Optional[str] = Field(None, max_length=100)
+    candidate_id: Optional[int] = None
+    cluster_id: Optional[int] = None
+    outline_id: Optional[int] = None
+    outline_status: Optional[str] = None
+    title_status: Optional[str] = None
+    content_status: Optional[str] = None
 
 
 class ContentCreationInDB(ContentCreationBase):

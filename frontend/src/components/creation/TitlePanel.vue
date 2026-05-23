@@ -7,6 +7,7 @@
         :key="i"
         :agent-name="step.agent"
         :action="step.action"
+        :avatar="step.avatar"
         :is-active="i === currentStepIndex"
         :show-progress="i === currentStepIndex"
         :percent="i === currentStepIndex ? stepPercent : (i < currentStepIndex ? 100 : 0)"
@@ -42,13 +43,19 @@
 
     <!-- 完成：标题结果展示（左右分栏） -->
     <div v-if="status === 'completed' && titles.length" class="title-result-split">
-      <!-- 左侧：可编辑的标题候选 -->
+      <!-- 左侧：标题候选 -->
       <div class="result-left">
         <div class="left-header">
-          <h3 class="text-h4 font-sans text-ink">推荐标题 Top {{ titles.length }}</h3>
-          <span v-if="meta" class="text-xs text-ink-3">
-            候选 {{ meta.total_candidates || titles.length }} · 套路 {{ meta.covered_methods || '-' }} · 重生 {{ meta.regeneration_count || 0 }} 次
-          </span>
+          <div class="flex items-center gap-4">
+            <h3 class="text-h4 font-sans text-ink">推荐标题 Top {{ titles.length }}</h3>
+            <span v-if="meta" class="text-xs text-ink-3">
+              候选 {{ meta.total_candidates || titles.length }} · 套路 {{ meta.covered_methods || '-' }} · 重生 {{ meta.regeneration_count || 0 }} 次
+            </span>
+          </div>
+          <div class="view-toggle">
+            <button class="toggle-btn" :class="{ active: viewMode === 'edit' }" @click="viewMode = 'edit'">编辑</button>
+            <button class="toggle-btn" :class="{ active: viewMode === 'preview' }" @click="viewMode = 'preview'">预览</button>
+          </div>
         </div>
         <div class="space-y-4">
           <div
@@ -68,7 +75,9 @@
                   <span class="text-xs text-ink-3">·</span>
                   <span class="text-xs text-ink-3">{{ (title.editable_title || title.title).length }} 字</span>
                 </div>
+                <!-- 编辑模式 -->
                 <el-input
+                  v-if="viewMode === 'edit'"
                   v-model="title.editable_title"
                   type="textarea"
                   :autosize="{ minRows: 1, maxRows: 3 }"
@@ -76,6 +85,8 @@
                   resize="none"
                   @click.stop
                 />
+                <!-- 预览模式 -->
+                <p v-else class="text-base font-semibold text-ink">{{ title.editable_title || title.title }}</p>
                 <p v-if="title.reason" class="text-sm text-ink-3 mt-2">{{ title.reason }}</p>
               </div>
               <div class="ml-2 text-right flex-shrink-0 flex flex-col items-end gap-1">
@@ -92,6 +103,7 @@
                     <el-icon><DocumentCopy /></el-icon>
                   </el-button>
                   <el-button
+                    v-if="viewMode === 'edit'"
                     size="small"
                     link
                     :loading="title._saving"
@@ -104,31 +116,29 @@
             </div>
           </div>
         </div>
-
-        <!-- 操作 -->
-        <div class="mt-6 flex justify-center gap-3">
-          <el-button @click="generateTitles">重新生成</el-button>
-          <el-button type="primary" @click="confirmTitle" :disabled="selectedIndex === null">
-            确认标题
-          </el-button>
-        </div>
       </div>
 
       <!-- 右侧：Agent 反馈 -->
       <div class="result-right">
-        <div class="flex items-center justify-between mb-3">
-          <div></div>
-          <el-button
-            size="small"
-            :loading="reevaluating"
-            :disabled="selectedIndex === null"
-            @click="reevaluateTitle"
-          >
-            <el-icon><Refresh /></el-icon>
-            重新评估选中标题
-          </el-button>
-        </div>
-        <AgentFeedbackPanel :agents="agentFeedback" subtitle="标题流水线：A 创作 → B 评分 → C 点击预测 → D 综合判定" />
+        <AgentFeedbackPanel :agents="agentFeedback" subtitle="标题流水线：A 创作 → B 评分 → C 点击预测 → D 综合判定 Top 5" />
+      </div>
+    </div>
+
+    <!-- 固定底部操作栏 -->
+    <div v-if="status === 'completed' && titles.length" class="title-bottom-bar">
+      <div class="bottom-bar-inner">
+        <el-button @click="generateTitles" :loading="generating">
+          <el-icon><Refresh /></el-icon>
+          重新生成
+        </el-button>
+        <el-button :loading="reevaluating" :disabled="selectedIndex === null" @click="reevaluateTitle">
+          <el-icon><Aim /></el-icon>
+          重新评估
+        </el-button>
+        <el-button type="primary" @click="confirmTitle" :disabled="selectedIndex === null">
+          确认标题
+          <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+        </el-button>
       </div>
     </div>
   </div>
@@ -137,7 +147,7 @@
 <script setup>
 import { ref, watch, computed, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { MagicStick, CircleCloseFilled, DocumentCopy, Document, Refresh } from '@element-plus/icons-vue'
+import { MagicStick, CircleCloseFilled, DocumentCopy, Document, Refresh, ArrowRight, Aim } from '@element-plus/icons-vue'
 import AgentStatusBar from './AgentStatusBar.vue'
 import AgentFeedbackPanel from './AgentFeedbackPanel.vue'
 import { get, post } from '@/api/api'
@@ -149,11 +159,12 @@ const props = defineProps({
   outlineData: { type: Object, default: null },
 })
 
-const emit = defineEmits(['complete'])
+const emit = defineEmits(['complete', 'next-step'])
 
 // 状态
 const status = ref('idle')
 const generating = ref(false)
+const viewMode = ref('preview') // edit | preview
 const titles = ref([])
 const candidatesAll = ref([])
 const meta = ref(null)
@@ -170,13 +181,20 @@ const stepPercent = progress.stepPercent
 // 监听 SSE 结果
 watch(() => progress.result.value, (newResult) => {
   if (newResult) {
-    titles.value = (newResult.recommendations || newResult.titles || []).map((t) => ({
+    candidatesAll.value = newResult.candidates || []
+    meta.value = newResult.meta || null
+    // 从 candidatesAll 中取 top 5 展示
+    const allCands = candidatesAll.value
+    const top5 = allCands.filter((c) => c.is_top5)
+    const recommendations = newResult.recommendations || newResult.titles || []
+    // 合并：top5 优先，不足则用 recommendations 补
+    const source = top5.length >= 3 ? top5 : recommendations
+    titles.value = source.slice(0, 5).map((t) => ({
       ...t,
       editable_title: t.title,
     }))
-    candidatesAll.value = newResult.candidates || []
-    meta.value = newResult.meta || null
     status.value = 'completed'
+    selectedIndex.value = 0
     ElMessage.success('标题生成完成')
     generating.value = false
   }
@@ -258,6 +276,7 @@ const confirmTitle = () => {
   if (selectedIndex.value !== null) {
     const chosen = titles.value[selectedIndex.value]
     emit('complete', { ...chosen, title: chosen.editable_title || chosen.title })
+    emit('next-step')
     ElMessage.success('标题已确认')
   }
 }
@@ -368,20 +387,25 @@ const agentFeedback = computed(() => {
   if (!candidatesAll.value.length && !titles.value.length) return []
 
   const cands = candidatesAll.value
-  const top5 = cands.filter((c) => c.is_top5)
-  const top3 = cands.filter((c) => c.is_top3)
   const eliminated = cands.filter((c) => c.is_eliminated)
   const sel = selectedCandidate.value
 
-  // Agent A 概览
+  // 当前选中的标题
+  const selected = selectedIndex.value !== null ? titles.value[selectedIndex.value] : null
+  // 从 candidatesAll 找完整数据（含 b_score_details 等）
+  const sel = selected ? cands.find((c) => c.id === selected.id) || selected : null
+
+  // Agent A 概览（全局）
   const agentA = {
     id: 'A',
     code: 'A',
-    name: 'Agent A · 标题创作员',
+    name: '甄意浓 · 标题创作员',
     role: '生成多套路标题候选',
+    avatar: '/agents/title-a.png',
     summary: meta.value
       ? `共生成 ${meta.value.total_candidates ?? cands.length} 个候选，覆盖 ${meta.value.covered_methods ?? '-'} 种套路；一票否决淘汰 ${meta.value.eliminated_count ?? eliminated.length} 个；重生 ${meta.value.regeneration_count ?? 0} 次。`
       : `共 ${cands.length} 个候选`,
+    issuesLabel: '淘汰原因',
     issues: eliminated.map((c) => ({
       location: c.title,
       text: c.elimination_reason || '被一票否决',
@@ -392,7 +416,7 @@ const agentFeedback = computed(() => {
   const agentB = {
     id: 'B',
     code: 'B',
-    name: 'Agent B · 标题评审员',
+    name: '尚怀瑾 · 标题评审员',
     role: '6 维度评分 + 一票否决扫描',
   }
 
@@ -427,7 +451,7 @@ const agentFeedback = computed(() => {
   const agentC = {
     id: 'C',
     code: 'C',
-    name: 'Agent C · 读者点击预测员',
+    name: '于思齐 · 标题预测员',
     role: '模拟真实读者的点击意愿',
   }
 
@@ -558,16 +582,67 @@ const agentFeedback = computed(() => {
 
 .rank-1 {
   background: var(--clay);
-  color: #fff;
+  color: var(--paper);
 }
 
 .rank-2 {
   background: var(--sand);
-  color: #fff;
+  color: var(--paper);
 }
 
 .rank-3 {
   background: var(--pine-soft);
   color: var(--pine);
+}
+
+/* 视图切换 */
+.view-toggle {
+  display: inline-flex;
+  background: var(--bone);
+  border-radius: var(--r-pill);
+  padding: 3px;
+  flex-shrink: 0;
+}
+
+.toggle-btn {
+  padding: 4px 14px;
+  border: none;
+  background: transparent;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  line-height: 1.4;
+}
+
+.toggle-btn.active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* 固定底部操作栏 */
+.title-bottom-bar {
+  position: fixed;
+  bottom: 0;
+  left: 240px;
+  right: 0;
+  z-index: 100;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
+  height: 65px;
+  display: flex;
+  align-items: center;
+}
+
+.title-bottom-bar .bottom-bar-inner {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 0 24px;
+  width: 100%;
 }
 </style>

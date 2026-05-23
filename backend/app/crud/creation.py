@@ -120,7 +120,15 @@ class CRUDContentCreation(CRUDBase[ContentCreation, ContentCreationCreate, Conte
             summary=obj_in.summary,
             featured_image=obj_in.featured_image,
             word_count=word_count,
-            reading_time=reading_time
+            reading_time=reading_time,
+            topic_title=getattr(obj_in, "topic_title", None),
+            topic_direction=getattr(obj_in, "topic_direction", None),
+            candidate_id=getattr(obj_in, "candidate_id", None),
+            cluster_id=getattr(obj_in, "cluster_id", None),
+            outline_id=getattr(obj_in, "outline_id", None),
+            outline_status=getattr(obj_in, "outline_status", None) or "idle",
+            title_status=getattr(obj_in, "title_status", None) or "idle",
+            content_status=getattr(obj_in, "content_status", None) or "idle",
         )
         
         db.add(db_obj)

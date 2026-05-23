@@ -21,6 +21,16 @@ class BaseAIService(ABC):
         self.api_base = api_base
         self.logger = logging.getLogger(f"{self.__class__.__name__}.{provider}")
 
+    async def chat(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1000
+    ) -> Dict[str, Any]:
+        """通用 chat 方法，用于风格训练和预览"""
+        pass
+
     @abstractmethod
     async def generate_content(self, prompt: str, style: Optional[Dict[str, Any]] = None) -> str:
         """生成内容"""
@@ -67,6 +77,35 @@ class OpenAIService(BaseAIService):
             api_key=settings.OPENAI_API_KEY,
             api_base=settings.OPENAI_API_BASE
         )
+
+    async def chat(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1000
+    ) -> Dict[str, Any]:
+        """通用 chat 方法"""
+        try:
+            import openai
+
+            client = openai.AsyncOpenAI(
+                api_key=self.api_key,
+                base_url=self.api_base
+            )
+
+            response = await client.chat.completions.create(
+                model=model or self.model_name,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+
+            return {"content": response.choices[0].message.content}
+
+        except Exception as e:
+            self.logger.error(f"OpenAI chat 失败: {e}")
+            raise
 
     async def generate_content(self, prompt: str, style: Optional[Dict[str, Any]] = None) -> str:
         """生成内容"""
@@ -317,13 +356,56 @@ class OpenAIService(BaseAIService):
 class DeepSeekService(BaseAIService):
     """DeepSeek服务"""
 
+    MODEL_NAME = "deepseek-v4-flash"
+    VALID_MODELS = {"deepseek-v4-pro", "deepseek-v4-flash"}
+
     def __init__(self):
         super().__init__(
             provider="deepseek",
-            model_name="deepseek-chat",
+            model_name=self.MODEL_NAME,
             api_key=settings.DEEPSEEK_API_KEY,
             api_base=settings.DEEPSEEK_API_BASE
         )
+
+    def _resolve_model(self, model: Optional[str]) -> str:
+        if model and model in self.VALID_MODELS:
+            return model
+        if model:
+            self.logger.warning(
+                f"无效的 DeepSeek 模型名 '{model}'，回退到默认 {self.MODEL_NAME}"
+            )
+        return self.MODEL_NAME
+
+    async def chat(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1000
+    ) -> Dict[str, Any]:
+        """通用 chat 方法"""
+        try:
+            import openai
+
+            client = openai.AsyncOpenAI(
+                api_key=self.api_key,
+                base_url=self.api_base
+            )
+
+            model = self._resolve_model(model)
+            self.logger.info(f"DeepSeekChat using model: {model}")
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+
+            return {"content": response.choices[0].message.content}
+
+        except Exception as e:
+            self.logger.error(f"DeepSeek chat 失败: {e}")
+            raise
 
     async def generate_content(self, prompt: str, style: Optional[Dict[str, Any]] = None) -> str:
         """生成内容"""
@@ -574,6 +656,48 @@ class TongyiService(BaseAIService):
             api_key=settings.TONGYI_API_KEY,
             api_base=settings.TONGYI_API_BASE
         )
+
+    async def chat(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1000
+    ) -> Dict[str, Any]:
+        """通用 chat 方法"""
+        try:
+            import httpx
+
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+
+            payload = {
+                "model": model or self.model_name,
+                "input": {
+                    "messages": messages
+                },
+                "parameters": {
+                    "temperature": temperature,
+                    "max_tokens": max_tokens
+                }
+            }
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.api_base}/services/aigc/text-generation/generation",
+                    headers=headers,
+                    json=payload,
+                    timeout=60.0
+                )
+                response.raise_for_status()
+                result = response.json()
+                return {"content": result["output"]["choices"][0]["message"]["content"]}
+
+        except Exception as e:
+            self.logger.error(f"通义千问 chat 失败: {e}")
+            raise
 
     async def generate_content(self, prompt: str, style: Optional[Dict[str, Any]] = None) -> str:
         """生成内容"""

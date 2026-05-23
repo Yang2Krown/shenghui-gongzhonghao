@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 
 
 class StyleProfileBase(BaseModel):
@@ -49,7 +49,7 @@ class StyleProfileInDB(StyleProfileBase):
     confidence_score: float = 0.0
     created_at: datetime
     updated_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -61,7 +61,7 @@ class StyleProfileResponse(StyleProfileBase):
     confidence_score: float = 0.0
     created_at: datetime
     updated_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -74,6 +74,81 @@ class StyleProfileListResponse(BaseModel):
     page_size: int
     total_pages: int
 
+
+# ===== 风格训练相关 Schema =====
+
+class StyleSourceBase(BaseModel):
+    """训练素材基础模型"""
+    title: Optional[str] = Field(None, max_length=500, description="素材标题")
+    content_type: Optional[str] = Field("text", description="内容类型: text, link, file")
+    url: Optional[str] = Field(None, max_length=1000, description="链接URL")
+    raw_text: Optional[str] = Field(None, description="文本内容")
+
+
+class StyleSourceCreate(StyleSourceBase):
+    """训练素材创建模型"""
+    pass
+
+
+class StyleSourceInDB(StyleSourceBase):
+    """数据库中的训练素材模型"""
+    id: int
+    user_id: int
+    profile_id: Optional[int] = None
+    preview: Optional[str] = None
+    word_count: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class StyleSourceResponse(StyleSourceBase):
+    """训练素材响应模型"""
+    id: int
+    user_id: int
+    profile_id: Optional[int] = None
+    preview: Optional[str] = None
+    word_count: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class StyleProfileWithSources(BaseModel):
+    """风格档案（含素材列表）"""
+    profile: Optional[Dict[str, Any]] = None
+    sources: List[Dict[str, Any]] = []
+
+
+class TrainStyleRequest(BaseModel):
+    """训练风格请求"""
+    model: Optional[str] = Field(None, description="AI模型（留空使用默认模型）")
+
+
+class TrainStyleResponse(BaseModel):
+    """训练风格响应"""
+    version: int
+    signature: str
+    radar: Dict[str, float]
+    traits: List[Dict[str, Any]]
+    source_count: int
+    total_words: int
+
+
+class PreviewStyleRequest(BaseModel):
+    """风格预览请求"""
+    topic: str = Field(..., description="预览主题")
+    model: Optional[str] = Field(None, description="AI模型（留空使用默认模型）")
+
+
+class PreviewStyleResponse(BaseModel):
+    """风格预览响应"""
+    content: str
+
+
+# ===== 旧 Schema（保留兼容） =====
 
 class ArticleForAnalysisBase(BaseModel):
     """分析文章基础模型"""
@@ -111,7 +186,7 @@ class ArticleForAnalysisInDB(ArticleForAnalysisBase):
     processing_status: str = "pending"
     created_at: datetime
     updated_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -125,7 +200,7 @@ class ArticleForAnalysisResponse(ArticleForAnalysisBase):
     processing_status: str = "pending"
     created_at: datetime
     updated_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -151,3 +226,4 @@ class StyleAnalysisResponse(BaseModel):
     summary: str = Field(..., description="分析摘要")
     title: Optional[str] = Field(None, description="文章标题")
     word_count: int = Field(0, description="字数")
+    sources: Optional[List[Dict[str, Any]]] = Field(None, description="参与分析的来源")

@@ -56,10 +56,12 @@ async def update_user_profile(
     """更新用户资料"""
     # 更新用户基本信息
     if profile_in.full_name is not None or profile_in.avatar_url is not None:
-        user_update = UserUpdate(
-            full_name=profile_in.full_name,
-            avatar_url=profile_in.avatar_url
-        )
+        user_update_data = {}
+        if profile_in.full_name is not None:
+            user_update_data["full_name"] = profile_in.full_name
+        if profile_in.avatar_url is not None:
+            user_update_data["avatar_url"] = profile_in.avatar_url
+        user_update = UserUpdate(**user_update_data)
         await user_crud.update(db, db_obj=current_user, obj_in=user_update)
     
     # 更新用户资料
@@ -215,20 +217,20 @@ async def get_articles(
 
 @router.post("/upload-avatar", response_model=dict)
 async def upload_avatar(
-    file: UploadFile = File(...),
+    avatar: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """上传头像"""
     # 检查文件类型
-    if not file.content_type.startswith("image/"):
+    if not avatar.content_type.startswith("image/"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="只支持图片文件"
         )
     
     # 检查文件大小 (10MB)
-    if file.size > 10 * 1024 * 1024:
+    if avatar.size is not None and avatar.size > 10 * 1024 * 1024:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="文件大小不能超过10MB"
@@ -244,13 +246,13 @@ async def upload_avatar(
         os.makedirs(upload_dir, exist_ok=True)
         
         # 生成文件名
-        file_ext = file.filename.split(".")[-1]
+        file_ext = avatar.filename.split(".")[-1]
         filename = f"{current_user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{file_ext}"
         file_path = os.path.join(upload_dir, filename)
         
         # 保存文件
         with open(file_path, "wb") as buffer:
-            content = await file.read()
+            content = await avatar.read()
             buffer.write(content)
         
         # 更新用户头像URL

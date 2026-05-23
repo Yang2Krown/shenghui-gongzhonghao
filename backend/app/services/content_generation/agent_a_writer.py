@@ -207,8 +207,21 @@ async def generate_article(inp: ContentGenerationInput) -> AgentAOutput:
     )
 
     parsed = parse_json_loose(result.text)
-    if not parsed or "sections" not in parsed:
-        logger.error(f"[Agent A] 输出解析失败: {result.text[:300]}")
+    if parsed and "sections" not in parsed:
+        for alias in ("parts", "sections_list", "段落", "items", "节"):
+            if alias in parsed and isinstance(parsed[alias], list):
+                logger.warning(f"[Agent A] LLM 用了别名 key '{alias}'，已映射到 sections")
+                parsed["sections"] = parsed[alias]
+                break
+        else:
+            if isinstance(parsed, list):
+                parsed = {"sections": parsed}
+    if not parsed or not isinstance(parsed.get("sections"), list):
+        logger.error(
+            f"[Agent A] 输出解析失败 (len={len(result.text or '')}): "
+            f"parsed_keys={list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__}, "
+            f"原始响应前 800 字: {(result.text or '')[:800]!r}"
+        )
         raise ValueError("Agent A 输出格式不符合 schema")
 
     output = _parse_llm_output(parsed, inp)

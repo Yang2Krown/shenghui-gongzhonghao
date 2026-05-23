@@ -7,12 +7,12 @@
         <div class="flex items-center justify-center h-16 border-b border-line">
           <div v-if="!isCollapsed" class="flex items-center space-x-2">
             <div class="w-8 h-8 bg-clay rounded-r-md flex items-center justify-center">
-              <span class="text-white font-bold text-lg">AI</span>
+              <span class="text-paper font-bold text-lg">AI</span>
             </div>
             <span class="text-lg font-bold text-ink">内容运营平台</span>
           </div>
           <div v-else class="w-8 h-8 bg-clay rounded-r-md flex items-center justify-center">
-            <span class="text-white font-bold text-lg">AI</span>
+            <span class="text-paper font-bold text-lg">AI</span>
           </div>
         </div>
         
@@ -28,11 +28,6 @@
             <template #title>话题库</template>
           </el-menu-item>
 
-          <el-menu-item index="topic-candidates">
-            <el-icon><DataBoard /></el-icon>
-            <template #title>候选选题</template>
-          </el-menu-item>
-
           <el-menu-item index="creation">
             <el-icon><Edit /></el-icon>
             <template #title>我的创作</template>
@@ -43,12 +38,7 @@
           
           <el-menu-item index="settings">
             <el-icon><Setting /></el-icon>
-            <template #title>个人设置</template>
-          </el-menu-item>
-          
-          <el-menu-item index="style-settings">
-            <el-icon><Brush /></el-icon>
-            <template #title>风格设置</template>
+            <template #title>设置</template>
           </el-menu-item>
         </el-menu>
         
@@ -99,13 +89,6 @@
         </div>
         
         <div class="flex items-center space-x-4">
-          <!-- 通知图标 -->
-          <el-badge :value="3" :max="99" class="mr-4">
-            <el-icon :size="20" class="text-ink-3 hover:text-ink cursor-pointer">
-              <Bell />
-            </el-icon>
-          </el-badge>
-          
           <!-- 用户下拉菜单 -->
           <el-dropdown v-if="userStore.user" @command="handleUserCommand">
             <div class="flex items-center space-x-2 cursor-pointer">
@@ -121,10 +104,6 @@
             </div>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="profile">
-                  <el-icon><User /></el-icon>
-                  个人资料
-                </el-dropdown-item>
                 <el-dropdown-item command="settings">
                   <el-icon><Setting /></el-icon>
                   设置
@@ -141,7 +120,11 @@
       
       <!-- 页面内容 -->
       <el-main class="pt-20 pb-8 px-6">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <keep-alive :include="['TopicClusters']">
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </el-main>
     </div>
   </div>
@@ -151,7 +134,7 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { Edit, Setting, Brush, Bell, User, SwitchButton, ArrowDown, Expand, Fold, DataBoard, Folder } from '@element-plus/icons-vue'
+import { Edit, Setting, SwitchButton, ArrowDown, Expand, Fold, DataBoard, Folder } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -166,8 +149,7 @@ const activeMenu = computed(() => {
   if (path === '/' || path.startsWith('/topic-clusters')) return 'topic-clusters'
   if (path.startsWith('/topic-candidates')) return 'topic-candidates'
   if (path.startsWith('/creation')) return 'creation'
-  if (path === '/settings') return 'settings'
-  if (path === '/settings/style') return 'style-settings'
+  if (path.startsWith('/settings')) return 'settings'
   return 'topic-clusters'
 })
 
@@ -192,7 +174,6 @@ const handleMenuSelect = (index) => {
     'topic-candidates': '/topic-candidates',
     'creation': '/creation',
     'settings': '/settings',
-    'style-settings': '/settings/style'
   }
 
   if (menuRoutes[index]) {
@@ -203,9 +184,6 @@ const handleMenuSelect = (index) => {
 // 用户命令处理
 const handleUserCommand = (command) => {
   switch (command) {
-    case 'profile':
-      router.push('/settings')
-      break
     case 'settings':
       router.push('/settings')
       break

@@ -1,7 +1,8 @@
 <template>
   <div class="agent-status-bar">
     <div class="agent-avatar" :class="{ active: isActive }">
-      {{ agentLabel }}
+      <img v-if="avatar" :src="avatar" class="avatar-img" />
+      <span v-else>{{ agentLabel }}</span>
     </div>
     <div class="agent-info">
       <div class="agent-name">{{ agentName }}</div>
@@ -28,6 +29,7 @@ const props = defineProps({
   isActive: { type: Boolean, default: false },
   percent: { type: Number, default: 0 },
   showProgress: { type: Boolean, default: false },
+  avatar: { type: String, default: '' },
 })
 
 const agentLabel = computed(() => {
@@ -66,13 +68,21 @@ const agentLabel = computed(() => {
   font-size: 14px;
   flex-shrink: 0;
   transition: all 0.3s;
+  overflow: hidden;
 }
 
 .agent-avatar.active {
   background: var(--clay);
-  color: #fff;
+  color: var(--paper);
   box-shadow: 0 0 0 3px rgba(204, 120, 92, 0.2);
   animation: pulse-ring 2s ease-in-out infinite;
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
 }
 
 .agent-info {

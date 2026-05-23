@@ -69,22 +69,26 @@ const routes = [
         meta: { title: '新建创作' }
       },
       {
-        path: 'creation/:id',
+        path: 'creation/editor/:id',
         name: 'EditCreation',
         component: () => import('@/pages/creation/CreationEditor.vue'),
         meta: { title: '编辑创作' }
       },
       {
+        path: 'creation/:id',
+        name: 'CreationDraft',
+        component: () => import('@/pages/creation/CreationDraft.vue'),
+        meta: { title: '草稿详情' }
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('@/pages/settings/ProfileSettings.vue'),
-        meta: { title: '个人设置' }
+        meta: { title: '设置' }
       },
       {
         path: 'settings/style',
-        name: 'StyleSettings',
-        component: () => import('@/pages/settings/StyleSettings.vue'),
-        meta: { title: '风格设置' }
+        redirect: '/settings'
       },
       // ===== 旧路由 → 重定向到创作工作台 =====
       {
@@ -133,11 +137,12 @@ const router = createRouter({
   history: createWebHistory(),
   routes,
   scrollBehavior(to, from, savedPosition) {
-    if (savedPosition) {
-      return savedPosition
-    } else {
-      return { top: 0 }
-    }
+    // 浏览器前进/后退：还原原位置
+    if (savedPosition) return savedPosition
+    // 同一路径只变 query（点 chip / 写 URL 状态等），保持当前滚动位置不变
+    if (to.path === from.path) return false
+    // 切换路由：回到顶部
+    return { top: 0 }
   }
 })
 

@@ -98,36 +98,67 @@ def compute_low_fan_hit(engagements: List[Dict[str, Any]]) -> bool:
 # AI 相关性过滤
 # ──────────────────────────────────────────────
 
-# 宽泛的 AI/科技 关键词（中英文），命中任一即视为 AI 相关
+# AI/科技 关键词（中英文）。原则：必须是 AI 专有词或强复合词，
+# 避免单字"训练/推理/微调/机器人/Agent"等通用词误报（运动员训练、聊天机器人客服等）。
 AI_RELATED_KEYWORDS = [
-    # 大模型 & 公司
+    # 大模型 & 公司 —— 专有名词
     "AI", "人工智能", "大模型", "LLM", "GPT", "Claude", "Gemini", "Kimi", "Qwen", "DeepSeek",
     "Grok", "OpenAI", "Anthropic", "Google DeepMind", "Meta AI", "百度文心", "阿里通义",
     "智谱", "月之暗面", "MiniMax", "零一万物", "百川",
     # Coding Agent
     "Codex", "Cursor", "Copilot", "Claude Code", "vibe coding", "AI 编程", "coding agent",
-    # Agent & 工作流
-    "Agent", "MCP", "A2A", "agentic", "智能体", "工作流自动化",
+    "AI Coding", "AI 写代码", "AI 编辑器",
+    # Agent & 工作流 —— 必须有"AI/智能/agentic"修饰
+    "AI Agent", "Coding Agent", "MCP", "A2A", "agentic", "智能体", "工作流自动化",
+    "Agent 工作流", "Agent Memory",
     # AI 视频 & 出图
     "Sora", "Runway", "Vidu", "可灵", "即梦", "Pika", "Midjourney", "Stable Diffusion",
-    "AI 视频", "视频生成", "AI 绘画", "出图",
-    # AI 硬件 & 芯片
-    "英伟达", "NVIDIA", "GPU", "TPU", "芯片", "算力", "H100", "B200", "Blackwell",
+    "AI 视频", "视频生成", "AI 绘画", "AI 出图", "文生图", "文生视频",
+    # AI 硬件 & 芯片 —— 用专有型号 + AI 芯片复合词
+    "英伟达", "NVIDIA", "H100", "B200", "Blackwell", "AI 芯片", "AI 算力",
+    "GPU 算力", "TPU",
     # AI 应用
     "ChatGPT", "AI 搜索", "AI 助手", "AI 写作", "AI 翻译", "AI 编程工具",
-    "具身智能", "机器人", "自动驾驶", "FSD",
-    # 通用
+    "具身智能", "AI 机器人", "人形机器人", "自动驾驶", "FSD",
+    # AI 训练/推理 —— 复合词避免误报
     "机器学习", "深度学习", "神经网络", "transformer", "RAG", "向量数据库",
-    "embedding", "微调", "fine-tune", "推理", "训练",
+    "AI 推理", "模型推理", "模型训练", "AI 训练", "预训练",
+    "模型微调", "LoRA 微调", "fine-tune", "embedding 模型",
 ]
+
+
+# 短英文关键词（≤4 字母）必须用词边界匹配，避免子串误命中
+# 比如 "AI" 不能匹配 URL 里的 "d59wc985ai2h1"
+import re as _re
+_SHORT_EN_KEYWORDS = {"AI", "LLM", "GPT", "MCP", "A2A", "TPU", "GPU", "RAG", "FSD", "AGI", "LoRA"}
+
+
+def _keyword_hit(kw: str, text_raw: str, text_lower: str) -> bool:
+    """单关键词命中检测：短英文用词边界，其他用 substring。"""
+    if kw in _SHORT_EN_KEYWORDS:
+        return bool(_re.search(rf"\b{_re.escape(kw)}\b", text_raw, _re.IGNORECASE))
+    return kw.lower() in text_lower
+
+
+_HASHTAG_RE = _re.compile(r"#[\w一-鿿]+")
+
+
+def _strip_hashtags(text: str) -> str:
+    """去掉 #xxx 标签 —— 标签里出现 AI 关键词不应让一条娱乐内容被判为 AI。"""
+    return _HASHTAG_RE.sub(" ", text or "")
 
 
 def is_ai_related(title: str, summary: str = "") -> bool:
     """判断内容是否与 AI 相关。标题或摘要命中任一关键词即返回 True。
 
     先排除明显非 AI 的主题（金融、地产、汽车、娱乐等），再检查 AI 关键词。
+    注意：会剥掉 hashtag 再匹配——光在尾部标签里挂个 #ai 不算 AI 内容。
     """
-    text = f"{title} {summary}".lower()
+    # 剥掉 hashtag 再做关键词匹配
+    title_body = _strip_hashtags(title)
+    summary_body = _strip_hashtags(summary)
+    text_raw = f"{title_body} {summary_body}"
+    text = text_raw.lower()
 
     # 排除：标题主体是非 AI 话题（即使偶尔提到 AI 也不算）
     NON_AI_PATTERNS = [
@@ -142,29 +173,68 @@ def is_ai_related(title: str, summary: str = "") -> bool:
         "续航", "充电桩", "电池容量",
         # 娱乐/生活
         "明星", "综艺", "电影", "票房", "追星", "八卦",
-        "美食", "旅游", "穿搭", "护肤",
-        # 政治/军事
+        "美食", "旅游", "穿搭", "护肤", "美妆", "化妆", "口红",
+        "宠物", "养猫", "养狗", "铲屎官",
+        "婚礼", "婚纱", "恋爱", "相亲", "婆媳", "亲子", "带娃", "育儿",
+        # 偶像 / KPOP / 二次元
+        "kpop", "k-pop", "爱豆", "偶像", "团综", "选秀", "出道",
+        "饭圈", "应援", "打投", "ido", "嫂嫂", "老婆粉",
+        # 游戏 / 模拟器 / 二游 / 手游
+        "模拟器", "手游", "端游", "二游", "网游", "页游", "文游",
+        "经纪人模拟", "恋爱模拟", "养成游戏", "乙游", "galgame",
+        "原神", "崩坏", "明日方舟", "王者荣耀", "lol", "csgo",
+        "steam", "switch", "playstation", "ns 游戏",
+        # 健康/医疗/养生
+        "猝死", "心梗", "癌症", "减肥", "健身", "瑜伽", "跑步", "马拉松",
+        "运动员", "睡眠", "养生", "中医", "针灸",
+        # 政治/军事/社会新闻
         "选举", "总统", "国会", "军事", "军演", "导弹",
+        "裸辞", "辞职", "考研", "考公", "学区房",
+        # 名人 / 突发事件
+        "张雪峰", "周鸿祎", "罗永浩",  # 容易被借势但跟 AI 无关
+        "猝死", "去世", "意外身亡", "讣告",
         # 其他科技（非 AI）
         "5g", "6g", "光纤", "宽带", "运营商",
         "量子计算", "量子通信",
     ]
 
-    # 如果标题核心词命中排除列表，且没有强 AI 关键词，视为非 AI
-    # 简单策略：标题长度 > 10 字时，排除词出现在标题前半段视为主体
-    title_lower = title.lower()
-    has_strong_ai = any(kw.lower() in title_lower for kw in [
-        "ai", "人工智能", "大模型", "llm", "gpt", "claude", "gemini",
-        "openai", "anthropic", "deepseek", "agent", "codex", "cursor",
-        "chatgpt", "机器学习", "深度学习", "具身智能",
-    ])
+    title_lower = title_body.lower()
+    _strong_kws = [
+        # 核心概念
+        "AI", "人工智能", "AGI", "大模型", "LLM", "智能体", "Agent",
+        "机器学习", "深度学习", "具身智能", "MCP", "RAG", "embedding",
+        "扩散模型", "Transformer", "强化学习", "微调", "Fine-tune", "蒸馏",
+        # 头部产品 / 公司
+        "ChatGPT", "GPT", "Claude", "Gemini", "Grok", "Llama",
+        "OpenAI", "Anthropic", "DeepSeek", "Qwen", "Kimi", "Moonshot",
+        "Mistral", "xAI", "Cohere",
+        # 编程类
+        "Codex", "Cursor", "Copilot", "Devin", "Windsurf", "Qoder",
+        "Coding Agent", "vibecoding", "vibe coding", "vibe 编程",
+        # 多模态 / 生成
+        "Sora", "Midjourney", "Stable Diffusion", "Runway", "Pika", "Luma",
+        "可灵", "即梦", "Vidu", "ControlNet", "LoRA",
+        # 其它
+        "AIGC", "向量数据库", "AI 编程", "AI 视频", "AI 绘画",
+    ]
 
-    if not has_strong_ai:
+    has_strong_ai_in_title = any(_keyword_hit(kw, title_body, title_lower) for kw in _strong_kws)
+    # 标题没强 AI 信号且命中非 AI 主题（"模拟器""爱豆"等）→ 直接判非 AI
+    if not has_strong_ai_in_title:
         for pattern in NON_AI_PATTERNS:
             if pattern in title_lower:
                 return False
 
-    return any(kw.lower() in text for kw in AI_RELATED_KEYWORDS)
+    # 剥 hashtag 后的全文里出现强 AI 关键词，就算 AI 相关——
+    # 既能拦下"经纪人模拟器 #ai #deepseek"这种只在尾巴 hashtag 挂 AI 的，
+    # 也能放过"用 ai 做了一个网页传输工具"这种正文里说 AI 的
+    has_strong_ai_anywhere = any(_keyword_hit(kw, text_raw, text) for kw in _strong_kws)
+    if has_strong_ai_anywhere:
+        return True
+
+    # 没强关键词时，要求弱关键词至少命中 2 个（更稳）
+    weak_hits = sum(1 for kw in AI_RELATED_KEYWORDS if _keyword_hit(kw, text_raw, text))
+    return weak_hits >= 2
 
 
 # 方向匹配：先用关键词字典，未来可换成 embedding 相似度匹配 SourceRegistry.direction_tags

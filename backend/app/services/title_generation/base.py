@@ -78,7 +78,10 @@ class BaseAgent(ABC):
         try:
             return json.loads(response)
         except (json.JSONDecodeError, TypeError):
-            logger.warning(f"无法解析JSON响应: {str(response)[:200]}...")
+            preview = (response or "")[:1200] if response else "<EMPTY>"
+            logger.warning(
+                f"无法解析JSON响应 (len={len(response or '')}): {preview!r}"
+            )
             return {}
 
     @abstractmethod

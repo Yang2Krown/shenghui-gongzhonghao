@@ -2,14 +2,14 @@
   <div class="topic-cluster-detail">
     <!-- 返回按钮 -->
     <div class="mb-4">
-      <el-button text @click="router.push('/topic-clusters')" style="color: #6B6862;">
+      <el-button text @click="goBack" style="color: #6B6862;">
         &larr; 返回话题库
       </el-button>
     </div>
 
     <!-- 加载状态 -->
     <div v-if="loading" class="flex justify-center items-center py-20">
-      <el-icon class="is-loading" :size="32" style="color: #CC785C;"><Loading /></el-icon>
+      <el-icon class="is-loading" :size="32" style="color: var(--clay);"><Loading /></el-icon>
       <span class="ml-2" style="color: #6B6862;">加载中...</span>
     </div>
 
@@ -18,7 +18,7 @@
       <div class="detail-card mb-6">
         <div class="p-6">
           <!-- 标题：中文主显 + 英文原标题灰色小字 -->
-          <h1 class="font-serif mb-1" style="font-size: 28px; font-weight: 500; color: #1F1F1E; line-height: 1.3;">
+          <h1 class="font-serif mb-1" style="font-size: 28px; font-weight: 500; color: var(--ink); line-height: 1.3;">
             {{ cluster.core_title_zh || cluster.core_title }}
           </h1>
           <p v-if="cluster.core_title_zh && cluster.core_title_zh !== cluster.core_title"
@@ -33,6 +33,8 @@
             <span v-if="cluster.direction" class="tag-direction">{{ cluster.direction }}</span>
             <span v-if="cluster.freshness" class="tag-freshness">{{ formatFreshness(cluster.freshness) }}</span>
             <span v-if="cluster.low_fan_hit" class="tag-hot">低粉爆款</span>
+            <span v-if="cluster.mined" class="tag-mined">已挖掘</span>
+            <span v-else class="tag-unmined">未挖掘</span>
           </div>
 
           <!-- 摘要：中文优先 + 英文原文小字回退 -->
@@ -49,16 +51,16 @@
           <div v-if="cluster.elements && Object.keys(cluster.elements).length > 0" class="mb-4">
             <h4 style="color: #3A3935; font-size: 14px; font-weight: 600; margin-bottom: 8px;">信息要素</h4>
             <div class="flex flex-wrap gap-2">
-              <span v-for="(val, key) in cluster.elements" :key="key" class="element-tag">
+              <span v-for="(val, key) in cluster.elements" :key="key" class="element-tag" v-show="val">
                 {{ key }}: {{ val }}
               </span>
             </div>
           </div>
 
           <!-- 底部信息 -->
-          <div class="flex items-center justify-between pt-4" style="border-top: 1px solid #E4DDCE;">
+          <div class="flex items-center justify-between pt-4" style="border-top: 1px solid var(--line);">
             <div class="flex items-center space-x-4" style="font-size: 13px; color: #6B6862;">
-              <span>热度: <strong style="color: #CC785C;">{{ cluster.heat_score?.toFixed(1) || '-' }}</strong></span>
+              <span>热度: <strong style="color: var(--clay);">{{ cluster.heat_score?.toFixed(1) || '-' }}</strong></span>
               <span>{{ cluster.candidates?.length || 0 }} 个候选选题</span>
               <span>{{ cluster.source_urls?.length || 0 }} 篇原文</span>
             </div>
@@ -71,7 +73,7 @@
 
       <!-- 原文来源区域：卡片化 -->
       <div v-if="cluster.raw_infos?.length > 0 || cluster.source_urls?.length > 0" class="source-section mb-6">
-        <h3 class="font-serif mb-3" style="font-size: 18px; font-weight: 500; color: #1F1F1E;">
+        <h3 class="font-serif mb-3" style="font-size: 18px; font-weight: 500; color: var(--ink);">
           原文来源
           <span style="color: #6B6862; font-size: 14px; font-weight: 400;">
             ({{ cluster.raw_infos?.length || cluster.source_urls?.length }})
@@ -122,22 +124,39 @@
         </div>
       </div>
 
-      <!-- 候选选题列表 -->
-      <div>
+      <!-- 候选选题 + Agent 反馈 双栏布局 -->
+      <div class="mining-result-layout" :class="{ 'has-feedback': miningDone && agentFeedback.length }">
+      <!-- 左栏：候选选题列表 -->
+      <div class="mining-result-left">
         <div class="flex items-center justify-between mb-4">
-          <h3 class="font-serif" style="font-size: 18px; font-weight: 500; color: #1F1F1E;">
+          <h3 class="font-serif" style="font-size: 18px; font-weight: 500; color: var(--ink);">
             候选选题
             <span style="color: #6B6862; font-size: 14px; font-weight: 400;">({{ cluster.candidates?.length || 0 }})</span>
           </h3>
         </div>
 
-        <div v-if="!cluster.candidates || cluster.candidates.length === 0" class="text-center py-12" style="background: #FAF9F5; border: 1px solid #E4DDCE; border-radius: 16px;">
+        <!-- Agent 进度条（挖掘进行中） -->
+        <div v-if="miningIsRunning" class="mb-4">
+          <AgentStatusBar
+            v-for="(step, i) in miningSteps"
+            :key="i"
+            :agent-name="step.agent"
+            :action="step.action"
+            :is-active="i === miningStepIndex"
+            :show-progress="i === miningStepIndex"
+            :percent="i === miningStepIndex ? miningStepPercent : (i < miningStepIndex ? 100 : 0)"
+            :avatar="step.avatar"
+            class="mb-2"
+          />
+        </div>
+
+        <div v-if="!cluster.candidates || cluster.candidates.length === 0" class="text-center py-12" style="background: var(--paper); border: 1px solid var(--line); border-radius: 16px;">
           <p style="color: #6B6862;">该话题尚未挖掘候选选题</p>
           <el-button
             class="mt-3"
-            :loading="mining"
+            :loading="miningIsRunning"
             @click="triggerMining"
-            style="background: #CC785C; color: #fff; border: none; border-radius: 10px;"
+            style="background: var(--clay); color: var(--paper); border: none; border-radius: 10px;"
           >
             立即挖掘
           </el-button>
@@ -148,7 +167,7 @@
             v-for="candidate in cluster.candidates"
             :key="candidate.id"
             class="candidate-card"
-            @click="expandedId = expandedId === candidate.id ? null : candidate.id"
+            @click="selectCandidate(candidate)"
           >
             <div class="p-5">
               <div class="flex items-start justify-between">
@@ -159,10 +178,10 @@
                     <span class="verdict-badge" :class="getVerdictClass(candidate.verdict)">
                       {{ getVerdictIcon(candidate.verdict) }}
                     </span>
-                    <h4 style="font-size: 16px; font-weight: 600; color: #1F1F1E;">
+                    <h4 style="font-size: 16px; font-weight: 600; color: var(--ink);">
                       {{ candidate.title }}
                     </h4>
-                    <span v-if="candidate.persona_divergence_flag" style="color: #C49B5C;" title="Persona 分歧度高">
+                    <span v-if="candidate.persona_divergence_flag" style="color: var(--sand);" title="Persona 分歧度高">
                       !
                     </span>
                   </div>
@@ -201,7 +220,7 @@
                   </div>
                   <div style="font-size: 12px; color: #6B6862; margin-top: 4px;">加权总分</div>
                   <div v-if="!candidate.veto_passed" class="mt-2">
-                    <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: #B85450; color: #fff;">一票否决</span>
+                    <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: var(--crimson); color: var(--paper);">一票否决</span>
                   </div>
                   <!-- 去创作按钮 -->
                   <el-button
@@ -216,11 +235,11 @@
               </div>
 
               <!-- 展开的评分明细 -->
-              <div v-if="expandedId === candidate.id && candidate.score" class="mt-4 pt-4" style="border-top: 1px solid #E4DDCE;">
+              <div v-if="expandedId === candidate.id && candidate.score" class="mt-4 pt-4" style="border-top: 1px solid var(--line);">
                 <div class="grid grid-cols-3 md:grid-cols-6 gap-4 mb-3">
                   <div v-for="(label, key) in dimensionLabels" :key="key" class="text-center">
                     <div style="font-size: 12px; color: #6B6862;">{{ label }}</div>
-                    <div style="font-size: 18px; font-weight: 600; color: #1F1F1E;">{{ candidate.score[key]?.toFixed(1) || '-' }}</div>
+                    <div style="font-size: 18px; font-weight: 600; color: var(--ink);">{{ candidate.score[key]?.toFixed(1) || '-' }}</div>
                   </div>
                 </div>
                 <div v-if="candidate.score.evidence" style="font-size: 12px; color: #9A968D;">
@@ -230,14 +249,23 @@
                 </div>
 
                 <!-- 角切入说明 -->
-                <div v-if="candidate.angle_note" class="mt-3 p-3" style="background: #F5E2D5; border-radius: 10px;">
-                  <span style="font-size: 12px; font-weight: 600; color: #A85A40;">切入说明: </span>
+                <div v-if="candidate.angle_note" class="mt-3 p-3" style="background: var(--clay-tint); border-radius: 10px;">
+                  <span style="font-size: 12px; font-weight: 600; color: var(--clay-deep);">切入说明: </span>
                   <span style="font-size: 13px; color: #3A3935;">{{ candidate.angle_note }}</span>
                 </div>
               </div>
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- 右栏：Agent 反馈面板 -->
+      <div v-if="miningDone && agentFeedback.length" class="mining-result-right">
+        <AgentFeedbackPanel
+          :agents="agentFeedback"
+          subtitle="选题挖掘流水线：沈知远 衍生候选 → 白景明 评分评估"
+        />
+      </div>
       </div>
     </template>
 
@@ -249,19 +277,40 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import { get, post } from '@/api/api'
+import { useAgentProgress } from '@/composables/useAgentProgress'
+import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
+import AgentFeedbackPanel from '@/components/creation/AgentFeedbackPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
 
+// 优先用浏览器历史回退，能保留话题库分页/筛选状态；
+// 没有历史（直接进入详情页）时才 fallback 到话题库首页。
+const goBack = () => {
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push('/topic-clusters')
+  }
+}
+
 const loading = ref(true)
-const mining = ref(false)
 const cluster = ref(null)
 const expandedId = ref(null)
+const miningDone = ref(false)
+const selectedCandidateId = ref(null)
+
+// Agent 进度（SSE 驱动）
+const miningProgress = useAgentProgress()
+const miningIsRunning = miningProgress.isRunning
+const miningSteps = miningProgress.steps
+const miningStepIndex = miningProgress.currentStepIndex
+const miningStepPercent = miningProgress.stepPercent
 
 const dimensionLabels = {
   pain_point: '痛点直击',
@@ -272,8 +321,70 @@ const dimensionLabels = {
   audience_fit: '受众适配',
 }
 
+// Agent 反馈数据（挖掘完成后展示）
+const agentFeedback = computed(() => {
+  const c = cluster.value
+  if (!c?.candidates?.length || !miningDone.value) return []
+
+  const candidates = c.candidates
+  const selectedCount = candidates.filter(x => x.verdict === 'selected').length
+  const backupCount = candidates.filter(x => x.verdict === 'backup').length
+  const rejectedCount = candidates.filter(x => x.verdict === 'rejected').length
+  const vetoedCount = candidates.filter(x => x.verdict === 'vetoed').length
+
+  const agentA = {
+    id: 'A',
+    code: 'A',
+    name: '沈知远 · 选题衍生员',
+    role: '从话题信息中衍生候选选题',
+    avatar: '/agents/agent-a.png',
+    summary: `基于话题「${c.core_title_zh || c.core_title}」，共衍生 ${candidates.length} 个候选选题。`,
+  }
+
+  const selectedCandidate = candidates.find(x => x.id === selectedCandidateId.value)
+
+  let agentB
+  if (selectedCandidate) {
+    // 展示选中候选的详细评价
+    const verdictLabel = selectedCandidate.verdict === 'selected' ? '入选' : selectedCandidate.verdict === 'backup' ? '备选' : selectedCandidate.verdict === 'vetoed' ? '否决' : '淘汰'
+    const personaText = (selectedCandidate.persona_reviews || [])
+      .map(pr => `${pr.persona}（${pr.score}分）：${pr.rationale}`)
+      .join('\n')
+    agentB = {
+      id: 'B',
+      code: 'B',
+      name: '白景明 · 选题评分员',
+      role: '6 维度评分 + 入选判定',
+      avatar: '/agents/agent-b.png',
+      summary: `「${selectedCandidate.title}」— ${verdictLabel}，加权总分 ${selectedCandidate.weighted_score?.toFixed(1) ?? '-'}`,
+      suggestions: personaText ? personaText.split('\n') : [],
+    }
+  } else {
+    // 未选中任何候选时，显示总览
+    agentB = {
+      id: 'B',
+      code: 'B',
+      name: '白景明 · 选题评分员',
+      role: '6 维度评分 + 入选判定',
+      avatar: '/agents/agent-b.png',
+      summary: `入选 ${selectedCount} · 备选 ${backupCount} · 淘汰 ${rejectedCount} · 否决 ${vetoedCount}`,
+    }
+  }
+
+  return [agentA, agentB]
+})
+
+const selectCandidate = (candidate) => {
+  expandedId.value = expandedId.value === candidate.id ? null : candidate.id
+  selectedCandidateId.value = expandedId.value ? candidate.id : null
+}
+
 onMounted(() => {
   loadCluster()
+})
+
+onUnmounted(() => {
+  miningProgress.stop()
 })
 
 const loadCluster = async () => {
@@ -281,6 +392,10 @@ const loadCluster = async () => {
   try {
     const res = await get(`/topic-clusters/${route.params.id}`)
     cluster.value = res.data
+    // 如果已有候选选题，说明挖掘已完成，恢复反馈面板状态
+    if (res.data?.candidates?.length > 0) {
+      miningDone.value = true
+    }
   } catch (error) {
     if (error.response?.status === 404) {
       cluster.value = null
@@ -293,30 +408,55 @@ const loadCluster = async () => {
 }
 
 const triggerMining = async () => {
+  console.log('[triggerMining] clicked, cluster_id:', cluster.value?.id)
   if (!cluster.value?.id) return
-  mining.value = true
+  miningDone.value = false
+
+  // 监听 SSE 结果
+  const stopWatch = watch(() => miningProgress.result.value, (newResult) => {
+    if (newResult) {
+      console.log('[triggerMining] SSE result:', newResult)
+      ElMessage.success(`挖掘完成，生成 ${newResult.total_candidates ?? '?'} 个候选`)
+      miningDone.value = true
+      loadCluster()
+      stopWatch()
+    }
+  })
+
+  // 监听 SSE 错误
+  const stopErrorWatch = watch(() => miningProgress.error.value, (newError) => {
+    if (newError) {
+      console.error('[triggerMining] SSE error:', newError)
+      ElMessage.error(`挖掘失败: ${newError}`)
+      stopErrorWatch()
+    }
+  })
+
   try {
-    // 挖掘需顺序调用 Agent A + Agent B 两次 LLM，耗时较长，单独放宽超时到 180s
-    const res = await post('/topic-candidates/mine', { cluster_id: cluster.value.id }, { timeout: 180000 })
+    console.log('[triggerMining] POST /topic-candidates/mine ...')
+    const res = await post('/topic-candidates/mine', { cluster_id: cluster.value.id })
+    console.log('[triggerMining] POST response:', res?.data)
     const data = res?.data || {}
     if (data.skipped) {
       ElMessage.info('该话题已经挖掘过')
-    } else {
-      ElMessage.success(`挖掘完成，生成 ${data.total_candidates ?? '?'} 个候选`)
+      await loadCluster()
+      miningDone.value = true
+      return
     }
-    await loadCluster()
+    const runId = data.run_id
+    console.log('[triggerMining] run_id:', runId)
+    if (runId) {
+      miningProgress.start(`/api/v1/topic-candidates/stream/${runId}`)
+    }
   } catch (error) {
-    // axios 错误：从 response.data.detail 拿 FastAPI 抛出的具体错误
+    console.error('[triggerMining] POST failed:', error)
     const detail = error?.response?.data?.detail || error?.message || '挖掘失败'
     ElMessage.error(`挖掘失败: ${detail}`)
-    console.error('[triggerMining]', error)
-  } finally {
-    mining.value = false
   }
 }
 
 const formatFreshness = (val) => {
-  const map = { '24h': '24h 内', '7d': '7 天内', '30d': '30 天内', 'expired': '已过期' }
+  const map = { '24h': '24h 内', '7d': '7 天内', '30d': '30 天内', 'expired': '大于 30 天' }
   return map[val] || val
 }
 
@@ -349,10 +489,10 @@ const getVerdictClass = (verdict) => {
 }
 
 const getScoreColor = (score) => {
-  if (!score) return '#6B6862'
-  if (score >= 7) return '#5C8A5C'
-  if (score >= 5) return '#C49B5C'
-  return '#B85450'
+  if (!score) return 'var(--ink-3)'
+  if (score >= 7) return 'var(--leaf)'
+  if (score >= 5) return 'var(--sand)'
+  return 'var(--crimson)'
 }
 
 // 去创作
@@ -371,15 +511,15 @@ const startCreation = (candidate) => {
 
 <style scoped>
 .detail-card {
-  background: #FAF9F5;
-  border: 1px solid #E4DDCE;
+  background: var(--paper);
+  border: 1px solid var(--line);
   border-radius: 16px;
   box-shadow: 0 1px 2px rgba(31,31,30,.04), 0 0 0 1px rgba(31,31,30,.04);
 }
 
 .source-section {
-  background: #FAF9F5;
-  border: 1px solid #E4DDCE;
+  background: var(--paper);
+  border: 1px solid var(--line);
   border-radius: 16px;
   padding: 24px;
 }
@@ -389,15 +529,15 @@ const startCreation = (candidate) => {
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
-  background: #fff;
-  border: 1px solid #E4DDCE;
+  background: var(--paper);
+  border: 1px solid var(--line);
   border-radius: 10px;
   text-decoration: none;
   transition: all 0.15s;
 }
 .source-item:hover {
-  border-color: #CC785C;
-  background: #F5E2D5;
+  border-color: var(--clay);
+  background: var(--clay-tint);
 }
 
 .source-index {
@@ -407,8 +547,8 @@ const startCreation = (candidate) => {
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  background: #CC785C;
-  color: #fff;
+  background: var(--clay);
+  color: var(--paper);
   font-size: 12px;
   font-weight: 600;
   flex-shrink: 0;
@@ -424,7 +564,7 @@ const startCreation = (candidate) => {
 }
 
 .source-arrow {
-  color: #CC785C;
+  color: var(--clay);
   font-size: 16px;
   flex-shrink: 0;
 }
@@ -432,15 +572,15 @@ const startCreation = (candidate) => {
 /* 新版原文卡片 */
 .source-card {
   display: block;
-  background: #fff;
-  border: 1px solid #E4DDCE;
+  background: var(--paper);
+  border: 1px solid var(--line);
   border-radius: 12px;
   text-decoration: none;
   transition: all 0.2s cubic-bezier(.32, .72, 0, 1);
   overflow: hidden;
 }
 .source-card:hover {
-  border-color: #CC785C;
+  border-color: var(--clay);
   box-shadow: 0 4px 12px rgba(204, 120, 92, 0.10);
   transform: translateY(-1px);
 }
@@ -457,11 +597,11 @@ const startCreation = (candidate) => {
   display: inline-block;
   padding: 2px 10px;
   border-radius: 999px;
-  background: #F5E2D5;
-  color: #A85A40;
+  background: var(--clay-tint);
+  color: var(--clay-deep);
   font-size: 12px;
   font-weight: 500;
-  border: 1px solid #E9B79E;
+  border: 1px solid var(--clay-soft);
 }
 .source-card-time {
   font-size: 12px;
@@ -470,7 +610,7 @@ const startCreation = (candidate) => {
 .source-card-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1F1F1E;
+  color: var(--ink);
   line-height: 1.45;
   margin-bottom: 6px;
 }
@@ -494,13 +634,13 @@ const startCreation = (candidate) => {
   color: #9A968D;
 }
 .source-card-link {
-  color: #CC785C;
+  color: var(--clay);
   font-weight: 500;
 }
 
 .candidate-card {
-  background: #FAF9F5;
-  border: 1px solid #E4DDCE;
+  background: var(--paper);
+  border: 1px solid var(--line);
   border-radius: 16px;
   cursor: pointer;
   transition: all 0.24s cubic-bezier(.32, .72, 0, 1);
@@ -524,19 +664,19 @@ const startCreation = (candidate) => {
 }
 
 .verdict-selected {
-  background: #5C8A5C;
-  color: #fff;
+  background: var(--leaf);
+  color: var(--paper);
 }
 .verdict-backup {
-  background: #C49B5C;
-  color: #fff;
+  background: var(--sand);
+  color: var(--paper);
 }
 .verdict-rejected {
-  background: #B85450;
-  color: #fff;
+  background: var(--crimson);
+  color: var(--paper);
 }
 .verdict-vetoed {
-  background: #EFEAE0;
+  background: var(--bone);
   color: #6B6862;
 }
 
@@ -546,9 +686,9 @@ const startCreation = (candidate) => {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
-  background: #F5E2D5;
-  color: #A85A40;
-  border: 1px solid #E9B79E;
+  background: var(--clay-tint);
+  color: var(--clay-deep);
+  border: 1px solid var(--clay-soft);
 }
 
 .tag-direction {
@@ -558,7 +698,7 @@ const startCreation = (candidate) => {
   font-size: 12px;
   font-weight: 500;
   background: #C9D4CD;
-  color: #3F5C52;
+  color: var(--pine);
 }
 
 .tag-direction-sm {
@@ -568,7 +708,7 @@ const startCreation = (candidate) => {
   font-size: 11px;
   font-weight: 500;
   background: #C9D4CD;
-  color: #3F5C52;
+  color: var(--pine);
 }
 
 .tag-freshness {
@@ -578,7 +718,7 @@ const startCreation = (candidate) => {
   font-size: 12px;
   font-weight: 500;
   background: #ECDCBF;
-  color: #C49B5C;
+  color: var(--sand);
 }
 
 .tag-hot {
@@ -587,8 +727,29 @@ const startCreation = (candidate) => {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
-  background: #B85450;
-  color: #fff;
+  background: var(--crimson);
+  color: var(--paper);
+}
+
+.tag-mined {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--leaf);
+  color: var(--paper);
+}
+
+.tag-unmined {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--bone);
+  color: #6B6862;
+  border: 1px solid var(--line);
 }
 
 .tag-business-sensitive {
@@ -609,9 +770,9 @@ const startCreation = (candidate) => {
   border-radius: 999px;
   font-size: 11px;
   font-weight: 500;
-  background: #EFEAE0;
+  background: var(--bone);
   color: #3A3935;
-  border: 1px solid #E4DDCE;
+  border: 1px solid var(--line);
 }
 
 .tag-dim {
@@ -621,7 +782,7 @@ const startCreation = (candidate) => {
   font-size: 11px;
   font-weight: 500;
   background: #ECDCBF;
-  color: #C49B5C;
+  color: var(--sand);
 }
 
 .element-tag {
@@ -629,8 +790,31 @@ const startCreation = (candidate) => {
   padding: 3px 10px;
   border-radius: 6px;
   font-size: 12px;
-  background: #EFEAE0;
+  background: var(--bone);
   color: #3A3935;
-  border: 1px solid #E4DDCE;
+  border: 1px solid var(--line);
+}
+
+/* 挖掘结果双栏布局 */
+.mining-result-layout {
+  display: block;
+}
+
+.mining-result-layout.has-feedback {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: flex-start;
+}
+
+@media (max-width: 1100px) {
+  .mining-result-layout.has-feedback {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mining-result-left,
+.mining-result-right {
+  min-width: 0;
 }
 </style>

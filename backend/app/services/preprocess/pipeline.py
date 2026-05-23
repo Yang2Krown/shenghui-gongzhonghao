@@ -160,5 +160,10 @@ class PreprocessPipeline:
             if not cluster.direction:
                 cluster.direction = detect_direction(cluster.core_title, cluster.summary)
 
+            # AI 相关性：原文 + 中文翻译都喂进去判一遍，结果落库给列表 API 用
+            _title = " ".join(filter(None, [cluster.core_title, cluster.core_title_zh]))
+            _summary = " ".join(filter(None, [cluster.summary, cluster.summary_zh]))
+            cluster.is_ai_relevant = is_ai_related(_title, _summary)
+
 
 preprocess_pipeline = PreprocessPipeline()

@@ -150,7 +150,7 @@ const generateTitles = async () => {
 }
 
 .input-section {
-  background: #fff;
+  background: var(--paper);
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -196,7 +196,7 @@ const generateTitles = async () => {
 
 .btn-primary {
   background: #1890ff;
-  color: #fff;
+  color: var(--paper);
   border: none;
   padding: 12px 32px;
   border-radius: 8px;
@@ -217,7 +217,7 @@ const generateTitles = async () => {
 }
 
 .result-section {
-  background: #fff;
+  background: var(--paper);
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -238,10 +238,10 @@ const generateTitles = async () => {
 }
 
 .title-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background-color: var(--ivory); background-image: radial-gradient(circle at 15% 20%, rgba(204,120,92,.08), transparent 45%), radial-gradient(circle at 85% 80%, rgba(63,92,82,.06), transparent 50%);
   border-radius: 12px;
   padding: 20px;
-  color: #fff;
+  color: var(--paper);
 }
 
 .title-rank {
@@ -319,7 +319,7 @@ const generateTitles = async () => {
 }
 
 .btn-secondary {
-  background: #fff;
+  background: var(--paper);
   color: #1890ff;
   border: 1px solid #1890ff;
   padding: 10px 24px;
