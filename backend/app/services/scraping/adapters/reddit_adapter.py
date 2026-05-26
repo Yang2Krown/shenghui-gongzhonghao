@@ -17,6 +17,7 @@ from typing import List, Optional
 
 import httpx
 
+from app.core.config import settings
 from app.models.source_registry import SourceRegistry, SourceAccount, SOURCE_TYPE_REDDIT
 from app.services.scraping.base import FetchedItem, SourceAdapter
 
@@ -52,7 +53,7 @@ class RedditAdapter(SourceAdapter):
         if sort == "top" and cfg.get("time"):
             params["t"] = cfg["time"]
 
-        async with httpx.AsyncClient(timeout=self.TIMEOUT, headers={"User-Agent": self.UA}) as client:
+        async with httpx.AsyncClient(timeout=self.TIMEOUT, headers={"User-Agent": self.UA}, proxy=settings.HTTP_PROXY or None) as client:
             try:
                 resp = await client.get(url, params=params)
                 resp.raise_for_status()

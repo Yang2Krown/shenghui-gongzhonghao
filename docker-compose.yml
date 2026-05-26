@@ -74,7 +74,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
+    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4
     volumes:
       - ./backend:/app
     environment:
@@ -98,7 +98,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A app.tasks.celery_app beat --loglevel=info
+    command: celery -A app.core.celery_app beat --loglevel=info
     volumes:
       - ./backend:/app
     environment:

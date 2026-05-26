@@ -7,26 +7,30 @@ from typing import Any, Dict, List, Optional
 import feedparser
 import httpx
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 
 class AgentReachClient:
     """Agent-Reach 工具集的 Python 封装。
 
-    底层调用 mcporter / Jina Reader / feedparser，把外部 CLI / HTTP
-    统一成可在后端 service 里直接 await 的方法。
+    底层调用 Exa HTTP API / Jina Reader / feedparser。
     """
 
     JINA_READER_BASE = "https://r.jina.ai/"
+    EXA_API_BASE = "https://api.exa.ai"
 
-    def __init__(self, mcporter_bin: str = "mcporter", request_timeout: int = 30):
-        self.mcporter_bin = mcporter_bin
+    def __init__(self, request_timeout: int = 30):
         self.request_timeout = request_timeout
+
+    def _get_proxy(self) -> Optional[str]:
+        return settings.HTTP_PROXY or None
 
     async def read_url(self, url: str) -> str:
         """通过 Jina Reader 读取任意网页，返回 Markdown 正文。"""
         target = f"{self.JINA_READER_BASE}{url}"
-        async with httpx.AsyncClient(timeout=self.request_timeout) as client:
+        async with httpx.AsyncClient(timeout=self.request_timeout, proxy=self._get_proxy()) as client:
             resp = await client.get(target)
             resp.raise_for_status()
             return resp.text
@@ -37,15 +41,46 @@ class AgentReachClient:
         num_results: int = 10,
         include_domains: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """Exa 全网语义搜索。返回 [{title, url, published, author, snippet}]"""
-        args: Dict[str, Any] = {"query": query, "numResults": num_results}
+        """Exa 全网语义搜索（HTTP API）。返回 [{title, url, published, author, snippet}]"""
+        if not settings.EXA_API_KEY:
+            raise RuntimeError("EXA_API_KEY 未配置")
+
+        payload: Dict[str, Any] = {
+            "query": query,
+            "numResults": num_results,
+            "type": "auto",
+            "contents": {"highlights": True},
+        }
         if include_domains:
-            args["includeDomains"] = include_domains
-        raw = await self._mcporter_call("exa.web_search_exa", args)
-        return self._parse_exa_search_text(raw)
+            payload["includeDomains"] = include_domains
+
+        async with httpx.AsyncClient(timeout=self.request_timeout, proxy=self._get_proxy()) as client:
+            resp = await client.post(
+                f"{self.EXA_API_BASE}/search",
+                json=payload,
+                headers={
+                    "x-api-key": settings.EXA_API_KEY,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        results = []
+        for r in data.get("results", []):
+            highlights = r.get("highlights") or []
+            snippet = highlights[0] if highlights else r.get("text") or ""
+            results.append({
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "published": r.get("publishedDate"),
+                "author": r.get("author"),
+                "snippet": snippet,
+            })
+        return results
 
     async def search_wechat(self, keyword: str, num_results: int = 10) -> List[Dict[str, Any]]:
-        """微信公众号搜索：限定 mp.weixin.qq.com 域名（Exa 软过滤 + 后处理硬过滤）。"""
+        """微信公众号搜索：限定 mp.weixin.qq.com 域名。"""
         candidates = await self.search_web(
             query=keyword,
             num_results=num_results * 3,
@@ -56,8 +91,25 @@ class AgentReachClient:
 
     async def crawl_wechat(self, urls: List[str], max_characters: int = 10000) -> str:
         """通过 Exa 抓取微信公众号文章全文。"""
-        args = {"urls": urls, "maxCharacters": max_characters}
-        return await self._mcporter_call("exa.crawling_exa", args)
+        if not settings.EXA_API_KEY:
+            raise RuntimeError("EXA_API_KEY 未配置")
+
+        async with httpx.AsyncClient(timeout=self.request_timeout, proxy=self._get_proxy()) as client:
+            resp = await client.post(
+                f"{self.EXA_API_BASE}/contents",
+                json={"urls": urls, "text": {"maxCharacters": max_characters}},
+                headers={
+                    "x-api-key": settings.EXA_API_KEY,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        texts = []
+        for r in data.get("results", []):
+            texts.append(r.get("text", ""))
+        return "\n\n".join(texts)
 
     async def fetch_rss(self, feed_url: str, limit: int = 30) -> List[Dict[str, Any]]:
         """解析 RSS/Atom feed，返回标准化条目列表。"""
@@ -79,53 +131,6 @@ class AgentReachClient:
                 "author": getattr(entry, "author", None),
             })
         return items
-
-    async def _mcporter_call(self, tool: str, args: Dict[str, Any]) -> str:
-        """调用 mcporter call '<tool>(<args>)' 并返回原始 stdout。"""
-        args_str = ", ".join(f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in args.items())
-        cmd_arg = f"{tool}({args_str})"
-        proc = await asyncio.create_subprocess_exec(
-            self.mcporter_bin, "call", cmd_arg,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.request_timeout * 2)
-        except asyncio.TimeoutError:
-            proc.kill()
-            raise RuntimeError(f"mcporter call 超时: {tool}")
-
-        if proc.returncode != 0:
-            raise RuntimeError(f"mcporter call 失败 ({proc.returncode}): {stderr.decode('utf-8', 'ignore')[:500]}")
-        return stdout.decode("utf-8", "ignore")
-
-    @staticmethod
-    def _parse_exa_search_text(raw: str) -> List[Dict[str, Any]]:
-        """Exa mcporter 输出是 'Title:/URL:/Published:/...' 块的纯文本，按空行分块解析。"""
-        results: List[Dict[str, Any]] = []
-        blocks = re.split(r"\n\s*\n", raw.strip())
-        for block in blocks:
-            item: Dict[str, Any] = {}
-            lines = block.splitlines()
-            current_field = None
-            for line in lines:
-                m = re.match(r"^(Title|URL|Published|Author|Highlights|Content|Summary):\s*(.*)$", line)
-                if m:
-                    key = m.group(1).lower()
-                    value = m.group(2).strip()
-                    item[key] = value
-                    current_field = key
-                elif current_field and line.strip():
-                    item[current_field] = (item.get(current_field, "") + "\n" + line.strip()).strip()
-            if item.get("title") and item.get("url"):
-                results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "published": item.get("published"),
-                    "author": item.get("author"),
-                    "snippet": item.get("highlights") or item.get("content") or item.get("summary"),
-                })
-        return results
 
     @staticmethod
     def _clean_html(text: str) -> str:

@@ -182,7 +182,16 @@ async def send_sms_code_endpoint(
     req: SendSmsCodeRequest,
 ) -> Any:
     """发送手机短信验证码"""
-    result = await send_sms_code(req.phone)
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        result = await send_sms_code(req.phone)
+    except Exception as e:
+        logger.error(f"发送验证码异常: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"验证码服务异常: {type(e).__name__}: {e}",
+        )
     if not result["ok"]:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,

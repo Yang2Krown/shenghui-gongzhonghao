@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from app.core.config import settings
 from app.models.source_registry import SourceRegistry, SourceAccount, SOURCE_TYPE_HACKERNEWS
 from app.services.scraping.base import FetchedItem, SourceAdapter
 
@@ -38,7 +39,7 @@ class HackerNewsAdapter(SourceAdapter):
         endpoint = cfg.get("endpoint", "topstories")
         limit = int(cfg.get("limit", self.DEFAULT_LIMIT))
 
-        async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=self.TIMEOUT, proxy=settings.HTTP_PROXY or None) as client:
             try:
                 resp = await client.get(f"{BASE}/{endpoint}.json")
                 resp.raise_for_status()

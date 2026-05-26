@@ -37,6 +37,18 @@ x-backend-env: &backend-env
   EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
   LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
   TOPHUB_API_KEY: ${TOPHUB_API_KEY}
+  # 阿里云短信
+  ALIYUN_SMS_ACCESS_KEY_ID: ${ALIYUN_SMS_ACCESS_KEY_ID}
+  ALIYUN_SMS_ACCESS_KEY_SECRET: ${ALIYUN_SMS_ACCESS_KEY_SECRET}
+  ALIYUN_SMS_SIGN_NAME: ${ALIYUN_SMS_SIGN_NAME}
+  ALIYUN_SMS_TEMPLATE_CODE: ${ALIYUN_SMS_TEMPLATE_CODE}
+  # CORS / 可信主机
+  BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-["*"]}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:-["*"]}
+  # Exa API（微信公众号搜索）
+  EXA_API_KEY: ${EXA_API_KEY:-}
+  # HTTP 代理（访问境外网站）
+  HTTP_PROXY: ${HTTP_PROXY:-}
   # X (Twitter) 可选
   TWITTER_AUTH_TOKEN: ${TWITTER_AUTH_TOKEN:-}
   TWITTER_CT0: ${TWITTER_CT0:-}
@@ -47,6 +59,8 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:5433:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

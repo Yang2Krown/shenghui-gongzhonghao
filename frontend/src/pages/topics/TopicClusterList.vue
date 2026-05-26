@@ -1,9 +1,12 @@
 <template>
   <div class="topic-cluster-list">
     <!-- 页面标题 -->
-    <div class="mb-6">
-      <h1 class="font-serif text-ink" style="font-size: 30px; font-weight: 500; line-height: 1.2;">话题库</h1>
-      <p class="mt-1" style="color: #6B6862; font-size: 14px;">信息聚合后的原始话题，点击可查看衍生的候选选题</p>
+    <div class="mb-6" style="display: flex; justify-content: space-between; align-items: flex-start;">
+      <div>
+        <h1 class="font-serif text-ink" style="font-size: 30px; font-weight: 500; line-height: 1.2;">话题库</h1>
+        <p class="mt-1" style="color: #6B6862; font-size: 14px;">信息聚合后的原始话题，点击可查看衍生的候选选题</p>
+      </div>
+      <el-button :icon="Refresh" :loading="refreshing" @click="manualRefresh">手动抓取</el-button>
     </div>
 
     <!-- 常驻筛选 -->
@@ -159,14 +162,27 @@ import { ref, reactive, onMounted, onActivated, onDeactivated, watch, computed, 
 defineOptions({ name: 'TopicClusters' })   // keep-alive include 用这个名字匹配
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Loading, Folder } from '@element-plus/icons-vue'
-import { get } from '@/api/api'
+import { Loading, Folder, Refresh } from '@element-plus/icons-vue'
+import { get, post } from '@/api/api'
 
 const router = useRouter()
 const route = useRoute()
 
 const loading = ref(false)
+const refreshing = ref(false)
 const clusters = ref([])
+
+const manualRefresh = async () => {
+  refreshing.value = true
+  try {
+    await post('/topic-clusters/refresh')
+    ElMessage.success('已提交抓取任务，预计几分钟后可刷新查看新数据')
+  } catch (e) {
+    ElMessage.error('提交失败，请稍后重试')
+  } finally {
+    refreshing.value = false
+  }
+}
 
 const filters = reactive({
   info_type: '',
@@ -304,6 +320,8 @@ onMounted(() => {
 
 onActivated(() => {
   isActive.value = true
+  // 返回列表时重新拉数据，确保挖掘状态等变更即时显示
+  loadClusters()
   nextTick(() => {
     window.scrollTo({ top: scrollY, behavior: 'instant' in window ? 'instant' : 'auto' })
   })
@@ -383,13 +401,14 @@ const formatFreshness = (val) => {
   padding: 0 8px;
 }
 
-/* 小红书风瀑布流（CSS columns）*/
+/* 横向网格：从左到右、从上到下按分数排列 */
 .masonry {
-  column-count: 3;
-  column-gap: 20px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
 }
-@media (max-width: 1280px) { .masonry { column-count: 2; } }
-@media (max-width: 640px)  { .masonry { column-count: 1; } }
+@media (max-width: 1280px) { .masonry { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px)  { .masonry { grid-template-columns: 1fr; } }
 
 @media (max-width: 768px) {
   .filter-row { flex-wrap: wrap; }
@@ -403,10 +422,8 @@ const formatFreshness = (val) => {
   cursor: pointer;
   transition: all 0.2s cubic-bezier(.32, .72, 0, 1);
   box-shadow: 0 1px 2px rgba(31,31,30,.04), 0 0 0 1px rgba(31,31,30,.04);
-  break-inside: avoid;
-  display: inline-block;
-  width: 100%;
-  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
 }
 .cluster-card:hover {
   box-shadow: 0 4px 12px rgba(31,31,30,.06), 0 0 0 1px rgba(31,31,30,.04);

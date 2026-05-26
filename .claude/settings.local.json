@@ -88,7 +88,10 @@
       "Bash(grep -rln \"风格签名\" src/)",
       "Bash(sed -n '205,215p' /Users/yang2krown/Desktop/gzh/backend/app/services/content_generation/agent_a_writer.py)",
       "Bash(sed -n '348,358p' /Users/yang2krown/Desktop/gzh/backend/app/services/content_generation/agent_c_deai.py)",
-      "Bash(sed -n '293,303p' /Users/yang2krown/Desktop/gzh/backend/app/services/content_generation/agent_d_inspector.py)"
+      "Bash(sed -n '293,303p' /Users/yang2krown/Desktop/gzh/backend/app/services/content_generation/agent_d_inspector.py)",
+      "Bash(docker compose *)",
+      "Bash(docker-compose ps *)",
+      "Bash(scp /Users/yang2krown/Desktop/gzh/docker-compose.prod.yml root@1.13.92.57:/www/wwwroot/gzh/)"
     ]
   }
 }

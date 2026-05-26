@@ -8,6 +8,7 @@
 from celery import Celery
 
 from app.core.config import settings
+from app.tasks.scheduler import CELERY_BEAT_SCHEDULE
 
 
 celery_app = Celery(
@@ -30,6 +31,7 @@ celery_app.conf.update(
     task_soft_time_limit=60 * 25,     # 25 分钟软超时
     worker_max_tasks_per_child=200,   # 每个 worker 跑 200 个任务后重启（防内存泄漏）
     broker_connection_retry_on_startup=True,
+    beat_schedule=CELERY_BEAT_SCHEDULE,
 )
 
 # 自动发现 app.tasks.* 下的所有任务

@@ -60,14 +60,22 @@ class ScrapingOrchestrator:
             for acc in (await db.execute(acc_stmt)).scalars().all():
                 accounts_by_src.setdefault(acc.source_registry_id, []).append(acc)
 
-        # 并发抓取（每个 source 一个 task）
+        # 限流并发抓取（最多 5 个同时跑，避免 API 限流）
+        sem = asyncio.Semaphore(5)
+        task_sources = []
         tasks = []
         for src in sources:
             adapter = self.get_adapter(src.source_type)
             if not adapter:
                 logger.warning(f"无 adapter 处理 source_type={src.source_type} (source={src.name})")
                 continue
-            tasks.append(self._fetch_one(adapter, src, accounts_by_src.get(src.id, [])))
+            task_sources.append(src)
+
+            async def _limited_fetch(a=adapter, s=src, accs=accounts_by_src.get(src.id, [])):
+                async with sem:
+                    return await self._fetch_one(a, s, accs)
+
+            tasks.append(_limited_fetch())
 
         per_source = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -82,7 +90,7 @@ class ScrapingOrchestrator:
             "per_source": {},
         }
 
-        for src, outcome in zip([s for s in sources if self.get_adapter(s.source_type)], per_source):
+        for src, outcome in zip(task_sources, per_source):
             entry: Dict[str, Any] = {"platform": src.platform, "source_type": src.source_type}
             if isinstance(outcome, Exception):
                 logger.error(f"[{src.platform}] 抓取失败: {outcome}")

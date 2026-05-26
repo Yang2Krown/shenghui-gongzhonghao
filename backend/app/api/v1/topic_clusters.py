@@ -19,10 +19,88 @@ from app.models.raw_info import RawInfo
 from app.models.source_registry import SourceRegistry
 from app.models.topic_candidate import TopicCandidate
 from datetime import datetime, timedelta
-from app.services.preprocess.rules import MAX_CONTENT_AGE_DAYS
+from app.services.preprocess.rules import MAX_CONTENT_AGE_DAYS, compute_freshness as _compute_freshness
 from app.models.info_cluster import INFO_TYPE_WEIGHT
 
 router = APIRouter()
+
+
+_refresh_running = False
+
+
+def _celery_available() -> bool:
+    """检测 Celery broker (Redis) 是否可用。"""
+    try:
+        from app.core.celery_app import celery_app
+        conn = celery_app.connection()
+        conn.connect()
+        conn.close()
+        return True
+    except Exception:
+        return False
+
+
+async def _do_refresh():
+    """进程内后台执行抓取 + 预处理（本地开发用）。"""
+    global _refresh_running
+    import logging
+    log = logging.getLogger(__name__)
+    try:
+        from app.services.scraping.adapters import register_adapters
+        from app.services.scraping.orchestrator import orchestrator
+        from app.services.preprocess import preprocess_pipeline
+        from app.db.session import AsyncSessionLocal
+
+        register_adapters()
+        async with AsyncSessionLocal() as db:
+            result = await orchestrator.fetch_all(db)
+            log.info(f"手动抓取完成: {result}")
+
+        async with AsyncSessionLocal() as db:
+            pp_result = await preprocess_pipeline.run_batch(db, limit=2000)
+            log.info(f"手动预处理完成: {pp_result}")
+    except Exception as e:
+        log.error(f"手动刷新失败: {e}", exc_info=True)
+    finally:
+        _refresh_running = False
+
+
+@router.post("/refresh", response_model=dict)
+async def manual_refresh(
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """手动触发抓取 + 预处理。有 Celery 走队列，否则进程内异步执行。"""
+    import asyncio
+    global _refresh_running
+
+    if _celery_available():
+        from app.tasks.scraper_tasks import fetch_all_sources_task
+        from app.tasks.preprocess_tasks import run_batch_task
+
+        fetch_all_sources_task.delay()
+        run_batch_task.apply_async(kwargs={"limit": 2000}, countdown=120)
+
+        return {
+            "code": 200,
+            "message": "已提交抓取 + 预处理任务，请稍后刷新页面查看新数据",
+            "data": {"mode": "celery"},
+        }
+
+    if _refresh_running:
+        return {
+            "code": 200,
+            "message": "已有抓取任务在执行中，请稍后刷新页面查看",
+            "data": {},
+        }
+
+    _refresh_running = True
+    asyncio.create_task(_do_refresh())
+
+    return {
+        "code": 200,
+        "message": "已开始抓取 + 预处理，请几分钟后刷新页面查看新数据",
+        "data": {"mode": "async"},
+    }
 
 
 @router.get("", response_model=dict)
@@ -54,20 +132,44 @@ async def get_topic_clusters(
         query = query.where(InfoCluster.direction == direction)
     if mined is not None:
         query = query.where(InfoCluster.mined == mined)
+    # freshness 实时过滤：按时间范围筛选，而非静态字段
     if freshness:
-        query = query.where(InfoCluster.freshness == freshness)
+        now = datetime.utcnow()
+        # 用 published_at，缺失时用 created_at 兜底
+        effective_dt = func.coalesce(InfoCluster.published_at, InfoCluster.created_at)
+        if freshness == "24h":
+            query = query.where(effective_dt >= now - timedelta(hours=24))
+        elif freshness == "7d":
+            query = query.where(effective_dt >= now - timedelta(days=7))
+        elif freshness == "30d":
+            query = query.where(effective_dt >= now - timedelta(days=30))
+        elif freshness == "expired":
+            query = query.where(
+                or_(effective_dt.is_(None), effective_dt < now - timedelta(days=30))
+            )
     if keyword:
         query = query.where(InfoCluster.core_title.ilike(f"%{keyword}%"))
 
-    # 排序：display_score = heat_score × info_type_weight（公众号创作价值加权）
-    # 在 SQL 层用 CASE 表达式，避免拉全表到内存排序
-    from sqlalchemy import case
+    # 排序：display_score = heat_score × info_type_weight × freshness_boost
+    # freshness_boost: 越新的话题加权越高，实现"新鲜优先"
+    #   24h 内 → ×2.0    7d 内 → ×1.2    30d 内 → ×0.8    更老 → ×0.4
+    from sqlalchemy import case, extract
     weight_case = case(
         {k: v for k, v in INFO_TYPE_WEIGHT.items()},
         value=InfoCluster.info_type,
-        else_=0.7,  # 未知类型默认中等权重
+        else_=0.7,
     )
-    display_score_expr = (InfoCluster.heat_score * weight_case).label("display_score")
+    # 用 COALESCE(published_at, created_at) 实时算时间差（单位：小时）
+    effective_ts = func.coalesce(InfoCluster.published_at, InfoCluster.created_at)
+    # extract epoch 得到秒差，转小时
+    age_hours = extract("epoch", func.now() - effective_ts) / 3600.0
+    freshness_boost = case(
+        (age_hours < 24, 2.0),
+        (age_hours < 24 * 7, 1.2),
+        (age_hours < 24 * 30, 0.8),
+        else_=0.4,
+    )
+    display_score_expr = (InfoCluster.heat_score * weight_case * freshness_boost).label("display_score")
 
     if sort_by == "display_score":
         order_col = display_score_expr
@@ -100,10 +202,16 @@ async def get_topic_clusters(
         )
         candidate_counts = {row[0]: row[1] for row in count_result.all()}
 
+    # freshness_boost 映射（与 SQL 层 CASE 保持一致）
+    _FRESHNESS_BOOST = {"24h": 2.0, "7d": 1.2, "30d": 0.8, "expired": 0.4}
+
     items = []
     for c in page_clusters:
         weight = INFO_TYPE_WEIGHT.get(c.info_type, 0.7)
-        display_score = round((c.heat_score or 0) * weight, 2)
+        # 实时计算 freshness，不依赖数据库里预处理时写死的值
+        live_freshness = _compute_freshness(c.published_at, fallback_dt=c.created_at)
+        boost = _FRESHNESS_BOOST.get(live_freshness, 0.4)
+        display_score = round((c.heat_score or 0) * weight * boost, 2)
         items.append({
             "id": c.id,
             "core_title": c.core_title,
@@ -115,7 +223,7 @@ async def get_topic_clusters(
             "direction": c.direction,
             "source_urls": c.source_urls or [],
             "source_count": c.source_count or len(c.source_urls or []),
-            "freshness": c.freshness,
+            "freshness": live_freshness,
             "heat_score": c.heat_score,
             "low_fan_hit": c.low_fan_hit,
             "mined": c.mined,
@@ -235,7 +343,7 @@ async def get_topic_cluster_detail(
             "source_urls": cluster.source_urls or [],
             "source_count": cluster.source_count or len(cluster.source_urls or []),
             "raw_infos": raw_infos_list,                 # 新增：完整原文卡片列表
-            "freshness": cluster.freshness,
+            "freshness": _compute_freshness(cluster.published_at, fallback_dt=cluster.created_at),
             "heat_score": cluster.heat_score,
             "low_fan_hit": cluster.low_fan_hit,
             "mined": cluster.mined,

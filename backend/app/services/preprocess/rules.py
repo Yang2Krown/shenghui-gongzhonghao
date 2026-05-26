@@ -26,12 +26,18 @@ def is_recent(published_at: Optional[datetime], *, max_days: int = MAX_CONTENT_A
     return (now - published_at) <= timedelta(days=max_days)
 
 
-def compute_freshness(published_at: Optional[datetime], *, now: Optional[datetime] = None) -> str:
-    """根据发布时间打鲜度档位。"""
-    if not published_at:
+def compute_freshness(published_at: Optional[datetime], *, now: Optional[datetime] = None,
+                      fallback_dt: Optional[datetime] = None) -> str:
+    """根据发布时间打鲜度档位。
+
+    当 published_at 为空时，使用 fallback_dt（通常是 cluster.created_at）作为替代，
+    避免很多不返回发布时间的数据源（TopHub 等）被一刀切标为 expired。
+    """
+    dt = published_at or fallback_dt
+    if not dt:
         return FRESHNESS_EXPIRED
     now = now or datetime.utcnow()
-    delta = now - published_at
+    delta = now - dt
     if delta < timedelta(hours=24):
         return FRESHNESS_24H
     if delta < timedelta(days=7):

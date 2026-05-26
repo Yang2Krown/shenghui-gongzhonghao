@@ -16,6 +16,7 @@ from typing import List, Optional
 
 import httpx
 
+from app.core.config import settings
 from app.models.source_registry import SourceRegistry, SourceAccount, SOURCE_TYPE_V2EX
 from app.services.scraping.base import FetchedItem, SourceAdapter
 
@@ -47,7 +48,7 @@ class V2EXAdapter(SourceAdapter):
             url = f"{self.BASE}/topics/hot.json"
             params = {}
 
-        async with httpx.AsyncClient(timeout=self.TIMEOUT, headers={"User-Agent": self.UA}) as client:
+        async with httpx.AsyncClient(timeout=self.TIMEOUT, headers={"User-Agent": self.UA}, proxy=settings.HTTP_PROXY or None) as client:
             try:
                 resp = await client.get(url, params=params)
                 resp.raise_for_status()

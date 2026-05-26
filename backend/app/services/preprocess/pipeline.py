@@ -141,8 +141,10 @@ class PreprocessPipeline:
             if not raws:
                 continue
 
-            # freshness
-            cluster.freshness = compute_freshness(cluster.published_at)
+            # freshness：published_at 缺失时用 cluster.created_at 兜底
+            cluster.freshness = compute_freshness(
+                cluster.published_at, fallback_dt=cluster.created_at
+            )
 
             # heat_score
             source_weights = [r.source.weight for r in raws if r.source]

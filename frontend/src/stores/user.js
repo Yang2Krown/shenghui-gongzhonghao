@@ -9,8 +9,14 @@ export const useUserStore = defineStore('user', () => {
   const TOKEN_MAX_AGE = 7 * 24 * 60 * 60 * 1000 // 7天
 
   const isTokenExpired = () => {
+    const hasToken = localStorage.getItem('token')
+    if (!hasToken) return true
     const savedAt = localStorage.getItem('tokenSavedAt')
-    if (!savedAt) return true
+    if (!savedAt) {
+      // 兼容旧登录：有 token 但没记录时间，补记当前时间
+      localStorage.setItem('tokenSavedAt', String(Date.now()))
+      return false
+    }
     return Date.now() - Number(savedAt) > TOKEN_MAX_AGE
   }
 

@@ -116,6 +116,12 @@ class Settings(BaseSettings):
     ALIYUN_SMS_SIGN_NAME: Optional[str] = None
     ALIYUN_SMS_TEMPLATE_CODE: Optional[str] = None
 
+    # Exa API（微信公众号搜索，替代 mcporter CLI）
+    EXA_API_KEY: Optional[str] = None
+
+    # HTTP 代理（用于访问境外网站：HN / Reddit / V2EX / GitHub 等）
+    HTTP_PROXY: Optional[str] = None
+
     # 数据抓取配置
     SCRAPE_INTERVAL_HOURS: int = 24  # 每24小时抓取一次
     SCRAPE_TIMEOUT: int = 30  # 抓取超时时间（秒）
