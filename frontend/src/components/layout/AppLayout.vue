@@ -15,7 +15,7 @@
             <span class="text-paper font-bold text-lg">AI</span>
           </div>
         </div>
-        
+
         <!-- 导航菜单 -->
         <el-menu
           :default-active="activeMenu"
@@ -32,16 +32,16 @@
             <el-icon><Edit /></el-icon>
             <template #title>我的创作</template>
           </el-menu-item>
-          
+
           <!-- 底部分隔 -->
           <div class="flex-1"></div>
-          
+
           <el-menu-item index="settings">
             <el-icon><Setting /></el-icon>
             <template #title>设置</template>
           </el-menu-item>
         </el-menu>
-        
+
         <!-- 用户信息 -->
         <div class="p-4 border-t border-line">
           <div v-if="userStore.user" class="flex items-center space-x-3">
@@ -65,7 +65,7 @@
         </div>
       </div>
     </el-aside>
-    
+
     <!-- 主内容区 -->
     <div :style="{ marginLeft: isCollapsed ? '64px' : '240px' }" class="transition-all duration-300">
       <!-- 顶部导航栏 -->
@@ -78,7 +78,7 @@
             @click="toggleSidebar"
             class="text-ink-3 hover:text-ink"
           />
-          
+
           <!-- 面包屑导航 -->
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
@@ -87,7 +87,7 @@
             </el-breadcrumb-item>
           </el-breadcrumb>
         </div>
-        
+
         <div class="flex items-center space-x-4">
           <!-- 用户下拉菜单 -->
           <el-dropdown v-if="userStore.user" @command="handleUserCommand">
@@ -117,7 +117,7 @@
           </el-dropdown>
         </div>
       </el-header>
-      
+
       <!-- 页面内容 -->
       <el-main class="pt-20 pb-8 px-6">
         <router-view v-slot="{ Component }">
@@ -134,7 +134,7 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { Edit, Setting, SwitchButton, ArrowDown, Expand, Fold, DataBoard, Folder } from '@element-plus/icons-vue'
+import { Edit, Setting, SwitchButton, ArrowDown, Expand, Fold, DataBoard, Folder, Document, ChatDotSquare } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -150,6 +150,7 @@ const activeMenu = computed(() => {
   if (path.startsWith('/topic-candidates')) return 'topic-candidates'
   if (path.startsWith('/creation')) return 'creation'
   if (path.startsWith('/settings')) return 'settings'
+  if (path.startsWith('/munger-generation') || path.startsWith('/munger-scorer')) return 'titles'
   return 'topic-clusters'
 })
 
@@ -174,6 +175,12 @@ const handleMenuSelect = (index) => {
     'topic-candidates': '/topic-candidates',
     'creation': '/creation',
     'settings': '/settings',
+    'munger-generation': '/munger-generation',
+    'munger-scorer': '/munger-scorer',
+  }
+
+  if (index === 'titles') {
+    return // sub-menu header, do nothing
   }
 
   if (menuRoutes[index]) {

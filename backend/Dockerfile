@@ -1,21 +1,21 @@
-# 使用官方Python镜像
 FROM python:3.10-slim
 
-# 设置工作目录
 WORKDIR /app
 
-# 设置环境变量
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
+    PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright/
 
-# 安装系统依赖（含 playwright chromium 运行时依赖）
-RUN apt-get update \
+# 替换为阿里云源，加速 apt（仅限 Debian 12+ 新格式源）
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         gcc \
         libpq-dev \
         curl \
-        # Playwright Chromium 依赖
         libnss3 \
         libnspr4 \
         libatk1.0-0 \
@@ -37,29 +37,22 @@ RUN apt-get update \
         fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装Python依赖
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip \
+    && pip install -r requirements.txt
 
-# 装 Playwright chromium（约 170MB，但比 deps 小）
 RUN playwright install chromium
 
-# 复制应用代码
 COPY . .
 
-# 让 entrypoint.sh 可执行
 RUN chmod +x /app/entrypoint.sh
 
-# 创建非root用户
 RUN adduser --disabled-password --gecos '' appuser \
     && chown -R appuser:appuser /app
 USER appuser
 
-# 暴露端口
 EXPOSE 8000
 
-# 健康检查
 HEALTHCHECK --interval=30s --timeout=30s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 

@@ -85,7 +85,7 @@
       <div
         v-for="cluster in clusters"
         :key="cluster.id"
-        :class="['cluster-card', cluster.info_type === '资讯型' && 'cluster-card-news']"
+        class="cluster-card"
         @click="goToDetail(cluster.id)"
       >
         <div class="p-5">
@@ -146,22 +146,15 @@
       </div>
     </div>
 
-    <!-- 加载更多哨兵 / 状态提示 -->
-    <div v-if="clusters.length > 0" ref="loadMoreSentinel" class="load-more">
-      <span v-if="loadingMore" class="load-more-text">
-        <el-icon class="is-loading"><Loading /></el-icon>
-        加载中...
-      </span>
-      <span v-else-if="!hasMore" class="load-more-end">
-        — 全部 {{ pagination.total }} 条已加载 —
-      </span>
-      <span v-else class="load-more-text" style="opacity: 0.5;">下拉加载更多</span>
+    <!-- 加载完成 -->
+    <div v-if="clusters.length > 0" class="load-more">
+      <span class="load-more-end">— 共 {{ pagination.total }} 条 —</span>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch, computed, nextTick } from 'vue'
+import { ref, reactive, onMounted, onActivated, onDeactivated, watch, computed, nextTick } from 'vue'
 
 defineOptions({ name: 'TopicClusters' })   // keep-alive include 用这个名字匹配
 import { useRouter, useRoute } from 'vue-router'
@@ -172,12 +165,8 @@ import { get } from '@/api/api'
 const router = useRouter()
 const route = useRoute()
 
-const loading = ref(false)          // 首屏 / 重新加载
-const loadingMore = ref(false)      // 滚动追加
-const hasMore = ref(true)
+const loading = ref(false)
 const clusters = ref([])
-const loadMoreSentinel = ref(null)
-let observer = null
 
 const filters = reactive({
   info_type: '',
@@ -265,16 +254,14 @@ const resetAllFilters = () => {
 }
 
 const reloadFromStart = () => {
-  pagination.page = 1
-  hasMore.value = true
   clusters.value = []
   syncToQuery()
-  loadClusters({ reset: true })
+  loadClusters()
 }
 
 const pagination = reactive({
   page: 1,
-  pageSize: 9,   // 每次加载 9 条 = 3 列 × 3 行，懒一点
+  pageSize: 999,   // 一次性加载全部
   total: 0,
 })
 
@@ -290,7 +277,7 @@ const restoreFromQuery = () => {
   filters.sort_by     = q.sort_by     ?? 'display_score'
   filters.sort_order  = q.sort_order  ?? 'desc'
   pagination.page     = 1
-  pagination.pageSize = 9
+  pagination.pageSize = 999
 }
 
 // 把筛选状态写进 URL query（不再写 page，刷新都从头开始）
@@ -312,48 +299,37 @@ let scrollY = 0
 
 onMounted(() => {
   restoreFromQuery()
-  loadClusters({ reset: true })
+  loadClusters()
 })
 
 onActivated(() => {
   isActive.value = true
-  // 还原滚动位置（keep-alive 重新激活时浏览器可能已经把页面顶部对齐了）
   nextTick(() => {
     window.scrollTo({ top: scrollY, behavior: 'instant' in window ? 'instant' : 'auto' })
-    setupObserver()  // 重新挂哨兵（DOM 仍在，但 observer 可能被 disconnect 过）
   })
 })
 
 onDeactivated(() => {
   isActive.value = false
   scrollY = window.scrollY
-  if (observer) observer.disconnect()
 })
 
 // 浏览器后退/前进时，URL query 变化要重新载入（但只在当前真正激活时响应）
 watch(() => route.query, (newQ, oldQ) => {
   if (!isActive.value) return
   if (route.name !== 'TopicClusters' && route.name !== 'Home') return
-  // 比对一下 query 是否真的变了——避免自己 router.replace 后又触发自己
   const same = JSON.stringify(newQ) === JSON.stringify(oldQ)
   if (same) return
   restoreFromQuery()
-  pagination.page = 1
-  hasMore.value = true
   clusters.value = []
-  loadClusters({ reset: true })
+  loadClusters()
 })
 
-onBeforeUnmount(() => {
-  if (observer) observer.disconnect()
-})
-
-const loadClusters = async (opts = {}) => {
-  // 第一次加载用 loading（占首屏），后续追加用 loadingMore（底部 spinner）
-  if (opts.reset || pagination.page === 1) loading.value = true
+const loadClusters = async () => {
+  loading.value = true
   try {
     const params = {
-      page: pagination.page,
+      page: 1,
       page_size: pagination.pageSize,
       sort_by: filters.sort_by,
       sort_order: filters.sort_order,
@@ -365,46 +341,15 @@ const loadClusters = async (opts = {}) => {
     if (filters.keyword) params.keyword = filters.keyword
 
     const res = await get('/topic-clusters', params)
-    const items = res.data.items || []
-    if (opts.reset || pagination.page === 1) {
-      clusters.value = items
-    } else {
-      clusters.value = clusters.value.concat(items)
-    }
+    clusters.value = res.data.items || []
     pagination.total = res.data.total
-    hasMore.value = clusters.value.length < res.data.total && items.length > 0
   } catch (error) {
     ElMessage.error('加载话题库失败')
     console.error(error)
   } finally {
     loading.value = false
-    loadingMore.value = false
   }
 }
-
-// 滚到底了再加载下一批
-// 注意：不要在这里调 syncToQuery —— router.replace 会触发全局 scrollBehavior 把页面弹回顶部
-const loadMore = async () => {
-  if (loading.value || loadingMore.value || !hasMore.value) return
-  loadingMore.value = true
-  pagination.page += 1
-  await loadClusters()
-}
-
-const setupObserver = () => {
-  if (observer) observer.disconnect()
-  if (!loadMoreSentinel.value) return
-  observer = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting) loadMore()
-  }, { rootMargin: '0px', threshold: 0.1 })   // 哨兵真的进视野才触发
-  observer.observe(loadMoreSentinel.value)
-}
-
-// 列表渲染后挂哨兵
-watch(() => clusters.value.length, async () => {
-  await nextTick()
-  setupObserver()
-})
 
 const goToDetail = (id) => {
   router.push(`/topic-clusters/${id}`)
@@ -509,14 +454,6 @@ const formatFreshness = (val) => {
   background: var(--clay-tint);
   color: var(--clay-deep);
   border: 1px solid var(--clay-soft);
-}
-
-/* 资讯型卡片整体降级（透明度 + 边框淡化） */
-.cluster-card-news {
-  opacity: 0.75;
-}
-.cluster-card-news:hover {
-  opacity: 1;
 }
 
 /* 教程 / 实操推荐徽标（绿色高亮） */

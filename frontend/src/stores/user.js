@@ -6,8 +6,16 @@ import { ElMessage } from 'element-plus'
 export const useUserStore = defineStore('user', () => {
   // 状态
   const user = ref(null)
-  const token = ref(localStorage.getItem('token') || '')
-  const refreshToken = ref(localStorage.getItem('refreshToken') || '')
+  const TOKEN_MAX_AGE = 7 * 24 * 60 * 60 * 1000 // 7天
+
+  const isTokenExpired = () => {
+    const savedAt = localStorage.getItem('tokenSavedAt')
+    if (!savedAt) return true
+    return Date.now() - Number(savedAt) > TOKEN_MAX_AGE
+  }
+
+  const token = ref(isTokenExpired() ? '' : (localStorage.getItem('token') || ''))
+  const refreshToken = ref(isTokenExpired() ? '' : (localStorage.getItem('refreshToken') || ''))
   const loading = ref(false)
 
   // 计算属性
@@ -17,11 +25,14 @@ export const useUserStore = defineStore('user', () => {
 
   // 初始化 - 从本地存储恢复token
   const initialize = async () => {
+    if (isTokenExpired()) {
+      clearAuth()
+      return
+    }
     if (token.value) {
       try {
         await fetchUser()
       } catch (error) {
-        // Token无效，清除
         clearAuth()
       }
     }
@@ -39,6 +50,7 @@ export const useUserStore = defineStore('user', () => {
       refreshToken.value = refresh_token
       localStorage.setItem('token', access_token)
       localStorage.setItem('refreshToken', refresh_token)
+      localStorage.setItem('tokenSavedAt', String(Date.now()))
       
       // 获取用户信息
       await fetchUser()
@@ -65,6 +77,7 @@ export const useUserStore = defineStore('user', () => {
       refreshToken.value = refresh_token
       localStorage.setItem('token', access_token)
       localStorage.setItem('refreshToken', refresh_token)
+      localStorage.setItem('tokenSavedAt', String(Date.now()))
       
       // 获取用户信息
       await fetchUser()
@@ -104,6 +117,7 @@ export const useUserStore = defineStore('user', () => {
       refreshToken.value = refresh_token
       localStorage.setItem('token', access_token)
       localStorage.setItem('refreshToken', refresh_token)
+      localStorage.setItem('tokenSavedAt', String(Date.now()))
       
       return access_token
     } catch (error) {
@@ -125,6 +139,7 @@ export const useUserStore = defineStore('user', () => {
     refreshToken.value = ''
     localStorage.removeItem('token')
     localStorage.removeItem('refreshToken')
+    localStorage.removeItem('tokenSavedAt')
   }
 
   // 更新用户信息

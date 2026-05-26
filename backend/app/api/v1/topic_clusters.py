@@ -30,7 +30,7 @@ async def get_topic_clusters(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(100, ge=1, le=1000),
     info_type: Optional[str] = Query(None),
     direction: Optional[str] = Query(None),
     mined: Optional[bool] = Query(None),

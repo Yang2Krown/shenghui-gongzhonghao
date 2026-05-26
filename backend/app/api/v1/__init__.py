@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger
 
 api_router = APIRouter()
 
@@ -79,4 +79,11 @@ api_router.include_router(
     title_generation.router,
     prefix="/title-generation",
     tags=["标题生成"]
+)
+
+# 芒格版标题生成与评分路由
+api_router.include_router(
+    title_munger.router,
+    prefix="/title-munger",
+    tags=["芒格版标题"]
 )

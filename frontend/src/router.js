@@ -110,6 +110,19 @@ const routes = [
       {
         path: 'content-generation',
         redirect: '/creation'
+      },
+      // 芒格版标题
+      {
+        path: 'munger-generation',
+        name: 'MungerGeneration',
+        component: () => import('@/pages/titles/MungerGeneration.vue'),
+        meta: { title: '芒格版标题生成' }
+      },
+      {
+        path: 'munger-scorer',
+        name: 'MungerScorer',
+        component: () => import('@/pages/titles/TitleScorer.vue'),
+        meta: { title: '芒格版标题评分' }
       }
     ]
   },
@@ -146,20 +159,25 @@ const router = createRouter({
   }
 })
 
+// 不需要登录的页面
+const PUBLIC_ROUTES = ['Login', 'Register', 'NotFound']
+
 // 全局前置守卫
 router.beforeEach((to, from, next) => {
   // 设置页面标题
   document.title = to.meta.title ? `${to.meta.title} - AI公众号内容运营平台` : 'AI公众号内容运营平台'
-  
-  // 检查是否需要登录
-  const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
+
   const userStore = useUserStore()
-  
-  if (requiresAuth && !userStore.isAuthenticated) {
+  const isPublic = PUBLIC_ROUTES.includes(to.name)
+
+  if (!isPublic && !userStore.isAuthenticated) {
     next({
       name: 'Login',
       query: { redirect: to.fullPath }
     })
+  } else if (isPublic && userStore.isAuthenticated && to.name === 'Login') {
+    // 已登录用户访问登录页，跳转首页
+    next({ path: '/' })
   } else {
     next()
   }
