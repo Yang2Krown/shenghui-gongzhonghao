@@ -60,7 +60,7 @@ class TitleScorerService:
         start_time = datetime.now()
 
         await self._notify({"event": "step_start", "data": {
-            "step": 0, "agent": "拆解 Agent", "action": "正在结构化解读标题...",
+            "step": 1, "agent": "拆解 Agent", "action": "正在结构化解读标题...",
         }})
 
         # Step 0: 拆解 Agent
@@ -73,44 +73,44 @@ class TitleScorerService:
             }
 
         analysis = analysis_result.get("analysis", {})
-        await self._notify({"event": "step_done", "data": {"step": 0, "agent": "拆解 Agent"}})
+        await self._notify({"event": "step_done", "data": {"step": 1, "agent": "拆解 Agent"}})
 
-        # Step 1: 三维度并行评分
+        # Step 2: 三维度并行评分
         await self._notify({"event": "step_start", "data": {
-            "step": 1, "agent": "缺口评审", "action": "正在评分信息缺口...",
+            "step": 2, "agent": "缺口评审", "action": "正在评分信息缺口...",
         }})
         gap_result = await self.gap_reviewer.score_gap(analysis, title)
-        await self._notify({"event": "step_done", "data": {"step": 1, "agent": "缺口评审"}})
+        await self._notify({"event": "step_done", "data": {"step": 2, "agent": "缺口评审"}})
 
         await self._notify({"event": "step_start", "data": {
-            "step": 1, "agent": "锚点评审", "action": "正在评分社会位置...",
+            "step": 2, "agent": "锚点评审", "action": "正在评分社会位置...",
         }})
         anchor_result = await self.anchor_reviewer.score_anchor(analysis, title)
-        await self._notify({"event": "step_done", "data": {"step": 1, "agent": "锚点评审"}})
+        await self._notify({"event": "step_done", "data": {"step": 2, "agent": "锚点评审"}})
 
         await self._notify({"event": "step_start", "data": {
-            "step": 1, "agent": "冲突评审", "action": "正在评分认知冲突...",
+            "step": 2, "agent": "冲突评审", "action": "正在评分认知冲突...",
         }})
         conflict_result = await self.conflict_reviewer.score_conflict(analysis, title)
-        await self._notify({"event": "step_done", "data": {"step": 1, "agent": "冲突评审"}})
+        await self._notify({"event": "step_done", "data": {"step": 2, "agent": "冲突评审"}})
 
-        # Step 2: 增强评审
+        # Step 3: 增强评审
         await self._notify({"event": "step_start", "data": {
-            "step": 2, "agent": "增强评审", "action": "正在评估芒格倾向...",
+            "step": 3, "agent": "增强评审", "action": "正在评估芒格倾向...",
         }})
         enhance_result = await self.enhance_reviewer.score_enhancement(analysis, title)
-        await self._notify({"event": "step_done", "data": {"step": 2, "agent": "增强评审"}})
+        await self._notify({"event": "step_done", "data": {"step": 3, "agent": "增强评审"}})
 
-        # Step 3: 红线审查
+        # Step 4: 红线审查
         await self._notify({"event": "step_start", "data": {
-            "step": 3, "agent": "红线 Agent", "action": "正在合规审查...",
+            "step": 4, "agent": "红线 Agent", "action": "正在合规审查...",
         }})
         redline_result = await self.redline.check_redlines(analysis, title)
-        await self._notify({"event": "step_done", "data": {"step": 3, "agent": "红线 Agent"}})
+        await self._notify({"event": "step_done", "data": {"step": 4, "agent": "红线 Agent"}})
 
-        # Step 4: 改写 Agent（综合诊断）
+        # Step 5: 改写 Agent（综合诊断）
         await self._notify({"event": "step_start", "data": {
-            "step": 4, "agent": "改写 Agent", "action": "正在综合诊断并生成改写建议...",
+            "step": 5, "agent": "改写 Agent", "action": "正在综合诊断并生成改写建议...",
         }})
         rewrite_result = await self.rewriter.comprehensive_diagnosis(
             title=title,
@@ -121,12 +121,12 @@ class TitleScorerService:
             enhance_result=enhance_result,
             redline_result=redline_result,
         )
-        await self._notify({"event": "step_done", "data": {"step": 4, "agent": "改写 Agent"}})
+        await self._notify({"event": "step_done", "data": {"step": 5, "agent": "改写 Agent"}})
 
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
 
-        await self._notify({"event": "complete", "data": {"step": 4, "agent": "改写 Agent"}})
+        await self._notify({"event": "complete", "data": {"step": 5, "agent": "改写 Agent"}})
 
         return {
             "success": True,

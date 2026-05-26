@@ -60,7 +60,7 @@ class MungerTitleGenerationService:
             logger.info(f"===== 芒格版标题生成 第 {loop_count} 轮 =====")
 
             await self._notify({"event": "step_start", "data": {
-                "step": 0, "agent": "策划 Agent", "action": "正在提取定位语...",
+                "step": 1, "agent": "策划 Agent", "action": "正在提取定位语...",
                 "round": loop_count, "max_rounds": MAX_LOOP_ROUNDS,
             }})
 
@@ -74,13 +74,13 @@ class MungerTitleGenerationService:
                 break
 
             logger.info(f"定位语: {positioning}")
-            await self._notify({"event": "step_done", "data": {"step": 0, "agent": "策划 Agent"}})
+            await self._notify({"event": "step_done", "data": {"step": 1, "agent": "策划 Agent"}})
 
             # Step 1: 三维度并行
             dim_steps = [
-                (1, "缺口 Agent", "正在生成信息缺口标题...", self.gap, "gap"),
-                (1, "锚点 Agent", "正在生成社会位置标题...", self.anchor, "anchor"),
-                (1, "冲突 Agent", "正在生成认知冲突标题...", self.conflict, "conflict"),
+                (2, "缺口 Agent", "正在生成信息缺口标题...", self.gap, "gap"),
+                (2, "锚点 Agent", "正在生成社会位置标题...", self.anchor, "anchor"),
+                (2, "冲突 Agent", "正在生成认知冲突标题...", self.conflict, "conflict"),
             ]
 
             all_titles = []
@@ -100,27 +100,27 @@ class MungerTitleGenerationService:
                 logger.error("Step 1 未生成任何标题")
                 break
 
-            # Step 2: 增强 Agent
+            # Step 3: 增强 Agent
             await self._notify({"event": "step_start", "data": {
-                "step": 2, "agent": "增强 Agent", "action": "正在芒格倾向叠加...",
+                "step": 3, "agent": "增强 Agent", "action": "正在芒格倾向叠加...",
                 "round": loop_count,
             }})
             enhance_result = await self.enhancer.enhance_titles(all_titles)
             top5 = enhance_result.get("top5", [])
-            await self._notify({"event": "step_done", "data": {"step": 2, "agent": "增强 Agent"}})
+            await self._notify({"event": "step_done", "data": {"step": 3, "agent": "增强 Agent"}})
 
             if not top5:
                 logger.error("增强 Agent 未输出 Top 5")
                 all_failure_reasons.append("增强后标题为空")
                 continue
 
-            # Step 3: 审判 Agent
+            # Step 4: 审判 Agent
             await self._notify({"event": "step_start", "data": {
-                "step": 3, "agent": "审判 Agent", "action": "正在拇指测试+红线审查...",
+                "step": 4, "agent": "审判 Agent", "action": "正在拇指测试+红线审查...",
                 "round": loop_count,
             }})
             verdict_result = await self.judge.verdict(top5)
-            await self._notify({"event": "step_done", "data": {"step": 3, "agent": "审判 Agent"}})
+            await self._notify({"event": "step_done", "data": {"step": 4, "agent": "审判 Agent"}})
 
             # 检查是否通过
             if not verdict_result.get("all_rejected", True):
@@ -129,7 +129,7 @@ class MungerTitleGenerationService:
                 duration = (end_time - start_time).total_seconds()
 
                 await self._notify({"event": "complete", "data": {
-                    "step": 3, "agent": "审判 Agent",
+                    "step": 4, "agent": "审判 Agent",
                     "loop_count": loop_count,
                 }})
 

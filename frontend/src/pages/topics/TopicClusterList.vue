@@ -83,66 +83,68 @@
       <p class="mt-1" style="color: #6B6862; font-size: 14px;">需要先通过抓取和预处理生成话题</p>
     </div>
 
-    <!-- 话题瀑布流 -->
+    <!-- 话题瀑布流：JS 分列 + flex 列布局，保证横向排序 + 瀑布流间距 -->
     <div v-else class="masonry">
-      <div
-        v-for="cluster in clusters"
-        :key="cluster.id"
-        class="cluster-card"
-        @click="goToDetail(cluster.id)"
-      >
-        <div class="p-5">
-          <!-- 标题 -->
-          <h3 class="font-serif" style="font-size: 22px; font-weight: 500; color: var(--ink); line-height: 1.45;
-                                        display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
-            {{ cluster.core_title_zh || cluster.core_title }}
-          </h3>
-          <p v-if="cluster.core_title_zh && cluster.core_title_zh !== cluster.core_title"
-             class="mt-1.5" style="font-size: 12px; color: #9A968D; line-height: 1.5;
-                                   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
-            {{ cluster.core_title }}
-          </p>
+      <div v-for="(col, ci) in masonryColumns" :key="ci" class="masonry-col">
+        <div
+          v-for="cluster in col"
+          :key="cluster.id"
+          class="cluster-card"
+          @click="goToDetail(cluster.id)"
+        >
+          <div class="p-5">
+            <!-- 标题 -->
+            <h3 class="font-serif" style="font-size: 22px; font-weight: 500; color: var(--ink); line-height: 1.45;
+                                          display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
+              {{ cluster.core_title_zh || cluster.core_title }}
+            </h3>
+            <p v-if="cluster.core_title_zh && cluster.core_title_zh !== cluster.core_title"
+               class="mt-1.5" style="font-size: 12px; color: #9A968D; line-height: 1.5;
+                                     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+              {{ cluster.core_title }}
+            </p>
 
-          <!-- 摘要 -->
-          <p v-if="cluster.summary_zh || cluster.summary"
-             class="mt-3"
-             style="color: #6B6862; font-size: 15px; line-height: 1.75;
-                    display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;">
-            {{ cluster.summary_zh || cluster.summary }}
-          </p>
+            <!-- 摘要 -->
+            <p v-if="cluster.summary_zh || cluster.summary"
+               class="mt-3"
+               style="color: #6B6862; font-size: 15px; line-height: 1.75;
+                      display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;">
+              {{ cluster.summary_zh || cluster.summary }}
+            </p>
 
-          <!-- 标签 -->
-          <div class="flex flex-wrap gap-2 mt-4">
-            <span v-if="cluster.info_type" class="tag-type">
-              {{ cluster.info_type }}
-            </span>
-            <span v-if="cluster.direction" class="tag-direction">{{ cluster.direction }}</span>
-            <span v-if="cluster.freshness" class="tag-freshness">{{ formatFreshness(cluster.freshness) }}</span>
-            <span v-if="cluster.low_fan_hit" class="tag-hot">🔥 低粉爆款</span>
-            <span v-if="cluster.mined" class="tag-mined">已挖掘</span>
-            <span v-else class="tag-unmined">待挖掘</span>
-          </div>
+            <!-- 标签 -->
+            <div class="flex flex-wrap gap-2 mt-4">
+              <span v-if="cluster.info_type" class="tag-type">
+                {{ cluster.info_type }}
+              </span>
+              <span v-if="cluster.direction" class="tag-direction">{{ cluster.direction }}</span>
+              <span v-if="cluster.freshness" class="tag-freshness">{{ formatFreshness(cluster.freshness) }}</span>
+              <span v-if="cluster.low_fan_hit" class="tag-hot">🔥 低粉爆款</span>
+              <span v-if="cluster.mined" class="tag-mined">已挖掘</span>
+              <span v-else class="tag-unmined">待挖掘</span>
+            </div>
 
-          <!-- 评分行：价值 + 热度（克制版） -->
-          <div class="score-row">
-            <div class="score-item">
-              <span class="score-label">价值</span>
-              <span class="score-num">{{ cluster.display_score?.toFixed(1) || '-' }}</span>
-            </div>
-            <span class="score-sep">·</span>
-            <div class="score-item">
-              <span class="score-label">热度</span>
-              <span class="score-num score-num-heat">{{ cluster.heat_score?.toFixed(1) || '-' }}</span>
-            </div>
-            <span class="score-sep">·</span>
-            <div class="score-item" v-if="cluster.candidate_count > 0">
-              <span class="score-label">选题</span>
-              <span class="score-num score-num-pine">{{ cluster.candidate_count }}</span>
-            </div>
-            <span v-if="cluster.candidate_count > 0" class="score-sep">·</span>
-            <div class="score-item">
-              <span class="score-label">原文</span>
-              <span class="score-num score-num-mute">{{ cluster.source_count || cluster.source_urls?.length || 0 }}</span>
+            <!-- 评分行：价值 + 热度（克制版） -->
+            <div class="score-row">
+              <div class="score-item">
+                <span class="score-label">价值</span>
+                <span class="score-num">{{ cluster.display_score?.toFixed(1) || '-' }}</span>
+              </div>
+              <span class="score-sep">·</span>
+              <div class="score-item">
+                <span class="score-label">热度</span>
+                <span class="score-num score-num-heat">{{ cluster.heat_score?.toFixed(1) || '-' }}</span>
+              </div>
+              <span class="score-sep">·</span>
+              <div class="score-item" v-if="cluster.candidate_count > 0">
+                <span class="score-label">选题</span>
+                <span class="score-num score-num-pine">{{ cluster.candidate_count }}</span>
+              </div>
+              <span v-if="cluster.candidate_count > 0" class="score-sep">·</span>
+              <div class="score-item">
+                <span class="score-label">原文</span>
+                <span class="score-num score-num-mute">{{ cluster.source_count || cluster.source_urls?.length || 0 }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -157,7 +159,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onActivated, onDeactivated, watch, computed, nextTick } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, onActivated, onDeactivated, watch, computed, nextTick } from 'vue'
 
 defineOptions({ name: 'TopicClusters' })   // keep-alive include 用这个名字匹配
 import { useRouter, useRoute } from 'vue-router'
@@ -171,6 +173,32 @@ const route = useRoute()
 const loading = ref(false)
 const refreshing = ref(false)
 const clusters = ref([])
+
+// ── 瀑布流横排：CSS columns 是竖着填的，需要重排数据模拟横向顺序 ──
+const columnCount = ref(3)
+const _updateCols = () => {
+  // 用内容区实际宽度（减去侧边栏），不用 window.innerWidth
+  const el = document.querySelector('.topic-cluster-list')
+  const w = el ? el.clientWidth : window.innerWidth
+  columnCount.value = w <= 500 ? 1 : w <= 800 ? 2 : 3
+}
+window.addEventListener('resize', _updateCols)
+onUnmounted(() => window.removeEventListener('resize', _updateCols))
+
+/**
+ * 按横向顺序把数据分到各列：
+ * [1,2,3,4,5,6,7,8,9] → Col0=[1,4,7] Col1=[2,5,8] Col2=[3,6,9]
+ * 视觉上第一行从左到右就是 1,2,3（分数最高的前3个）
+ */
+const masonryColumns = computed(() => {
+  const items = clusters.value
+  const cols = columnCount.value
+  const columns = Array.from({ length: cols }, () => [])
+  items.forEach((item, i) => {
+    columns[i % cols].push(item)
+  })
+  return columns
+})
 
 const manualRefresh = async () => {
   refreshing.value = true
@@ -314,6 +342,7 @@ const isActive = ref(true)
 let scrollY = 0
 
 onMounted(() => {
+  nextTick(_updateCols)
   restoreFromQuery()
   loadClusters()
 })
@@ -401,14 +430,20 @@ const formatFreshness = (val) => {
   padding: 0 8px;
 }
 
-/* 横向网格：从左到右、从上到下按分数排列 */
+/* 瀑布流：JS 分列 + flex 实现横向排序 + 自适应高度 */
 .masonry {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
   gap: 20px;
 }
-@media (max-width: 1280px) { .masonry { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 640px)  { .masonry { grid-template-columns: 1fr; } }
+.masonry-col {
+  flex: 1;
+  min-width: 0;          /* 防止长文本撑宽列 */
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+@media (max-width: 900px) { .masonry-col { min-width: calc(50% - 10px); } }
+@media (max-width: 640px) { .masonry { flex-direction: column; } }
 
 @media (max-width: 768px) {
   .filter-row { flex-wrap: wrap; }
@@ -422,8 +457,8 @@ const formatFreshness = (val) => {
   cursor: pointer;
   transition: all 0.2s cubic-bezier(.32, .72, 0, 1);
   box-shadow: 0 1px 2px rgba(31,31,30,.04), 0 0 0 1px rgba(31,31,30,.04);
-  display: flex;
-  flex-direction: column;
+  overflow: hidden;        /* 长内容不撑破卡片 */
+  word-break: break-word;  /* 长单词/URL 自动换行 */
 }
 .cluster-card:hover {
   box-shadow: 0 4px 12px rgba(31,31,30,.06), 0 0 0 1px rgba(31,31,30,.04);

@@ -1,91 +1,150 @@
 """
 芒格版标题生成与评分 API 端点
+
+支持 SSE 实时推送 Agent 进度。
 """
 
+import asyncio
 import logging
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
+from app.core.progress import progress_store
 from app.schemas.title_munger import (
     MungerGenerationRequest,
     MungerGenerationResponse,
     ScorerRequest,
     ScorerResponse,
 )
-from app.services.title_munger_generation.service import MungerTitleGenerationService
-from app.services.title_scorer.service import TitleScorerService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.post("/munger-generate", response_model=MungerGenerationResponse)
-async def munger_title_generate(request: MungerGenerationRequest):
-    """
-    芒格版标题生成
+async def _run_munger_generate_background(content: str, run_id: str):
+    from app.services.title_munger_generation.service import MungerTitleGenerationService
 
-    基于文章内容，通过6 Agent协作 + 回环机制生成标题（≤20字）。
-
-    流程:
-    1. 策划 Agent → 定位语提取
-    2. 缺口/锚点/冲突 Agent → 三维度并行生成
-    3. 增强 Agent → 芒格倾向叠加
-    4. 审判 Agent → 拇指测试+红线审查
-    5. 回环：全部淘汰则重试（≤3轮）
-    """
     try:
-        service = MungerTitleGenerationService()
-        result = await service.generate(request.content)
+        async def _progress_cb(event):
+            await progress_store.push(run_id, event)
 
-        return MungerGenerationResponse(
-            success=result.get("success", False),
-            positioning=result.get("positioning", ""),
-            all_titles=[{"title": t.get("title", ""), "dimension": t.get("dimension", "")} for t in result.get("all_titles", [])],
-            top5=[{"title": t.get("title", ""), "dimension": t.get("dimension", ""), "enhancement": t.get("enhancement", "")} for t in result.get("top5", [])],
-            verdicts=[{"title": v.get("title", ""), "thumb": v.get("thumb", ""), "redline": v.get("redline", ""), "word_count": v.get("word_count", 0), "final_verdict": v.get("final_verdict", "淘汰")} for v in result.get("verdicts", [])],
-            final_pick=result.get("final_pick", ""),
-            loop_count=result.get("loop_count", 0),
-            failure_reasons=result.get("failure_reasons", []),
-            duration_seconds=result.get("duration_seconds", 0),
-            message=result.get("message", ""),
-        )
+        service = MungerTitleGenerationService(progress_callback=_progress_cb)
+        result = await service.generate(content)
+
+        await progress_store.push(run_id, {
+            "event": "result",
+            "data": {
+                "success": result.get("success", False),
+                "positioning": result.get("positioning", ""),
+                "all_titles": result.get("all_titles", []),
+                "top5": result.get("top5", []),
+                "verdicts": result.get("verdicts", []),
+                "final_pick": result.get("final_pick", ""),
+                "loop_count": result.get("loop_count", 0),
+                "failure_reasons": result.get("failure_reasons", []),
+                "duration_seconds": result.get("duration_seconds", 0),
+                "message": result.get("message", ""),
+            },
+        })
     except Exception as e:
         logger.error(f"芒格版标题生成失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"标题生成失败: {str(e)}")
+        await progress_store.push(run_id, {
+            "event": "error",
+            "data": {"message": str(e)},
+        })
 
 
-@router.post("/munger-score", response_model=ScorerResponse)
-async def munger_title_score(request: ScorerRequest):
-    """
-    芒格版标题评分
+async def _run_munger_score_background(title: str, summary: Optional[str], run_id: str):
+    from app.services.title_scorer.service import TitleScorerService
 
-    对已有标题进行多维度评分、诊断并给出改写建议。
-
-    流程:
-    1. 拆解 Agent → 结构化解读
-    2. 缺口/锚点/冲突评审 → 三维度评分
-    3. 增强评审 → 芒格倾向评分
-    4. 红线 Agent → 合规审查
-    5. 改写 Agent → 综合诊断 + 改写建议
-    """
     try:
-        service = TitleScorerService()
-        result = await service.score(request.title, request.summary)
+        async def _progress_cb(event):
+            await progress_store.push(run_id, event)
 
-        return ScorerResponse(
-            success=result.get("success", False),
-            title=result.get("title", ""),
-            analysis=result.get("analysis", {}),
-            scores=result.get("scores", {}),
-            redlines=result.get("redlines", {}),
-            total_score=result.get("total_score", 0),
-            grade=result.get("grade", ""),
-            grade_label=result.get("grade_label", ""),
-            diagnosis=result.get("diagnosis", {}),
-            rewrites=[{"title": r.get("title", ""), "fix": r.get("fix", ""), "keep": r.get("keep", "")} for r in result.get("rewrites", [])],
-            duration_seconds=result.get("duration_seconds", 0),
-            error=result.get("error"),
-        )
+        service = TitleScorerService(progress_callback=_progress_cb)
+        result = await service.score(title, summary)
+
+        await progress_store.push(run_id, {
+            "event": "result",
+            "data": result,
+        })
     except Exception as e:
         logger.error(f"芒格版标题评分失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"标题评分失败: {str(e)}")
+        await progress_store.push(run_id, {
+            "event": "error",
+            "data": {"message": str(e)},
+        })
+
+
+@router.post("/munger-generate")
+async def munger_title_generate(request: MungerGenerationRequest):
+    """
+    芒格版标题生成（SSE 模式）
+
+    返回 run_id，前端通过 SSE 获取实时进度。
+    """
+    if not request.content or len(request.content) < 10:
+        raise HTTPException(status_code=400, detail="文章内容至少需要10个字符")
+
+    run_id = progress_store.create_run()
+
+    asyncio.create_task(
+        _run_munger_generate_background(request.content, run_id)
+    )
+
+    return {
+        "code": 200,
+        "message": "芒格版标题生成任务已提交",
+        "run_id": run_id,
+    }
+
+
+@router.post("/munger-score")
+async def munger_title_score(request: ScorerRequest):
+    """
+    芒格版标题评分（SSE 模式）
+
+    返回 run_id，前端通过 SSE 获取实时进度。
+    """
+    if not request.title:
+        raise HTTPException(status_code=400, detail="请输入标题内容")
+
+    run_id = progress_store.create_run()
+
+    asyncio.create_task(
+        _run_munger_score_background(request.title, request.summary, run_id)
+    )
+
+    return {
+        "code": 200,
+        "message": "芒格版标题评分任务已提交",
+        "run_id": run_id,
+    }
+
+
+@router.get("/stream/{run_id}")
+async def stream_munger_progress(
+    run_id: str,
+    token: str = Query(None, description="认证 token（EventSource 不支持 header）"),
+) -> StreamingResponse:
+    """SSE 端点：实时推送芒格版标题生成/评分进度。"""
+    if token:
+        from app.core.security import decode_token
+        payload = decode_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="无效的 token")
+
+    if not progress_store.exists(run_id):
+        raise HTTPException(status_code=404, detail=f"run {run_id} 不存在或已过期")
+
+    return StreamingResponse(
+        progress_store.stream(run_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

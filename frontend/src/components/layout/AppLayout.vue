@@ -33,6 +33,15 @@
             <template #title>我的创作</template>
           </el-menu-item>
 
+          <el-sub-menu index="titles">
+            <template #title>
+              <el-icon><ChatDotSquare /></el-icon>
+              <span>标题工具</span>
+            </template>
+            <el-menu-item index="munger-generation">芒格标题生成</el-menu-item>
+            <el-menu-item index="munger-scorer">芒格标题评分</el-menu-item>
+          </el-sub-menu>
+
           <!-- 底部分隔 -->
           <div class="flex-1"></div>
 
