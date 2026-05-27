@@ -118,6 +118,13 @@ const routes = [
         component: () => import('@/pages/titles/MungerGeneration.vue'),
         meta: { title: '芒格版标题生成' }
       },
+      // 公众号转小红书
+      {
+        path: 'wechat-to-xhs',
+        name: 'WechatToXhs',
+        component: () => import('@/pages/conversion/WechatToXhs.vue'),
+        meta: { title: '公众号转小红书' }
+      },
       {
         path: 'munger-scorer',
         name: 'MungerScorer',

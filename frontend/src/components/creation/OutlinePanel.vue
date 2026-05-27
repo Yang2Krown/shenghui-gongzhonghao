@@ -58,7 +58,11 @@
         :agents="angleFeedback"
         subtitle="创作角度体检：信息源审计 → 角度陌生化 → 节奏设计"
       />
-      <div class="mt-6 flex justify-center">
+    </div>
+
+    <!-- 固定底部操作栏（体检完成） -->
+    <div v-if="showAngleResult" class="outline-bottom-bar">
+      <div class="bottom-bar-inner">
         <el-button @click="inspectAngle" :loading="generating">
           <el-icon><Refresh /></el-icon>
           重新体检

@@ -42,6 +42,11 @@
             <el-menu-item index="munger-scorer">芒格标题评分</el-menu-item>
           </el-sub-menu>
 
+          <el-menu-item index="wechat-to-xhs">
+            <el-icon><Switch /></el-icon>
+            <template #title>公众号转小红书</template>
+          </el-menu-item>
+
           <!-- 底部分隔 -->
           <div class="flex-1"></div>
 
@@ -143,7 +148,7 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { Edit, Setting, SwitchButton, ArrowDown, Expand, Fold, DataBoard, Folder, Document, ChatDotSquare } from '@element-plus/icons-vue'
+import { Edit, Setting, SwitchButton, ArrowDown, Expand, Fold, DataBoard, Folder, Document, ChatDotSquare, Switch } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -160,6 +165,7 @@ const activeMenu = computed(() => {
   if (path.startsWith('/creation')) return 'creation'
   if (path.startsWith('/settings')) return 'settings'
   if (path.startsWith('/munger-generation') || path.startsWith('/munger-scorer')) return 'titles'
+  if (path.startsWith('/wechat-to-xhs')) return 'wechat-to-xhs'
   return 'topic-clusters'
 })
 
@@ -186,6 +192,7 @@ const handleMenuSelect = (index) => {
     'settings': '/settings',
     'munger-generation': '/munger-generation',
     'munger-scorer': '/munger-scorer',
+    'wechat-to-xhs': '/wechat-to-xhs',
   }
 
   if (index === 'titles') {
