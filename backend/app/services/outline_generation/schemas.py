@@ -22,6 +22,10 @@ class OutlineInput(BaseModel):
     info_cluster_id: Optional[int] = None
     core_title: Optional[str] = None
     summary: Optional[str] = None
+    creation_guidance: Optional[dict] = Field(
+        default=None,
+        description="创作角度体检输出，供大纲 Agent A 消费",
+    )
 
 
 # ──────────────────────────────────────────────

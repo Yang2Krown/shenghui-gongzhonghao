@@ -68,43 +68,62 @@ def _build_user_prompt(input_data: AgentCInput) -> str:
 }}"""
 
 
+MAX_RETRIES = 3
+
+
 async def criticize_outline(
     input_data: AgentCInput,
     *,
     llm_client: Optional[LLMClient] = None,
     model: Optional[str] = None,
 ) -> AgentCOutput:
-    """Agent C 主入口：以读者视角挑刺并修订大纲。"""
+    """Agent C 主入口：以读者视角挑刺并修订大纲。
+
+    Schema 校验失败时自动重试，最多 3 次。
+    """
     client = llm_client or get_llm_client()
 
     system_prompt = _load_system_prompt()
     user_prompt = _build_user_prompt(input_data)
 
-    messages = [
-        ChatMessage(role="system", content=system_prompt),
-        ChatMessage(role="user", content=user_prompt),
-    ]
-
     logger.info(f"Agent C 开始处理: outline_id={input_data.outline_id}")
 
-    result = await client.chat(
-        messages=messages,
-        model=model,
-        temperature=0.5,
-        max_tokens=6000,
-        json_mode=True,
-    )
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        extra_hint = ""
+        if attempt > 1:
+            extra_hint = (
+                "\n\n【重要】上一次输出格式不符合要求。"
+                "请严格输出 JSON，必须包含 overall_feeling、problem_sections、revised_sections 字段。"
+                "不要输出任何 markdown 标记或解释文字。"
+            )
 
-    parsed = parse_json_loose(result.text)
-    if not parsed or "overall_feeling" not in parsed:
-        logger.error(f"Agent C 输出解析失败: {result.text[:300]}")
-        raise ValueError("Agent C 输出格式不符合 schema")
+        messages = [
+            ChatMessage(role="system", content=system_prompt + extra_hint),
+            ChatMessage(role="user", content=user_prompt),
+        ]
 
-    output = AgentCOutput(**parsed)
+        result = await client.chat(
+            messages=messages,
+            model=model,
+            temperature=0.5,
+            max_tokens=6000,
+            json_mode=True,
+        )
 
-    # 如果反馈是"全篇都不想看"，视为严重问题
-    if "不想看" in output.overall_feeling or "关了" in output.overall_feeling:
-        logger.warning(f"Agent C 反馈全篇都不想看: {output.overall_feeling}")
+        parsed = parse_json_loose(result.text)
+        if not parsed or "overall_feeling" not in parsed:
+            last_error = ValueError("Agent C 输出格式不符合 schema")
+            logger.warning(f"Agent C 第 {attempt}/{MAX_RETRIES} 次输出解析失败: {result.text[:300]}")
+            continue
 
-    logger.info(f"Agent C 完成: outline_id={input_data.outline_id}, 问题节数={len(output.problem_sections)}")
-    return output
+        output = AgentCOutput(**parsed)
+
+        if "不想看" in output.overall_feeling or "关了" in output.overall_feeling:
+            logger.warning(f"Agent C 反馈全篇都不想看: {output.overall_feeling}")
+
+        logger.info(f"Agent C 完成（第 {attempt} 次）: outline_id={input_data.outline_id}, 问题节数={len(output.problem_sections)}")
+        return output
+
+    logger.error(f"[Agent C] {MAX_RETRIES} 次尝试均失败")
+    raise last_error

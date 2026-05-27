@@ -19,6 +19,8 @@ from app.services.topic_mining.schemas import (
 
 logger = logging.getLogger(__name__)
 
+MAX_RETRIES = 3
+
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 ASSETS_DIR = Path(__file__).parent / "assets"
 
@@ -216,9 +218,7 @@ async def score_candidates(
 ) -> AgentBOutput:
     """Agent B 主入口：对候选选题列表评分。
 
-    对齐设计文档 4.2 节：
-    - schema 不符 → 重试 1 次
-    - 维度缺失 → 对该候选重新打分（由 Pydantic 校验触发重试）
+    Schema 校验失败时自动重试，最多 3 次。
     """
     client = llm_client or get_llm_client()
     system_prompt = _load_system_prompt()
@@ -230,30 +230,42 @@ async def score_candidates(
 
     async def _full_attempt(extra_hint: str = ""):
         parsed = await _attempt_score(input_data, client, model, system_full, user_prompt, extra_hint=extra_hint)
-        # 把 Pydantic 校验也包进来：维度缺失会触发 ValidationError → 当 schema 错误重试
         normalized = _normalize_persona_reviews(parsed, input_data)
         return AgentBOutput(**normalized)
 
-    try:
-        output = await _full_attempt()
-    except (ValueError, Exception) as e:
-        # 包括 ValidationError（缺维度/类型不对）+ ValueError（schema 不符）
-        if "AgentBOutput" in str(type(e).__name__) + str(e) or isinstance(e, ValueError):
-            logger.warning(f"Agent B schema/维度校验失败，重试 1 次: {type(e).__name__}: {str(e)[:120]}")
-            output = await _full_attempt(
-                extra_hint="\n\n【重要】上次输出有问题（schema 或维度缺失）。必须每个候选包含全部 6 个维度（痛点直击度/价值密度/传播触发器/差异化/新鲜度/受众适配度），每维度都有 score 和 evidence。",
+    output = None
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        extra_hint = ""
+        if attempt > 1:
+            extra_hint = (
+                "\n\n【重要】上一次输出格式不符合要求。"
+                "请严格输出 JSON，必须包含 candidates 数组，每个候选含全部 6 个维度"
+                "（pain_point/value_density/propagation/differentiation/freshness/audience_fit），"
+                "每维度都有 score 和 evidence。"
+                "不要输出任何 markdown 标记或解释文字。"
             )
-        else:
-            raise
+        try:
+            output = await _full_attempt(extra_hint=extra_hint)
+            break
+        except (ValueError, Exception) as e:
+            last_error = e
+            logger.warning(
+                f"Agent B 第 {attempt}/{MAX_RETRIES} 次 schema/维度校验失败: "
+                f"{type(e).__name__}: {str(e)[:120]}"
+            )
+            continue
+
+    if output is None:
+        logger.error(f"[Agent B] {MAX_RETRIES} 次尝试均失败")
+        raise last_error
 
     # 二次校验：重新计算 weighted_score 和 verdict
     for scored in output.candidates:
-        # 拆分"商务敏感"为独立标记（设计文档 3.3 节）
         is_business_sensitive, real_veto_reasons = _detect_business_sensitive(scored)
         if is_business_sensitive:
             scored.business_sensitive = True
             scored.veto_reasons = real_veto_reasons
-            # 若 LLM 因 BS 把候选标 veto_passed=False，现在拨回 True（除非有其他真否决）
             if not scored.veto_passed and not real_veto_reasons:
                 scored.veto_passed = True
 

@@ -6,15 +6,18 @@ from typing import Any, Dict
 
 from celery import shared_task
 
-from app.db.session import AsyncSessionLocal
+from app.db.session import AsyncSessionLocal, engine
 from app.services.preprocess import preprocess_pipeline
 
 logger = logging.getLogger(__name__)
 
 
 async def _run(limit: int) -> Dict[str, Any]:
-    async with AsyncSessionLocal() as db:
-        return await preprocess_pipeline.run_batch(db, limit=limit)
+    try:
+        async with AsyncSessionLocal() as db:
+            return await preprocess_pipeline.run_batch(db, limit=limit)
+    finally:
+        await engine.dispose()
 
 
 @shared_task(bind=True, name="preprocess.run_batch")

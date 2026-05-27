@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.core.security import get_current_user
 from app.core.progress import progress_store
@@ -26,11 +26,74 @@ from app.models.outline import (
     OutlineInspection,
 )
 from app.models.topic_candidate import TopicCandidate
+from app.services.angle_inspection import inspect_creation_angle
 from app.services.outline_generation.outline_service import generate_outline
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.post("/inspect-angle", response_model=dict)
+async def trigger_angle_inspection(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """触发创作角度体检任务。"""
+
+    candidate_id = body.get("candidate_id")
+    if not candidate_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="缺少 candidate_id 参数",
+        )
+
+    model = body.get("model")
+    run_id = progress_store.create_run()
+
+    async def _run():
+        from app.db.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as bg_db:
+            try:
+                result = await bg_db.execute(
+                    select(TopicCandidate)
+                    .options(selectinload(TopicCandidate.score))
+                    .where(TopicCandidate.id == int(candidate_id))
+                )
+                candidate = result.scalar_one_or_none()
+                if not candidate:
+                    raise ValueError(f"选题候选 {candidate_id} 不存在")
+
+                async def _progress_cb(event):
+                    await progress_store.push(run_id, event)
+
+                report = await inspect_creation_angle(
+                    candidate,
+                    model=model,
+                    progress_callback=_progress_cb,
+                )
+                await progress_store.push(run_id, {
+                    "event": "complete",
+                    "data": {"step": 3, "agent": "创作角度体检"},
+                })
+                await progress_store.push(run_id, {
+                    "event": "result",
+                    "data": report.model_dump(),
+                })
+            except Exception as e:
+                await progress_store.push(run_id, {
+                    "event": "error",
+                    "data": {"message": str(e)},
+                })
+
+    asyncio.create_task(_run())
+
+    return {
+        "code": 200,
+        "message": "创作角度体检任务已提交",
+        "data": {"run_id": run_id},
+    }
 
 
 @router.post("/generate", response_model=dict)
@@ -58,6 +121,7 @@ async def trigger_outline_generation(
         )
 
     model = body.get("model")
+    angle_report = body.get("angle_report")
     run_id = progress_store.create_run()
 
     async def _run():
@@ -71,6 +135,7 @@ async def trigger_outline_generation(
                     bg_db,
                     candidate_id=int(candidate_id),
                     model=model,
+                    angle_report_data=angle_report,
                     progress_callback=_progress_cb,
                 )
                 # result 事件触发前端关闭 SSE 流（必须在 complete 之后推送）

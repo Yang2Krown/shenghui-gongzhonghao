@@ -71,21 +71,25 @@ class ProgressStore:
             yield _sse_format({"event": "error", "data": {"message": f"run {run_id} 不存在"}})
             return
 
+        # 2KB 填充注释，强制 CDN / 反向代理冲刷缓冲区
+        yield ":" + " " * 2048 + "\n\n"
+        yield _sse_format({"event": "connected", "data": {"run_id": run_id}})
+
+        heartbeat_interval = 15
         try:
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=self._ttl)
+                    event = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval)
                 except asyncio.TimeoutError:
-                    yield _sse_format({"event": "error", "data": {"message": "等待超时"}})
-                    break
+                    # 发送心跳注释保持连接活跃
+                    yield ":heartbeat\n\n"
+                    continue
 
                 yield _sse_format(event)
 
-                # 收到结果或错误事件后结束流（result 在 complete 之后推送，必须等 result 到达再关闭）
                 if event.get("event") in ("result", "error"):
                     break
         finally:
-            # 延迟清理，给客户端一点时间接收最后的事件
             asyncio.get_event_loop().call_later(5.0, self.cleanup, run_id)
 
     # ── 自动清理过期 run ──────────────────────────────
@@ -108,10 +112,13 @@ def _sse_format(event: dict) -> str:
     格式：
         event:{event_type}\n
         data:{json}\n\n
+
+    每个事件前加 8KB 注释填充，强制代理层冲刷缓冲区。
     """
     event_type = event.get("event", "message")
     data = event.get("data", {})
-    return f"event:{event_type}\ndata:{json.dumps(data, ensure_ascii=False)}\n\n"
+    padding = ":" + " " * 8192 + "\n"
+    return f"{padding}event:{event_type}\ndata:{json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 # 全局单例

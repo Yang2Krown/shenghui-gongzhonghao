@@ -15,16 +15,16 @@
       />
     </div>
 
-    <!-- 空状态：生成按钮 -->
+    <!-- 空状态：先做创作角度体检 -->
     <div v-if="status === 'idle'" class="text-center py-16">
       <div class="mb-4">
         <el-icon :size="48" style="color: var(--line);"><Document /></el-icon>
       </div>
-      <h3 class="text-h4 font-sans text-ink mb-2">开始生成大纲</h3>
-      <p class="text-ink-3 mb-6">基于选题信息，AI 将自动生成文章大纲</p>
-      <el-button type="primary" size="large" @click="generateOutline" :loading="generating">
+      <h3 class="text-h4 font-sans text-ink mb-2">先做创作角度体检</h3>
+      <p class="text-ink-3 mb-6">检查信息源、创作角度和内容节奏，确认后再生成大纲</p>
+      <el-button type="primary" size="large" @click="inspectAngle" :loading="generating">
         <el-icon><MagicStick /></el-icon>
-        生成大纲
+        开始体检
       </el-button>
     </div>
 
@@ -38,11 +38,40 @@
       <el-icon :size="48" style="color: var(--crimson);"><CircleCloseFilled /></el-icon>
       <h3 class="text-h4 font-sans text-ink mt-4 mb-2">生成失败</h3>
       <p class="text-ink-3 mb-6">{{ errorMessage }}</p>
-      <el-button @click="generateOutline">重试</el-button>
+      <el-button @click="generationPhase === 'outline' ? generateOutline() : inspectAngle()">重试</el-button>
+    </div>
+
+    <!-- 体检完成：先展示反馈，等待用户确认进入大纲 -->
+    <div v-if="showAngleResult" class="angle-result">
+      <div class="angle-summary card p-5 mb-5">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h3 class="text-h3 font-sans text-ink mb-2">创作角度体检完成</h3>
+            <p class="text-ink-2">{{ angleReport.core_suggestion }}</p>
+          </div>
+          <div class="score-pill" :class="getScoreColor(angleReport.total_score)">
+            {{ angleReport.total_score?.toFixed?.(1) || angleReport.total_score || '-' }}
+          </div>
+        </div>
+      </div>
+      <AgentFeedbackPanel
+        :agents="angleFeedback"
+        subtitle="创作角度体检：信息源审计 → 角度陌生化 → 节奏设计"
+      />
+      <div class="mt-6 flex justify-center">
+        <el-button @click="inspectAngle" :loading="generating">
+          <el-icon><Refresh /></el-icon>
+          重新体检
+        </el-button>
+        <el-button type="primary" @click="generateOutline" :loading="generating">
+          确认并生成大纲
+          <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+        </el-button>
+      </div>
     </div>
 
     <!-- 完成：左右分栏 -->
-    <div v-if="status === 'completed' && outline" class="outline-result-split">
+    <div v-if="showOutlineResult" class="outline-result-split">
       <!-- 左侧：大纲内容 -->
       <div class="result-left">
         <div class="card p-5 mb-4">
@@ -173,13 +202,13 @@
       <div class="result-right">
         <AgentFeedbackPanel
           :agents="agentFeedback"
-          subtitle="大纲流水线：A 起稿 → B 评审挑选 → C 读者挑刺 → D 6 维度自检"
+          subtitle="大纲流水线：A 起稿 → B 评审 → C 挑刺 → D 自检"
         />
       </div>
     </div>
 
     <!-- 固定底部操作栏 -->
-    <div v-if="status === 'completed' && outline" class="outline-bottom-bar">
+    <div v-if="showOutlineResult" class="outline-bottom-bar">
       <div class="bottom-bar-inner">
         <el-button @click="generateOutline" :loading="generating">
           <el-icon><Refresh /></el-icon>
@@ -210,9 +239,10 @@ import { useAgentProgress } from '@/composables/useAgentProgress'
 const props = defineProps({
   candidateId: { type: [Number, String], default: null },
   outlineId: { type: [Number, String], default: null },
+  activeWorkflowStep: { type: String, default: 'angle' },
 })
 
-const emit = defineEmits(['complete', 'next-step'])
+const emit = defineEmits(['complete', 'next-step', 'pipeline-status'])
 
 // 状态
 const status = ref('idle') // idle | generating | completed | failed
@@ -222,6 +252,8 @@ const outline = ref(null)
 const errorMessage = ref('')
 const saving = ref(false)
 const reevaluating = ref(false)
+const generationPhase = ref('angle')
+const angleReport = ref(null)
 
 // Agent 进度（SSE 驱动）
 const progress = useAgentProgress()
@@ -233,9 +265,21 @@ const stepPercent = progress.stepPercent
 watch(() => progress.result.value, (newResult) => {
   if (newResult) {
     outline.value = JSON.parse(JSON.stringify(newResult))
-    status.value = 'completed'
-    emit('complete', newResult)
-    ElMessage.success('大纲生成完成')
+    if (generationPhase.value === 'angle') {
+      angleReport.value = JSON.parse(JSON.stringify(newResult))
+      outline.value = null
+      status.value = 'angle-completed'
+      emit('pipeline-status', { angle: 'completed', outline: 'idle' })
+      ElMessage.success('创作角度体检完成')
+    } else {
+      if (!angleReport.value && newResult?.generation_process?.creation_angle_inspection) {
+        angleReport.value = JSON.parse(JSON.stringify(newResult.generation_process.creation_angle_inspection))
+      }
+      status.value = 'completed'
+      emit('pipeline-status', { angle: 'completed', outline: 'completed' })
+      emit('complete', newResult)
+      ElMessage.success('大纲生成完成')
+    }
     generating.value = false
   }
 })
@@ -246,9 +290,57 @@ watch(() => progress.error.value, (newError) => {
     status.value = 'failed'
     errorMessage.value = newError
     generating.value = false
+    emit('pipeline-status', generationPhase.value === 'angle'
+      ? { angle: 'failed', outline: 'idle' }
+      : { angle: 'completed', outline: 'failed' })
     ElMessage.error('大纲生成失败')
   }
 })
+
+watch(currentStepIndex, (idx) => {
+  if (idx < 0) return
+  if (generationPhase.value === 'angle') {
+    emit('pipeline-status', {
+      angle: 'generating',
+      outline: 'idle',
+    })
+    return
+  }
+  emit('pipeline-status', {
+    angle: 'completed',
+    outline: 'generating',
+  })
+})
+
+const inspectAngle = async () => {
+  if (!props.candidateId) {
+    ElMessage.warning('缺少选题候选 ID')
+    return
+  }
+
+  status.value = 'generating'
+  generating.value = true
+  errorMessage.value = ''
+  generationPhase.value = 'angle'
+  angleReport.value = null
+  emit('pipeline-status', { angle: 'generating', outline: 'idle' })
+
+  try {
+    const res = await outlineApi.inspectAngle({
+      candidate_id: props.candidateId,
+    })
+    const runId = res.data.run_id
+    if (runId) {
+      progress.start(`/api/v1/outlines/stream/${runId}`)
+    }
+  } catch (error) {
+    status.value = 'failed'
+    errorMessage.value = error?.response?.data?.detail || error?.message || '体检失败，请重试'
+    generating.value = false
+    emit('pipeline-status', { angle: 'failed', outline: 'idle' })
+    ElMessage.error('创作角度体检失败')
+  }
+}
 
 // 加载已有大纲
 onMounted(async () => {
@@ -256,7 +348,9 @@ onMounted(async () => {
     try {
       const res = await outlineApi.getOutline(props.outlineId)
       outline.value = JSON.parse(JSON.stringify(res.data))
+      angleReport.value = outline.value?.generation_process?.creation_angle_inspection || null
       status.value = 'completed'
+      emit('pipeline-status', { angle: 'completed', outline: 'completed' })
     } catch (e) {
       console.error('加载大纲失败:', e)
     }
@@ -278,10 +372,13 @@ const generateOutline = async () => {
   status.value = 'generating'
   generating.value = true
   errorMessage.value = ''
+  generationPhase.value = 'outline'
+  emit('pipeline-status', { angle: 'completed', outline: 'generating' })
 
   try {
     const res = await outlineApi.generateOutline({
       candidate_id: props.candidateId,
+      angle_report: angleReport.value,
     })
 
     const runId = res.data.run_id
@@ -292,6 +389,7 @@ const generateOutline = async () => {
     status.value = 'failed'
     errorMessage.value = error?.response?.data?.detail || error?.message || '生成失败，请重试'
     generating.value = false
+    emit('pipeline-status', { angle: 'completed', outline: 'failed' })
     ElMessage.error('大纲生成失败')
   }
 }
@@ -302,6 +400,18 @@ const getScoreColor = (score) => {
   if (score >= 6) return 'text-sand'
   return 'text-crimson'
 }
+
+const showAngleResult = computed(() =>
+  props.activeWorkflowStep === 'angle'
+  && !!angleReport.value
+  && (status.value === 'angle-completed' || status.value === 'completed')
+)
+
+const showOutlineResult = computed(() =>
+  props.activeWorkflowStep !== 'angle'
+  && status.value === 'completed'
+  && !!outline.value
+)
 
 const copyAllOutline = async () => {
   if (!outline.value) return
@@ -407,7 +517,6 @@ const agentFeedback = computed(() => {
   const reviewObj = o.review || {}
   const criticismObj = o.criticism || {}
   const inspectionObj = o.inspection || {}
-
   // Agent A
   const agentA = {
     id: 'A',
@@ -454,11 +563,14 @@ const agentFeedback = computed(() => {
     agentC.issues = problemSections.map((p) => ({
       location:
         typeof p === 'object'
-          ? `第 ${p.section_number || '?'} 节 · ${p.title || ''}`
+          ? `第 ${p.section_number || '?'} 节${p.problem_type ? ` · ${p.problem_type}` : ''}${p.title ? ` · ${p.title}` : ''}`
           : '',
       text:
         typeof p === 'object'
-          ? p.problem || p.reason || p.description || JSON.stringify(p)
+          ? [
+              p.feedback || p.problem || p.reason || p.description,
+              p.suggestion ? `建议：${p.suggestion}` : '',
+            ].filter(Boolean).join(' ')
           : String(p),
     }))
   }
@@ -504,6 +616,64 @@ const agentFeedback = computed(() => {
 
   return [agentA, agentB, agentC, agentD]
 })
+
+const buildAngleAgents = (report) => {
+  if (!report) return []
+  const sourceAudit = report.source_audit || {}
+  const angleAudit = report.angle_audit || {}
+  const rhythmAudit = report.rhythm_audit || {}
+
+  const sourceAgent = {
+    id: 'angle-source',
+    code: 'S',
+    name: '沈知衡 · 信息源审计员',
+    role: '检查素材来源和跨领域交叉点',
+    avatar: '/agents/angle-a.png',
+    score: report.source_score,
+    summary: sourceAudit.intersection || '',
+    verdict: sourceAudit.verdict || '',
+    verdictPassed: !String(sourceAudit.verdict || '').includes('🔴'),
+    issuesLabel: '当前素材来源',
+    issues: (sourceAudit.source_domains || []).map((d) => ({ text: d })),
+    suggestions: sourceAudit.supplement_suggestions || [],
+  }
+  const angleAgent = {
+    id: 'angle-angle',
+    code: 'G',
+    name: '许见微 · 角度陌生化检验员',
+    role: '识别第一直觉角度并给替代角度',
+    avatar: '/agents/angle-b.png',
+    score: report.angle_score,
+    summary: angleAudit.core_tension || angleAudit.why_avoid || '',
+    verdict: angleAudit.verdict || '',
+    verdictPassed: String(angleAudit.verdict || '').includes('通过'),
+    issuesLabel: '第一直觉角度',
+    issues: (angleAudit.obvious_angles || []).map((a) => ({ text: a })),
+    suggestions: (angleAudit.alternative_angles || []).map((a) =>
+      `${a.angle}（${a.contrast_type || '陌生化'}：${a.core_tension || ''}）`
+    ),
+  }
+  const rhythmAgent = {
+    id: 'angle-rhythm',
+    code: 'R',
+    name: '林起伏 · 节奏设计师',
+    role: '输出情绪地图、升番结构、开头结尾',
+    avatar: '/agents/angle-c.png',
+    score: report.rhythm_score,
+    summary: rhythmAudit.emotion_map || '',
+    verdict: rhythmAudit.verdict || '',
+    verdictPassed: !String(rhythmAudit.verdict || '').includes('🔴'),
+    suggestions: [
+      rhythmAudit.escalation_suggestion,
+      rhythmAudit.opening_hook,
+      rhythmAudit.ending_aftershock,
+      ...(rhythmAudit.transition_hooks || []),
+    ].filter(Boolean),
+  }
+  return [sourceAgent, angleAgent, rhythmAgent]
+}
+
+const angleFeedback = computed(() => buildAngleAgents(angleReport.value))
 </script>
 
 <style scoped>
@@ -523,6 +693,27 @@ const agentFeedback = computed(() => {
 .result-left,
 .result-right {
   min-width: 0;
+}
+
+.angle-result {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.angle-summary {
+  border-left: 4px solid var(--clay);
+}
+
+.score-pill {
+  min-width: 64px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-pill);
+  background: var(--bone);
+  font-size: 22px;
+  font-weight: 700;
 }
 
 .section-title-input :deep(.el-input__wrapper) {

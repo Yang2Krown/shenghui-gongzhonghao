@@ -7,7 +7,9 @@ Agent A（大纲创作员）→ Agent B（大纲评审员）→ Agent C（读者
 import logging
 from typing import Callable, Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.outline import (
     Outline,
@@ -17,6 +19,8 @@ from app.models.outline import (
     OutlineInspection,
 )
 from app.models.topic_candidate import TopicCandidate
+from app.services.angle_inspection import inspect_creation_angle
+from app.services.angle_inspection.schemas import CreationAngleInspectionOutput
 from app.services.outline_generation.schemas import (
     OutlineInput,
     AgentBInput,
@@ -43,21 +47,38 @@ async def generate_outline(
     llm_client=None,
     model: Optional[str] = None,
     progress_callback: Optional[Callable] = None,
+    angle_report_data: Optional[dict] = None,
 ) -> FinalOutline:
     """大纲生成主入口。
     
     流程：
     1. 从数据库获取选题候选
-    2. Agent A 生成 3 个候选大纲
-    3. Agent B 评审并补全传播标签
-    4. Agent C 挑刺并修订
-    5. Agent D 自检评分
-    6. 如果不通过，最多重试 2 次
+    2. 创作角度体检三关：信息源审计 → 角度陌生化 → 节奏设计
+    3. Agent A 生成 3 个候选大纲
+    4. Agent B 评审并补全传播标签
+    5. Agent C 挑刺并修订
+    6. Agent D 自检评分
+    7. 如果不通过，最多重试 2 次
     """
     # 1. 获取选题候选
-    candidate = await db.get(TopicCandidate, candidate_id)
+    result = await db.execute(
+        select(TopicCandidate)
+        .options(selectinload(TopicCandidate.score))
+        .where(TopicCandidate.id == candidate_id)
+    )
+    candidate = result.scalar_one_or_none()
     if not candidate:
         raise ValueError(f"选题候选 {candidate_id} 不存在")
+
+    if angle_report_data:
+        angle_report = CreationAngleInspectionOutput(**angle_report_data)
+    else:
+        angle_report = await inspect_creation_angle(
+            candidate,
+            llm_client=llm_client,
+            model=model,
+            progress_callback=progress_callback,
+        )
     
     # 构建输入
     outline_input = OutlineInput(
@@ -68,6 +89,12 @@ async def generate_outline(
         value_promise=candidate.value_promise,
         angle_note=candidate.angle_note,
         info_cluster_id=candidate.info_cluster_id,
+        creation_guidance={
+            **angle_report.creation_guidance,
+            "overall_verdict": angle_report.overall_verdict,
+            "core_suggestion": angle_report.core_suggestion,
+            "prompt_text": angle_report.to_prompt_text(),
+        },
     )
     
     # 创建大纲记录
@@ -85,7 +112,7 @@ async def generate_outline(
         try:
             logger.info(f"大纲生成第 {attempt + 1} 次尝试: outline_id={outline.id}")
             
-            # 2. Agent A 生成 3 个候选大纲
+            # 3. Agent A 生成 3 个候选大纲
             if progress_callback:
                 await progress_callback({"event": "step_start", "data": {"step": 1, "agent": "顾清和 · 大纲创作员", "action": "正在生成 3 个候选大纲...", "avatar": "/agents/outline-a.png"}})
             candidates = await create_outline_candidates(
@@ -109,7 +136,7 @@ async def generate_outline(
             if progress_callback:
                 await progress_callback({"event": "step_done", "data": {"step": 1, "agent": "Agent A"}})
 
-            # 3. Agent B 评审
+            # 4. Agent B 评审
             if progress_callback:
                 await progress_callback({"event": "step_start", "data": {"step": 2, "agent": "陆言之 · 大纲评审员", "action": "正在评审大纲，选择最优方案...", "avatar": "/agents/outline-b.png"}})
             b_input = AgentBInput(
@@ -132,7 +159,7 @@ async def generate_outline(
             if progress_callback:
                 await progress_callback({"event": "step_done", "data": {"step": 2, "agent": "Agent B"}})
 
-            # 4. Agent C 挑刺
+            # 5. Agent C 挑刺
             if progress_callback:
                 await progress_callback({"event": "step_start", "data": {"step": 3, "agent": "刁亦凡 · 大纲挑刺员", "action": "正在模拟读者挑刺，修订问题...", "avatar": "/agents/outline-c.png"}})
             c_input = AgentCInput(
@@ -154,7 +181,7 @@ async def generate_outline(
             if progress_callback:
                 await progress_callback({"event": "step_done", "data": {"step": 3, "agent": "Agent C"}})
 
-            # 5. Agent D 自检
+            # 6. Agent D 自检
             if progress_callback:
                 await progress_callback({"event": "step_start", "data": {"step": 4, "agent": "简行舟 · 大纲自检员", "action": "正在自检评分，输出最终大纲...", "avatar": "/agents/outline-d.png"}})
             d_input = AgentDInput(
@@ -197,6 +224,7 @@ async def generate_outline(
             # 记录生成过程
             outline.generation_process = {
                 "attempts": attempt + 1,
+                "creation_angle_inspection": angle_report.model_dump(),
                 "selected_candidate": review_result.selected_candidate,
                 "review_reason": review_result.review_reason,
                 "criticism": criticism_result.overall_feeling,
@@ -238,6 +266,12 @@ async def generate_outline(
                     value_promise=candidate.value_promise,
                     angle_note=f"{candidate.angle_note or ''}\n\n【前次失败原因】\n{'; '.join(d.reason for d in inspection_result.deduction_reasons)}",
                     info_cluster_id=candidate.info_cluster_id,
+                    creation_guidance={
+                        **angle_report.creation_guidance,
+                        "overall_verdict": angle_report.overall_verdict,
+                        "core_suggestion": angle_report.core_suggestion,
+                        "prompt_text": angle_report.to_prompt_text(),
+                    },
                 )
                 continue
             

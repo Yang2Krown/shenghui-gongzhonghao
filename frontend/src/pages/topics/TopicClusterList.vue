@@ -204,7 +204,7 @@ const manualRefresh = async () => {
   refreshing.value = true
   try {
     await post('/topic-clusters/refresh')
-    ElMessage.success('已提交抓取任务，预计几分钟后可刷新查看新数据')
+    ElMessage.success('已提交抓取任务，预计几分钟后刷新页面查看新数据')
   } catch (e) {
     ElMessage.error('提交失败，请稍后重试')
   } finally {

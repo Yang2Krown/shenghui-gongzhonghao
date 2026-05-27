@@ -69,42 +69,62 @@ class ClickPredictorAgent(BaseAgent):
     ) -> Dict[str, Any]:
         """
         预测点击意愿
-        
-        模拟订阅号信息流场景，对Top 5逐个预测点击意愿。
-        
+
+        Schema 校验失败时自动重试，最多 3 次。
+
         Args:
             top5: Top 5候选列表
             topic: 选题信息
             outline: 大纲信息
-            
+
         Returns:
             点击预测结果
         """
+        MAX_RETRIES = 3
         logger.info(f"Agent C 开始预测点击，候选数量: {len(top5)}")
-        
-        # 构建预测提示词
+
         prompt = self._build_prediction_prompt(top5, topic, outline)
-        
-        # 调用AI模型 —— 强制 JSON 模式
-        response = await self.call_ai_model(
-            prompt=prompt,
-            system_prompt=self._get_system_prompt(),
-            temperature=0.5,  # 中等温度，模拟真实反应
-            json_mode=True,
-        )
-        
-        # 解析响应
-        result = self.parse_json_response(response)
-        
-        # 整理预测结果
-        predictions = self._format_predictions(result.get("predictions", []), top5)
-        
-        logger.info(f"Agent C 预测完成，平均点击意愿: {self._calculate_average_click(predictions)}")
-        
+        system_prompt = self._get_system_prompt()
+
+        last_response = ""
+        for attempt in range(1, MAX_RETRIES + 1):
+            extra = ""
+            if attempt > 1:
+                extra = (
+                    "\n\n【重要】上一次输出格式不符合要求。"
+                    "请严格输出 JSON，必须包含 predictions 数组，每个元素含 candidate_id、"
+                    "click_willingness、click_reason、no_click_reason、improvement_suggestion 字段。"
+                    "不要输出 markdown 或解释文字。"
+                )
+
+            response = await self.call_ai_model(
+                prompt=prompt,
+                system_prompt=system_prompt + extra,
+                temperature=0.5,
+                json_mode=True,
+            )
+            last_response = response
+
+            result = self.parse_json_response(response)
+            predictions_raw = result.get("predictions", [])
+
+            if predictions_raw:
+                predictions = self._format_predictions(predictions_raw, top5)
+                logger.info(f"Agent C 预测完成（第 {attempt} 次），平均点击意愿: {self._calculate_average_click(predictions)}")
+                return {
+                    "predictions": predictions,
+                    "reader_profile": READER_PROFILE,
+                    "raw_response": response,
+                }
+
+            logger.warning(f"Agent C 第 {attempt}/{MAX_RETRIES} 次未返回有效预测")
+
+        logger.error(f"[Agent C] {MAX_RETRIES} 次尝试均未返回有效预测")
+        predictions = self._format_predictions([], top5)
         return {
             "predictions": predictions,
             "reader_profile": READER_PROFILE,
-            "raw_response": response,
+            "raw_response": last_response,
         }
     
     def _get_system_prompt(self) -> str:

@@ -100,39 +100,57 @@ class TitleCreatorAgent(BaseAgent):
     ) -> Dict[str, Any]:
         """
         生成标题候选
-        
+
+        Schema 校验失败时自动重试，最多 3 次。
+
         Args:
             topic: 选题信息
             outline: 大纲信息
             feedback: 重生反馈（可选）
-            
+
         Returns:
             包含候选标题列表的字典
         """
+        MAX_RETRIES = 3
         logger.info(f"Agent A 开始生成标题，选题: {topic.title}")
-        
-        # 构建提示词
+
         prompt = self._build_prompt(topic, outline, feedback)
-        
-        # 调用AI模型 —— 强制 JSON 模式
-        response = await self.call_ai_model(
-            prompt=prompt,
-            system_prompt=self._get_system_prompt(),
-            temperature=0.8,  # 稍高温度增加创造性
-            json_mode=True,
-        )
-        
-        # 解析响应
-        result = self.parse_json_response(response)
-        
-        # 验证和后处理
-        candidates = self._validate_candidates(result.get("candidates", []))
-        
-        logger.info(f"Agent A 生成了 {len(candidates)} 个候选标题")
-        
+        system_prompt = self._get_system_prompt()
+
+        last_response = ""
+        for attempt in range(1, MAX_RETRIES + 1):
+            extra = ""
+            if attempt > 1:
+                extra = (
+                    "\n\n【重要】上一次输出格式不符合要求。"
+                    "请严格输出 JSON，必须包含 candidates 数组，每个元素含 title、word_count、"
+                    "method、modifiers、explanation 字段。不要输出 markdown 或解释文字。"
+                )
+
+            response = await self.call_ai_model(
+                prompt=prompt,
+                system_prompt=system_prompt + extra,
+                temperature=0.8,
+                json_mode=True,
+            )
+            last_response = response
+
+            result = self.parse_json_response(response)
+            candidates = self._validate_candidates(result.get("candidates", []))
+
+            if candidates:
+                logger.info(f"Agent A 生成了 {len(candidates)} 个候选标题（第 {attempt} 次）")
+                return {
+                    "candidates": candidates,
+                    "raw_response": response,
+                }
+
+            logger.warning(f"Agent A 第 {attempt}/{MAX_RETRIES} 次未生成有效候选")
+
+        logger.error(f"[Agent A] {MAX_RETRIES} 次尝试均未生成有效候选")
         return {
-            "candidates": candidates,
-            "raw_response": response,
+            "candidates": [],
+            "raw_response": last_response,
         }
     
     def _get_system_prompt(self) -> str:

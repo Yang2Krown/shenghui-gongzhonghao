@@ -180,8 +180,13 @@ def _parse_llm_output(raw: dict, inp: ContentGenerationInput) -> AgentAOutput:
     )
 
 
+MAX_RETRIES = 3
+
+
 async def generate_article(inp: ContentGenerationInput) -> AgentAOutput:
     """Agent A 主入口：一次性生成 2500-3000 字正文骨干。
+
+    Schema 校验失败时自动重试，最多 3 次。
 
     Args:
         inp: 正文生成总输入
@@ -191,46 +196,60 @@ async def generate_article(inp: ContentGenerationInput) -> AgentAOutput:
     """
     client = get_llm_client()
     user_prompt = _build_user_prompt(inp)
+    system_prompt = _load_system_prompt()
 
     logger.info(f"[Agent A] 开始生成正文，标题: {inp.topic_title}")
 
-    messages = [
-        ChatMessage(role="system", content=_load_system_prompt()),
-        ChatMessage(role="user", content=user_prompt),
-    ]
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        extra_hint = ""
+        if attempt > 1:
+            extra_hint = (
+                "\n\n【重要】上一次输出格式不符合要求。"
+                "请严格输出 JSON，必须包含 sections 数组，每个元素含 section_number、subtitle、content 字段。"
+                "不要输出任何 markdown 标记或解释文字。"
+            )
 
-    result = await client.chat(
-        messages=messages,
-        temperature=0.7,
-        max_tokens=8000,
-        json_mode=True,
-    )
+        messages = [
+            ChatMessage(role="system", content=system_prompt + extra_hint),
+            ChatMessage(role="user", content=user_prompt),
+        ]
 
-    parsed = parse_json_loose(result.text)
-    if parsed and "sections" not in parsed:
-        for alias in ("parts", "sections_list", "段落", "items", "节"):
-            if alias in parsed and isinstance(parsed[alias], list):
-                logger.warning(f"[Agent A] LLM 用了别名 key '{alias}'，已映射到 sections")
-                parsed["sections"] = parsed[alias]
-                break
-        else:
-            if isinstance(parsed, list):
-                parsed = {"sections": parsed}
-    if not parsed or not isinstance(parsed.get("sections"), list):
-        logger.error(
-            f"[Agent A] 输出解析失败 (len={len(result.text or '')}): "
-            f"parsed_keys={list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__}, "
-            f"原始响应前 800 字: {(result.text or '')[:800]!r}"
+        result = await client.chat(
+            messages=messages,
+            temperature=0.7,
+            max_tokens=8000,
+            json_mode=True,
         )
-        raise ValueError("Agent A 输出格式不符合 schema")
 
-    output = _parse_llm_output(parsed, inp)
+        parsed = parse_json_loose(result.text)
+        if parsed and "sections" not in parsed:
+            for alias in ("parts", "sections_list", "段落", "items", "节"):
+                if alias in parsed and isinstance(parsed[alias], list):
+                    logger.warning(f"[Agent A] LLM 用了别名 key '{alias}'，已映射到 sections")
+                    parsed["sections"] = parsed[alias]
+                    break
+            else:
+                if isinstance(parsed, list):
+                    parsed = {"sections": parsed}
 
-    # 自检
-    _self_check(output, inp)
+        if not parsed or not isinstance(parsed.get("sections"), list):
+            last_error = ValueError("Agent A 输出格式不符合 schema")
+            logger.warning(
+                f"[Agent A] 第 {attempt}/{MAX_RETRIES} 次输出解析失败 "
+                f"(len={len(result.text or '')}): "
+                f"parsed_keys={list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__}, "
+                f"原始响应前 800 字: {(result.text or '')[:800]!r}"
+            )
+            continue
 
-    logger.info(f"[Agent A] 正文生成完成，字数: {output.total_word_count}，节数: {output.section_count}")
-    return output
+        output = _parse_llm_output(parsed, inp)
+        _self_check(output, inp)
+        logger.info(f"[Agent A] 正文生成完成（第 {attempt} 次），字数: {output.total_word_count}，节数: {output.section_count}")
+        return output
+
+    logger.error(f"[Agent A] {MAX_RETRIES} 次尝试均失败")
+    raise last_error
 
 
 def _self_check(output: AgentAOutput, inp: ContentGenerationInput):

@@ -155,6 +155,10 @@ class PreprocessPipeline:
                 source_count=cluster.source_count or len(raws),
             )
 
+            # aihot 来源加权：精编过的内容质量更高，heat_score 上浮 1.5 分
+            if any(r.source and r.source.source_type == "aihot" for r in raws):
+                cluster.heat_score = round(min(10.0, cluster.heat_score + 1.5), 2)
+
             # 低粉爆款
             cluster.low_fan_hit = compute_low_fan_hit(engagements)
 

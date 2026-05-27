@@ -254,7 +254,9 @@ class TitleReviewerAgent(BaseAgent):
     ) -> List[Dict[str, Any]]:
         """
         对候选进行6维度评分
-        
+
+        Schema 校验失败时自动重试，最多 3 次。
+
         维度:
         1. 三个一眼达标度 (25%)
         2. 情绪触发力度 (20%)
@@ -262,76 +264,91 @@ class TitleReviewerAgent(BaseAgent):
         4. 长度合规 (10%)
         5. 套路成熟度 (15%)
         6. 与大纲一致性 (15%)
-        
+
         Args:
             candidates: 候选列表
             topic: 选题信息
             outline: 大纲信息
-            
+
         Returns:
             带评分的候选列表
         """
-        # 构建评分提示词
+        MAX_RETRIES = 3
         prompt = self._build_scoring_prompt(candidates, topic, outline)
-        
-        # 调用AI模型 —— 强制 JSON 模式，否则 LLM 容易返回带 markdown / 解释文本的非纯 JSON
-        response = await self.call_ai_model(
-            prompt=prompt,
-            system_prompt=self._get_system_prompt(),
-            temperature=0.3,  # 低温度确保评分一致性
-            json_mode=True,
-        )
-        
-        # 解析响应
-        result = self.parse_json_response(response)
+        system_prompt = self._get_system_prompt()
 
-        # 🔍 诊断日志：看 LLM 实际回了什么形状
-        logger.info(
-            f"[Agent B 诊断] LLM 原始响应前 400 字: {(response or '')[:400]!r}"
-        )
-        logger.info(
-            f"[Agent B 诊断] parse_json_response 结果顶层 keys: {list(result.keys())}; "
-            f"scores 数量: {len(result.get('scores', []) or [])}"
-        )
-        first_score = (result.get("scores") or [{}])[0] if result.get("scores") else {}
-        logger.info(f"[Agent B 诊断] 第一条 score: {first_score}")
+        last_error = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            extra_hint = ""
+            if attempt > 1:
+                extra_hint = (
+                    "\n\n【重要】上一次输出格式不符合要求。"
+                    "请严格输出 JSON，必须包含 scores 数组，每个元素含 candidate_id、"
+                    "three_eyes、emotion_trigger、specificity、length_compliance、"
+                    "method_maturity、outline_consistency、explanation 字段。"
+                    "不要输出任何 markdown 标记或解释文字。"
+                )
 
-        # 合并评分结果——三层鲁棒匹配
-        scored_candidates = []
-        raw_scores = result.get("scores", []) or []
-        scores_map = _robust_id_map(raw_scores, candidates, key="candidate_id")
-        unmatched = [i for i, c in enumerate(candidates) if c.get("id", "") not in scores_map]
-        logger.info(
-            f"[Agent B 诊断] 匹配上 {len(candidates) - len(unmatched)}/{len(candidates)} 个候选"
-        )
-        if unmatched:
-            logger.warning(
-                f"Agent B: {len(unmatched)}/{len(candidates)} 个候选未匹配到评分，"
-                f"将使用默认分 5（候选 #{[i+1 for i in unmatched]}）"
+            response = await self.call_ai_model(
+                prompt=prompt,
+                system_prompt=system_prompt + extra_hint,
+                temperature=0.3,
+                json_mode=True,
             )
 
-        for candidate in candidates:
-            candidate_id = candidate.get("id", "")
-            score_data = scores_map.get(candidate_id, {})
-            
-            # 计算加权总分
-            b_score = self._calculate_weighted_score(score_data)
-            
-            scored_candidates.append({
-                **candidate,
-                "b_score": b_score,
-                "b_score_details": {
-                    "three_eyes": score_data.get("three_eyes", 5),
-                    "emotion_trigger": score_data.get("emotion_trigger", 5),
-                    "specificity": score_data.get("specificity", 5),
-                    "length_compliance": score_data.get("length_compliance", 5),
-                    "method_maturity": score_data.get("method_maturity", 5),
-                    "outline_consistency": score_data.get("outline_consistency", 5),
-                },
-                "scoring_explanation": score_data.get("explanation", ""),
-            })
-        
-        return scored_candidates
+            result = self.parse_json_response(response)
+
+            logger.info(
+                f"[Agent B 诊断] 第 {attempt}/{MAX_RETRIES} 次 LLM 原始响应前 400 字: {(response or '')[:400]!r}"
+            )
+            logger.info(
+                f"[Agent B 诊断] parse_json_response 结果顶层 keys: {list(result.keys())}; "
+                f"scores 数量: {len(result.get('scores', []) or [])}"
+            )
+
+            raw_scores = result.get("scores", []) or []
+            if not raw_scores:
+                last_error = ValueError("Agent B 输出格式不符合 schema: scores 为空")
+                logger.warning(f"Agent B 第 {attempt}/{MAX_RETRIES} 次输出无 scores 数据")
+                continue
+
+            first_score = raw_scores[0] if raw_scores else {}
+            logger.info(f"[Agent B 诊断] 第一条 score: {first_score}")
+
+            scored_candidates = []
+            scores_map = _robust_id_map(raw_scores, candidates, key="candidate_id")
+            unmatched = [i for i, c in enumerate(candidates) if c.get("id", "") not in scores_map]
+            logger.info(
+                f"[Agent B 诊断] 匹配上 {len(candidates) - len(unmatched)}/{len(candidates)} 个候选"
+            )
+            if unmatched:
+                logger.warning(
+                    f"Agent B: {len(unmatched)}/{len(candidates)} 个候选未匹配到评分，"
+                    f"将使用默认分 5（候选 #{[i+1 for i in unmatched]}）"
+                )
+
+            for candidate in candidates:
+                candidate_id = candidate.get("id", "")
+                score_data = scores_map.get(candidate_id, {})
+                b_score = self._calculate_weighted_score(score_data)
+                scored_candidates.append({
+                    **candidate,
+                    "b_score": b_score,
+                    "b_score_details": {
+                        "three_eyes": score_data.get("three_eyes", 5),
+                        "emotion_trigger": score_data.get("emotion_trigger", 5),
+                        "specificity": score_data.get("specificity", 5),
+                        "length_compliance": score_data.get("length_compliance", 5),
+                        "method_maturity": score_data.get("method_maturity", 5),
+                        "outline_consistency": score_data.get("outline_consistency", 5),
+                    },
+                    "scoring_explanation": score_data.get("explanation", ""),
+                })
+
+            return scored_candidates
+
+        logger.error(f"[Agent B] {MAX_RETRIES} 次尝试均失败")
+        raise last_error
     
     def _calculate_weighted_score(self, score_data: Dict[str, Any]) -> float:
         """

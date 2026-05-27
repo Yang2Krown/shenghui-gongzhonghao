@@ -139,11 +139,16 @@ def _parse_llm_output(raw: dict) -> AgentBOutput:
     return AgentBOutput(sentences=sentences, stats=stats)
 
 
+MAX_RETRIES = 3
+
+
 async def catalyze_gold_sentences(
     agent_a_output: AgentAOutput,
     topic_title: str,
 ) -> AgentBOutput:
     """Agent B 主入口：催化 3-5 个金句。
+
+    Schema 校验失败时自动重试，最多 3 次。
 
     Args:
         agent_a_output: Agent A 的输出
@@ -154,50 +159,64 @@ async def catalyze_gold_sentences(
     """
     client = get_llm_client()
     user_prompt = _build_user_prompt(agent_a_output, topic_title)
+    system_prompt = _load_system_prompt()
 
     logger.info(f"[Agent B] 开始催化金句，标题: {topic_title}")
 
-    messages = [
-        ChatMessage(role="system", content=_load_system_prompt()),
-        ChatMessage(role="user", content=user_prompt),
-    ]
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        extra_hint = ""
+        if attempt > 1:
+            extra_hint = (
+                "\n\n【重要】上一次输出格式不符合要求。"
+                "请严格输出 JSON，必须包含 sentences 数组，每个元素含 sentence_id、sentence_type、"
+                "location、section_number、insert_method、content、word_count 字段。"
+                "不要输出任何 markdown 标记或解释文字。"
+            )
 
-    result = await client.chat(
-        messages=messages,
-        temperature=0.8,
-        max_tokens=2000,
-        json_mode=True,
-    )
+        messages = [
+            ChatMessage(role="system", content=system_prompt + extra_hint),
+            ChatMessage(role="user", content=user_prompt),
+        ]
 
-    parsed = parse_json_loose(result.text)
-
-    # LLM 经常用别的 key 名（gold_sentences / items / data...），都映射到 sentences
-    if parsed and "sentences" not in parsed:
-        for alias in ("gold_sentences", "金句", "items", "data", "results", "list"):
-            if alias in parsed and isinstance(parsed[alias], list):
-                logger.warning(f"[Agent B] LLM 用了别名 key '{alias}'，已映射到 sentences")
-                parsed["sentences"] = parsed[alias]
-                break
-        else:
-            # 如果整个 parsed 本身就是个 list，包一层
-            if isinstance(parsed, list):
-                parsed = {"sentences": parsed}
-
-    if not parsed or not isinstance(parsed.get("sentences"), list):
-        logger.error(
-            f"[Agent B] 输出解析失败 (len={len(result.text or '')}): "
-            f"parsed_keys={list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__}, "
-            f"原始响应前 800 字: {(result.text or '')[:800]!r}"
+        result = await client.chat(
+            messages=messages,
+            temperature=0.8,
+            max_tokens=2000,
+            json_mode=True,
         )
-        raise ValueError("Agent B 输出格式不符合 schema")
 
-    output = _parse_llm_output(parsed)
+        parsed = parse_json_loose(result.text)
 
-    # 自检
-    _self_check(output)
+        # LLM 经常用别的 key 名（gold_sentences / items / data...），都映射到 sentences
+        if parsed and "sentences" not in parsed:
+            for alias in ("gold_sentences", "金句", "items", "data", "results", "list"):
+                if alias in parsed and isinstance(parsed[alias], list):
+                    logger.warning(f"[Agent B] LLM 用了别名 key '{alias}'，已映射到 sentences")
+                    parsed["sentences"] = parsed[alias]
+                    break
+            else:
+                # 如果整个 parsed 本身就是个 list，包一层
+                if isinstance(parsed, list):
+                    parsed = {"sentences": parsed}
 
-    logger.info(f"[Agent B] 金句催化完成，共 {len(output.sentences)} 个金句")
-    return output
+        if not parsed or not isinstance(parsed.get("sentences"), list):
+            last_error = ValueError("Agent B 输出格式不符合 schema")
+            logger.warning(
+                f"[Agent B] 第 {attempt}/{MAX_RETRIES} 次输出解析失败 "
+                f"(len={len(result.text or '')}): "
+                f"parsed_keys={list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__}, "
+                f"原始响应前 800 字: {(result.text or '')[:800]!r}"
+            )
+            continue
+
+        output = _parse_llm_output(parsed)
+        _self_check(output)
+        logger.info(f"[Agent B] 金句催化完成（第 {attempt} 次），共 {len(output.sentences)} 个金句")
+        return output
+
+    logger.error(f"[Agent B] {MAX_RETRIES} 次尝试均失败")
+    raise last_error
 
 
 def _self_check(output: AgentBOutput):

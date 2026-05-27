@@ -319,11 +319,16 @@ def _parse_llm_output(raw: dict, original_word_count: int) -> AgentCOutput:
     )
 
 
+MAX_RETRIES = 3
+
+
 async def deai_rewrite(
     agent_a_output: AgentAOutput,
     agent_b_output: AgentBOutput,
 ) -> AgentCOutput:
     """Agent C 主入口：去 AI 味改写。
+
+    Schema 校验失败时自动重试，最多 3 次。
 
     Args:
         agent_a_output: Agent A 的输出（正文骨干）
@@ -334,46 +339,61 @@ async def deai_rewrite(
     """
     client = get_llm_client()
     user_prompt = _build_user_prompt(agent_a_output, agent_b_output)
+    system_prompt = _load_system_prompt()
 
     logger.info(f"[Agent C] 开始去 AI 味改写，原文字数: {agent_a_output.total_word_count}")
 
-    messages = [
-        ChatMessage(role="system", content=_load_system_prompt()),
-        ChatMessage(role="user", content=user_prompt),
-    ]
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        extra_hint = ""
+        if attempt > 1:
+            extra_hint = (
+                "\n\n【重要】上一次输出格式不符合要求。"
+                "请严格输出 JSON，必须包含 rewritten_text 字段（改写后的完整正文字符串），"
+                "以及 rewrite_table、skipped_sections、stats、quality_check 字段。"
+                "不要输出任何 markdown 标记或解释文字。"
+            )
 
-    result = await client.chat(
-        messages=messages,
-        temperature=0.5,
-        max_tokens=8000,
-        json_mode=True,
-    )
+        messages = [
+            ChatMessage(role="system", content=system_prompt + extra_hint),
+            ChatMessage(role="user", content=user_prompt),
+        ]
 
-    parsed = parse_json_loose(result.text)
-    if parsed and "rewritten_text" not in parsed:
-        for alias in ("rewrite", "text", "content", "改写后", "result", "output"):
-            if alias in parsed and isinstance(parsed[alias], str):
-                logger.warning(f"[Agent C] LLM 用了别名 key '{alias}'，已映射到 rewritten_text")
-                parsed["rewritten_text"] = parsed[alias]
-                break
-    if not parsed or not isinstance(parsed.get("rewritten_text"), str):
-        logger.error(
-            f"[Agent C] 输出解析失败 (len={len(result.text or '')}): "
-            f"parsed_keys={list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__}, "
-            f"原始响应前 800 字: {(result.text or '')[:800]!r}"
+        result = await client.chat(
+            messages=messages,
+            temperature=0.5,
+            max_tokens=8000,
+            json_mode=True,
         )
-        raise ValueError("Agent C 输出格式不符合 schema")
 
-    output = _parse_llm_output(parsed, agent_a_output.total_word_count)
+        parsed = parse_json_loose(result.text)
+        if parsed and "rewritten_text" not in parsed:
+            for alias in ("rewrite", "text", "content", "改写后", "result", "output"):
+                if alias in parsed and isinstance(parsed[alias], str):
+                    logger.warning(f"[Agent C] LLM 用了别名 key '{alias}'，已映射到 rewritten_text")
+                    parsed["rewritten_text"] = parsed[alias]
+                    break
 
-    # 自检
-    _self_check(output, agent_a_output.total_word_count)
+        if not parsed or not isinstance(parsed.get("rewritten_text"), str):
+            last_error = ValueError("Agent C 输出格式不符合 schema")
+            logger.warning(
+                f"[Agent C] 第 {attempt}/{MAX_RETRIES} 次输出解析失败 "
+                f"(len={len(result.text or '')}): "
+                f"parsed_keys={list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__}, "
+                f"原始响应前 800 字: {(result.text or '')[:800]!r}"
+            )
+            continue
 
-    logger.info(
-        f"[Agent C] 去 AI 味完成，改写后字数: {output.rewritten_word_count}，"
-        f"变化: {output.word_change_pct}%，改写处数: {len(output.rewrite_table)}"
-    )
-    return output
+        output = _parse_llm_output(parsed, agent_a_output.total_word_count)
+        _self_check(output, agent_a_output.total_word_count)
+        logger.info(
+            f"[Agent C] 去 AI 味完成（第 {attempt} 次），改写后字数: {output.rewritten_word_count}，"
+            f"变化: {output.word_change_pct}%，改写处数: {len(output.rewrite_table)}"
+        )
+        return output
+
+    logger.error(f"[Agent C] {MAX_RETRIES} 次尝试均失败")
+    raise last_error
 
 
 def _self_check(output: AgentCOutput, original_word_count: int):

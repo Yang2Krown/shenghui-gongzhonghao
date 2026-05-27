@@ -22,4 +22,28 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=7, minute=30),
         "kwargs": {"limit": 2000},
     },
+    # ── AI HOT（独立于通用 RSS 链路）──
+    # 精选：每 2 小时
+    "aihot-selected": {
+        "task": "scraper.fetch_aihot",
+        "schedule": crontab(minute=15, hour="*/2"),
+        "kwargs": {"feed_key": "selected"},
+    },
+    # 全部：上午 10:00 + 下午 16:00
+    "aihot-all-morning": {
+        "task": "scraper.fetch_aihot",
+        "schedule": crontab(minute=0, hour=10),
+        "kwargs": {"feed_key": "all"},
+    },
+    "aihot-all-afternoon": {
+        "task": "scraper.fetch_aihot",
+        "schedule": crontab(minute=0, hour=16),
+        "kwargs": {"feed_key": "all"},
+    },
+    # 日报：每天 8:30（人家 8:00 更新）
+    "aihot-daily": {
+        "task": "scraper.fetch_aihot",
+        "schedule": crontab(minute=30, hour=8),
+        "kwargs": {"feed_key": "daily"},
+    },
 }

@@ -260,6 +260,9 @@ def _parse_llm_output(
     )
 
 
+MAX_RETRIES = 3
+
+
 async def integrate_and_inspect(
     inp: ContentGenerationInput,
     agent_a_output: AgentAOutput,
@@ -267,6 +270,8 @@ async def integrate_and_inspect(
     agent_c_output: AgentCOutput,
 ) -> AgentDOutput:
     """Agent D 主入口：整合金句 + 8 维度自检诊断。
+
+    Schema 校验失败时自动重试，最多 3 次。
 
     Args:
         inp: 正文生成总输入
@@ -279,43 +284,62 @@ async def integrate_and_inspect(
     """
     client = get_llm_client()
     user_prompt = _build_user_prompt(inp, agent_a_output, agent_b_output, agent_c_output)
+    system_prompt = _load_system_prompt()
 
     logger.info("[Agent D] 开始整合 + 自检诊断")
 
-    messages = [
-        ChatMessage(role="system", content=_load_system_prompt()),
-        ChatMessage(role="user", content=user_prompt),
-    ]
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        extra_hint = ""
+        if attempt > 1:
+            extra_hint = (
+                "\n\n【重要】上一次输出格式不符合要求。"
+                "请严格输出 JSON，必须包含 final_text 和 dimensions 字段，"
+                "dimensions 包含 title_fulfillment、outline_alignment、word_compliance、"
+                "style_consistency、deai_thoroughness、gold_sentence_completeness、"
+                "opening_quality、ending_quality 共 8 个维度。"
+                "不要输出任何 markdown 标记或解释文字。"
+            )
 
-    result = await client.chat(
-        messages=messages,
-        temperature=0.3,
-        max_tokens=8000,
-        json_mode=True,
-    )
+        messages = [
+            ChatMessage(role="system", content=system_prompt + extra_hint),
+            ChatMessage(role="user", content=user_prompt),
+        ]
 
-    parsed = parse_json_loose(result.text)
-    if parsed and "dimensions" not in parsed:
-        for alias in ("evaluations", "scores", "维度", "评分", "评估"):
-            if alias in parsed:
-                logger.warning(f"[Agent D] LLM 用了别名 key '{alias}'，已映射到 dimensions")
-                parsed["dimensions"] = parsed[alias]
-                break
-    if not parsed or "dimensions" not in parsed:
-        logger.error(
-            f"[Agent D] 输出解析失败 (len={len(result.text or '')}): "
-            f"parsed_keys={list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__}, "
-            f"原始响应前 800 字: {(result.text or '')[:800]!r}"
+        result = await client.chat(
+            messages=messages,
+            temperature=0.3,
+            max_tokens=8000,
+            json_mode=True,
         )
-        raise ValueError("Agent D 输出格式不符合 schema")
 
-    output = _parse_llm_output(parsed, inp, agent_a_output, agent_b_output, agent_c_output)
+        parsed = parse_json_loose(result.text)
+        if parsed and "dimensions" not in parsed:
+            for alias in ("evaluations", "scores", "维度", "评分", "评估"):
+                if alias in parsed:
+                    logger.warning(f"[Agent D] LLM 用了别名 key '{alias}'，已映射到 dimensions")
+                    parsed["dimensions"] = parsed[alias]
+                    break
 
-    logger.info(
-        f"[Agent D] 诊断完成，总分: {output.total_score}/10，"
-        f"建议: {output.recommended_action}"
-    )
-    return output
+        if not parsed or "dimensions" not in parsed:
+            last_error = ValueError("Agent D 输出格式不符合 schema")
+            logger.warning(
+                f"[Agent D] 第 {attempt}/{MAX_RETRIES} 次输出解析失败 "
+                f"(len={len(result.text or '')}): "
+                f"parsed_keys={list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__}, "
+                f"原始响应前 800 字: {(result.text or '')[:800]!r}"
+            )
+            continue
+
+        output = _parse_llm_output(parsed, inp, agent_a_output, agent_b_output, agent_c_output)
+        logger.info(
+            f"[Agent D] 诊断完成（第 {attempt} 次），总分: {output.total_score}/10，"
+            f"建议: {output.recommended_action}"
+        )
+        return output
+
+    logger.error(f"[Agent D] {MAX_RETRIES} 次尝试均失败")
+    raise last_error
 
 
 def build_final_output(

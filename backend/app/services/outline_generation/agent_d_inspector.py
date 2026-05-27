@@ -91,47 +91,67 @@ def _determine_verdict(output: AgentDOutput) -> str:
     return "failed"
 
 
+MAX_RETRIES = 3
+
+
 async def inspect_outline(
     input_data: AgentDInput,
     *,
     llm_client: Optional[LLMClient] = None,
     model: Optional[str] = None,
 ) -> AgentDOutput:
-    """Agent D 主入口：对大纲进行自检评分。"""
+    """Agent D 主入口：对大纲进行自检评分。
+
+    Schema 校验失败时自动重试，最多 3 次。
+    """
     client = llm_client or get_llm_client()
 
     system_prompt = _load_system_prompt()
     user_prompt = _build_user_prompt(input_data)
 
-    messages = [
-        ChatMessage(role="system", content=system_prompt),
-        ChatMessage(role="user", content=user_prompt),
-    ]
-
     logger.info(f"Agent D 开始处理: outline_id={input_data.outline_id}")
 
-    result = await client.chat(
-        messages=messages,
-        model=model,
-        temperature=0.2,
-        max_tokens=4000,
-        json_mode=True,
-    )
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        extra_hint = ""
+        if attempt > 1:
+            extra_hint = (
+                "\n\n【重要】上一次输出格式不符合要求。"
+                "请严格输出 JSON，必须包含 hook_score、value_ladder_score、rhythm_score、"
+                "title_scan_score、trigger_score、length_score（每个含 score 和 evidence）、"
+                "total_score、verdict、deduction_reasons 字段。"
+                "不要输出任何 markdown 标记或解释文字。"
+            )
 
-    parsed = parse_json_loose(result.text)
-    if not parsed or "total_score" not in parsed:
-        logger.error(f"Agent D 输出解析失败: {result.text[:300]}")
-        raise ValueError("Agent D 输出格式不符合 schema")
+        messages = [
+            ChatMessage(role="system", content=system_prompt + extra_hint),
+            ChatMessage(role="user", content=user_prompt),
+        ]
 
-    output = AgentDOutput(**parsed)
+        result = await client.chat(
+            messages=messages,
+            model=model,
+            temperature=0.2,
+            max_tokens=4000,
+            json_mode=True,
+        )
 
-    # 二次校验：重新计算总分和判定
-    output.total_score = round(_calculate_total_score(output), 2)
-    output.verdict = _determine_verdict(output)
+        parsed = parse_json_loose(result.text)
+        if not parsed or "total_score" not in parsed:
+            last_error = ValueError("Agent D 输出格式不符合 schema")
+            logger.warning(f"Agent D 第 {attempt}/{MAX_RETRIES} 次输出解析失败: {result.text[:300]}")
+            continue
 
-    # 如果不通过，确保有扣分理由
-    if output.verdict == "failed" and not output.deduction_reasons:
-        logger.warning(f"Agent D 判定不通过但无扣分理由")
+        output = AgentDOutput(**parsed)
 
-    logger.info(f"Agent D 完成: outline_id={input_data.outline_id}, 总分={output.total_score}, 判定={output.verdict}")
-    return output
+        output.total_score = round(_calculate_total_score(output), 2)
+        output.verdict = _determine_verdict(output)
+
+        if output.verdict == "failed" and not output.deduction_reasons:
+            logger.warning(f"Agent D 判定不通过但无扣分理由")
+
+        logger.info(f"Agent D 完成（第 {attempt} 次）: outline_id={input_data.outline_id}, 总分={output.total_score}, 判定={output.verdict}")
+        return output
+
+    logger.error(f"[Agent D] {MAX_RETRIES} 次尝试均失败")
+    raise last_error

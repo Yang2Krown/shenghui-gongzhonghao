@@ -17,6 +17,11 @@ export const outlineApi = {
     return api.post('/outlines/generate', data, { timeout: 300000 })
   },
 
+  // 创作角度体检（三关：信息源 / 角度 / 节奏）
+  inspectAngle(data) {
+    return api.post('/outlines/inspect-angle', data, { timeout: 180000 })
+  },
+
   // 保存编辑后的大纲
   updateOutline(id, data) {
     return api.patch(`/outlines/${id}`, data)

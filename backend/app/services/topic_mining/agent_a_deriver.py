@@ -123,6 +123,9 @@ async def _attempt_derive(
     return output.candidates
 
 
+MAX_RETRIES = 3
+
+
 async def derive_candidates(
     info: InfoClusterInput,
     *,
@@ -131,9 +134,8 @@ async def derive_candidates(
 ) -> List[CandidateFromA]:
     """Agent A 主入口：从 1 条信息衍生候选选题列表。
 
-    对齐设计文档 4.2 节异常处理：
-    - schema 不符 → 重试 1 次，仍失败抛
-    - 衍生数量低于下限 → 重试 1 次，仍不足则降级返回已有候选
+    Schema 校验失败时自动重试，最多 3 次。
+    衍生数量低于下限时也会重试补足。
     """
     client = llm_client or get_llm_client()
     system_prompt = _load_system_prompt()
@@ -144,17 +146,32 @@ async def derive_candidates(
     lo, hi = DERIVE_LIMITS.get(info.info_type, (4, 6))
     logger.info(f"Agent A 开始处理: cluster_id={info.cluster_id}, type={info.info_type}, expect {lo}-{hi}")
 
-    # 第一次：schema 失败允许重试 1 次
-    try:
-        candidates = await _attempt_derive(info, client, model, system_full, user_prompt)
-    except ValueError as e:
-        logger.warning(f"Agent A schema 失败，重试 1 次: {e}")
-        candidates = await _attempt_derive(
-            info, client, model, system_full, user_prompt,
-            extra_hint="\n\n【重要】上次输出格式不对，请严格按 JSON schema 输出 candidates 数组。",
-        )
+    # schema 失败允许重试最多 3 次
+    candidates = None
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        extra_hint = ""
+        if attempt > 1:
+            extra_hint = (
+                "\n\n【重要】上一次输出格式不符合要求。"
+                "请严格输出 JSON，必须包含 candidates 数组，每个元素含 candidate_id、title、"
+                "direction、routine、dimension_combo、value_promise、angle_note、"
+                "persona_reviews、persona_divergence、persona_divergence_flag 字段。"
+                "不要输出任何 markdown 标记或解释文字。"
+            )
+        try:
+            candidates = await _attempt_derive(info, client, model, system_full, user_prompt, extra_hint=extra_hint)
+            break
+        except ValueError as e:
+            last_error = e
+            logger.warning(f"Agent A 第 {attempt}/{MAX_RETRIES} 次 schema 失败: {e}")
+            continue
 
-    # 数量低于下限 → 重试 1 次（要求模型补足）
+    if candidates is None:
+        logger.error(f"[Agent A] {MAX_RETRIES} 次尝试均失败")
+        raise last_error
+
+    # 数量低于下限 → 重试补足
     if len(candidates) < lo:
         logger.warning(f"Agent A 衍生数量 {len(candidates)} 低于下限 {lo}，重试补足")
         try:
@@ -162,7 +179,6 @@ async def derive_candidates(
                 info, client, model, system_full, user_prompt,
                 extra_hint=f"\n\n【重要】上次只衍生 {len(candidates)} 个，必须达到 {lo}-{hi} 个。请补足多角度候选。",
             )
-            # 用新结果如果数量更多就替换
             if len(retry) > len(candidates):
                 candidates = retry
         except Exception as e:

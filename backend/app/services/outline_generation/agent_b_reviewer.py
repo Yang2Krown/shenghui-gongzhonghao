@@ -71,49 +71,69 @@ def _build_user_prompt(input_data: AgentBInput) -> str:
 }}"""
 
 
+MAX_RETRIES = 3
+
+
 async def review_outline(
     input_data: AgentBInput,
     *,
     llm_client: Optional[LLMClient] = None,
     model: Optional[str] = None,
 ) -> AgentBOutput:
-    """Agent B 主入口：评审候选大纲并补全传播标签。"""
+    """Agent B 主入口：评审候选大纲并补全传播标签。
+
+    Schema 校验失败时自动重试，最多 3 次。
+    """
     client = llm_client or get_llm_client()
 
     system_prompt = _load_system_prompt()
     user_prompt = _build_user_prompt(input_data)
 
-    messages = [
-        ChatMessage(role="system", content=system_prompt),
-        ChatMessage(role="user", content=user_prompt),
-    ]
-
     logger.info(f"Agent B 开始处理: outline_id={input_data.outline_id}, 候选数={len(input_data.candidates)}")
 
-    result = await client.chat(
-        messages=messages,
-        model=model,
-        temperature=0.3,
-        max_tokens=6000,
-        json_mode=True,
-    )
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        extra_hint = ""
+        if attempt > 1:
+            extra_hint = (
+                "\n\n【重要】上一次输出格式不符合要求。"
+                "请严格输出 JSON，必须包含 selected_candidate（数字）、review_reason、"
+                "sections 数组（每元素含 section_number、title、core_points、word_count、propagation_tags、notes）。"
+                "不要输出任何 markdown 标记或解释文字。"
+            )
 
-    parsed = parse_json_loose(result.text)
-    if not parsed or "selected_candidate" not in parsed:
-        logger.error(f"Agent B 输出解析失败: {result.text[:300]}")
-        raise ValueError("Agent B 输出格式不符合 schema")
+        messages = [
+            ChatMessage(role="system", content=system_prompt + extra_hint),
+            ChatMessage(role="user", content=user_prompt),
+        ]
 
-    output = AgentBOutput(**parsed)
+        result = await client.chat(
+            messages=messages,
+            model=model,
+            temperature=0.3,
+            max_tokens=6000,
+            json_mode=True,
+        )
 
-    # 校验传播标签完整性
-    all_tags = set()
-    for section in output.sections:
-        all_tags.update(section.propagation_tags)
-    
-    required_tags = {"开头钩子", "价值密度", "转发理由", "收藏点"}
-    missing_tags = required_tags - all_tags
-    if missing_tags:
-        logger.warning(f"Agent B 缺少必备传播标签: {missing_tags}")
+        parsed = parse_json_loose(result.text)
+        if not parsed or "selected_candidate" not in parsed:
+            last_error = ValueError("Agent B 输出格式不符合 schema")
+            logger.warning(f"Agent B 第 {attempt}/{MAX_RETRIES} 次输出解析失败: {result.text[:300]}")
+            continue
 
-    logger.info(f"Agent B 完成: outline_id={input_data.outline_id}, 选中候选={output.selected_candidate}")
-    return output
+        output = AgentBOutput(**parsed)
+
+        all_tags = set()
+        for section in output.sections:
+            all_tags.update(section.propagation_tags)
+
+        required_tags = {"开头钩子", "价值密度", "转发理由", "收藏点"}
+        missing_tags = required_tags - all_tags
+        if missing_tags:
+            logger.warning(f"Agent B 缺少必备传播标签: {missing_tags}")
+
+        logger.info(f"Agent B 完成（第 {attempt} 次）: outline_id={input_data.outline_id}, 选中候选={output.selected_candidate}")
+        return output
+
+    logger.error(f"[Agent B] {MAX_RETRIES} 次尝试均失败")
+    raise last_error
