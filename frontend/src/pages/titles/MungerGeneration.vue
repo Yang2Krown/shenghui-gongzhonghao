@@ -199,12 +199,15 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { onBeforeRouteLeave } from 'vue-router'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, Check, CircleCloseFilled } from '@element-plus/icons-vue'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import { post } from '@/api/api'
 import { useAgentProgress } from '@/composables/useAgentProgress'
+import generationRecordApi from '@/api/generationRecord'
+
+const route = useRoute()
 
 const content = ref('')
 const status = ref('idle') // idle | generating | completed | failed
@@ -274,6 +277,28 @@ watch(() => progress.error.value, (newError) => {
 
 onUnmounted(() => {
   progress.stop()
+})
+
+// 从历史记录恢复
+onMounted(async () => {
+  const recordId = route.query.record_id
+  if (recordId) {
+    try {
+      const res = await generationRecordApi.get(recordId)
+      const record = res.data
+      if (record.output_snapshot && record.status === 'completed') {
+        result.value = record.output_snapshot
+        status.value = 'completed'
+        // 尝试恢复输入内容
+        if (record.input_snapshot?.content_length) {
+          content.value = '' // 输入内容未存储在快照中，留空
+        }
+        ElMessage.success('已从历史记录恢复生成结果')
+      }
+    } catch (e) {
+      console.warn('恢复历史记录失败:', e)
+    }
+  }
 })
 
 const generate = async () => {

@@ -127,6 +127,8 @@ import OutlinePanel from '@/components/creation/OutlinePanel.vue'
 import TitlePanel from '@/components/creation/TitlePanel.vue'
 import ContentPanel from '@/components/creation/ContentPanel.vue'
 import outlineApi from '@/api/outline'
+import generationRecordApi from '@/api/generationRecord'
+import { get } from '@/api/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -199,8 +201,124 @@ const getStepMeta = (step) => {
   return text[step.status] || '待开始'
 }
 
+// ── 从历史记录恢复创作状态 ──
+const restoreFromHistory = async (recordId) => {
+  try {
+    // 1. 获取点击的那条记录
+    const recordRes = await generationRecordApi.get(recordId)
+    const record = recordRes.data
+
+    const cid = record.candidate_id
+    if (!cid) {
+      ElMessage.warning('此记录未关联选题，无法恢复完整创作状态')
+      return
+    }
+
+    // 2. 加载选题信息（用于顶部显示 + 传给子面板）
+    try {
+      const candidateRes = await get(`/topic-candidates/${cid}`)
+      const cand = candidateRes.data?.data || candidateRes.data || candidateRes
+      // 写入 URL query（不触发导航，仅更新显示用的 computed）
+      router.replace({
+        path: route.path,
+        query: {
+          ...route.query,
+          candidate_id: cid,
+          topic_title: cand.title || '',
+          topic_direction: cand.direction || '',
+        },
+      })
+    } catch (e) {
+      console.warn('加载选题信息失败:', e)
+    }
+
+    // 3. 获取该选题下所有已完成的记录（每种 type 最新一条）
+    const allRes = await generationRecordApi.byCandidate(cid)
+    const records = allRes.data || []
+
+    // 按 type 索引
+    const byType = {}
+    for (const r of records) {
+      byType[r.type] = r
+    }
+
+    // 4. 恢复大纲（最关键 —— 后续步骤都依赖大纲数据）
+    const outlineRecord = byType['outline_generate'] || byType['outline_reevaluate']
+    if (outlineRecord && outlineRecord.output_snapshot) {
+      const snap = outlineRecord.output_snapshot
+      // output_snapshot 里可能包含 outline_id 或 id
+      const oid = snap.id || snap.outline_id
+      if (oid) {
+        currentOutlineId.value = oid
+        // 通过 API 加载完整大纲数据（含 sections、inspection 等）
+        try {
+          const outlineRes = await outlineApi.getOutline(oid)
+          currentOutlineData.value = outlineRes.data || outlineRes
+        } catch {
+          // 如果 API 加载失败，尝试用快照数据
+          currentOutlineData.value = { ...snap, id: oid }
+        }
+      } else {
+        // 没有 outline_id，直接用快照
+        currentOutlineData.value = snap
+      }
+      angleStatus.value = 'completed'
+      outlineStatus.value = 'completed'
+    }
+
+    // 5. 恢复标题
+    const titleRecord = byType['title_generate']
+    if (titleRecord && titleRecord.output_snapshot) {
+      const snap = titleRecord.output_snapshot
+      const recs = snap.recommendations || []
+      if (recs.length > 0) {
+        selectedTitle.value = { title: recs[0].title, ...recs[0] }
+      }
+      titleStatus.value = 'completed'
+    }
+
+    // 6. 恢复正文
+    const contentRecord = byType['content_generate']
+    if (contentRecord && contentRecord.output_snapshot) {
+      const snap = contentRecord.output_snapshot
+      // content_generate 的 output_snapshot 只存了摘要信息
+      // 如果有 final_text 就用，否则标记 completed 但不填内容
+      if (snap.final_text) {
+        finalContent.value = snap
+      }
+      contentStatus.value = 'completed'
+    }
+
+    // 7. 跳到对应步骤（根据点击的记录类型决定）
+    const typeToStep = {
+      angle_inspection: 'angle',
+      outline_generate: 'outline',
+      outline_reevaluate: 'outline',
+      title_generate: 'title',
+      title_reevaluate: 'title',
+      content_generate: 'content',
+      content_reevaluate: 'content',
+    }
+    const targetStep = typeToStep[record.type] || 'outline'
+    goWorkflowStep(targetStep)
+
+    ElMessage.success('已从历史记录恢复创作状态')
+  } catch (e) {
+    console.error('从历史记录恢复失败:', e)
+    ElMessage.error('恢复创作状态失败')
+  }
+}
+
 // 加载已有创作数据
 onMounted(async () => {
+  // 优先：从历史记录恢复
+  const recordId = route.query.record_id
+  if (recordId) {
+    await restoreFromHistory(recordId)
+    return
+  }
+
+  // 原有逻辑：编辑模式加载草稿
   if (isEditing.value) {
     try {
       await creationStore.fetchCreationById(route.params.id)

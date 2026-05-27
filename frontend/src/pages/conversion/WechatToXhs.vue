@@ -184,10 +184,13 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { onBeforeRouteLeave } from 'vue-router'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Link, CircleCloseFilled, Loading, CopyDocument } from '@element-plus/icons-vue'
 import { post } from '@/api/api'
+import generationRecordApi from '@/api/generationRecord'
+
+const route = useRoute()
 
 const mode = ref('paste')
 const content = ref('')
@@ -196,6 +199,23 @@ const linkUrl = ref('')
 const loading = ref(false)
 const error = ref('')
 const result = ref(null)
+
+// 从历史记录恢复
+onMounted(async () => {
+  const recordId = route.query.record_id
+  if (recordId) {
+    try {
+      const res = await generationRecordApi.get(recordId)
+      const record = res.data
+      if (record.output_snapshot && record.status === 'completed') {
+        result.value = record.output_snapshot
+        ElMessage.success('已从历史记录恢复转换结果')
+      }
+    } catch (e) {
+      console.warn('恢复历史记录失败:', e)
+    }
+  }
+})
 
 const convertContent = async () => {
   if (content.value.length < 10) {

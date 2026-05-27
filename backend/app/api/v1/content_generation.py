@@ -243,7 +243,24 @@ async def generate_content_async(
                         },
                     },
                 })
-                await track_complete(run_id, {"final_word_count": output.final_word_count, "rewrite_count": output.agent_c_rewrite_count, "diagnosis_score": diag.total_score})
+                await track_complete(run_id, {
+                    "final_text": output.final_text,
+                    "final_word_count": output.final_word_count,
+                    "section_count": output.section_count,
+                    "rewrite_count": output.agent_c_rewrite_count,
+                    "style_anchor": output.style_anchor,
+                    "gold_sentences": [
+                        {"sentence_id": s.sentence_id, "sentence_type": s.sentence_type, "location": s.location, "content": s.content, "word_count": s.word_count}
+                        for s in output.gold_sentences
+                    ],
+                    "diagnosis": {
+                        "total_score": diag.total_score,
+                        "recommended_action": diag.recommended_action,
+                        "high_priority": diag.high_priority,
+                        "medium_priority": diag.medium_priority,
+                        "low_priority": diag.low_priority,
+                    },
+                })
             except Exception as e:
                 await progress_store.push(run_id, {
                     "event": "error",

@@ -212,12 +212,16 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowRight, Check, CircleCloseFilled } from '@element-plus/icons-vue'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import { post } from '@/api/api'
 import { useAgentProgress } from '@/composables/useAgentProgress'
+import generationRecordApi from '@/api/generationRecord'
+
+const route = useRoute()
 
 const title = ref('')
 const summary = ref('')
@@ -357,6 +361,31 @@ const reset = () => {
   result.value = null
   errorMessage.value = ''
 }
+
+// 从历史记录恢复
+onMounted(async () => {
+  const recordId = route.query.record_id
+  if (recordId) {
+    try {
+      const res = await generationRecordApi.get(recordId)
+      const record = res.data
+      if (record.output_snapshot && record.status === 'completed') {
+        result.value = record.output_snapshot
+        status.value = 'completed'
+        // 恢复输入
+        if (record.input_snapshot?.title) {
+          title.value = record.input_snapshot.title
+        }
+        if (record.input_snapshot?.summary) {
+          summary.value = record.input_snapshot.summary
+        }
+        ElMessage.success('已从历史记录恢复评分结果')
+      }
+    } catch (e) {
+      console.warn('恢复历史记录失败:', e)
+    }
+  }
+})
 </script>
 
 <style scoped>

@@ -45,6 +45,11 @@
     <div v-if="status === 'completed' && content" class="content-result-split">
       <!-- 左侧：可编辑正文 -->
       <div class="result-left">
+        <!-- 已选标题 -->
+        <div v-if="titleData?.title" class="selected-title mb-4">
+          {{ titleData.title }}
+        </div>
+
         <!-- 统计信息 -->
         <div class="card p-4 mb-4">
           <div class="flex flex-wrap items-center gap-6 text-sm">
@@ -84,14 +89,10 @@
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-h4 font-sans text-ink">正文</h3>
             <div class="flex items-center gap-2">
-              <el-button-group size="small">
-                <el-button :type="viewMode === 'edit' ? 'primary' : ''" @click="viewMode = 'edit'">
-                  编辑
-                </el-button>
-                <el-button :type="viewMode === 'preview' ? 'primary' : ''" @click="viewMode = 'preview'">
-                  预览
-                </el-button>
-              </el-button-group>
+              <div class="view-toggle">
+                <button class="toggle-btn" :class="{ active: viewMode === 'edit' }" @click="viewMode = 'edit'">编辑</button>
+                <button class="toggle-btn" :class="{ active: viewMode === 'preview' }" @click="viewMode = 'preview'">预览</button>
+              </div>
               <el-button link size="small" @click="copyText">
                 <el-icon><DocumentCopy /></el-icon> 复制
               </el-button>
@@ -137,17 +138,6 @@
 
       <!-- 右侧：Agent 反馈 -->
       <div class="result-right">
-        <div class="flex items-center justify-between mb-3">
-          <div></div>
-          <el-button
-            size="small"
-            :loading="reevaluating"
-            @click="reevaluateContent"
-          >
-            <el-icon><Refresh /></el-icon>
-            重新评估
-          </el-button>
-        </div>
         <AgentFeedbackPanel
           :agents="agentFeedback"
           subtitle="正文流水线：A 撰写 → B 金句 → C 去 AI 味 → D 8 维度诊断"
@@ -162,9 +152,9 @@
           <el-icon><Refresh /></el-icon>
           重新生成
         </el-button>
-        <el-button @click="saveDraft" :loading="saving">
-          <el-icon><Document /></el-icon>
-          保存草稿
+        <el-button :loading="reevaluating" @click="reevaluateContent">
+          <el-icon><Refresh /></el-icon>
+          重新评估
         </el-button>
         <el-button type="primary" @click="confirmContent">
           确认正文
@@ -503,6 +493,41 @@ const agentFeedback = computed(() => {
 </script>
 
 <style scoped>
+.view-toggle {
+  display: inline-flex;
+  background: var(--bone);
+  border-radius: var(--r-pill);
+  padding: 3px;
+  flex-shrink: 0;
+}
+
+.toggle-btn {
+  padding: 4px 14px;
+  border: none;
+  background: transparent;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  line-height: 1.4;
+}
+
+.toggle-btn.active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.selected-title {
+  font-family: var(--sans);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
 .content-result-split {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
