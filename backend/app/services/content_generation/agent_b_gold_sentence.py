@@ -164,6 +164,7 @@ async def catalyze_gold_sentences(
     logger.info(f"[Agent B] 开始催化金句，标题: {topic_title}")
 
     last_error = None
+    current_max_tokens = 8000
     for attempt in range(1, MAX_RETRIES + 1):
         extra_hint = ""
         if attempt > 1:
@@ -182,9 +183,16 @@ async def catalyze_gold_sentences(
         result = await client.chat(
             messages=messages,
             temperature=0.8,
-            max_tokens=2000,
+            max_tokens=current_max_tokens,
             json_mode=True,
         )
+
+        # 检测截断，自动增大 max_tokens
+        if getattr(result, 'finish_reason', None) == "length":
+            logger.warning(f"[Agent B] 输出被截断 (max_tokens={current_max_tokens})，增大重试")
+            current_max_tokens = min(current_max_tokens * 2, 16000)
+            last_error = ValueError("Agent B 输出被 max_tokens 截断")
+            continue
 
         parsed = parse_json_loose(result.text)
 

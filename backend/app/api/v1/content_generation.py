@@ -15,6 +15,7 @@ from app.core.security import get_current_user
 from app.core.progress import progress_store
 from app.db.session import get_db
 from app.models.user import User
+from app.services.generation_tracker import track_start, track_complete, track_fail
 
 router = APIRouter()
 
@@ -104,6 +105,19 @@ async def generate_content_async(
     正文数据通过 SSE 的 result 事件返回（在 complete 之后）。
     """
     run_id = progress_store.create_run()
+
+    await track_start(
+        user_id=current_user.id,
+        type="content_generate",
+        run_id=run_id,
+        input_snapshot={"candidate_id": req.candidate_id, "outline_id": req.outline_id},
+        display_title=f"正文生成 · 选题#{req.candidate_id}",
+        candidate_id=req.candidate_id,
+        resume_context={
+            "route": "/creation/new",
+            "query": {"candidate_id": req.candidate_id},
+        },
+    )
 
     async def _run():
         from sqlalchemy import select
@@ -229,11 +243,13 @@ async def generate_content_async(
                         },
                     },
                 })
+                await track_complete(run_id, {"final_word_count": output.final_word_count, "rewrite_count": output.agent_c_rewrite_count, "diagnosis_score": diag.total_score})
             except Exception as e:
                 await progress_store.push(run_id, {
                     "event": "error",
                     "data": {"message": str(e)},
                 })
+                await track_fail(run_id, str(e))
 
     asyncio.create_task(_run())
 
@@ -422,6 +438,18 @@ async def reevaluate_content(
 
     run_id = progress_store.create_run()
 
+    await track_start(
+        user_id=current_user.id,
+        type="content_reevaluate",
+        run_id=run_id,
+        input_snapshot={"title": req.title, "text_length": len(req.text)},
+        display_title=f"正文重评 · {req.title[:30]}",
+        resume_context={
+            "route": "/creation/new",
+            "query": {},
+        },
+    )
+
     async def _run():
         try:
             async def _progress_cb(event):
@@ -552,6 +580,7 @@ async def reevaluate_content(
             })
             await _progress_cb({"event": "step_done", "data": {"step": 1, "agent": "Agent D"}})
             await _progress_cb({"event": "complete", "data": {"step": 1, "agent": "Agent D"}})
+            await track_complete(run_id, result_data)
 
         except Exception as e:
             import logging
@@ -560,6 +589,7 @@ async def reevaluate_content(
                 "event": "error",
                 "data": {"message": str(e)},
             })
+            await track_fail(run_id, str(e))
 
     asyncio.create_task(_run())
 

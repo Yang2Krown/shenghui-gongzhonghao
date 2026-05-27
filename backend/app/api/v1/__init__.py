@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, wechat_to_xhs
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, wechat_to_xhs, generation_records
 
 api_router = APIRouter()
 
@@ -93,4 +93,11 @@ api_router.include_router(
     wechat_to_xhs.router,
     prefix="/wechat-to-xhs",
     tags=["公众号转小红书"]
+)
+
+# 生成记录路由
+api_router.include_router(
+    generation_records.router,
+    prefix="/generation-records",
+    tags=["生成记录"]
 )

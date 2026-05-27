@@ -27,7 +27,7 @@ class TopicCandidate(BaseModel):
     """候选选题主表（Agent A 输出 + Agent B 评分快照）。"""
     __tablename__ = "topic_candidates"
 
-    info_cluster_id = Column(Integer, ForeignKey("info_clusters.id"), nullable=False, index=True)
+    info_cluster_id = Column(Integer, ForeignKey("info_clusters.id"), nullable=True, index=True)
 
     # Agent A：衍生信息
     title = Column(String(500), nullable=False)                        # 草标题 14-22 字

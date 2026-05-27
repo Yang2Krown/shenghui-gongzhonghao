@@ -28,6 +28,7 @@ from app.models.outline import (
 from app.models.topic_candidate import TopicCandidate
 from app.services.angle_inspection import inspect_creation_angle
 from app.services.outline_generation.outline_service import generate_outline
+from app.services.generation_tracker import track_start, track_complete, track_fail
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,19 @@ async def trigger_angle_inspection(
 
     model = body.get("model")
     run_id = progress_store.create_run()
+
+    await track_start(
+        user_id=current_user.id,
+        type="angle_inspection",
+        run_id=run_id,
+        input_snapshot={"candidate_id": candidate_id, "model": model},
+        display_title=f"角度体检 · 选题#{candidate_id}",
+        candidate_id=int(candidate_id),
+        resume_context={
+            "route": "/creation/new",
+            "query": {"candidate_id": candidate_id},
+        },
+    )
 
     async def _run():
         from app.db.session import AsyncSessionLocal
@@ -81,11 +95,13 @@ async def trigger_angle_inspection(
                     "event": "result",
                     "data": report.model_dump(),
                 })
+                await track_complete(run_id, report.model_dump(), display_title=f"角度体检 · {candidate.title[:30]}")
             except Exception as e:
                 await progress_store.push(run_id, {
                     "event": "error",
                     "data": {"message": str(e)},
                 })
+                await track_fail(run_id, str(e))
 
     asyncio.create_task(_run())
 
@@ -124,6 +140,19 @@ async def trigger_outline_generation(
     angle_report = body.get("angle_report")
     run_id = progress_store.create_run()
 
+    await track_start(
+        user_id=current_user.id,
+        type="outline_generate",
+        run_id=run_id,
+        input_snapshot={"candidate_id": candidate_id, "model": model, "angle_report": angle_report},
+        display_title=f"大纲生成 · 选题#{candidate_id}",
+        candidate_id=int(candidate_id),
+        resume_context={
+            "route": "/creation/new",
+            "query": {"candidate_id": candidate_id},
+        },
+    )
+
     async def _run():
         from app.db.session import AsyncSessionLocal
         async with AsyncSessionLocal() as bg_db:
@@ -138,16 +167,17 @@ async def trigger_outline_generation(
                     angle_report_data=angle_report,
                     progress_callback=_progress_cb,
                 )
-                # result 事件触发前端关闭 SSE 流（必须在 complete 之后推送）
                 await progress_store.push(run_id, {
                     "event": "result",
                     "data": result.model_dump(),
                 })
+                await track_complete(run_id, result.model_dump(), display_title=f"大纲生成 · {result.title[:30]}" if hasattr(result, 'title') else None)
             except Exception as e:
                 await progress_store.push(run_id, {
                     "event": "error",
                     "data": {"message": str(e)},
                 })
+                await track_fail(run_id, str(e))
 
     asyncio.create_task(_run())
 
@@ -408,6 +438,19 @@ async def reevaluate_outline(
 
     run_id = progress_store.create_run()
 
+    await track_start(
+        user_id=current_user.id,
+        type="outline_reevaluate",
+        run_id=run_id,
+        input_snapshot={"outline_id": outline_id},
+        display_title=f"大纲重评 · {outline.title[:30]}" if outline.title else f"大纲重评 · #{outline_id}",
+        candidate_id=outline.candidate_id,
+        resume_context={
+            "route": "/creation/new",
+            "query": {"candidate_id": outline.candidate_id} if outline.candidate_id else {},
+        },
+    )
+
     async def _run():
         from app.db.session import AsyncSessionLocal
         from app.services.outline_generation.schemas import (
@@ -548,6 +591,7 @@ async def reevaluate_outline(
                     "data": _outline_to_dict_full(outline),
                 })
                 await _progress_cb({"event": "complete", "data": {"step": 3, "agent": "Agent D"}})
+                await track_complete(run_id, _outline_to_dict_full(outline))
 
             except Exception as e:
                 logger.error(f"大纲重新评估失败: {e}", exc_info=True)
@@ -555,6 +599,7 @@ async def reevaluate_outline(
                     "event": "error",
                     "data": {"message": str(e)},
                 })
+                await track_fail(run_id, str(e))
 
     asyncio.create_task(_run())
 

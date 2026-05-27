@@ -10,6 +10,9 @@ from app.models.info_cluster import InfoCluster
 from app.models.topic_candidate import TopicCandidate, PersonaReview, CandidateScore
 from app.models.daily_topic_list import DailyTopicList, DailyTopicListItem
 
+# 生成记录
+from app.models.generation_record import GenerationRecord
+
 # v3.0 大纲生成 pipeline 新增模型
 from app.models.outline import (
     Outline,
@@ -38,6 +41,8 @@ __all__ = [
     "CandidateScore",
     "DailyTopicList",
     "DailyTopicListItem",
+    # 生成记录
+    "GenerationRecord",
     # v3.0 大纲 pipeline
     "Outline",
     "OutlineCandidate",

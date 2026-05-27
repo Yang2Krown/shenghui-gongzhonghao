@@ -198,8 +198,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, Check, CircleCloseFilled } from '@element-plus/icons-vue'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import { post } from '@/api/api'
@@ -313,6 +314,24 @@ const reset = () => {
   result.value = null
   errorMessage.value = ''
 }
+
+onBeforeRouteLeave(async (to, from, next) => {
+  if (!result.value && !generating.value) return next()
+  try {
+    await ElMessageBox.confirm(
+      '离开后当前生成结果将丢失，确定离开吗？',
+      '确认离开',
+      { confirmButtonText: '仍然离开', cancelButtonText: '留在此页', type: 'warning' }
+    )
+    next()
+  } catch { next(false) }
+})
+
+const handleBeforeUnload = (e) => {
+  if (result.value || generating.value) { e.preventDefault(); e.returnValue = '' }
+}
+onMounted(() => window.addEventListener('beforeunload', handleBeforeUnload))
+onUnmounted(() => window.removeEventListener('beforeunload', handleBeforeUnload))
 </script>
 
 <style scoped>

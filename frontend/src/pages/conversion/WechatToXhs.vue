@@ -183,8 +183,9 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Link, CircleCloseFilled, Loading, CopyDocument } from '@element-plus/icons-vue'
 import { post } from '@/api/api'
 
@@ -285,6 +286,24 @@ const reset = () => {
   originalTitle.value = ''
   linkUrl.value = ''
 }
+
+onBeforeRouteLeave(async (to, from, next) => {
+  if (!result.value) return next()
+  try {
+    await ElMessageBox.confirm(
+      '离开后当前转换结果将丢失，确定离开吗？',
+      '确认离开',
+      { confirmButtonText: '仍然离开', cancelButtonText: '留在此页', type: 'warning' }
+    )
+    next()
+  } catch { next(false) }
+})
+
+const handleBeforeUnload = (e) => {
+  if (result.value) { e.preventDefault(); e.returnValue = '' }
+}
+onMounted(() => window.addEventListener('beforeunload', handleBeforeUnload))
+onUnmounted(() => window.removeEventListener('beforeunload', handleBeforeUnload))
 </script>
 
 <style scoped>

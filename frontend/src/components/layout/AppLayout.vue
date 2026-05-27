@@ -33,6 +33,11 @@
             <template #title>我的创作</template>
           </el-menu-item>
 
+          <el-menu-item index="custom-topic">
+            <el-icon><EditPen /></el-icon>
+            <template #title>自定义选题</template>
+          </el-menu-item>
+
           <el-sub-menu index="titles">
             <template #title>
               <el-icon><ChatDotSquare /></el-icon>
@@ -45,6 +50,11 @@
           <el-menu-item index="wechat-to-xhs">
             <el-icon><Switch /></el-icon>
             <template #title>公众号转小红书</template>
+          </el-menu-item>
+
+          <el-menu-item index="history">
+            <el-icon><Clock /></el-icon>
+            <template #title>生成记录</template>
           </el-menu-item>
 
           <!-- 底部分隔 -->
@@ -148,7 +158,7 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { Edit, Setting, SwitchButton, ArrowDown, Expand, Fold, DataBoard, Folder, Document, ChatDotSquare, Switch } from '@element-plus/icons-vue'
+import { Edit, Setting, SwitchButton, ArrowDown, Expand, Fold, DataBoard, Folder, Document, ChatDotSquare, Switch, EditPen, Clock } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -163,6 +173,7 @@ const activeMenu = computed(() => {
   if (path === '/' || path.startsWith('/topic-clusters')) return 'topic-clusters'
   if (path.startsWith('/topic-candidates')) return 'topic-candidates'
   if (path.startsWith('/creation')) return 'creation'
+  if (path.startsWith('/custom-topic')) return 'custom-topic'
   if (path.startsWith('/settings')) return 'settings'
   if (path.startsWith('/munger-generation') || path.startsWith('/munger-scorer')) return 'titles'
   if (path.startsWith('/wechat-to-xhs')) return 'wechat-to-xhs'
@@ -189,10 +200,12 @@ const handleMenuSelect = (index) => {
     'topic-clusters': '/topic-clusters',
     'topic-candidates': '/topic-candidates',
     'creation': '/creation',
+    'custom-topic': '/custom-topic',
     'settings': '/settings',
     'munger-generation': '/munger-generation',
     'munger-scorer': '/munger-scorer',
     'wechat-to-xhs': '/wechat-to-xhs',
+    'history': '/history',
   }
 
   if (index === 'titles') {

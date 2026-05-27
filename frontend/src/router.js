@@ -125,11 +125,24 @@ const routes = [
         component: () => import('@/pages/conversion/WechatToXhs.vue'),
         meta: { title: '公众号转小红书' }
       },
+      // 自定义选题创作
+      {
+        path: 'custom-topic',
+        name: 'CustomTopic',
+        component: () => import('@/pages/custom/CustomTopic.vue'),
+        meta: { title: '自定义选题' }
+      },
       {
         path: 'munger-scorer',
         name: 'MungerScorer',
         component: () => import('@/pages/titles/TitleScorer.vue'),
         meta: { title: '芒格版标题评分' }
+      },
+      {
+        path: 'history',
+        name: 'History',
+        component: () => import('@/pages/history/GenerationHistory.vue'),
+        meta: { title: '生成记录' }
       }
     ]
   },

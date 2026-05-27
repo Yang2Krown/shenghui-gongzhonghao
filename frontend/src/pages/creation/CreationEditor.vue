@@ -118,9 +118,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, ArrowRight, Document, Check } from '@element-plus/icons-vue'
 import { useCreationStore } from '@/stores/creation'
 import OutlinePanel from '@/components/creation/OutlinePanel.vue'
@@ -148,6 +148,9 @@ const currentOutlineId = ref(null)
 const currentOutlineData = ref(null)
 const selectedTitle = ref(null)
 const finalContent = ref(null)
+
+// 未保存状态追踪
+const isDirty = ref(false)
 
 // 创作步骤状态
 const angleStatus = ref('idle')
@@ -252,6 +255,7 @@ const onPipelineStatus = ({ angle, outline }) => {
 
 // 大纲完成回调（留在当前 tab，不自动跳转）
 const onOutlineComplete = (outlineData) => {
+  isDirty.value = true
   angleStatus.value = 'completed'
   outlineStatus.value = 'completed'
   goWorkflowStep('outline')
@@ -264,6 +268,7 @@ const onOutlineComplete = (outlineData) => {
 
 // 标题完成回调
 const onTitleComplete = (titleData) => {
+  isDirty.value = true
   titleStatus.value = 'completed'
   selectedTitle.value = titleData
   goWorkflowStep('title')
@@ -271,6 +276,7 @@ const onTitleComplete = (titleData) => {
 
 // 正文完成回调
 const onContentComplete = (contentData) => {
+  isDirty.value = true
   contentStatus.value = 'completed'
   finalContent.value = contentData || null
   goWorkflowStep('content')
@@ -320,6 +326,7 @@ const saveDraft = async () => {
       // 替换 URL 为编辑模式
       router.replace(`/creation/editor/${creation.id}`)
     }
+    isDirty.value = false
     ElMessage.success('草稿已保存')
   } catch (e) {
     console.error('保存失败:', e)
@@ -364,6 +371,40 @@ const goWorkflowStep = (key) => {
   activeWorkflowStep.value = key
   activeTab.value = stepToTab[key] || 'outline'
 }
+
+// ── 离开提示 ──
+onBeforeRouteLeave(async (to, from, next) => {
+  if (!isDirty.value) return next()
+  try {
+    await ElMessageBox.confirm(
+      '当前页面有未保存的生成内容，离开后将丢失。建议先保存草稿。',
+      '确认离开',
+      {
+        confirmButtonText: '仍然离开',
+        cancelButtonText: '留在此页',
+        type: 'warning',
+      }
+    )
+    next()
+  } catch {
+    next(false)
+  }
+})
+
+const handleBeforeUnload = (e) => {
+  if (isDirty.value) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
 </script>
 
 <style scoped>

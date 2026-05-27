@@ -16,6 +16,7 @@ import logging
 from app.db.session import get_db, AsyncSessionLocal
 from app.core.progress import progress_store
 from app.core.security import get_current_user
+from app.models.user import User
 from app.models.task import Task, TaskStatus
 from app.models.title import TitleGenerationResult, TitleCandidate, FinalRecommendation
 from app.schemas.title_generation import (
@@ -25,13 +26,14 @@ from app.schemas.title_generation import (
     TitleCandidateResponse,
     FinalRecommendationResponse,
 )
+from app.services.generation_tracker import track_start, track_complete, track_fail
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-async def _run_title_generation_background(task_id: str, request_data: dict, run_id: str = None):
+async def _run_title_generation_background(task_id: str, request_data: dict, run_id: str = None, user_id: int = None):
     """
     后台执行标题生成任务的独立函数
 
@@ -148,19 +150,21 @@ async def _run_title_generation_background(task_id: str, request_data: dict, run
                         for c in cand_rows
                     ]
 
+                result_data = {
+                    "task_id": task_id,
+                    "status": "completed",
+                    "recommendations": recommendations_payload,
+                    "candidates": candidates_payload,
+                    "meta": result_meta,
+                }
                 await progress_store.push(run_id, {
                     "event": "result",
-                    "data": {
-                        "task_id": task_id,
-                        "status": "completed",
-                        "recommendations": recommendations_payload,
-                        "candidates": candidates_payload,
-                        "meta": result_meta,
-                    },
+                    "data": result_data,
                 })
+                top_title = recommendations_payload[0]["title"] if recommendations_payload else None
+                await track_complete(run_id, result_data, display_title=f"标题生成 · {top_title[:30]}" if top_title else None)
         except Exception as e:
             logger.error(f"后台标题生成任务 {task_id} 失败: {str(e)}", exc_info=True)
-            # 更新任务状态为失败
             from sqlalchemy import update
             from datetime import datetime
             await db.execute(
@@ -176,6 +180,7 @@ async def _run_title_generation_background(task_id: str, request_data: dict, run
                     "event": "error",
                     "data": {"message": str(e)},
                 })
+                await track_fail(run_id, str(e))
 
 
 @router.post("/", response_model=TitleGenerationResponse)
@@ -183,7 +188,7 @@ async def create_title_generation(
     request: TitleGenerationRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    current_user=None,
+    current_user: User = Depends(get_current_user),
 ):
     """
     创建标题生成任务
@@ -222,12 +227,26 @@ async def create_title_generation(
     # 序列化请求数据，传给后台任务（避免传递ORM session）
     request_data = request.dict()
 
+    topic_title = request.topic.title if request.topic else "未命名"
+    await track_start(
+        user_id=current_user.id,
+        type="title_generate",
+        run_id=run_id,
+        input_snapshot=request_data,
+        display_title=f"标题生成 · {topic_title[:30]}",
+        resume_context={
+            "route": "/creation/new",
+            "query": {},
+        },
+    )
+
     # 启动后台任务（Service和Agent在后台任务中延迟实例化）
     background_tasks.add_task(
         _run_title_generation_background,
         task_id=task.id,
         request_data=request_data,
         run_id=run_id,
+        user_id=current_user.id,
     )
 
     return TitleGenerationResponse(
@@ -469,6 +488,7 @@ async def update_recommendation(
 async def reevaluate_title_candidate(
     candidate_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """重新评估单个标题候选（只跑 B 评分 + C 点击预测）。
 
@@ -493,6 +513,18 @@ async def reevaluate_title_candidate(
     task = task_row.scalar_one_or_none()
 
     run_id = progress_store.create_run()
+
+    await track_start(
+        user_id=current_user.id,
+        type="title_reevaluate",
+        run_id=run_id,
+        input_snapshot={"candidate_id": candidate_id, "title": candidate.title},
+        display_title=f"标题重评 · {candidate.title[:30]}",
+        resume_context={
+            "route": "/creation/new",
+            "query": {},
+        },
+    )
 
     async def _run():
         from app.services.title_generation.agent_b_reviewer import TitleReviewerAgent
@@ -592,6 +624,7 @@ async def reevaluate_title_candidate(
                     "data": candidate.to_dict(),
                 })
                 await _progress_cb({"event": "complete", "data": {"step": 2, "agent": "Agent C"}})
+                await track_complete(run_id, candidate.to_dict())
 
             except Exception as e:
                 logger.error(f"标题重新评估失败: {e}", exc_info=True)
@@ -599,6 +632,7 @@ async def reevaluate_title_candidate(
                     "event": "error",
                     "data": {"message": str(e)},
                 })
+                await track_fail(run_id, str(e))
 
     asyncio.create_task(_run())
 

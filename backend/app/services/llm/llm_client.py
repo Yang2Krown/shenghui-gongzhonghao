@@ -73,7 +73,7 @@ def get_llm_client(provider: Optional[str] = None) -> LLMClient:
 
 
 def parse_json_loose(text: str) -> Optional[Dict[str, Any]]:
-    """从模型输出里抠 JSON。容错：去掉 ```json fence、首尾噪音。失败返 None。"""
+    """从模型输出里抠 JSON。容错：去掉 ```json fence、首尾噪音、截断修复。失败返 None。"""
     if not text:
         return None
     s = text.strip()
@@ -91,5 +91,97 @@ def parse_json_loose(text: str) -> Optional[Dict[str, Any]]:
                 return json.loads(s[first : last + 1])
             except json.JSONDecodeError:
                 pass
+
+        # 截断修复：尝试补全不完整的 JSON
+        if first >= 0:
+            repaired = _repair_truncated_json(s[first:])
+            if repaired is not None:
+                logger.info("JSON 截断修复成功")
+                return repaired
+
     logger.warning(f"LLM JSON 解析失败，前 200 字: {text[:200]}")
+    return None
+
+
+def _repair_truncated_json(s: str) -> Optional[Dict[str, Any]]:
+    """尝试修复被 max_tokens 截断的 JSON。
+
+    策略：用栈追踪嵌套顺序，逐层闭合未关闭的括号/引号，然后尝试解析。
+    """
+    stack = []          # 追踪嵌套顺序：'{' 或 '['
+    in_string = False
+    escape_next = False
+
+    for ch in s:
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            escape_next = True
+            continue
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch in ("}", "]"):
+            if stack and stack[-1] == ch:
+                stack.pop()
+
+    # 如果在字符串中间截断，先闭合字符串
+    suffix = ""
+    if in_string:
+        suffix += '"'
+
+    # 按嵌套逆序闭合（从最内层到最外层）
+    suffix += "".join(reversed(stack))
+
+    if not suffix:
+        return None
+
+    candidate = s + suffix
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        pass
+
+    # 备选策略：逐个截断末尾找到能解析的最长前缀
+    # 处理 LLM 在末尾多写了不完整内容的情况
+    for i in range(len(s) - 1, 0, -1):
+        if s[i] in (",", ":"):
+            # 截掉这个不完整的键值对，重新闭合
+            partial = s[:i]
+            # 重新计算栈
+            partial_stack = []
+            partial_in_str = False
+            partial_esc = False
+            for ch in partial:
+                if partial_esc:
+                    partial_esc = False
+                    continue
+                if ch == "\\":
+                    partial_esc = True
+                    continue
+                if ch == '"' and not partial_esc:
+                    partial_in_str = not partial_in_str
+                    continue
+                if partial_in_str:
+                    continue
+                if ch == "{":
+                    partial_stack.append("}")
+                elif ch == "[":
+                    partial_stack.append("]")
+                elif ch in ("}", "]"):
+                    if partial_stack and partial_stack[-1] == ch:
+                        partial_stack.pop()
+            partial_suffix = ('"' if partial_in_str else "") + "".join(reversed(partial_stack))
+            try:
+                return json.loads(partial + partial_suffix)
+            except json.JSONDecodeError:
+                continue
+
     return None

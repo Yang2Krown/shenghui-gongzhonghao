@@ -421,6 +421,69 @@ async def trigger_generate_daily_list(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.post("/custom", response_model=dict)
+async def create_custom_topic(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """创建自定义选题。
+
+    用户手动输入选题标题、方向和参考资料，创建一条 TopicCandidate 记录，
+    然后可以复用现有的创作工作流（角度体检 → 大纲 → 标题 → 正文）。
+
+    body 格式：
+    {
+        "title": "选题标题",
+        "direction": "资讯型",     # 6 大内容方向之一
+        "reference": "参考资料"    # 可选
+    }
+    """
+    title = body.get("title", "").strip()
+    direction = body.get("direction", "").strip()
+    reference = body.get("reference", "").strip() if body.get("reference") else None
+
+    if not title:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="选题标题不能为空",
+        )
+    if not direction:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请选择内容方向",
+        )
+
+    valid_directions = ["资讯型", "观点型", "故事型", "干货型", "情感型", "趣味型"]
+    if direction not in valid_directions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"无效的内容方向，可选：{', '.join(valid_directions)}",
+        )
+
+    candidate = TopicCandidate(
+        title=title,
+        direction=direction,
+        angle_note=reference,
+        info_cluster_id=None,
+        verdict="selected",
+        veto_passed=True,
+    )
+    db.add(candidate)
+    await db.commit()
+    await db.refresh(candidate)
+
+    return {
+        "code": 200,
+        "message": "自定义选题创建成功",
+        "data": {
+            "id": candidate.id,
+            "title": candidate.title,
+            "direction": candidate.direction,
+        },
+    }
+
+
 @router.get("/{candidate_id}", response_model=dict)
 async def get_topic_candidate(
     candidate_id: int,
