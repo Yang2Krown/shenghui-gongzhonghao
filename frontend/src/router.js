@@ -1,156 +1,154 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 
-// 路由配置
 const routes = [
   {
     path: '/',
     component: () => import('@/components/layout/AppLayout.vue'),
     children: [
-      // 首页 = 话题库（新流程）
+      // 内容资讯（首页）
       {
         path: '',
-        name: 'Home',
-        component: () => import('@/pages/topics/TopicClusterList.vue'),
-        meta: { title: '话题库' }
+        name: 'Feed',
+        component: () => import('@/pages/feed/FeedScreen.vue'),
+        meta: { title: '内容资讯' }
       },
-      // 话题库主入口
-      {
-        path: 'topic-clusters',
-        name: 'TopicClusters',
-        component: () => import('@/pages/topics/TopicClusterList.vue'),
-        meta: { title: '话题库' }
-      },
+      // 话题详情
       {
         path: 'topic-clusters/:id',
         name: 'TopicClusterDetail',
         component: () => import('@/pages/topics/TopicClusterDetail.vue'),
         meta: { title: '话题详情' }
       },
-      // 候选选题清单（二级视图）
+      // 创作工具
       {
-        path: 'topic-candidates',
-        name: 'TopicCandidates',
-        component: () => import('@/pages/topics/TopicCandidateList.vue'),
-        meta: { title: '候选选题清单' }
-      },
-      // ===== Legacy 旧表入口（隐藏，但保留可访问） =====
-      {
-        path: 'legacy/topics',
-        name: 'LegacyTopics',
-        component: () => import('@/pages/topics/TopicList.vue'),
-        meta: { title: '原始素材库（旧）', hideInMenu: true }
+        path: 'angle',
+        name: 'Angle',
+        component: () => import('@/pages/tools/AngleTool.vue'),
+        meta: { title: '创作角度' }
       },
       {
-        path: 'legacy/topics/:id',
-        name: 'LegacyTopicDetail',
-        component: () => import('@/pages/topics/TopicDetail.vue'),
-        meta: { title: '原始素材详情（旧）', hideInMenu: true }
-      },
-      // ===== 旧路由 → 重定向，避免书签失效 =====
-      {
-        path: 'topics',
-        redirect: '/topic-clusters'
+        path: 'outline',
+        name: 'Outline',
+        component: () => import('@/pages/tools/OutlineTool.vue'),
+        meta: { title: '大纲生成' }
       },
       {
-        path: 'topics/:id',
-        redirect: '/topic-clusters'
+        path: 'body',
+        name: 'Body',
+        component: () => import('@/pages/tools/BodyTool.vue'),
+        meta: { title: '正文生成' }
       },
       {
-        path: 'creation',
-        name: 'Creation',
-        component: () => import('@/pages/creation/CreationList.vue'),
-        meta: { title: '我的创作' }
+        path: 'title',
+        name: 'Title',
+        component: () => import('@/pages/tools/TitleTool.vue'),
+        meta: { title: '标题生成' }
       },
-      {
-        path: 'creation/new',
-        name: 'NewCreation',
-        component: () => import('@/pages/creation/CreationEditor.vue'),
-        meta: { title: '新建创作' }
-      },
-      {
-        path: 'creation/editor/:id',
-        name: 'EditCreation',
-        component: () => import('@/pages/creation/CreationEditor.vue'),
-        meta: { title: '编辑创作' }
-      },
-      {
-        path: 'creation/:id',
-        name: 'CreationDraft',
-        component: () => import('@/pages/creation/CreationDraft.vue'),
-        meta: { title: '草稿详情' }
-      },
-      {
-        path: 'settings',
-        name: 'Settings',
-        component: () => import('@/pages/settings/ProfileSettings.vue'),
-        meta: { title: '设置' }
-      },
-      {
-        path: 'settings/style',
-        redirect: '/settings'
-      },
-      // ===== 旧路由 → 重定向到创作工作台 =====
-      {
-        path: 'outlines',
-        redirect: '/creation'
-      },
-      {
-        path: 'outlines/:id',
-        redirect: '/creation'
-      },
-      {
-        path: 'title-generation',
-        redirect: '/creation'
-      },
-      {
-        path: 'title-history',
-        redirect: '/creation'
-      },
-      {
-        path: 'content-generation',
-        redirect: '/creation'
-      },
-      // 独立标题生成（复用创作流水线）
-      {
-        path: 'standalone-title',
-        name: 'StandaloneTitle',
-        component: () => import('@/pages/titles/StandaloneTitleGeneration.vue'),
-        meta: { title: '智能起标题' }
-      },
-      // 芒格版标题
-      {
-        path: 'munger-generation',
-        name: 'MungerGeneration',
-        component: () => import('@/pages/titles/MungerGeneration.vue'),
-        meta: { title: '芒格版标题生成' }
-      },
-      // 公众号转小红书
+      // 内容仿写
       {
         path: 'wechat-to-xhs',
         name: 'WechatToXhs',
-        component: () => import('@/pages/conversion/WechatToXhs.vue'),
+        component: () => import('@/pages/rewrite/WechatToXhs.vue'),
         meta: { title: '公众号转小红书' }
       },
-      // 自定义选题创作
       {
-        path: 'custom-topic',
-        name: 'CustomTopic',
-        component: () => import('@/pages/custom/CustomTopic.vue'),
-        meta: { title: '自定义选题' }
+        path: 'wechat-rewrite',
+        name: 'WechatRewrite',
+        component: () => import('@/pages/rewrite/WechatRewrite.vue'),
+        meta: { title: '公众号仿写' }
       },
       {
-        path: 'munger-scorer',
-        name: 'MungerScorer',
-        component: () => import('@/pages/titles/TitleScorer.vue'),
-        meta: { title: '芒格版标题评分' }
+        path: 'xhs-to-wechat',
+        name: 'XhsToWechat',
+        component: () => import('@/pages/rewrite/XhsToWechat.vue'),
+        meta: { title: '小红书转公众号' }
       },
+      {
+        path: 'douyin-to-wechat',
+        name: 'DouyinToWechat',
+        component: () => import('@/pages/rewrite/DouyinToWechat.vue'),
+        meta: { title: '抖音转公众号' }
+      },
+      {
+        path: 'zhihu-to-wechat',
+        name: 'ZhihuToWechat',
+        component: () => import('@/pages/rewrite/ZhihuToWechat.vue'),
+        meta: { title: '知乎转公众号' }
+      },
+      {
+        path: 'content-rewrite',
+        name: 'ContentRewrite',
+        component: () => import('@/pages/rewrite/ContentRewrite.vue'),
+        meta: { title: '内容仿写' }
+      },
+      // 创作历史
       {
         path: 'history',
         name: 'History',
-        component: () => import('@/pages/history/GenerationHistory.vue'),
-        meta: { title: '生成记录' }
-      }
+        component: () => import('@/pages/history/HistoryScreen.vue'),
+        meta: { title: '创作历史' }
+      },
+      // 个人信息
+      {
+        path: 'profile',
+        name: 'Profile',
+        component: () => import('@/pages/profile/ProfileScreen.vue'),
+        meta: { title: '个人信息' }
+      },
+      // ===== 兼容旧路由 =====
+      {
+        path: 'topic-clusters',
+        redirect: '/'
+      },
+      {
+        path: 'topic-candidates',
+        redirect: '/'
+      },
+      {
+        path: 'creation',
+        redirect: '/'
+      },
+      {
+        path: 'creation/new',
+        redirect: '/'
+      },
+      {
+        path: 'creation/editor/:id',
+        redirect: '/'
+      },
+      {
+        path: 'creation/:id',
+        redirect: '/'
+      },
+      {
+        path: 'settings',
+        redirect: '/profile'
+      },
+      {
+        path: 'settings/style',
+        redirect: '/profile'
+      },
+      {
+        path: 'standalone-title',
+        redirect: '/title'
+      },
+      {
+        path: 'munger-generation',
+        redirect: '/title'
+      },
+      {
+        path: 'munger-scorer',
+        redirect: '/title'
+      },
+      {
+        path: 'custom-topic',
+        redirect: '/angle'
+      },
+      {
+        path: 'history',
+        redirect: '/history'
+      },
     ]
   },
   {
@@ -177,33 +175,22 @@ const router = createRouter({
   history: createWebHistory(),
   routes,
   scrollBehavior(to, from, savedPosition) {
-    // 浏览器前进/后退：还原原位置
     if (savedPosition) return savedPosition
-    // 同一路径只变 query（点 chip / 写 URL 状态等），保持当前滚动位置不变
     if (to.path === from.path) return false
-    // 切换路由：回到顶部
     return { top: 0 }
   }
 })
 
-// 不需要登录的页面
 const PUBLIC_ROUTES = ['Login', 'Register', 'NotFound']
 
-// 全局前置守卫
 router.beforeEach((to, from, next) => {
-  // 设置页面标题
-  document.title = to.meta.title ? `${to.meta.title} - AI公众号内容运营平台` : 'AI公众号内容运营平台'
-
+  document.title = to.meta.title ? `${to.meta.title} - 公众号创作台` : '公众号创作台'
   const userStore = useUserStore()
   const isPublic = PUBLIC_ROUTES.includes(to.name)
 
   if (!isPublic && !userStore.isAuthenticated) {
-    next({
-      name: 'Login',
-      query: { redirect: to.fullPath }
-    })
+    next({ name: 'Login', query: { redirect: to.fullPath } })
   } else if (isPublic && userStore.isAuthenticated && to.name === 'Login') {
-    // 已登录用户访问登录页，跳转首页
     next({ path: '/' })
   } else {
     next()
