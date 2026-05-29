@@ -95,9 +95,9 @@ class Settings(BaseSettings):
     MAX_PAGE_SIZE: int = 100
     
     # ====== 标题生成 Pipeline 配置 ======
-    MIN_CANDIDATES: int = 10
-    MAX_CANDIDATES: int = 15
-    MIN_COVERAGE_METHODS: int = 6
+    MIN_CANDIDATES: int = 5
+    MAX_CANDIDATES: int = 5
+    MIN_COVERAGE_METHODS: int = 3
     MAX_SAME_METHOD: int = 3
     PRIORITY_METHOD_RATIO: float = 0.5
     MIN_TITLE_LENGTH: int = 8

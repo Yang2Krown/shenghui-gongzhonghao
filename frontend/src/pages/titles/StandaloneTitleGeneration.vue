@@ -3,7 +3,7 @@
     <!-- 页头 -->
     <header class="mb-6">
       <h1 class="text-h3 font-serif text-ink">智能起标题</h1>
-      <p class="text-sm text-ink-3 mt-1">基于 4 Agent 协作流水线（A创作 → B评分 → C点击预测 → D综合判定），从文章内容直接生成高质量标题</p>
+      <p class="text-sm text-ink-3 mt-1">从文章内容直接生成 5 个标题，并为每个标题给出简介与点击分析</p>
     </header>
 
     <!-- 进度条 -->
@@ -109,95 +109,73 @@
         </div>
       </div>
 
-      <!-- 推荐标题 Top 5 -->
-      <div v-if="topTitles.length" class="card p-6 mb-6">
+      <!-- 标题 + 评价：左右分列 -->
+      <div v-if="allCandidates.length" class="card p-6 mb-6">
         <h3 class="text-h4 font-sans text-ink mb-4">
-          推荐标题 Top {{ topTitles.length }}
-          <span v-if="result.meta" class="text-sm text-ink-3 font-normal ml-2">
-            候选 {{ result.meta.total_candidates || topTitles.length }} · 覆盖 {{ result.meta.covered_methods || '-' }} 种套路
-          </span>
+          生成标题
+          <span class="text-sm text-ink-3 font-normal ml-2">共 {{ allCandidates.length }} 个 · 点击查看简介与点击分析</span>
         </h3>
-        <div class="space-y-3">
-          <div v-for="(t, i) in topTitles" :key="i" class="title-card">
-            <div class="flex items-start justify-between gap-3">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-2">
-                  <span class="rank-badge" :class="i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : 'rank-3'">
-                    TOP {{ i + 1 }}
-                  </span>
-                  <span class="text-xs text-ink-3">{{ t.method }}</span>
-                  <span class="text-xs text-ink-3">·</span>
-                  <span class="text-xs text-ink-3">{{ t.word_count }} 字</span>
-                </div>
-                <p class="text-base font-semibold text-ink">{{ t.title }}</p>
-                <p v-if="t.reason" class="text-sm text-ink-3 mt-2">{{ t.reason }}</p>
+        <div class="title-split">
+          <!-- 左：标题列表 -->
+          <div class="title-list">
+            <div
+              v-for="(c, i) in allCandidates"
+              :key="c.id || i"
+              class="title-item"
+              :class="{ 'title-item-active': selectedIndex === i }"
+              @click="selectedIndex = i"
+            >
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="seq-badge">{{ i + 1 }}</span>
+                <span class="title-item-text">{{ c.title }}</span>
               </div>
-              <div class="ml-2 text-right flex-shrink-0 flex flex-col items-end gap-1">
-                <div class="text-2xl font-bold" :class="getScoreColor(t.score || t.final_score)">
-                  {{ ((t.score || t.final_score) ?? 0).toFixed(1) }}
-                </div>
-                <div class="text-xs text-ink-3">综合评分</div>
-                <el-button size="small" link @click.stop="copyTitle(t.title)">
+              <div class="flex items-center gap-2 mt-1.5 pl-7">
+                <span class="text-xs text-ink-3">{{ c.method }}</span>
+                <span class="text-xs text-ink-4">·</span>
+                <span class="text-xs text-ink-3">{{ c.word_count }} 字</span>
+                <el-button size="small" link class="ml-auto" @click.stop="copyTitle(c.title)">
                   <el-icon><DocumentCopy /></el-icon>
                 </el-button>
               </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- 全部候选标题 -->
-      <div v-if="allCandidates.length" class="card p-6 mb-6">
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="text-h4 font-sans text-ink">
-            全部候选
-            <span class="text-sm text-ink-3 font-normal ml-2">共 {{ allCandidates.length }} 条</span>
-          </h3>
-          <el-button text size="small" @click="showAllCandidates = !showAllCandidates">
-            {{ showAllCandidates ? '收起' : '展开' }}
-          </el-button>
-        </div>
-        <div v-if="showAllCandidates" class="space-y-2">
-          <div
-            v-for="(c, i) in allCandidates"
-            :key="i"
-            class="candidate-row"
-            :class="{ 'candidate-eliminated': c.is_eliminated, 'candidate-top5': c.is_top5 }"
-          >
-            <div class="flex items-center gap-3 flex-1 min-w-0">
-              <span class="text-xs text-ink-4 w-6 text-center flex-shrink-0">#{{ c.sequence }}</span>
-              <span class="text-sm text-ink flex-1 truncate">{{ c.title }}</span>
-              <span class="text-xs text-ink-3 flex-shrink-0">{{ c.method }}</span>
-            </div>
-            <div class="flex items-center gap-3 flex-shrink-0">
-              <span v-if="c.is_top5" class="badge-primary text-xs">Top5</span>
-              <span v-if="c.is_eliminated" class="badge-danger text-xs">淘汰</span>
-              <span v-if="c.final_score" class="text-sm font-semibold" :class="getScoreColor(c.final_score)">
-                {{ c.final_score.toFixed(1) }}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
+          <!-- 右：评价详情 -->
+          <div class="title-detail">
+            <template v-if="selected">
+              <p class="detail-title">{{ selected.title }}</p>
 
-      <!-- 元信息 -->
-      <div v-if="result.meta" class="card p-6 mb-6">
-        <div class="meta-grid">
-          <div class="meta-item">
-            <span class="text-xs text-ink-3">候选数</span>
-            <span class="text-lg font-bold text-ink">{{ result.meta.total_candidates || '-' }}</span>
-          </div>
-          <div class="meta-item">
-            <span class="text-xs text-ink-3">淘汰数</span>
-            <span class="text-lg font-bold text-ink">{{ result.meta.eliminated_count || 0 }}</span>
-          </div>
-          <div class="meta-item">
-            <span class="text-xs text-ink-3">重生次数</span>
-            <span class="text-lg font-bold text-ink">{{ result.meta.regeneration_count || 0 }}</span>
-          </div>
-          <div class="meta-item">
-            <span class="text-xs text-ink-3">耗时</span>
-            <span class="text-lg font-bold text-ink">{{ (result.meta.duration_seconds || 0).toFixed(1) }}s</span>
+              <div class="detail-block">
+                <div class="detail-block-head">
+                  <span class="detail-tag tag-summary">简介</span>
+                  <span class="detail-block-sub">这标题写什么 · 为什么这么取</span>
+                </div>
+                <p class="detail-text">{{ selected.b_summary || '暂无简介' }}</p>
+              </div>
+
+              <div class="detail-block">
+                <div class="detail-block-head">
+                  <span class="detail-tag tag-click">点击分析</span>
+                  <span class="detail-block-sub">读者为什么会点</span>
+                </div>
+                <div v-if="selected.c_click_reason" class="detail-sub">
+                  <span class="detail-sub-label">吸引点 / 会点原因</span>
+                  <p class="detail-text">{{ selected.c_click_reason }}</p>
+                </div>
+                <div v-if="selected.c_no_click_reason" class="detail-sub">
+                  <span class="detail-sub-label">可能划走的点</span>
+                  <p class="detail-text">{{ selected.c_no_click_reason }}</p>
+                </div>
+                <div v-if="selected.c_improvement_suggestion" class="detail-sub">
+                  <span class="detail-sub-label">改进建议</span>
+                  <p class="detail-text">{{ selected.c_improvement_suggestion }}</p>
+                </div>
+                <p v-if="!selected.c_click_reason && !selected.c_no_click_reason && !selected.c_improvement_suggestion" class="detail-text">暂无点击分析</p>
+              </div>
+            </template>
+            <div v-else class="detail-empty">
+              <p class="text-ink-3">点击左侧任一标题查看评价</p>
+            </div>
           </div>
         </div>
       </div>
@@ -227,16 +205,15 @@ const status = ref('idle') // idle | generating | completed | failed
 const generating = ref(false)
 const errorMessage = ref('')
 const result = ref(null)
-const showAllCandidates = ref(false)
+const selectedIndex = ref(0)
 
 const progress = useAgentProgress()
 
 const workflowSteps = [
   { name: '内容分析' },
   { name: '标题创作 A' },
-  { name: '评审筛选 B' },
-  { name: '点击预测 C' },
-  { name: '综合判定 D' },
+  { name: '生成简介 B' },
+  { name: '点击分析 C' },
 ]
 
 const getStepStatus = (stepIndex) => {
@@ -248,25 +225,12 @@ const getStepStatus = (stepIndex) => {
   return 'pending'
 }
 
-const topTitles = computed(() => {
-  if (!result.value) return []
-  const recs = result.value.recommendations || []
-  if (recs.length) return recs.slice(0, 5)
-  const cands = result.value.candidates || []
-  return cands.filter(c => c.is_top5).slice(0, 5)
-})
-
 const allCandidates = computed(() => {
   if (!result.value) return []
   return result.value.candidates || []
 })
 
-const getScoreColor = (score) => {
-  if (!score) return 'text-ink-3'
-  if (score >= 8) return 'text-leaf'
-  if (score >= 6) return 'text-sand'
-  return 'text-crimson'
-}
+const selected = computed(() => allCandidates.value[selectedIndex.value] || null)
 
 const copyTitle = async (text) => {
   try {
@@ -281,6 +245,7 @@ const copyTitle = async (text) => {
 watch(() => progress.result.value, (newResult) => {
   if (newResult) {
     result.value = newResult
+    selectedIndex.value = 0
     status.value = 'completed'
     generating.value = false
     ElMessage.success('标题生成完成')
@@ -355,7 +320,7 @@ const reset = () => {
   generating.value = false
   result.value = null
   errorMessage.value = ''
-  showAllCandidates.value = false
+  selectedIndex.value = 0
 }
 
 onBeforeRouteLeave(async (to, from, next) => {
@@ -459,85 +424,149 @@ onUnmounted(() => window.removeEventListener('beforeunload', handleBeforeUnload)
   color: var(--ink);
 }
 
-/* 标题卡片 */
-.title-card {
-  padding: 20px;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  transition: all 0.2s;
+/* 左右分列 */
+.title-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 20px;
+  align-items: start;
 }
 
-.title-card:hover {
+@media (max-width: 720px) {
+  .title-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 左：标题列表 */
+.title-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.title-item {
+  padding: 12px 14px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: all 0.18s;
+}
+
+.title-item:hover {
   border-color: var(--clay-soft);
+  box-shadow: var(--sh-1);
+}
+
+.title-item-active {
+  border-color: var(--clay);
+  background: rgba(204, 120, 92, 0.06);
   box-shadow: var(--sh-2);
 }
 
-.rank-badge {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: var(--r-pill);
-  font-size: 11px;
+.seq-badge {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--bone);
+  color: var(--ink-3);
+  font-size: 12px;
   font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.rank-1 {
+.title-item-active .seq-badge {
   background: var(--clay);
   color: var(--paper);
 }
 
-.rank-2 {
-  background: var(--sand);
-  color: var(--paper);
+.title-item-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
 }
 
-.rank-3 {
+/* 右：详情 */
+.title-detail {
+  position: sticky;
+  top: 16px;
+  padding: 18px;
+  background: var(--bone);
+  border-radius: var(--r-lg);
+  min-height: 200px;
+}
+
+.detail-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.5;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.detail-block + .detail-block {
+  margin-top: 16px;
+}
+
+.detail-block-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.detail-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tag-summary {
   background: var(--pine-soft);
   color: var(--pine);
 }
 
-/* 候选行 */
-.candidate-row {
+.tag-click {
+  background: var(--clay);
+  color: var(--paper);
+}
+
+.detail-block-sub {
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.detail-sub + .detail-sub {
+  margin-top: 10px;
+}
+
+.detail-sub-label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-bottom: 2px;
+}
+
+.detail-text {
+  font-size: 14px;
+  color: var(--ink);
+  line-height: 1.7;
+}
+
+.detail-empty {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-}
-
-.candidate-eliminated {
-  opacity: 0.5;
-  background: rgba(184, 84, 80, 0.04);
-}
-
-.candidate-top5 {
-  border-color: var(--clay-soft);
-}
-
-/* 元信息 */
-.meta-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-}
-
-@media (max-width: 600px) {
-  .meta-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-.meta-item {
-  text-align: center;
-  padding: 12px;
-  background: var(--bone);
-  border-radius: var(--r-md);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  justify-content: center;
+  min-height: 160px;
 }
 
 /* 底部操作 */

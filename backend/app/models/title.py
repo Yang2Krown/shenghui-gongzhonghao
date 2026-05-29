@@ -42,6 +42,7 @@ class TitleCandidate(Base):
     # 评分信息 (Agent B)
     b_score = Column(Float, nullable=True, comment="Agent B评分总分")
     b_score_details = Column(JSON, nullable=True, comment="Agent B评分详情")
+    b_summary = Column(Text, nullable=True, comment="Agent B 生成的标题简介（为什么取这个标题/写什么）")
     
     # 点击预测 (Agent C)
     c_click_willingness = Column(Float, nullable=True, comment="点击意愿(0-10)")
@@ -100,6 +101,7 @@ class TitleCandidate(Base):
             "explanation": self.explanation,
             "b_score": self.b_score,
             "b_score_details": self.b_score_details or {},
+            "b_summary": self.b_summary,
             "c_click_willingness": self.c_click_willingness,
             "c_click_reason": self.c_click_reason,
             "c_no_click_reason": self.c_no_click_reason,

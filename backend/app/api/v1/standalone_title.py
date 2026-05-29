@@ -225,7 +225,7 @@ async def _run_standalone_title_background(content: str, run_id: str, user_id: i
                     await db.execute(
                         select(TitleCandidate)
                         .where(TitleCandidate.result_id == result_row.id)
-                        .order_by(desc(TitleCandidate.final_score))
+                        .order_by(TitleCandidate.sequence)
                     )
                 ).scalars().all()
                 candidates_payload = [
@@ -237,6 +237,7 @@ async def _run_standalone_title_background(content: str, run_id: str, user_id: i
                         "method": c.method,
                         "modifiers": c.modifiers or [],
                         "explanation": c.explanation,
+                        "b_summary": c.b_summary,
                         "b_score": c.b_score,
                         "b_score_details": c.b_score_details or {},
                         "c_click_willingness": c.c_click_willingness,
@@ -291,7 +292,7 @@ async def standalone_title_generate(
     独立标题生成
 
     输入文章全文或摘要，自动提取选题和大纲信息，
-    然后复用创作工作流中的 4 Agent 标题生成流水线（A创作 → B评分 → C点击预测 → D综合判定）。
+    然后复用标题生成流水线（A创作 5 个 → B生成简介 → C点击分析；不打分）。
     """
     run_id = progress_store.create_run()
 

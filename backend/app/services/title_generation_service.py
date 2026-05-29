@@ -61,14 +61,13 @@ class TitleGenerationService:
         """
         执行标题生成流程
         
-        完整的4 Agent协作流程:
-        1. Agent A: 生成10-15个标题候选
-        2. Agent B: 一票否决 + 评分 + 筛选Top 5
-        3. Agent C: 点击预测
-        4. Agent D: 综合评分 + 输出Top 3
-        
-        如果Top 3综合分 < 7.0，触发重生机制（最多1次）。
-        
+        当前 3 Agent 流程（D 已停用）:
+        1. Agent A: 生成 5 个标题候选
+        2. Agent B: 为每个标题生成「简介」（不打分）
+        3. Agent C: 为每个标题生成「点击分析」（会点原因/吸引点，不打分）
+
+        重生由前端手动触发（重跑 A→B→C），不再自动触发。
+
         Args:
             task_id: 任务ID
             request: 标题生成请求
@@ -96,7 +95,7 @@ class TitleGenerationService:
                 await self._update_task_status(task_id, TaskStatus.COMPLETED)
                 logger.info(f"标题生成任务 {task_id} 完成")
                 if self.progress_callback:
-                    await self.progress_callback({"event": "complete", "data": {"step": 4, "agent": "Agent D"}})
+                    await self.progress_callback({"event": "complete", "data": {"step": 3, "agent": "Agent C"}})
             else:
                 # 更新任务状态为失败
                 await self._update_task_status(
@@ -156,100 +155,55 @@ class TitleGenerationService:
         Returns:
             是否成功
         """
-        # Agent A: 生成候选标题（再生时带反馈）
+        # Agent A: 生成 5 个候选标题（再生时带反馈）
         candidates = await self._execute_agent_a(
             task_id=task_id,
             result_id=result_id,
             request=request,
             feedback=feedback,
         )
-        
+
         if not candidates:
             logger.error("Agent A 未生成任何候选标题")
             return False
-        
-        # Agent B: 评审和筛选
+
+        # Agent B: 为每个标题生成「简介」（不打分、不淘汰、不筛选）
         b_result = await self._execute_agent_b(
             task_id=task_id,
             result_id=result_id,
             candidates=candidates,
             request=request,
         )
-        
-        if not b_result or not b_result.get("top5"):
-            logger.error("Agent B 未筛选出Top 5")
+
+        if not b_result:
+            logger.error("Agent B 未生成标题简介")
             return False
-        
-        # Agent C: 点击预测
+
+        # Agent C: 为每个标题生成「点击分析」（会点原因/吸引点，不打分）
         c_result = await self._execute_agent_c(
             task_id=task_id,
             result_id=result_id,
-            top5=b_result["top5"],
+            candidates=candidates,
             request=request,
         )
-        
-        if not c_result:
-            logger.error("Agent C 未完成点击预测")
-            return False
-        
-        # Agent D: 最终判定
-        d_result = await self._execute_agent_d(
-            task_id=task_id,
-            result_id=result_id,
-            b_result=b_result,
-            c_result=c_result,
-            request=request,
-        )
-        
-        if not d_result:
-            logger.error("Agent D 未完成最终判定")
-            return False
-        
-        # 检查是否需要重生
-        if d_result.get("need_regeneration") and regeneration_count < settings.MAX_REGENERATIONS:
-            logger.info(f"触发重生机制，当前重生次数: {regeneration_count}")
-            
-            # 执行重生
-            return await self._execute_regeneration(
-                task_id=task_id,
-                result_id=result_id,
-                request=request,
-                regeneration_count=regeneration_count + 1,
-                feedback=d_result.get("feedback", ""),
-            )
-        
-        # 检查是否通过
-        if d_result.get("passed", False):
-            # 保存最终推荐
-            await self._save_recommendations(
-                result_id=result_id,
-                recommendations=d_result.get("recommendations", []),
-            )
 
-            # 为所有候选计算并保存 final_score
-            from sqlalchemy import select, update
-            from app.models.title import TitleCandidate
-            cand_result = await self.db.execute(
-                select(TitleCandidate).where(TitleCandidate.result_id == result_id)
-            )
-            for cand in cand_result.scalars().all():
-                b = cand.b_score or 0
-                c = cand.c_click_willingness or 0
-                cand.final_score = round(b * 0.6 + c * 0.4, 2)
-            await self.db.flush()
-            
-            # 更新结果统计
-            await self._update_result(result_id, {
-                "total_candidates": len(candidates),
-                "covered_methods": b_result.get("covered_methods", 0),
-                "eliminated_count": b_result.get("eliminated_count", 0),
-                "self_check_passed": "1",
-                "self_check_details": d_result.get("self_check_details"),
-            })
-            
-            return True
-        else:
+        if not c_result:
+            logger.error("Agent C 未完成点击分析")
             return False
+
+        # —— Agent D 已停用：流程在 C 之后收尾 ——
+        # 说明：D（综合判定/Top3）与自动重生、final_score、推荐保存逻辑已断开，
+        #       _execute_agent_d / _execute_regeneration / _save_recommendations 等方法保留在代码中但不再调用。
+
+        # 更新结果统计
+        await self._update_result(result_id, {
+            "total_candidates": len(candidates),
+            "covered_methods": b_result.get("covered_methods", 0),
+            "eliminated_count": 0,
+            "self_check_passed": "1",
+        })
+
+        return True
     
     async def _execute_agent_a(
         self,
@@ -273,7 +227,7 @@ class TitleGenerationService:
         logger.info("执行 Agent A - 标题创作员")
 
         if self.progress_callback:
-            await self.progress_callback({"event": "step_start", "data": {"step": 1, "agent": "甄意浓 · 标题创作员", "action": "正在生成 10-15 个标题候选...", "avatar": "/agents/title-a.png"}})
+            await self.progress_callback({"event": "step_start", "data": {"step": 1, "agent": "甄意浓 · 标题创作员", "action": "正在生成 5 个标题候选...", "avatar": "/agents/title-a.png"}})
 
         # 创建Agent日志
         log = await self._create_agent_log(
@@ -358,48 +312,35 @@ class TitleGenerationService:
         Returns:
             评审结果
         """
-        logger.info("执行 Agent B - 标题评审员")
+        logger.info("执行 Agent B - 标题简介生成员")
 
         if self.progress_callback:
-            await self.progress_callback({"event": "step_start", "data": {"step": 2, "agent": "尚怀瑾 · 标题评审员", "action": "正在一票否决扫描 + 6 维度评分...", "avatar": "/agents/title-b.png"}})
+            await self.progress_callback({"event": "step_start", "data": {"step": 2, "agent": "尚怀瑾 · 标题简介员", "action": "正在为每个标题生成简介...", "avatar": "/agents/title-b.png"}})
 
         # 创建Agent日志
         log = await self._create_agent_log(
             task_id=task_id,
             result_id=result_id,
             agent_type="B",
-            agent_name="标题评审员",
+            agent_name="标题简介员",
             agent_role="公众号运营专家",
             execution_order=2,
         )
-        
+
         try:
-            # 调用Agent B
+            # 调用Agent B（生成简介，不再打分/淘汰/筛选）
             result = await self.agent_b.review_titles(
                 candidates=candidates,
                 topic=request.topic,
                 outline=request.outline,
             )
-            
-            # 更新候选标题的评分（Agent B 返回 "id" 而非 "candidate_id"）
-            for score_data in result.get("scores", []):
-                candidate_id = score_data.get("candidate_id") or score_data.get("id")
-                if candidate_id:
-                    await self._update_candidate_score(candidate_id, score_data)
 
-            # 标记一票否决的候选
-            for eliminated in result.get("eliminated", []):
-                candidate_id = eliminated.get("candidate_id") or eliminated.get("id")
+            # 写入每个候选的简介
+            for item in result.get("summaries", []):
+                candidate_id = item.get("candidate_id") or item.get("id")
                 if candidate_id:
-                    await self._update_candidate_elimination(
-                        candidate_id,
-                        eliminated.get("reason") or eliminated.get("elimination_reason", ""),
-                    )
-            
-            # 标记Top 5
-            for top5_id in result.get("top5_ids", []):
-                await self._update_candidate_top5(top5_id, True)
-            
+                    await self._update_candidate_summary(candidate_id, item.get("summary", ""))
+
             # 更新Agent日志
             await self._update_agent_log(log.id, {
                 "status": "completed",
@@ -425,40 +366,42 @@ class TitleGenerationService:
         self,
         task_id: str,
         result_id: str,
-        top5: List[Dict[str, Any]],
+        candidates: List[Dict[str, Any]],
         request: TitleGenerationRequest,
     ) -> Optional[Dict[str, Any]]:
         """
-        执行Agent C - 读者点击预测员
-        
+        执行Agent C - 读者点击分析员
+
+        对全部候选逐个分析「会点的原因 / 吸引点」，不再打分。
+
         Args:
             task_id: 任务ID
             result_id: 结果ID
-            top5: Top 5候选列表
+            candidates: 全部候选列表
             request: 标题生成请求
-            
+
         Returns:
-            点击预测结果
+            点击分析结果
         """
-        logger.info("执行 Agent C - 读者点击预测员")
+        logger.info("执行 Agent C - 读者点击分析员")
 
         if self.progress_callback:
-            await self.progress_callback({"event": "step_start", "data": {"step": 3, "agent": "于思齐 · 标题预测员", "action": "正在模拟读者场景，预测点击意愿...", "avatar": "/agents/title-c.png"}})
+            await self.progress_callback({"event": "step_start", "data": {"step": 3, "agent": "于思齐 · 标题分析员", "action": "正在模拟读者场景，分析点击吸引点...", "avatar": "/agents/title-c.png"}})
 
         # 创建Agent日志
         log = await self._create_agent_log(
             task_id=task_id,
             result_id=result_id,
             agent_type="C",
-            agent_name="读者点击预测员",
+            agent_name="读者点击分析员",
             agent_role="目标读者(28岁互联网产品经理)",
             execution_order=3,
         )
-        
+
         try:
             # 调用Agent C
             result = await self.agent_c.predict_clicks(
-                top5=top5,
+                top5=candidates,
                 topic=request.topic,
                 outline=request.outline,
             )
@@ -740,6 +683,21 @@ class TitleGenerationService:
         )
         await self.db.flush()
     
+    async def _update_candidate_summary(
+        self,
+        candidate_id: str,
+        summary: str,
+    ) -> None:
+        """写入候选标题简介（Agent B）"""
+        from sqlalchemy import update
+
+        await self.db.execute(
+            update(TitleCandidate)
+            .where(TitleCandidate.id == candidate_id)
+            .values(b_summary=summary)
+        )
+        await self.db.flush()
+
     async def _update_candidate_elimination(
         self,
         candidate_id: str,

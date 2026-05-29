@@ -44,7 +44,8 @@
               <span>标题工具</span>
             </template>
             <el-menu-item index="standalone-title">智能起标题</el-menu-item>
-            <el-menu-item index="munger-generation">芒格标题生成</el-menu-item>
+            <!-- 芒格标题生成入口暂时隐藏（路由与页面代码保留） -->
+            <!-- <el-menu-item index="munger-generation">芒格标题生成</el-menu-item> -->
             <el-menu-item index="munger-scorer">芒格标题评分</el-menu-item>
           </el-sub-menu>
 

@@ -73,58 +73,106 @@ class TitleReviewerAgent(BaseAgent):
         outline: OutlineInfo,
     ) -> Dict[str, Any]:
         """
-        评审标题候选
-        
-        执行4步流程:
-        1. 一票否决扫描
-        2. 6维度评分
-        3. 与大纲一致性交叉验证
-        4. 筛选Top 5
-        
+        为每个候选标题生成「简介」（不再打分 / 不再淘汰 / 不再筛选 Top 5）。
+
+        简介内容：这个标题/这篇文章大概写什么、为什么这么取（亮点角度）。
+
         Args:
             candidates: 候选标题列表
             topic: 选题信息
             outline: 大纲信息
-            
+
         Returns:
-            评审结果
+            {"summaries": [{"candidate_id", "summary"}], "all": [...]}
         """
-        logger.info(f"Agent B 开始评审，候选数量: {len(candidates)}")
-        
-        # Step 1: 一票否决扫描
-        eliminated, survived = self._veto_scan(candidates)
-        logger.info(f"一票否决扫描: 淘汰 {len(eliminated)} 个，存活 {len(survived)} 个")
-        
-        if not survived:
-            logger.error("所有候选都被一票否决")
-            return {
-                "eliminated": eliminated,
-                "scores": [],
-                "top5": [],
-                "top5_ids": [],
-                "covered_methods": 0,
-                "eliminated_count": len(eliminated),
-            }
-        
-        # Step 2 & 3: 6维度评分 + 大纲一致性验证
-        scored_candidates = await self._score_candidates(survived, topic, outline)
-        
-        # Step 4: 筛选Top 5
-        top5 = self._select_top5(scored_candidates)
-        
-        # 统计信息
+        logger.info(f"Agent B 开始生成标题简介，候选数量: {len(candidates)}")
+
+        if not candidates:
+            return {"summaries": [], "all": [], "covered_methods": 0}
+
+        summaries = await self._generate_summaries(candidates, topic, outline)
+
         covered_methods = len(set(c.get("method", "") for c in candidates))
-        
-        logger.info(f"Agent B 评审完成，Top 5: {[c.get('title', '')[:20] for c in top5]}")
-        
+        logger.info(f"Agent B 简介生成完成，共 {len(summaries)} 条")
+
         return {
-            "eliminated": eliminated,
-            "scores": scored_candidates,
-            "top5": top5,
-            "top5_ids": [c.get("id") for c in top5],
+            "summaries": summaries,
+            "all": candidates,
             "covered_methods": covered_methods,
-            "eliminated_count": len(eliminated),
         }
+
+    async def _generate_summaries(
+        self,
+        candidates: List[Dict[str, Any]],
+        topic: TopicInfo,
+        outline: OutlineInfo,
+    ) -> List[Dict[str, Any]]:
+        """调用 AI 为每个候选生成简介"""
+        prompt = self._build_summary_prompt(candidates, topic, outline)
+
+        response = await self.call_ai_model(
+            prompt=prompt,
+            system_prompt=self._get_system_prompt(),
+            temperature=0.6,
+        )
+
+        result = self.parse_json_response(response)
+        summary_map = {
+            s.get("candidate_id") or s.get("id"): s.get("summary", "")
+            for s in result.get("summaries", [])
+        }
+
+        summaries = []
+        for c in candidates:
+            cid = c.get("id", "")
+            summaries.append({
+                "candidate_id": cid,
+                "summary": summary_map.get(cid, ""),
+            })
+        return summaries
+
+    def _build_summary_prompt(
+        self,
+        candidates: List[Dict[str, Any]],
+        topic: TopicInfo,
+        outline: OutlineInfo,
+    ) -> str:
+        """构建简介生成提示词"""
+        candidates_text = "\n".join([
+            f"{i+1}. ID: {c.get('id', '')}\n   标题: {c.get('title', '')}\n   套路: {c.get('method', '')}\n   修饰元素: {', '.join(c.get('modifiers', []))}"
+            for i, c in enumerate(candidates)
+        ])
+
+        return f"""【输入：候选标题】
+{candidates_text}
+
+【输入：选题 + 大纲】
+选题:
+- 标题: {topic.title}
+- 方向: {topic.direction}
+- 套路: {topic.method}
+- 价值承诺: {topic.value_promise}
+
+大纲:
+- 各节小标题: {', '.join(outline.section_titles)}
+- 关键信息点: {', '.join(outline.key_points)}
+
+【你的任务】
+为每个候选标题写一段「简介」（2-3 句话），说明：
+1. 用这个标题，文章大概会写什么内容、给读者什么；
+2. 这个标题为什么这么取——它的亮点/角度在哪（结合套路与选题）。
+注意：不要打分、不要排序、不要淘汰，只写简介。
+
+【输出格式】
+请严格按照以下JSON格式输出:
+{{
+  "summaries": [
+    {{
+      "candidate_id": "候选ID",
+      "summary": "这一段就是该标题的简介……"
+    }}
+  ]
+}}"""
     
     def _veto_scan(
         self,

@@ -110,12 +110,12 @@ class ClickPredictorAgent(BaseAgent):
 {READER_PROFILE['reading_habit']}
 
 你的任务：
-模拟自己在刷订阅号信息流时的真实反应，预测对每个标题的点击意愿。
+模拟自己在刷订阅号信息流时的真实反应，分析每个标题会不会吸引你点击、吸引点在哪。
 
 你的原则：
-- 真实即可，不要为了"政治正确"给所有候选打高分
-- 如果某个标题让你瞬间想划走，请直说"看到就划"
-- 说明会点/不会点的具体原因"""
+- 真实即可，不要为了"政治正确"夸每一个标题
+- 不需要打分，只描述「会点的原因 / 吸引你的点」以及「可能让你划走的点」
+- 如果某个标题让你瞬间想划走，请直说"看到就划"，并说明原因"""
     
     def _build_prediction_prompt(
         self,
@@ -141,7 +141,7 @@ class ClickPredictorAgent(BaseAgent):
         ])
         
         prompt = f"""【场景】
-你现在正在刷订阅号信息流。"路人甲TM"今天有一篇新文章，你看到了下面这5个候选标题之一（每次只能看到1个，周围是其他10篇日常公众号文章）。
+你现在正在刷订阅号信息流。"路人甲TM"今天有一篇新文章，你看到了下面这些候选标题之一（每次只能看到1个，周围是其他10篇日常公众号文章）。
 
 【候选标题】
 {candidates_text}
@@ -151,14 +151,7 @@ class ClickPredictorAgent(BaseAgent):
 - 价值承诺: {topic.value_promise}
 
 【你的任务】
-逐个预测每个标题在你身上的点击意愿（0-10），并说明会点/不会点的原因。
-
-评分标准:
-- 9-10: 看到就点，完全无法抗拒
-- 7-8: 很想点，大概率会打开
-- 5-6: 有点兴趣，可能点可能不点
-- 3-4: 兴趣不大，大概率划走
-- 1-2: 看到就划，完全无感
+逐个分析每个标题：会点的原因 / 吸引你的点是什么，以及可能让你划走的点。不需要打分。
 
 【输出格式】
 请严格按照以下JSON格式输出:
@@ -166,17 +159,9 @@ class ClickPredictorAgent(BaseAgent):
   "predictions": [
     {{
       "candidate_id": "候选ID",
-      "click_willingness": 8,
-      "click_reason": "反差感强 + 有具体数字 + 跟我的工作场景相关",
-      "no_click_reason": "",
-      "improvement_suggestion": "把'5个订阅'改成具体的服务名（如'5个SaaS'），更具体"
-    }},
-    {{
-      "candidate_id": "候选ID",
-      "click_willingness": 4,
-      "click_reason": "",
-      "no_click_reason": "感觉是另一篇Claude教程，已经看过类似的",
-      "improvement_suggestion": "需要叠加'反共识'或'数字冲击'修饰元素"
+      "click_reason": "会点的原因 / 吸引点，如：反差感强 + 有具体数字 + 跟我的工作场景相关",
+      "no_click_reason": "可能让你划走的点，如：感觉是另一篇看过的教程；没有可填则留空",
+      "improvement_suggestion": "可选的小建议"
     }},
     ...
   ]

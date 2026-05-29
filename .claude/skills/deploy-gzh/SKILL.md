@@ -1,111 +1,97 @@
 ---
 name: deploy-gzh
 description: >
-  把 gzh（公众号智能体）项目部署到生产服务器的完整流程：本地构建前端 → 同步代码到服务器 →
-  Docker Compose 重建并启动 → 验证。当用户说「部署」「上传到服务器」「发布到线上」「更新服务器代码」
-  「deploy」，或提到 gzh 项目上线、把改动推到 1.13.92.57 / gzh.midonghub.com 时，必须使用本 skill。
-  它封装了这个项目特有的几个大坑（前端不在服务器编译、macOS tar 会产生坏文件、必须全量重建等），
-  避免重复踩坑。
+  输出把 gzh（公众号智能体）项目部署到生产服务器的命令清单。当用户说「部署到服务器的命令」
+  「给我部署命令」「部署命令」「怎么部署到服务器」，或要把 gzh 的改动发布到线上 /
+  1.13.92.57 / gzh.midonghub.com 时，必须使用本 skill。
+  重要：本 skill 只【给出命令清单】，每条命令标注是【本地执行】还是【宝塔/服务器执行】，
+  由用户自己复制去运行。不要替用户执行任何部署命令，也不要用自动 SSH 脚本（服务器非免密）。
 ---
 
-# 部署 gzh 到生产服务器
+# 部署 gzh：命令清单
 
-把本地改动安全地部署到服务器。这个项目有几个**特有的坑**，本 skill 的存在就是为了不再踩它们。
+**本 skill 的职责：被触发时，把下面这套命令原样列给用户，每条清楚标注【本地执行】或【宝塔执行】。
+不要替用户运行，不要自动 SSH（服务器非免密，传输时会提示输密码，由用户自己输）。**
 
-## 关键事实（先记住这些，否则必踩坑）
+根据用户改了什么，给对应命令：改了前端 → 全套；只改后端 → 跳过前端构建那步。不确定就给全套。
 
-| 事实 | 含义 |
-|---|---|
-| **前端不在服务器编译** | 生产镜像是 `COPY dist`（见 `frontend/Dockerfile`）。改了前端**必须先本地 `npm run build`**，否则线上永远是旧页面。 |
-| **macOS `tar` 会产生 `._` 坏文件** | Mac 上 `tar czf` 会把扩展属性打进包，Linux 解压生成 `._xxx.py`（含 null 字节），导致 alembic 加载迁移时报 `source code string cannot contain null bytes`。**用 rsync，别用 tar。** |
-| **后端在服务器构建** | backend / celery 镜像在服务器 `docker build`，所以同步源码 + `--build` 即可生效。 |
-| **要全量重建** | 只 `build init backend` 会漏掉 frontend。部署时 `--build` 不指定服务名，重建全部。 |
-| **`init` 容器跑数据库迁移** | `alembic upgrade head` + seed。它失败 backend 起不来。新增数据库表要先生成 alembic 迁移文件。 |
-| **不要覆盖服务器的密钥/配置** | 同步时排除 `backend/.env.production` 和 `backend/secrets`，用服务器上已有的。 |
+---
 
-## 部署配置（默认值）
+## 部署命令清单（直接发给用户这个）
 
-- 本地项目根：当前 git 仓库根目录
-- 服务器：`root@1.13.92.57`
-- 服务器路径：`/www/wwwroot/gzh`
-- Compose：`docker-compose.prod.yml`，`--env-file backend/.env.production`
-- 域名：`https://gzh.midonghub.com`
+> 服务器：`root@1.13.92.57` ｜ 路径：`/www/wwwroot/gzh` ｜ 域名：`https://gzh.midonghub.com`
+> 传输用 rsync（不要用 tar，macOS 的 tar 会产生 `._` 坏文件导致服务器迁移崩溃）。
+> 非免密，rsync/ssh 会提示输服务器密码，输入即可。
 
-## 推荐方式：一键脚本
-
-大多数情况直接跑 `scripts/deploy.sh`，它会按正确顺序做完：本地构建前端 → rsync 同步 → 服务器重建启动 → 打印状态。
-
+### ① 【本地执行】构建前端（只改了后端可跳过此步）
 ```bash
-bash .claude/skills/deploy-gzh/scripts/deploy.sh
+cd "/Users/yang2krown/工作/公众号智能体/gzh/frontend"
+npm run build
+cd ..
 ```
+> 前端生产镜像直接用预构建的 `dist/`，服务器不编译。不 build 的话线上永远是旧页面。
 
-可选参数（不传用默认值）：
+### ② 【本地执行】同步代码到服务器（每条会提示输密码）
 ```bash
-# 跳过前端构建（只改了后端时，省时间）
-bash .claude/skills/deploy-gzh/scripts/deploy.sh --skip-frontend
+cd "/Users/yang2krown/工作/公众号智能体/gzh"
 
-# 自定义服务器/路径
-DEPLOY_HOST=root@1.13.92.57 DEPLOY_PATH=/www/wwwroot/gzh \
-  bash .claude/skills/deploy-gzh/scripts/deploy.sh
-```
-
-脚本跑完后，**务必硬刷新浏览器**（`Cmd+Shift+R`）或开无痕窗口访问域名，否则看到的是缓存的旧页面。
-
-## 手动方式（脚本不可用 / 想逐步确认时）
-
-### 1. 本地构建前端（改了前端才需要）
-```bash
-cd frontend && npm run build && cd ..
-```
-
-### 2. 同步到服务器（用 rsync，不要用 tar）
-```bash
-# 后端源码（排除垃圾、密钥、本地配置）
+# 后端源码（排除垃圾/密钥/本地配置，不覆盖服务器的 .env.production 和 secrets）
 rsync -az --delete \
   --exclude='__pycache__' --exclude='.venv' --exclude='uploads' \
   --exclude='.env.production' --exclude='secrets' \
   --exclude='.DS_Store' --exclude='._*' \
   backend/ root@1.13.92.57:/www/wwwroot/gzh/backend/
 
-# 前端构建产物
+# 前端构建产物（只改后端可不传）
 rsync -az --delete frontend/dist/ root@1.13.92.57:/www/wwwroot/gzh/frontend/dist/
 
-# compose 文件（若改过）
+# compose 文件（改过才需要）
 rsync -az docker-compose.prod.yml root@1.13.92.57:/www/wwwroot/gzh/
 ```
 
-### 3. 服务器上重建并启动
+### ③ 【宝塔执行】重建并启动（在宝塔终端，/www/wwwroot/gzh 下）
 ```bash
-ssh root@1.13.92.57
 cd /www/wwwroot/gzh
 
 # 保险：清掉可能残留的 macOS 坏文件
 find . -name '._*' -delete
 
-# 全量重建（长构建建议 nohup 后台跑，防 SSH 断）
+# 全量重建启动（构建较久，建议后台跑防 SSH 断）
 docker compose -f docker-compose.prod.yml --env-file backend/.env.production up -d --build
 ```
 
-### 4. 验证
+### ④ 【宝塔执行】验证
 ```bash
+cd /www/wwwroot/gzh
+
 # 服务状态：init=Exited(0)，其余 Up/healthy
 docker compose -f docker-compose.prod.yml --env-file backend/.env.production ps
 
-# init 迁移有没有过（不该有 traceback）
+# init 迁移日志，不该有 traceback
 docker logs gzh-init-1 --tail=30
-
-# OSS 配置（公众号转小红书的图片依赖它，必须 True）
-docker compose -f docker-compose.prod.yml --env-file backend/.env.production \
-  logs --tail=200 backend | grep -i oss
 ```
-然后浏览器**硬刷新**访问 `https://gzh.midonghub.com` 确认页面是最新的。
 
-## 出问题时
+### ⑤ 【本地/浏览器】最后确认
+- 浏览器**硬刷新** `Cmd+Shift+R` 或开无痕窗口访问 `https://gzh.midonghub.com`，确认页面是最新的。
+- 若涉及小红书发图，确认 OSS（【宝塔执行】，提取一篇带图文章后）：
+  ```bash
+  docker compose -f docker-compose.prod.yml --env-file backend/.env.production \
+    logs --tail=200 backend | grep -i oss
+  ```
+  看到 `[OSS] OSS 配置状态: True` 即可。
 
-按现象查 `references/troubleshooting.md`：里面有 null bytes、init exit 1、前端不更新、SSH 断、OSS 没配、镜像缓存等具体排查步骤和命令。
+---
 
-## 别忘了：小红书发布插件是单独分发的
+## 几个必须记住的坑（给命令时一并提醒用户）
 
-`xhs-extension/` 不经服务器部署。如果改了插件、或换了访问域名：
-1. 确认 `xhs-extension/manifest.json` 的 `content_scripts.matches` 里有生产域名 `https://gzh.midonghub.com/*`；
-2. 把整个 `xhs-extension/` 文件夹发给用户，让他们在 `chrome://extensions` 重新加载。
+- **前端不在服务器编译** → 改前端必须先本地 `npm run build` 再传 `dist/`。
+- **别用 macOS tar** → 会产生 `._` 坏文件，导致服务器 `init` 报 `null bytes` 崩溃。用 rsync。
+- **要全量 `--build`** → 别只 build init/backend，会漏掉 frontend。
+- **不覆盖服务器密钥** → rsync 已排除 `.env.production` 和 `secrets`。
+- **构建怕 SSH 断** → 长构建可后台跑：`nohup docker compose ... up -d --build > /tmp/build.log 2>&1 &` 再 `tail -f /tmp/build.log`。
+
+出问题按现象查 `references/troubleshooting.md`（null bytes、前端不更新、镜像缓存、OSS 没配、seed 报错等的排查命令）。
+
+## 小红书发布插件（单独，不经服务器部署）
+
+改了插件或换了域名时提醒用户：确认 `xhs-extension/manifest.json` 的 `matches` 含 `https://gzh.midonghub.com/*`，并把整个 `xhs-extension/` 文件夹发给用户在 `chrome://extensions` 重新加载。
