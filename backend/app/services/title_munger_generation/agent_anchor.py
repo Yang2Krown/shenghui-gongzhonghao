@@ -50,7 +50,6 @@ class AnchorAgent(BaseAgent):
 要求：
 - 必须包含一个身份锚点
 - 锚点精度："窄到让目标群体感到被点名，宽到让相邻群体也觉得相关"
-- 每条标题 ≤ 20个汉字（含标点）
 - 目标读者：科技/AI行业从业者
 
 输出格式（严格按以下格式，每行一条）：
@@ -65,7 +64,6 @@ TITLE||标题内容||锚点类型：职业/行为/处境"""
 规则：
 - 必须包含一个身份锚点
 - 锚点精度："窄到让目标群体感到被点名，宽到让相邻群体也觉得相关"
-- 每条标题 ≤ 20个汉字（含标点）
 - 目标读者：科技/AI行业从业者"""
 
     def _parse_titles_robust(self, response: str) -> List[Dict[str, str]]:
@@ -82,7 +80,7 @@ TITLE||标题内容||锚点类型：职业/行为/处境"""
                     anchor_type = ""
                     if len(parts) >= 3:
                         anchor_type = parts[2].replace("锚点类型：", "").replace("锚点类型:", "").strip()
-                    if title_text and len(self._count_chinese(title_text)) <= 20:
+                    if title_text:
                         titles.append({"title": title_text, "dimension": "社会位置", "anchor_type": anchor_type})
 
         # Fallback to XML parsing
@@ -126,7 +124,7 @@ TITLE||标题内容||锚点类型：职业/行为/处境"""
 
             # Count actual Chinese chars
             cn_chars = self._count_chinese(title_text)
-            if title_text and len(cn_chars) <= 20:
+            if title_text:
                 titles.append({"title": title_text, "dimension": "社会位置", "anchor_type": anchor_type})
 
         return titles

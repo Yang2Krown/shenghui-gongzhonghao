@@ -41,20 +41,18 @@ def _celery_available() -> bool:
 
 
 async def _do_refresh():
-    """进程内后台执行抓取 + 预处理（本地开发用）。"""
+    """进程内后台执行 aihot 全量抓取 + 预处理（本地开发用）。"""
     global _refresh_running
     import logging
     log = logging.getLogger(__name__)
     try:
-        from app.services.scraping.adapters import register_adapters
-        from app.services.scraping.orchestrator import orchestrator
+        from app.services.scraping.adapters.aihot_adapter import fetch_aihot
         from app.services.preprocess import preprocess_pipeline
         from app.db.session import AsyncSessionLocal
 
-        register_adapters()
         async with AsyncSessionLocal() as db:
-            result = await orchestrator.fetch_all(db)
-            log.info(f"手动抓取完成: {result}")
+            result = await fetch_aihot(db, feed_key="all")
+            log.info(f"手动抓取 aihot[all] 完成: {result}")
 
         async with AsyncSessionLocal() as db:
             pp_result = await preprocess_pipeline.run_batch(db, limit=2000)
@@ -74,15 +72,15 @@ async def manual_refresh(
     global _refresh_running
 
     if _celery_available():
-        from app.tasks.scraper_tasks import fetch_all_sources_task
+        from app.tasks.scraper_tasks import fetch_aihot_task
         from app.tasks.preprocess_tasks import run_batch_task
 
-        fetch_all_sources_task.delay()
+        fetch_aihot_task.delay(feed_key="all")
         run_batch_task.apply_async(kwargs={"limit": 2000}, countdown=120)
 
         return {
             "code": 200,
-            "message": "已提交抓取 + 预处理任务，请稍后刷新页面查看新数据",
+            "message": "已提交 AI HOT 全量抓取 + 预处理任务，请稍后刷新页面查看新数据",
             "data": {"mode": "celery"},
         }
 

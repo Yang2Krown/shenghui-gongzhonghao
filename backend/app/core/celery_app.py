@@ -34,12 +34,10 @@ celery_app.conf.update(
     beat_schedule=CELERY_BEAT_SCHEDULE,
 )
 
-# 自动发现 app.tasks.* 下的所有任务
-celery_app.autodiscover_tasks([
-    "app.tasks.scraper_tasks",
-    "app.tasks.preprocess_tasks",
-    "app.tasks.topic_mining_tasks",
-    "app.tasks.ranking_tasks",
-])
+# 显式导入任务模块，确保 @shared_task 注册到 celery_app
+import app.tasks.scraper_tasks  # noqa: F401
+import app.tasks.preprocess_tasks  # noqa: F401
+import app.tasks.topic_mining_tasks  # noqa: F401
+import app.tasks.ranking_tasks  # noqa: F401
 
 __all__ = ["celery_app"]

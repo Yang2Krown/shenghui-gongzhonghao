@@ -111,6 +111,13 @@ const routes = [
         path: 'content-generation',
         redirect: '/creation'
       },
+      // 独立标题生成（复用创作流水线）
+      {
+        path: 'standalone-title',
+        name: 'StandaloneTitle',
+        component: () => import('@/pages/titles/StandaloneTitleGeneration.vue'),
+        meta: { title: '智能起标题' }
+      },
       // 芒格版标题
       {
         path: 'munger-generation',

@@ -457,13 +457,13 @@ function shortLabel(label) {
 }
 
 .dot-b {
-  background: linear-gradient(135deg, var(--pine), var(--pine));
-  box-shadow: 0 2px 8px rgba(63, 92, 82, 0.3), 0 0 0 4px var(--paper);
+  background: linear-gradient(135deg, var(--sand), var(--sand));
+  box-shadow: 0 2px 8px rgba(196, 155, 92, 0.3), 0 0 0 4px var(--paper);
 }
 
 .dot-c {
-  background: linear-gradient(135deg, var(--sand), var(--sand));
-  box-shadow: 0 2px 8px rgba(196, 155, 92, 0.3), 0 0 0 4px var(--paper);
+  background: linear-gradient(135deg, var(--pine), var(--pine));
+  box-shadow: 0 2px 8px rgba(63, 92, 82, 0.3), 0 0 0 4px var(--paper);
 }
 
 .dot-d {
@@ -505,8 +505,8 @@ function shortLabel(label) {
 }
 
 .card-a { border-left: 3px solid var(--clay); }
-.card-b { border-left: 3px solid var(--pine); }
-.card-c { border-left: 3px solid var(--sand); }
+.card-b { border-left: 3px solid var(--sand); }
+.card-c { border-left: 3px solid var(--pine); }
 .card-d { border-left: 3px solid var(--leaf); }
 
 /* ── 卡片头部 ── */

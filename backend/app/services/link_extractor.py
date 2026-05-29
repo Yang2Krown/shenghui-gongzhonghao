@@ -5,10 +5,11 @@
 import re
 import json
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from urllib.parse import urlparse, unquote
 
 import httpx
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +274,118 @@ async def extract_wechat(url: str, cookie: str = None) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"公众号提取失败: {e}")
         return {"title": "", "content": f"提取失败: {str(e)[:200]}", "author": "", "tags": [], "platform": "gzh"}
+
+
+async def extract_wechat_with_images(url: str, cookie: str = None) -> Dict[str, Any]:
+    """
+    提取微信公众号文章内容，包含图片及其在文中的位置。
+    返回结构化的 blocks 列表，每个 block 为 text 或 image 类型。
+    """
+    try:
+        url = url.strip().split(' ')[0]
+        parsed = urlparse(url)
+        if not parsed.hostname or ('mp.weixin.qq.com' not in parsed.hostname and 'weixin.qq.com' not in parsed.hostname):
+            return {"title": "", "blocks": [], "author": "", "tags": [], "platform": "gzh", "error": "请输入有效的微信公众号链接"}
+
+        html = await fetch_html(url, cookie=cookie, ua=WECHAT_UA)
+
+        if '该内容已被发布者删除' in html or 'global_error_msg' in html:
+            return {"title": "", "blocks": [], "author": "", "tags": [], "platform": "gzh", "error": "文章已失效或被删除"}
+
+        title = _extract_wechat_var(html, 'msg_title') or ''
+        if not title:
+            title_match = re.search(r'<title[^>]*>([^<]+)</title>', html)
+            title = title_match.group(1).strip() if title_match else ''
+
+        author = _extract_wechat_var(html, 'nickname') or ''
+
+        blocks = _extract_wechat_blocks(html)
+
+        tags = []
+        full_text = ' '.join(b['content'] for b in blocks if b['type'] == 'text')
+        tag_matches = re.findall(r'#([^#]+)#', full_text)
+        if tag_matches:
+            tags = [t.strip() for t in tag_matches if t.strip()]
+
+        logger.info(f"公众号图文提取: title={title[:50] if title else ''}, blocks={len(blocks)}, images={sum(1 for b in blocks if b['type'] == 'image')}")
+
+        return {
+            "title": title.strip(),
+            "blocks": blocks,
+            "author": author.strip(),
+            "tags": tags,
+            "platform": "gzh",
+        }
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"公众号请求失败: {e.response.status_code}")
+        return {"title": "", "blocks": [], "author": "", "tags": [], "platform": "gzh", "error": f"请求失败，状态码: {e.response.status_code}"}
+    except Exception as e:
+        logger.error(f"公众号图文提取失败: {e}")
+        return {"title": "", "blocks": [], "author": "", "tags": [], "platform": "gzh", "error": f"提取失败: {str(e)[:200]}"}
+
+
+def _extract_wechat_blocks(html: str) -> List[Dict[str, Any]]:
+    """从公众号 HTML 中提取结构化的图文 blocks"""
+    soup = BeautifulSoup(html, 'html.parser')
+    content_div = soup.find('div', id='js_content')
+    if not content_div:
+        return []
+
+    blocks: List[Dict[str, Any]] = []
+    current_text_lines: List[str] = []
+
+    def flush_text():
+        text = '\n'.join(current_text_lines).strip()
+        if text:
+            blocks.append({"type": "text", "content": text})
+        current_text_lines.clear()
+
+    def walk(element):
+        for child in element.children:
+            if isinstance(child, NavigableString):
+                text = child.strip()
+                if text:
+                    current_text_lines.append(text)
+                continue
+
+            if not isinstance(child, Tag):
+                continue
+
+            if child.name == 'img':
+                img_url = child.get('data-src') or child.get('src') or ''
+                if img_url and not img_url.startswith('data:'):
+                    flush_text()
+                    blocks.append({
+                        "type": "image",
+                        "url": img_url,
+                        "alt": child.get('alt', ''),
+                    })
+                continue
+
+            if child.name in ('p', 'div', 'section', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
+                inner_text = child.get_text(separator=' ', strip=True)
+                inner_imgs = child.find_all('img')
+
+                if not inner_imgs:
+                    if inner_text:
+                        current_text_lines.append(inner_text)
+                else:
+                    walk(child)
+
+                if child.name in ('p', 'div', 'section', 'blockquote') and current_text_lines:
+                    pass
+                continue
+
+            if child.name == 'br':
+                continue
+
+            walk(child)
+
+    walk(content_div)
+    flush_text()
+
+    return blocks
 
 
 def _extract_wechat_var(html: str, var_name: str) -> Optional[str]:

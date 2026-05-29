@@ -17,6 +17,7 @@
 version: '3.8'
 
 x-backend-env: &backend-env
+  TZ: Asia/Shanghai
   POSTGRES_SERVER: ${POSTGRES_SERVER:-postgres}
   POSTGRES_PORT: ${POSTGRES_PORT:-5432}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -52,6 +53,12 @@ x-backend-env: &backend-env
   # X (Twitter) 可选
   TWITTER_AUTH_TOKEN: ${TWITTER_AUTH_TOKEN:-}
   TWITTER_CT0: ${TWITTER_CT0:-}
+  # 阿里云 OSS（公众号图片上传）
+  OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+  OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+  OSS_ENDPOINT: ${OSS_ENDPOINT:-}
+  OSS_BUCKET_NAME: ${OSS_BUCKET_NAME:-}
+  OSS_DIR: ${OSS_DIR:-gzh-images}
 
 services:
 

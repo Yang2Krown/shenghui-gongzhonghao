@@ -92,7 +92,9 @@
           class="cluster-card"
           @click="goToDetail(cluster.id)"
         >
-          <div class="p-5">
+          <div class="p-5" style="position: relative;">
+            <!-- NEW 标签 -->
+            <span v-if="isNew(cluster)" class="tag-new">NEW</span>
             <!-- 标题 -->
             <h3 class="font-serif" style="font-size: 22px; font-weight: 500; color: var(--ink); line-height: 1.45;
                                           display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
@@ -406,9 +408,31 @@ const formatFreshness = (val) => {
   const map = { '24h': '24h 内', '7d': '7 天内', '30d': '30 天内', 'expired': '大于 30 天' }
   return map[val] || val
 }
+
+const isNew = (cluster) => {
+  if (!cluster.created_at) return false
+  const created = new Date(cluster.created_at)
+  const now = new Date()
+  return (now - created) < 60 * 60 * 1000  // 1 小时内
+}
 </script>
 
 <style scoped>
+/* NEW 标签 */
+.tag-new {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: #E8453C;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  line-height: 1.4;
+}
+
 /* 滚动加载状态条 */
 .load-more {
   display: flex;

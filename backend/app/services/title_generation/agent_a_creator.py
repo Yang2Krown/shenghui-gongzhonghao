@@ -246,7 +246,7 @@ class TitleCreatorAgent(BaseAgent):
   "candidates": [
     {
       "title": "标题内容",
-      "word_count": 20,
+      "word_count": 18,
       "method": "套路名称",
       "modifiers": ["修饰元素1", "修饰元素2"],
       "explanation": "为什么这样写"
@@ -322,11 +322,8 @@ class TitleCreatorAgent(BaseAgent):
         for candidate in candidates:
             title = candidate.get("title", "")
 
-            # 检查字数
+            # 记录字数（不再因字数淘汰）
             word_count = len(title)
-            if word_count < settings.MIN_TITLE_LENGTH or word_count > settings.MAX_TITLE_LENGTH:
-                logger.warning(f"标题字数不符合要求: {title} ({word_count}字)")
-                continue
 
             # 检查一票否决词
             if self._contains_anti_pattern(title):

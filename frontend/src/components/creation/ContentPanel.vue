@@ -45,13 +45,9 @@
     <div v-if="status === 'completed' && content" class="content-result-split">
       <!-- 左侧：可编辑正文 -->
       <div class="result-left">
-        <!-- 已选标题 -->
-        <div v-if="titleData?.title" class="selected-title mb-4">
-          {{ titleData.title }}
-        </div>
-
         <!-- 统计信息 -->
         <div class="card p-4 mb-4">
+          <h3 v-if="titleData?.title" class="selected-title">{{ titleData.title }}</h3>
           <div class="flex flex-wrap items-center gap-6 text-sm">
             <div>
               <span class="text-ink-3">字数：</span>
@@ -76,12 +72,12 @@
               <span class="text-xs font-semibold text-ink">{{ content.diagnosis.recommended_action }}</span>
             </div>
           </div>
-        </div>
-
-        <!-- 风格锚点 -->
-        <div v-if="content.style_anchor" class="style-anchor mb-4">
-          <span class="anchor-label">风格锚点</span>
-          <span class="anchor-text">{{ content.style_anchor }}</span>
+          <p v-if="content.style_anchor" class="style-anchor-inline">{{ content.style_anchor }}</p>
+          <div v-if="highlightFragments.length" class="hl-legend">
+            <span class="hl-legend-item"><mark class="hl-gold">金句</mark></span>
+            <span class="hl-legend-item"><mark class="hl-deai">去AI味改写</mark></span>
+            <span class="text-ink-4 text-xs">预览模式下悬停查看</span>
+          </div>
         </div>
 
         <!-- 正文编辑区 -->
@@ -107,31 +103,7 @@
             class="content-edit"
             resize="vertical"
           />
-          <div v-else class="content-preview prose" v-html="renderedHtml" />
-        </div>
-
-        <!-- 金句 -->
-        <div v-if="content.gold_sentences?.length" class="card p-5 mb-4">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="text-h4 font-sans text-ink">金句</h3>
-            <span class="text-xs text-ink-3">共 {{ content.gold_sentences.length }} 句</span>
-          </div>
-          <div class="space-y-2">
-            <div
-              v-for="sentence in content.gold_sentences"
-              :key="sentence.sentence_id"
-              class="gold-sentence-row"
-            >
-              <div class="flex items-start gap-3">
-                <span class="gold-type-badge">{{ sentence.sentence_type }}</span>
-                <span class="flex-1 text-sm text-ink leading-relaxed">{{ sentence.content }}</span>
-                <span class="text-xs text-ink-3 flex-shrink-0">{{ sentence.location }}</span>
-                <el-button link size="small" @click="copySentence(sentence.content)">
-                  <el-icon><DocumentCopy /></el-icon>
-                </el-button>
-              </div>
-            </div>
-          </div>
+          <div v-else ref="previewRef" class="content-preview prose" v-html="renderedHtml" @mousemove="onPreviewMouseMove" @mouseleave="onPreviewMouseLeave" />
         </div>
 
       </div>
@@ -358,20 +330,66 @@ const copySentence = async (text) => {
   }
 }
 
+// 收集需要高亮的文本片段
+const highlightFragments = computed(() => {
+  if (!content.value) return []
+  const fragments = []
+
+  // Agent B 金句
+  const goldSentences = content.value.gold_sentences || []
+  for (const s of goldSentences) {
+    if (s.content && s.content.length >= 4) {
+      fragments.push({ text: s.content, type: 'gold', label: s.sentence_type || '金句' })
+    }
+  }
+
+  // Agent C 改写后文本
+  const rewrites = content.value.rewrite_table || []
+  for (const r of rewrites) {
+    if (r.rewritten_text && r.rewritten_text.length >= 4) {
+      fragments.push({ text: r.rewritten_text, type: 'deai', label: r.ai_taste_subtype || '去AI味' })
+    }
+  }
+
+  // 按长度从长到短排序，避免短片段先匹配导致长片段断裂
+  fragments.sort((a, b) => b.text.length - a.text.length)
+  return fragments
+})
+
+// 对一段已 escapeHtml 的文本做高亮标记
+function applyHighlights(html) {
+  const frags = highlightFragments.value
+  if (!frags.length) return html
+
+  for (const frag of frags) {
+    const escaped = escapeHtml(frag.text)
+    if (!escaped) continue
+    const idx = html.indexOf(escaped)
+    if (idx === -1) continue
+    const cls = frag.type === 'gold' ? 'hl-gold' : 'hl-deai'
+    const tipLabel = frag.type === 'gold' ? '金句' : '去AI味改写'
+    const tipDetail = escapeHtml(frag.label)
+    const tag = `<mark class="${cls}" data-hl-type="${tipLabel}" data-hl-detail="${tipDetail}">${escaped}</mark>`
+    html = html.substring(0, idx) + tag + html.substring(idx + escaped.length)
+  }
+  return html
+}
+
 const renderedHtml = computed(() => {
   const txt = editableText.value || ''
   // 简单的 markdown-ish 渲染：段落 + ## / ### 标题
-  return txt
+  const raw = txt
     .split(/\n\n+/)
     .map((para) => {
       const trimmed = para.trim()
       if (!trimmed) return ''
-      if (trimmed.startsWith('### ')) return `<h3>${escapeHtml(trimmed.slice(4))}</h3>`
-      if (trimmed.startsWith('## ')) return `<h2>${escapeHtml(trimmed.slice(3))}</h2>`
-      if (trimmed.startsWith('# ')) return `<h2>${escapeHtml(trimmed.slice(2))}</h2>`
-      return `<p>${escapeHtml(trimmed).replace(/\n/g, '<br>')}</p>`
+      if (trimmed.startsWith('### ')) return `<h3>${inlineMarkdown(escapeHtml(trimmed.slice(4)))}</h3>`
+      if (trimmed.startsWith('## ')) return `<h2>${inlineMarkdown(escapeHtml(trimmed.slice(3)))}</h2>`
+      if (trimmed.startsWith('# ')) return `<h2>${inlineMarkdown(escapeHtml(trimmed.slice(2)))}</h2>`
+      return `<p>${inlineMarkdown(escapeHtml(trimmed)).replace(/\n/g, '<br>')}</p>`
     })
     .join('\n')
+  return applyHighlights(raw)
 })
 
 function escapeHtml(s) {
@@ -381,6 +399,58 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
 }
+
+// 行内 Markdown：**加粗**、*斜体*、`代码`
+function inlineMarkdown(html) {
+  return html
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+}
+
+// ── 自定义高亮 Tooltip（即时响应） ────────────────────
+let hlTooltipEl = null
+let lastMark = null
+
+function ensureTooltip() {
+  if (hlTooltipEl) return hlTooltipEl
+  hlTooltipEl = document.createElement('div')
+  hlTooltipEl.className = 'hl-tooltip'
+  hlTooltipEl.style.display = 'none'
+  document.body.appendChild(hlTooltipEl)
+  return hlTooltipEl
+}
+
+function showTip(mark) {
+  if (mark === lastMark) return
+  lastMark = mark
+  const tip = ensureTooltip()
+  if (!mark) { tip.style.display = 'none'; return }
+  const type = mark.dataset.hlType
+  const detail = mark.dataset.hlDetail
+  const isGold = mark.classList.contains('hl-gold')
+  tip.innerHTML = `<span class="hl-tip-badge ${isGold ? 'hl-tip-gold' : 'hl-tip-deai'}">${type}</span><span class="hl-tip-detail">${detail}</span>`
+  const rect = mark.getBoundingClientRect()
+  tip.style.left = `${rect.left + rect.width / 2}px`
+  tip.style.top = `${rect.top - 6}px`
+  tip.style.display = 'flex'
+}
+
+function onPreviewMouseMove(e) {
+  const mark = e.target.closest('mark[data-hl-type]')
+  showTip(mark || null)
+}
+
+function onPreviewMouseLeave() {
+  lastMark = null
+  if (hlTooltipEl) hlTooltipEl.style.display = 'none'
+}
+
+const previewRef = ref(null)
+
+onUnmounted(() => {
+  if (hlTooltipEl) { hlTooltipEl.remove(); hlTooltipEl = null }
+})
 
 const getScoreColor = (score) => {
   if (!score) return 'text-ink-3'
@@ -521,11 +591,20 @@ const agentFeedback = computed(() => {
 }
 
 .selected-title {
-  font-family: var(--sans);
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--ink);
+  font-size: 20px;
   line-height: 1.4;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.style-anchor-inline {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-3);
+  line-height: 1.6;
 }
 
 .content-result-split {
@@ -603,6 +682,56 @@ const agentFeedback = computed(() => {
   margin-bottom: 14px;
 }
 
+/* 高亮：金句（暖色） */
+.content-preview :deep(.hl-gold) {
+  background: rgba(218, 165, 32, 0.15);
+  color: inherit;
+  border-bottom: 2px solid var(--sand);
+  padding: 1px 2px;
+  border-radius: 2px;
+  cursor: default;
+}
+
+/* 高亮：去AI味改写（冷色） */
+.content-preview :deep(.hl-deai) {
+  background: rgba(107, 142, 35, 0.12);
+  color: inherit;
+  border-bottom: 2px solid var(--leaf, #6b8e23);
+  padding: 1px 2px;
+  border-radius: 2px;
+  cursor: default;
+}
+
+/* 图例 */
+.hl-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.hl-legend-item .hl-gold {
+  background: rgba(218, 165, 32, 0.15);
+  color: var(--ink);
+  border-bottom: 2px solid var(--sand);
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: default;
+}
+
+.hl-legend-item .hl-deai {
+  background: rgba(107, 142, 35, 0.12);
+  color: var(--ink);
+  border-bottom: 2px solid var(--leaf, #6b8e23);
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: default;
+}
+
 .gold-sentence-row {
   padding: 12px 14px;
   background: var(--ivory, var(--bone));
@@ -643,5 +772,57 @@ const agentFeedback = computed(() => {
   gap: 12px;
   padding: 0 24px;
   width: 100%;
+}
+</style>
+
+<style>
+/* 高亮 Tooltip（挂在 body，不能 scoped） */
+.hl-tooltip {
+  position: fixed;
+  z-index: 9999;
+  transform: translate(-50%, -100%);
+  background: var(--ink, #2c2c2c);
+  border-radius: 8px;
+  padding: 6px 12px;
+  pointer-events: none;
+  white-space: nowrap;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+}
+
+.hl-tooltip::after {
+  content: '';
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid var(--ink, #2c2c2c);
+}
+
+.hl-tip-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.hl-tip-gold {
+  background: rgba(218, 165, 32, 0.25);
+  color: #f0d060;
+}
+
+.hl-tip-deai {
+  background: rgba(107, 142, 35, 0.25);
+  color: #a0d468;
+}
+
+.hl-tip-detail {
+  font-size: 12px;
+  color: rgba(255,255,255,0.85);
+  font-weight: 500;
 }
 </style>

@@ -92,7 +92,17 @@
       "Bash(docker compose *)",
       "Bash(docker-compose ps *)",
       "Bash(scp /Users/yang2krown/Desktop/gzh/docker-compose.prod.yml root@1.13.92.57:/www/wwwroot/gzh/)",
-      "Bash(xargs ls -la)"
+      "Bash(xargs ls -la)",
+      "mcp__scheduled-tasks__list_scheduled_tasks",
+      "Bash(PYTHONPATH=/Users/yang2krown/工作/公众号智能体/gzh/backend .venv/bin/python -c ' *)",
+      "Bash(tar czf *)",
+      "Bash(scp /tmp/gzh-full.tar.gz root@1.13.92.57:/www/wwwroot/)",
+      "Read(//Users/yang2krown/Downloads/**)",
+      "Bash(unzip -l /Users/yang2krown/Downloads/post-to-xhs.zip)",
+      "Bash(rm -rf post-to-xhs)",
+      "Bash(unzip /Users/yang2krown/Downloads/post-to-xhs.zip)",
+      "Bash(node -e ' *)",
+      "Bash(ls \"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" 2>/dev/null && echo \"Chrome found\")"
     ]
   }
 }

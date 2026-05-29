@@ -56,7 +56,6 @@ class ConflictAgent(BaseAgent):
 - 先识别目标读者对该话题最普遍的假设
 - 然后否定该假设，或给出矛盾事实
 - "为什么"句式天然适合，但"问题出在"也有效
-- 每条标题 ≤ 20个汉字（含标点）
 
 输出格式：
 <assumption>读者的默认假设：……</assumption>
@@ -72,8 +71,7 @@ TITLE||标题内容||认知冲突"""
 规则：
 - 先识别目标读者对该话题最普遍的假设
 - 然后否定该假设，或给出矛盾事实
-- "为什么"句式天然适合，但"问题出在"也有效
-- 每条标题 ≤ 20个汉字（含标点）"""
+- "为什么"句式天然适合，但"问题出在"也有效"""
 
     def _parse_titles_robust(self, response: str) -> List[Dict[str, str]]:
         """解析标题"""
@@ -103,7 +101,7 @@ TITLE||标题内容||认知冲突"""
                     title_text = re.sub(r'^[\d\.\-\s]+', '', line).strip()
                     title_text = re.sub(r'[（(]\d+[字字符]+[）)]$', '', title_text).strip()
                     title_text = re.sub(r'\s*\|\s*.*$', '', title_text).strip()
-                    if title_text and len(title_text) <= 25:
+                    if title_text:
                         titles.append({"title": title_text, "dimension": "认知冲突"})
 
         return titles

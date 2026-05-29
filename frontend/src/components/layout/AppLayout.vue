@@ -43,6 +43,7 @@
               <el-icon><ChatDotSquare /></el-icon>
               <span>标题工具</span>
             </template>
+            <el-menu-item index="standalone-title">智能起标题</el-menu-item>
             <el-menu-item index="munger-generation">芒格标题生成</el-menu-item>
             <el-menu-item index="munger-scorer">芒格标题评分</el-menu-item>
           </el-sub-menu>
@@ -175,7 +176,7 @@ const activeMenu = computed(() => {
   if (path.startsWith('/creation')) return 'creation'
   if (path.startsWith('/custom-topic')) return 'custom-topic'
   if (path.startsWith('/settings')) return 'settings'
-  if (path.startsWith('/munger-generation') || path.startsWith('/munger-scorer')) return 'titles'
+  if (path.startsWith('/standalone-title') || path.startsWith('/munger-generation') || path.startsWith('/munger-scorer')) return 'titles'
   if (path.startsWith('/wechat-to-xhs')) return 'wechat-to-xhs'
   return 'topic-clusters'
 })
@@ -202,6 +203,7 @@ const handleMenuSelect = (index) => {
     'creation': '/creation',
     'custom-topic': '/custom-topic',
     'settings': '/settings',
+    'standalone-title': '/standalone-title',
     'munger-generation': '/munger-generation',
     'munger-scorer': '/munger-scorer',
     'wechat-to-xhs': '/wechat-to-xhs',

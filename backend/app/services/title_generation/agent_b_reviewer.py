@@ -72,7 +72,6 @@ VETO_CONDITIONS = [
     "涉及政治/监管敏感",
     "人身攻击具体个人/团队",
     "虚假承诺（包过/100%保证等）",
-    "字数 < 10 或 > 22",
 ]
 
 
@@ -180,8 +179,7 @@ class TitleReviewerAgent(BaseAgent):
         - 政治/监管敏感
         - 人身攻击
         - 虚假承诺（包过/100%保证等）
-        - 字数 < 10 或 > 22
-        
+
         Args:
             candidates: 候选列表
             
@@ -194,14 +192,6 @@ class TitleReviewerAgent(BaseAgent):
         for candidate in candidates:
             title = candidate.get("title", "")
             word_count = candidate.get("word_count", len(title))
-            
-            # 检查字数
-            if word_count < settings.MIN_TITLE_LENGTH or word_count > settings.MAX_TITLE_LENGTH:
-                eliminated.append({
-                    **candidate,
-                    "elimination_reason": f"字数不符合要求: {word_count}字（要求{settings.MIN_TITLE_LENGTH}-{settings.MAX_TITLE_LENGTH}字）",
-                })
-                continue
             
             # 检查一票否决词
             veto_reason = self._check_veto_words(title)
@@ -476,10 +466,10 @@ class TitleReviewerAgent(BaseAgent):
    - 1-3: 无具体元素
 
 4. 长度合规 (10%):
-   - 10: 14-20字
-   - 8: 10-13字
-   - 6: 21-22字
-   - 1: <10字或>22字
+   - 10: 标题长度适中，阅读流畅
+   - 7-8: 稍长或稍短，但不影响理解
+   - 4-6: 偏长或偏短，影响阅读体验
+   - 1-3: 过短缺乏信息量，或过长影响传播
 
 5. 套路成熟度 (15%):
    - 9-10: 命中高爆款模式，使用准确

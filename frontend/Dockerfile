@@ -20,24 +20,11 @@ EXPOSE 3000
 # 开发模式启动
 CMD ["npm", "run", "dev"]
 
-# 生产环境构建
-FROM node:18-alpine as build
-
-WORKDIR /app
-
-# 安装依赖
-COPY package.json ./
-RUN npm install
-
-# 构建应用
-COPY . .
-RUN npm run build
-
-# 生产环境
+# 生产环境：直接用本地预构建的 dist 产物，不在服务器上 build
 FROM nginx:alpine as production
 
-# 复制构建产物
-COPY --from=build /app/dist /usr/share/nginx/html
+# 复制本地已构建好的 dist
+COPY dist /usr/share/nginx/html
 
 # 复制nginx配置
 COPY nginx.conf /etc/nginx/nginx.conf

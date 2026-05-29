@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, wechat_to_xhs, generation_records
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug
 
 api_router = APIRouter()
 
@@ -88,6 +88,13 @@ api_router.include_router(
     tags=["芒格版标题"]
 )
 
+# 独立标题生成路由
+api_router.include_router(
+    standalone_title.router,
+    prefix="/standalone-title",
+    tags=["独立标题生成"]
+)
+
 # 公众号转小红书路由
 api_router.include_router(
     wechat_to_xhs.router,
@@ -100,4 +107,25 @@ api_router.include_router(
     generation_records.router,
     prefix="/generation-records",
     tags=["生成记录"]
+)
+
+# 图片代理路由
+api_router.include_router(
+    image_proxy.router,
+    prefix="/image-proxy",
+    tags=["图片代理"]
+)
+
+# 小红书发布路由
+api_router.include_router(
+    xhs_publish.router,
+    prefix="/xhs-publish",
+    tags=["小红书发布"]
+)
+
+# 小红书调试路由（临时）
+api_router.include_router(
+    xhs_debug.router,
+    prefix="/xhs-debug",
+    tags=["小红书调试"]
 )

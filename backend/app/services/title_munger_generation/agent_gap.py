@@ -50,7 +50,6 @@ class GapAgent(BaseAgent):
 要求：
 - 方向感充足（读者知道话题是什么）
 - 关键变量藏住（读者必须点进来才知道答案）
-- 每条标题 ≤ 20个汉字（含标点）
 - 不得使用"震惊""必看""颠覆"等情绪词
 
 输出格式（严格按以下格式，每行一条）：
@@ -65,7 +64,6 @@ TITLE||标题内容||信息缺口"""
 规则：
 - 方向感充足（读者知道话题是什么）
 - 关键变量藏住（读者必须点进来才知道答案）
-- 每条标题 ≤ 20个汉字（含标点）
 - 不得使用"震惊""必看""颠覆"等情绪词"""
 
     def _parse_titles_robust(self, response: str) -> List[Dict[str, str]]:
@@ -111,7 +109,7 @@ TITLE||标题内容||信息缺口"""
                 title_text = re.sub(r'[（(]\d+[字字符]+[）)]$', '', title_text).strip()
                 title_text = re.sub(r'\s*\|\s*.*$', '', title_text).strip()
 
-                if title_text and len(title_text) <= 25:
+                if title_text:
                     titles.append({"title": title_text, "dimension": "信息缺口"})
 
         return titles

@@ -91,7 +91,7 @@ def _build_user_prompt(
   "sentences": [
     {
       "sentence_id": 1,
-      "sentence_type": "开头钩子金句（反差金句）",
+      "sentence_type": "开头钩子金句",
       "location": "第1节末尾",
       "section_number": 1,
       "insert_method": "替换种子",
@@ -114,6 +114,7 @@ def _build_user_prompt(
     lines.append("1. 每个金句 immutable 字段固定为 true")
     lines.append("2. 如果原位置有金句种子，insert_method 填'替换种子'；如果是新增位置，填'新增'")
     lines.append("3. 金句数量 3-5 个")
+    lines.append("4. sentence_type 只填一个类型名称，不要加括号补充说明，例如填「开头钩子金句」而不是「开头钩子金句（反差金句）」")
 
     return "\n".join(lines)
 
