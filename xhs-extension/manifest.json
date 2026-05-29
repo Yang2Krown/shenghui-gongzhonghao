@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "公众号转小红书 · 发布助手",
+  "version": "0.1.0",
+  "description": "在你自己的浏览器里，用你已登录的小红书账号，把网页生成好的长文一键填充并排版。内部使用。",
+  "permissions": ["scripting", "tabs", "storage"],
+  "host_permissions": [
+    "https://creator.xiaohongshu.com/*",
+    "https://*.xhscdn.com/*",
+    "https://*.aliyuncs.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "http://192.168.0.246/*",
+        "http://1.13.92.57/*",
+        "https://gzh.midonghub.com/*"
+      ],
+      "js": ["bridge.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["publish-main.js"],
+      "matches": ["https://creator.xiaohongshu.com/*"]
+    }
+  ]
+}

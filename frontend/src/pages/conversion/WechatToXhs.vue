@@ -73,7 +73,7 @@
             <p v-if="block.type === 'text'" class="article-text">{{ block.content }}</p>
             <div v-else-if="block.type === 'image'" class="article-image-wrap">
               <img
-                :src="block.local_path || block.url"
+                :src="previewImgSrc(block)"
                 :alt="block.alt || '文章配图'"
                 class="article-image"
                 loading="lazy"
@@ -103,13 +103,26 @@
               <p class="text-sm text-ink-3 mt-1">AI 改写为小红书风格短文案</p>
             </div>
           </div>
-          <div class="action-card" @click="startPublishFlow">
+          <div class="action-card" @click="startPluginPublish">
             <div class="action-icon action-icon-primary">
               <el-icon :size="28"><Promotion /></el-icon>
             </div>
             <div>
-              <h4 class="text-base font-semibold text-ink">一键长文排版发布</h4>
-              <p class="text-sm text-ink-3 mt-1">自动填写小红书长文 + 排版模板</p>
+              <h4 class="text-base font-semibold text-ink">
+                插件发布
+                <span v-if="extReady" class="badge-clay" style="margin-left:6px;">插件已就绪</span>
+                <span v-else class="text-xs text-ink-4" style="margin-left:6px;">未检测到插件</span>
+              </h4>
+              <p class="text-sm text-ink-3 mt-1">用你自己浏览器里登录的小红书发布（推荐）</p>
+            </div>
+          </div>
+          <div class="action-card" @click="startPublishFlow">
+            <div class="action-icon">
+              <el-icon :size="28"><Promotion /></el-icon>
+            </div>
+            <div>
+              <h4 class="text-base font-semibold text-ink">本机 Chrome 发布</h4>
+              <p class="text-sm text-ink-3 mt-1">在运行后端的机器上弹出 Chrome 自动排版（原方式）</p>
             </div>
           </div>
         </div>
@@ -135,10 +148,16 @@
       </el-steps>
 
       <!-- Step 0: 填写中 -->
-      <div v-if="publishStep === 0" class="card p-6 mb-6 text-center py-12">
+      <div v-if="publishStep === 0 && publishStatus !== 'need_login'" class="card p-6 mb-6 text-center py-12">
         <el-icon class="is-loading" :size="32" style="color: var(--clay);"><Loading /></el-icon>
-        <p class="text-ink-3 mt-3">正在启动 Chrome 并填写长文内容...</p>
-        <p class="text-xs text-ink-4 mt-1">请勿关闭弹出的 Chrome 窗口</p>
+        <template v-if="publishVia === 'ext'">
+          <p class="text-ink-3 mt-3">{{ publishProgress || '正在通过插件填写长文…' }}</p>
+          <p class="text-xs text-ink-4 mt-1">请勿关闭新打开的小红书标签页</p>
+        </template>
+        <template v-else>
+          <p class="text-ink-3 mt-3">正在启动 Chrome 并填写长文内容...</p>
+          <p class="text-xs text-ink-4 mt-1">请勿关闭弹出的 Chrome 窗口</p>
+        </template>
       </div>
 
       <!-- 需要登录 -->
@@ -183,11 +202,15 @@
         </div>
         <div v-else>
           <h3 class="text-h4 font-sans text-ink mb-3">请在浏览器中预览确认</h3>
-          <p class="text-sm text-ink-2 mb-4">已在 Chrome 中打开发布页，请检查内容和排版效果。确认无误后点击发布。</p>
+          <p v-if="publishVia === 'ext'" class="text-sm text-ink-2 mb-4">
+            已在小红书标签页填好内容并排版。请<strong>切换到那个标签页</strong>检查无误后，
+            在小红书页面里点「发布」。发布完成后点下方按钮。
+          </p>
+          <p v-else class="text-sm text-ink-2 mb-4">已在 Chrome 中打开发布页，请检查内容和排版效果。确认无误后点击发布。</p>
           <div class="flex justify-center gap-4">
             <el-button @click="backToPreview">取消</el-button>
             <el-button type="primary" @click="doPublish" :loading="publishLoading">
-              确认发布
+              {{ publishVia === 'ext' ? '我已在小红书完成发布' : '确认发布' }}
             </el-button>
           </div>
         </div>
@@ -321,10 +344,44 @@ const publishLoading = ref(false)
 const templates = ref([])
 const selectedTemplate = ref('')
 
+// 插件发布相关
+const publishVia = ref('local') // 'local' | 'ext'
+const extReady = ref(false)     // 是否检测到发布插件
+const publishProgress = ref('') // 插件流程进度文案
+
+const postToExt = (type, payload) => {
+  window.postMessage({ __gzhXhs: true, dir: 'to-ext', type, payload }, '*')
+}
+
+// 监听插件(bridge)发来的消息
+const onExtMessage = (e) => {
+  const m = e.data
+  if (!m || m.__gzhXhs !== true || m.dir !== 'to-page') return
+  if (m.type === 'ready' || m.type === 'pong') { extReady.value = true; return } // 插件已安装就绪
+  if (publishVia.value !== 'ext') return // 只在插件发布流程里处理后续消息
+  if (m.type === 'progress') {
+    publishProgress.value = m.detail || m.step || ''
+  } else if (m.type === 'templates') {
+    templates.value = m.templates || []
+    publishStep.value = 1
+    publishLoading.value = false
+  } else if (m.type === 'prepared') {
+    publishStep.value = 2
+    publishLoading.value = false
+  } else if (m.type === 'error') {
+    error.value = m.error || '插件发布出错'
+    publishLoading.value = false
+  }
+}
+
 const isValidLink = computed(() => linkUrl.value && linkUrl.value.includes('weixin'))
 
 // 从历史记录恢复
 onMounted(async () => {
+  window.addEventListener('message', onExtMessage)
+  // 主动探测插件是否就绪（bridge 注入后也会主动推 ready）
+  postToExt('ping')
+
   const recordId = route.query.record_id
   if (recordId) {
     try {
@@ -338,6 +395,10 @@ onMounted(async () => {
       console.warn('恢复历史记录失败:', e)
     }
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('message', onExtMessage)
 })
 
 // ===== 粘贴内容转换 =====
@@ -417,8 +478,42 @@ const convertFromPreview = async () => {
   }
 }
 
-// ===== 长文发布流程 =====
+// ===== 插件发布流程 =====
+const startPluginPublish = () => {
+  if (!extReady.value) {
+    error.value = '未检测到发布插件。请先安装插件（见 xhs-extension/README）并刷新页面。'
+    return
+  }
+  publishVia.value = 'ext'
+  step.value = 'publish'
+  publishStep.value = 0
+  publishStatus.value = ''
+  publishLoading.value = true
+  publishProgress.value = '正在把内容发送给插件…'
+  error.value = ''
+  templates.value = []
+  selectedTemplate.value = ''
+
+  // 插件用公网图片 url（OSS），不用 local_path；插件后台会 fetch 下来再上传
+  const blocks = (previewData.value.blocks || []).map(b => ({
+    type: b.type,
+    content: b.content || undefined,
+    url: b.url || undefined,
+    alt: b.alt || undefined,
+  }))
+  let desc = previewData.value.text_content || ''
+  if (desc.length > 800) desc = desc.slice(0, 800)
+
+  postToExt('publish', {
+    title: previewData.value.title || '无标题',
+    description: desc,
+    blocks,
+  })
+}
+
+// ===== 长文发布流程（本机 Chrome / CDP） =====
 const startPublishFlow = async () => {
+  publishVia.value = 'local'
   step.value = 'publish'
   publishStep.value = 0
   publishStatus.value = ''
@@ -462,6 +557,16 @@ const retryPublish = () => {
 
 const confirmTemplate = async () => {
   if (!selectedTemplate.value) return
+
+  // 插件流程：把模板名发给插件，等待 'prepared' 消息
+  if (publishVia.value === 'ext') {
+    publishLoading.value = true
+    publishProgress.value = '应用模板中…'
+    error.value = ''
+    postToExt('selectTemplate', { name: selectedTemplate.value })
+    return
+  }
+
   publishLoading.value = true
   error.value = ''
   try {
@@ -483,6 +588,13 @@ const confirmTemplate = async () => {
 }
 
 const doPublish = async () => {
+  // 插件流程 v1 不自动点发布，用户已在小红书页面手动发布，这里只标记完成
+  if (publishVia.value === 'ext') {
+    publishStep.value = 3
+    ElMessage.success('已完成')
+    return
+  }
+
   publishLoading.value = true
   error.value = ''
   try {
@@ -506,6 +618,8 @@ const backToPreview = () => {
   step.value = 'preview'
   publishStep.value = 0
   publishStatus.value = ''
+  publishVia.value = 'local'
+  publishProgress.value = ''
   result.value = null
 }
 
@@ -519,8 +633,18 @@ const resetAll = () => {
   previewData.value = { title: '', author: '', blocks: [], tags: [], image_count: 0, text_content: '' }
   publishStep.value = 0
   publishStatus.value = ''
+  publishVia.value = 'local'
+  publishProgress.value = ''
   templates.value = []
   selectedTemplate.value = ''
+}
+
+// 预览图地址：优先用公网 url（OSS，生产/本地都能显示）；
+// 微信原图有防盗链不能直接加载，这种才退回本地代理路径 local_path
+const previewImgSrc = (block) => {
+  const url = block.url || ''
+  if (url && !/weixin|qq\.com/i.test(url)) return url
+  return block.local_path || url
 }
 
 const onImageError = (e) => {
