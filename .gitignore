@@ -32,6 +32,7 @@ backend/.env.local
 # Cookies / secrets
 secrets/
 backend/secrets/
+backend/uploads/wechat_images/
 *.cookie
 *.cookies.json
 x_cookie.json
