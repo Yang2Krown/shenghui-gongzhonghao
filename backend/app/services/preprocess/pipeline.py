@@ -45,14 +45,15 @@ class PreprocessPipeline:
         *,
         limit: int = DEFAULT_BATCH,
     ) -> Dict[str, Any]:
-        # 1. 拉待处理
+        # 1. 拉待处理（join source 拿 weight，用于低权重跳过）
         stmt = (
             select(RawInfo)
+            .options(selectinload(RawInfo.source))
             .where(RawInfo.state == RAW_STATE_PENDING)
             .order_by(RawInfo.created_at)
             .limit(limit)
         )
-        raws = (await db.execute(stmt)).scalars().all()
+        raws = (await db.execute(stmt)).scalars().unique().all()
         if not raws:
             logger.info("preprocess: 无待处理 RawInfo")
             return {"pending": 0, "embedded": 0, "clusters_touched": 0, "enriched": 0}
@@ -84,14 +85,29 @@ class PreprocessPipeline:
         if skipped_non_ai:
             logger.info(f"preprocess: 跳过 {skipped_non_ai} 条非 AI 内容")
 
-        # 3. embed
-        stats["embedded"] = await embed_raw_infos(db, ai_related)
+        # 2c. 来源权重过滤：低权重来源（weight <= 2）跳过 embedding，节省成本
+        #     仍保留这些 raw 的状态为 pending，后续可手动触发
+        EMBED_MIN_WEIGHT = 2
+        embeddable = []
+        skipped_low_weight = 0
+        for r in ai_related:
+            src_weight = r.source.weight if r.source else None
+            if src_weight is not None and src_weight <= EMBED_MIN_WEIGHT:
+                skipped_low_weight += 1
+                continue
+            embeddable.append(r)
+        if skipped_low_weight:
+            logger.info(f"preprocess: 跳过 {skipped_low_weight} 条低权重来源（weight<={EMBED_MIN_WEIGHT}）")
+
+        # 3. embed（只对通过权重过滤的 embeddable）
+        stats["embedded"] = await embed_raw_infos(db, embeddable)
+        stats["skipped_low_weight"] = skipped_low_weight
 
         # 3.5 Layer 3 语义过滤：用 ai_centroid 算与 AI 中心的 cosine 距离
         from app.services.preprocess.ai_centroid import get_ai_centroid, cosine_distance
         centroid = await get_ai_centroid()
         semantic_skipped = 0
-        for r in ai_related:
+        for r in embeddable:
             if r.embedding is None:
                 continue
             if cosine_distance(list(r.embedding), centroid) >= 0.55:
@@ -102,7 +118,7 @@ class PreprocessPipeline:
             logger.info(f"preprocess: 语义过滤跳过 {semantic_skipped} 条")
 
         # 4. 过滤掉 embed 失败的 + Layer 3 标 SKIPPED 的，进入聚类
-        clusterable = [r for r in ai_related if r.embedding is not None and r.state != RAW_STATE_SKIPPED]
+        clusterable = [r for r in embeddable if r.embedding is not None and r.state != RAW_STATE_SKIPPED]
         clusters = await cluster_raw_batch(db, clusterable)
         stats["clusters_touched"] = len(clusters)
 

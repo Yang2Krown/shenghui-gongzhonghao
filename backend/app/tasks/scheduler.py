@@ -1,28 +1,82 @@
 """
 任务调度模块
+
+全网采集按 source_type 拆分成独立任务，每个类型失败互不影响。
+AI HOT 保持独立链路，频率更高（每 2h 精选）。
 """
 from celery.schedules import crontab
 
 
 CELERY_BEAT_SCHEDULE = {
-    # 每日 6:00 全量抓取
-    "daily-fetch-all": {
-        "task": "scraper.fetch_all_sources",
+    # ── 全网采集：按 source_type 分批，错开 5 分钟 ──
+    # RSS 类（轻量、稳定，最早跑）
+    "fetch-rss": {
+        "task": "scraper.fetch_source_type",
         "schedule": crontab(hour=6, minute=0),
+        "kwargs": {"source_type": "rss"},
     },
-    # 06:30 预处理：raw_info → InfoCluster
+    "fetch-github": {
+        "task": "scraper.fetch_source_type",
+        "schedule": crontab(hour=6, minute=5),
+        "kwargs": {"source_type": "github"},
+    },
+    "fetch-hackernews": {
+        "task": "scraper.fetch_source_type",
+        "schedule": crontab(hour=6, minute=10),
+        "kwargs": {"source_type": "hackernews"},
+    },
+    "fetch-tophub": {
+        "task": "scraper.fetch_source_type",
+        "schedule": crontab(hour=6, minute=15),
+        "kwargs": {"source_type": "tophub"},
+    },
+    "fetch-v2ex": {
+        "task": "scraper.fetch_source_type",
+        "schedule": crontab(hour=6, minute=20),
+        "kwargs": {"source_type": "v2ex"},
+    },
+    "fetch-reddit": {
+        "task": "scraper.fetch_source_type",
+        "schedule": crontab(hour=6, minute=25),
+        "kwargs": {"source_type": "reddit"},
+    },
+    "fetch-xhs-daily": {
+        "task": "scraper.fetch_source_type",
+        "schedule": crontab(hour=6, minute=30),
+        "kwargs": {"source_type": "xhs_daily"},
+    },
+    "fetch-gzh-explosive": {
+        "task": "scraper.fetch_source_type",
+        "schedule": crontab(hour=6, minute=35),
+        "kwargs": {"source_type": "gzh_explosive"},
+    },
+    # 重量级（需要 Exa API / Playwright，放后面）
+    "fetch-exa-wechat": {
+        "task": "scraper.fetch_source_type",
+        "schedule": crontab(hour=6, minute=45),
+        "kwargs": {"source_type": "exa_wechat"},
+    },
+    "fetch-x-playwright": {
+        "task": "scraper.fetch_source_type",
+        "schedule": crontab(hour=6, minute=50),
+        "kwargs": {"source_type": "x_playwright"},
+    },
+
+    # ── 预处理 ──
+    # 07:00 预处理：raw_info → InfoCluster（给采集留 1 小时窗口）
     "morning-preprocess": {
         "task": "preprocess.run_batch",
-        "schedule": crontab(hour=6, minute=30),
-        "kwargs": {"limit": 2000},
+        "schedule": crontab(hour=7, minute=0),
+        "kwargs": {"limit": 500},
     },
-    # 07:30 兜底再跑一次预处理
+    # 08:00 兜底再跑一次预处理（小批次，防超时）
     "morning-preprocess-fallback": {
         "task": "preprocess.run_batch",
-        "schedule": crontab(hour=7, minute=30),
-        "kwargs": {"limit": 2000},
+        "schedule": crontab(hour=8, minute=0),
+        "kwargs": {"limit": 500},
     },
-    # ── AI HOT（独立于通用 RSS 链路）──
+
+    # ── AI HIGH 独立链路（频率更高，与全网采集解耦）──
     # 精选：每 2 小时
     "aihot-selected": {
         "task": "scraper.fetch_aihot",

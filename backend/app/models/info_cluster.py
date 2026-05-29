@@ -42,6 +42,7 @@ class InfoCluster(BaseModel):
     # 核心信息
     core_title = Column(String(500), nullable=False)                   # 原文标题（可能英文）
     core_title_zh = Column(String(500), nullable=True)                 # 中文翻译（英文 cluster 才会有）
+    latest_title = Column(String(500), nullable=True)                  # 最新一条 raw 的标题（合并后更新）
     summary = Column(Text, nullable=True)                              # 簇级摘要（多源合并后的整体描述）
     summary_zh = Column(Text, nullable=True)                           # 摘要中文翻译
     info_type = Column(String(30), nullable=True, index=True)          # 见 INFO_TYPE_*

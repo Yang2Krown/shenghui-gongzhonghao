@@ -43,7 +43,7 @@ def fetch_all_sources_task(
     source_types: Optional[List[str]] = None,
     platforms: Optional[List[str]] = None,
 ):
-    """全量抓取（按 source_type / platform 过滤）。"""
+    """全量抓取（按 source_type / platform 过滤）。手动触发时用。"""
     try:
         logger.info(f"orchestrator 启动：source_types={source_types} platforms={platforms}")
         result = asyncio.run(_run_orchestrator(source_types=source_types, platforms=platforms))
@@ -52,6 +52,19 @@ def fetch_all_sources_task(
     except Exception as e:
         logger.error(f"抓取任务失败: {e}")
         self.retry(exc=e, countdown=60, max_retries=3)
+
+
+@shared_task(bind=True, name="scraper.fetch_source_type")
+def fetch_source_type_task(self, source_type: str):
+    """按单个 source_type 抓取，定时任务调用。失败不影响其他类型。"""
+    try:
+        logger.info(f"[{source_type}] 抓取启动")
+        result = asyncio.run(_run_orchestrator(source_types=[source_type]))
+        logger.info(f"[{source_type}] 完成：new={result.get('items_new')} dup={result.get('items_duplicate')}")
+        return result
+    except Exception as e:
+        logger.error(f"[{source_type}] 抓取失败: {e}")
+        self.retry(exc=e, countdown=60, max_retries=2)
 
 
 @shared_task(bind=True, name="scraper.fetch_rss_only")

@@ -55,7 +55,7 @@ async def _do_refresh():
             log.info(f"手动抓取 aihot[all] 完成: {result}")
 
         async with AsyncSessionLocal() as db:
-            pp_result = await preprocess_pipeline.run_batch(db, limit=2000)
+            pp_result = await preprocess_pipeline.run_batch(db, limit=500)
             log.info(f"手动预处理完成: {pp_result}")
     except Exception as e:
         log.error(f"手动刷新失败: {e}", exc_info=True)
@@ -76,7 +76,7 @@ async def manual_refresh(
         from app.tasks.preprocess_tasks import run_batch_task
 
         fetch_aihot_task.delay(feed_key="all")
-        run_batch_task.apply_async(kwargs={"limit": 2000}, countdown=120)
+        run_batch_task.apply_async(kwargs={"limit": 500}, countdown=120)
 
         return {
             "code": 200,
@@ -146,7 +146,14 @@ async def get_topic_clusters(
                 or_(effective_dt.is_(None), effective_dt < now - timedelta(days=30))
             )
     if keyword:
-        query = query.where(InfoCluster.core_title.ilike(f"%{keyword}%"))
+        from sqlalchemy import or_
+        query = query.where(
+            or_(
+                InfoCluster.core_title.ilike(f"%{keyword}%"),
+                InfoCluster.latest_title.ilike(f"%{keyword}%"),
+                InfoCluster.core_title_zh.ilike(f"%{keyword}%"),
+            )
+        )
 
     # 排序：display_score = heat_score × info_type_weight × freshness_boost
     # freshness_boost: 越新的话题加权越高，实现"新鲜优先"
@@ -214,6 +221,7 @@ async def get_topic_clusters(
             "id": c.id,
             "core_title": c.core_title,
             "core_title_zh": c.core_title_zh,
+            "latest_title": c.latest_title,
             "summary": c.summary,
             "summary_zh": c.summary_zh,
             "info_type": c.info_type,
@@ -333,6 +341,7 @@ async def get_topic_cluster_detail(
             "id": cluster.id,
             "core_title": cluster.core_title,
             "core_title_zh": cluster.core_title_zh,
+            "latest_title": cluster.latest_title,
             "summary": cluster.summary,
             "summary_zh": cluster.summary_zh,
             "info_type": cluster.info_type,
@@ -340,7 +349,7 @@ async def get_topic_cluster_detail(
             "elements": cluster.elements,
             "source_urls": cluster.source_urls or [],
             "source_count": cluster.source_count or len(cluster.source_urls or []),
-            "raw_infos": raw_infos_list,                 # 新增：完整原文卡片列表
+            "raw_infos": raw_infos_list,
             "freshness": _compute_freshness(cluster.published_at, fallback_dt=cluster.created_at),
             "heat_score": cluster.heat_score,
             "low_fan_hit": cluster.low_fan_hit,

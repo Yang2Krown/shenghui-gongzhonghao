@@ -98,12 +98,12 @@
             <!-- 标题 -->
             <h3 class="font-serif" style="font-size: 22px; font-weight: 500; color: var(--ink); line-height: 1.45;
                                           display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
-              {{ cluster.core_title_zh || cluster.core_title }}
+              {{ cluster.core_title_zh || cluster.latest_title || cluster.core_title }}
             </h3>
-            <p v-if="cluster.core_title_zh && cluster.core_title_zh !== cluster.core_title"
+            <p v-if="cluster.core_title_zh && cluster.core_title_zh !== (cluster.latest_title || cluster.core_title)"
                class="mt-1.5" style="font-size: 12px; color: #9A968D; line-height: 1.5;
                                      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
-              {{ cluster.core_title }}
+              {{ cluster.latest_title || cluster.core_title }}
             </p>
 
             <!-- 摘要 -->

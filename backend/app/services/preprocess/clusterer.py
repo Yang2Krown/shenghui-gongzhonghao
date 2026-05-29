@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_SIM_THRESHOLD = 0.22
 
 # 只在最近 N 天的活跃簇里搜，避免无限制 KNN
-RECENT_CLUSTER_DAYS = 7
+RECENT_CLUSTER_DAYS = 3
 
 
 async def find_or_create_cluster(
@@ -54,6 +54,28 @@ async def find_or_create_cluster(
 
     if row and row.dist is not None and row.dist < threshold:
         cluster, dist = row
+        # 额外检查：published_at 相差超过 3 天的不合并（避免 Claude 4.5 和 4.8 混在一起）
+        if raw.published_at and cluster.published_at:
+            gap = abs((raw.published_at - cluster.published_at).days)
+            if gap > 3:
+                logger.debug(
+                    f"RawInfo {raw.id} 与 cluster {cluster.id} 时间差 {gap} 天，跳过合并"
+                )
+                cluster = InfoCluster(
+                    core_title=(raw.title or "")[:500],
+                    summary=raw.summary,
+                    source_count=1,
+                    source_urls=[raw.url] if raw.url else [],
+                    published_at=raw.published_at,
+                    centroid=raw.embedding,
+                    mined=False,
+                )
+                db.add(cluster)
+                await db.flush()
+                raw.info_cluster_id = cluster.id
+                raw.state = RAW_STATE_CLUSTERED
+                logger.debug(f"RawInfo {raw.id} → 新簇 {cluster.id}（时间差过大）")
+                return cluster
         await _attach_to_cluster(db, cluster, raw)
         logger.debug(f"RawInfo {raw.id} → cluster {cluster.id} (dist={dist:.3f})")
         return cluster
@@ -61,6 +83,7 @@ async def find_or_create_cluster(
     # 新建簇
     cluster = InfoCluster(
         core_title=(raw.title or "")[:500],
+        latest_title=(raw.title or "")[:500],
         summary=raw.summary,
         source_count=1,
         source_urls=[raw.url] if raw.url else [],
@@ -77,7 +100,7 @@ async def find_or_create_cluster(
 
 
 async def _attach_to_cluster(db: AsyncSession, cluster: InfoCluster, raw: RawInfo) -> None:
-    """把 raw 并入 cluster：更新 centroid / source_urls / source_count / published_at。"""
+    """把 raw 并入 cluster：更新 centroid / source_urls / source_count / published_at / latest_title。"""
     # 增量平均：new_centroid = (old * n + new) / (n+1)
     n = cluster.source_count or 1
     old = list(cluster.centroid) if cluster.centroid is not None else None
@@ -95,6 +118,10 @@ async def _attach_to_cluster(db: AsyncSession, cluster: InfoCluster, raw: RawInf
     # published_at 取最新
     if raw.published_at and (not cluster.published_at or raw.published_at > cluster.published_at):
         cluster.published_at = raw.published_at
+
+    # latest_title 始终更新为最新 raw 的标题
+    if raw.title:
+        cluster.latest_title = raw.title[:500]
 
     raw.info_cluster_id = cluster.id
     raw.state = RAW_STATE_CLUSTERED

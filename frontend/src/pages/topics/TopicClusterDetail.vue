@@ -19,11 +19,11 @@
         <div class="p-6">
           <!-- 标题：中文主显 + 英文原标题灰色小字 -->
           <h1 class="font-serif mb-1" style="font-size: 28px; font-weight: 500; color: var(--ink); line-height: 1.3;">
-            {{ cluster.core_title_zh || cluster.core_title }}
+            {{ cluster.core_title_zh || cluster.latest_title || cluster.core_title }}
           </h1>
-          <p v-if="cluster.core_title_zh && cluster.core_title_zh !== cluster.core_title"
+          <p v-if="cluster.core_title_zh && cluster.core_title_zh !== (cluster.latest_title || cluster.core_title)"
              class="mb-3" style="font-size: 13px; color: #9A968D; line-height: 1.5;">
-            {{ cluster.core_title }}
+            {{ cluster.latest_title || cluster.core_title }}
           </p>
           <div v-else class="mb-3"></div>
 
