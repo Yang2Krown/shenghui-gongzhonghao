@@ -53,6 +53,7 @@ class CandidateFromA(BaseModel):
     """Agent A 衍生的单个候选选题。对齐设计文档 2.5 节。"""
     candidate_id: str = Field(description="递增编号，如 T-001")
     title: str = Field(min_length=10, max_length=40, description="草标题，建议 14-22 字，允许放宽到 40 字")
+    summary: str = Field(description="选题简介，1-2 句话描述这个选题要写什么、给谁看、为什么值得写")
     direction: str = Field(description="6 大内容方向之一")
     routine: str = Field(description="套路名，如 1.1.1 深度解读型")
     dimension_combo: List[str] = Field(default_factory=list, description='维度组合，如 ["态度=吹爆", "结构=列表"]')
@@ -95,6 +96,7 @@ class CandidateScored(BaseModel):
     """Agent B 评分后的候选选题。对齐设计文档 3.4 节。"""
     candidate_id: str
     title: str
+    summary: Optional[str] = ""
     direction: str
     routine: str
     dimension_combo: List[str] = Field(default_factory=list)

@@ -84,6 +84,7 @@ def mine_cluster(self, cluster_id: int) -> dict:
             candidate = TopicCandidate(
                 info_cluster_id=cluster_id,
                 title=scored.title,
+                summary=scored.summary,
                 direction=scored.direction,
                 routine=scored.routine,
                 dimension_combo=scored.dimension_combo,

@@ -363,6 +363,7 @@ async def get_topic_cluster_detail(
         candidate_list.append({
             "id": c.id,
             "title": c.title,
+            "summary": c.summary,
             "direction": c.direction,
             "routine": c.routine,
             "dimension_combo": c.dimension_combo,

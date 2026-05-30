@@ -225,6 +225,7 @@ async def _mine_cluster_inner(
         tc = TopicCandidate(
             info_cluster_id=cluster.id,
             title=scored.title,
+            summary=scored.summary,
             direction=scored.direction,
             routine=scored.routine,
             dimension_combo=scored.dimension_combo,
@@ -537,6 +538,7 @@ def _candidate_to_dict(c: TopicCandidate) -> dict:
         "id": c.id,
         "info_cluster_id": c.info_cluster_id,
         "title": c.title,
+        "summary": c.summary,
         "direction": c.direction,
         "routine": c.routine,
         "dimension_combo": c.dimension_combo,

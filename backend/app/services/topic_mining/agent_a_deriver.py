@@ -69,6 +69,7 @@ def _build_user_prompt(info: InfoClusterInput) -> str:
     {{
       "candidate_id": "T-001",
       "title": "14-22字标题",
+      "summary": "选题简介：1-2句话描述这个选题要写什么内容、目标读者是谁、为什么值得写。不要只是重复标题，要给出选题的具体内容方向。",
       "direction": "方向",
       "routine": "X.X.X 套路名",
       "dimension_combo": ["维度=值"],
@@ -154,7 +155,7 @@ async def derive_candidates(
         if attempt > 1:
             extra_hint = (
                 "\n\n【重要】上一次输出格式不符合要求。"
-                "请严格输出 JSON，必须包含 candidates 数组，每个元素含 candidate_id、title、"
+                "请严格输出 JSON，必须包含 candidates 数组，每个元素含 candidate_id、title、summary、"
                 "direction、routine、dimension_combo、value_promise、angle_note、"
                 "persona_reviews、persona_divergence、persona_divergence_flag 字段。"
                 "不要输出任何 markdown 标记或解释文字。"

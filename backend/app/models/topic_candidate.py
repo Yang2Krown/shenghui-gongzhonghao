@@ -31,6 +31,7 @@ class TopicCandidate(BaseModel):
 
     # Agent A：衍生信息
     title = Column(String(500), nullable=False)                        # 草标题 14-22 字
+    summary = Column(Text, nullable=True)                              # 选题简介，1-2 句话描述选题核心内容
     direction = Column(String(50), nullable=True, index=True)          # 6 大内容方向之一
     routine = Column(String(200), nullable=True)                       # 套路（如 "1.1.1 深度解读型"）
     dimension_combo = Column(JSONField, default=list)                       # 8 维度组合（["态度=吹爆", "结构=列表"]）
