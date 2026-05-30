@@ -46,6 +46,8 @@ if [ "$ROLE" = "web" ] || [ "$ROLE" = "init" ]; then
     echo "[entrypoint] 跑 seeds（幂等）..."
     python3 -m app.db.seeds || echo "[entrypoint] seeds 失败，跳过（不阻塞启动）"
     python3 -m app.db.seeds.seed_tophub || echo "[entrypoint] seed_tophub 失败，跳过"
+    # 必须在基础 seed 之后：新增直连源 + 禁用被墙源（否则 table3 seed 会把被墙源重新启用）
+    python3 -m app.db.seeds.seed_source_changes_2026 || echo "[entrypoint] seed_source_changes 失败，跳过"
 fi
 
 # init 角色：跑完就退出

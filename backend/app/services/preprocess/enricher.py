@@ -98,7 +98,8 @@ async def enrich_cluster(
                 ChatMessage(role="user", content=user_prompt),
             ],
             temperature=0.2,
-            max_tokens=800,
+            # 不显式设 max_tokens，走 client 默认（4096）。
+            # 之前写死 800 太小，推理模型还没输出 JSON 就被截断。
             json_mode=True,
         )
     except Exception as e:

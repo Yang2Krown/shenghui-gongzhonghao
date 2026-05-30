@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from app.core.timezone import utcnow
 from typing import Any, Dict, List, Optional
 
-from app.models.info_cluster import FRESHNESS_24H, FRESHNESS_7D, FRESHNESS_30D, FRESHNESS_EXPIRED
+from app.models.info_cluster import FRESHNESS_TODAY, FRESHNESS_YESTERDAY, FRESHNESS_EARLIER
 
 
 # 内容保鲜期：超过此天数的话题直接过滤掉（防止 2023 老古董出现）
@@ -29,41 +29,41 @@ def is_recent(published_at: Optional[datetime], *, max_days: int = MAX_CONTENT_A
 
 def compute_freshness(published_at: Optional[datetime], *, now: Optional[datetime] = None,
                       fallback_dt: Optional[datetime] = None) -> str:
-    """根据发布时间打鲜度档位。
+    """根据发布日期打鲜度档位（按北京时间自然日划分）。
 
+    今日 / 昨日 / 两天前（前天及更早）。
     当 published_at 为空时，使用 fallback_dt（通常是 cluster.created_at）作为替代，
-    避免很多不返回发布时间的数据源（TopHub 等）被一刀切标为 expired。
+    避免很多不返回发布时间的数据源（TopHub 等）被一刀切标为最旧。
     """
     dt = published_at or fallback_dt
     if not dt:
-        return FRESHNESS_EXPIRED
+        return FRESHNESS_EARLIER
     now = now or utcnow()
-    delta = now - dt
-    if delta < timedelta(hours=24):
-        return FRESHNESS_24H
-    if delta < timedelta(days=7):
-        return FRESHNESS_7D
-    if delta < timedelta(days=30):
-        return FRESHNESS_30D
-    return FRESHNESS_EXPIRED
+    today = now.date()
+    d = dt.date()
+    if d >= today:
+        return FRESHNESS_TODAY
+    if d == today - timedelta(days=1):
+        return FRESHNESS_YESTERDAY
+    return FRESHNESS_EARLIER
 
 
 def compute_heat_score(
     *,
-    source_weights: List[int],
     engagements: List[Dict[str, Any]],
     source_count: int,
 ) -> float:
-    """簇级热度分（0-10）。综合：来源数 + 来源权重 + 互动数据。
+    """簇级热度分（0-10）。综合：统一基线 + 互动数据 + 多源加成。
 
+    设计原则：所有来源一律平等，不再按来源渠道权重区分，给统一基线分。
     简单经验公式，后期可学习调参：
-      heat = clamp(0.4 * (源数权重) + 0.3 * (互动归一化) + 0.3 * (源数加成), 0, 10)
+      heat = clamp(0.4 * (统一基线) + 0.3 * (互动归一化) + 0.3 * (多源加成), 0, 10)
     """
-    if not source_weights and not engagements and source_count <= 0:
+    if not engagements and source_count <= 0:
         return 0.0
 
-    # 1) 来源权重均值 → 转 0-10（表 3 RSS 权重在 1-10）
-    weight_part = sum(source_weights) / len(source_weights) if source_weights else 5.0
+    # 1) 统一基线：所有来源平等，不再因来源不同而加减分
+    weight_part = 5.0
 
     # 2) 互动信号归一化（HN score 100+ = 满分；点赞 1000+ = 满分；按 log10）
     import math
@@ -93,8 +93,12 @@ def compute_low_fan_hit(engagements: List[Dict[str, Any]]) -> bool:
     """
     if not engagements:
         return False
-    # 简化：任一条目互动总数（score + comments）> 200 视为"可能低粉爆款"
     for e in engagements:
+        # 优先采信采集源已打好的低粉标记（如 gzh_explosive 的"低粉高阅读"分类）。
+        # 低粉爆款本就是粉丝少、点赞评论低，不能只靠互动阈值判断，否则永远不会命中。
+        if e.get("low_fan"):
+            return True
+        # 兜底：任一条目互动总数（score + comments + like）> 200 也视为可能低粉爆款
         total = (e.get("score", 0) or 0) + (e.get("comments", 0) or 0) + (e.get("like", 0) or 0)
         if total > 200:
             return True

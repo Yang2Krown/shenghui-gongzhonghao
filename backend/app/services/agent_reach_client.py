@@ -112,11 +112,37 @@ class AgentReachClient:
         return "\n\n".join(texts)
 
     async def fetch_rss(self, feed_url: str, limit: int = 30) -> List[Dict[str, Any]]:
-        """解析 RSS/Atom feed，返回标准化条目列表。"""
-        def _parse():
-            return feedparser.parse(feed_url)
+        """解析 RSS/Atom feed，返回标准化条目列表。
 
-        feed = await asyncio.to_thread(_parse)
+        先用 httpx 带超时下载内容，再交给 feedparser 解析。
+        关键：feedparser.parse(url) 自带的 urllib 无超时，被墙/卡死的源会无限挂起，
+        把整批采集拖到 Celery 超时被杀、commit 丢失。必须用带超时的 httpx 拉取。
+        """
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36"
+            )
+        }
+        client_kwargs: Dict[str, Any] = {
+            "timeout": self.request_timeout,
+            "follow_redirects": True,
+            "headers": headers,
+        }
+        proxy = self._get_proxy()
+        if proxy:  # 国内无代理时不传该参数；httpx <0.26 用 proxies=，>=0.26 用 proxy=
+            _ver = tuple(int(x) for x in httpx.__version__.split(".")[:2])
+            client_kwargs["proxy" if _ver >= (0, 26) else "proxies"] = proxy
+        try:
+            async with httpx.AsyncClient(**client_kwargs) as client:
+                resp = await client.get(feed_url)
+                resp.raise_for_status()
+                content = resp.content
+        except Exception as e:
+            logger.warning(f"RSS 下载失败: {feed_url} {type(e).__name__}: {e}")
+            return []
+
+        feed = await asyncio.to_thread(feedparser.parse, content)
         if feed.bozo and not feed.entries:
             logger.warning(f"RSS 解析失败: {feed_url} bozo={feed.bozo_exception}")
             return []

@@ -368,7 +368,7 @@ const loadCluster = async () => {
 }
 
 const formatFreshness = (val) => {
-  const map = { '24h': '24h 内', '7d': '7 天内', '30d': '30 天内', 'expired': '大于 30 天' }
+  const map = { 'today': '今日', 'yesterday': '昨日', 'earlier': '两天前' }
   return map[val] || val
 }
 

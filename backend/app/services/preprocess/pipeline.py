@@ -162,18 +162,12 @@ class PreprocessPipeline:
                 cluster.published_at, fallback_dt=cluster.created_at
             )
 
-            # heat_score
-            source_weights = [r.source.weight for r in raws if r.source]
+            # heat_score（所有来源平等，不按来源渠道/类型加分）
             engagements = [r.engagement or {} for r in raws]
             cluster.heat_score = compute_heat_score(
-                source_weights=source_weights,
                 engagements=engagements,
                 source_count=cluster.source_count or len(raws),
             )
-
-            # aihot 来源加权：精编过的内容质量更高，heat_score 上浮 1.5 分
-            if any(r.source and r.source.source_type == "aihot" for r in raws):
-                cluster.heat_score = round(min(10.0, cluster.heat_score + 1.5), 2)
 
             # 低粉爆款
             cluster.low_fan_hit = compute_low_fan_hit(engagements)

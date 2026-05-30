@@ -33,15 +33,16 @@ def run_batch_task(self, limit: int = 100):
 
 async def _rescore():
     """重新计算所有活跃 cluster 的 heat_score（让排序反映最新状态）。"""
-    from datetime import datetime, timedelta
+    from datetime import timedelta
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
     from app.models.info_cluster import InfoCluster
     from app.models.raw_info import RawInfo
-    from app.services.preprocess.rules import compute_heat_score, compute_freshness
+    from app.services.preprocess.rules import compute_heat_score, compute_freshness, compute_low_fan_hit
+    from app.core.timezone import utcnow
 
     async with AsyncSessionLocal() as db:
-        cutoff = datetime.utcnow() - timedelta(days=30)
+        cutoff = utcnow() - timedelta(days=30)
         clusters = (await db.execute(
             select(InfoCluster)
             .where(InfoCluster.is_ai_relevant.is_(True))
@@ -58,19 +59,16 @@ async def _rescore():
             if not raws:
                 continue
 
-            source_weights = [r.source.weight for r in raws if r.source]
             engagements = [r.engagement or {} for r in raws]
             old_score = cluster.heat_score
             cluster.heat_score = compute_heat_score(
-                source_weights=source_weights,
                 engagements=engagements,
                 source_count=cluster.source_count or len(raws),
             )
-            # aihot 加权
-            if any(r.source and r.source.source_type == "aihot" for r in raws):
-                cluster.heat_score = round(min(10.0, cluster.heat_score + 1.5), 2)
             # 更新 freshness
             cluster.freshness = compute_freshness(cluster.published_at, fallback_dt=cluster.created_at)
+            # 回填低粉爆款标记（采信采集源的显式 low_fan 标记），让存量聚类也能亮角标
+            cluster.low_fan_hit = compute_low_fan_hit(engagements)
             if cluster.heat_score != old_score:
                 updated += 1
 

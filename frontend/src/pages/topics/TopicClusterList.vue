@@ -93,8 +93,6 @@
           @click="goToDetail(cluster.id)"
         >
           <div class="p-5" style="position: relative;">
-            <!-- NEW 标签 -->
-            <span v-if="isNew(cluster)" class="tag-new">NEW</span>
             <!-- 标题 -->
             <h3 class="font-serif" style="font-size: 22px; font-weight: 500; color: var(--ink); line-height: 1.45;
                                           display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
@@ -261,10 +259,9 @@ const directionOptions = [
 // 时效 chips
 const freshnessOptions = [
   { value: '', label: '全部' },
-  { value: '24h', label: '24h 内' },
-  { value: '7d', label: '7 天内' },
-  { value: '30d', label: '30 天内' },
-  { value: 'expired', label: '大于 30 天' },
+  { value: 'today', label: '今日' },
+  { value: 'yesterday', label: '昨日' },
+  { value: 'earlier', label: '两天前' },
 ]
 
 // 挖掘状态 chips
@@ -357,9 +354,13 @@ const saveScroll = () => {
   try { sessionStorage.setItem('topic-list-scroll', String(window.scrollY)) } catch {}
 }
 
+// 记录"上次真正加载用的 query"，用来区分"筛选变化"(要重载) 和"从详情页返回"(不重载)
+let lastLoadedQueryStr = JSON.stringify(route.query)
+
 onMounted(() => {
   nextTick(_updateCols)
   restoreFromQuery()
+  lastLoadedQueryStr = JSON.stringify(route.query)
   loadClusters(true)
 })
 
@@ -367,15 +368,30 @@ onBeforeRouteLeave(() => {
   saveScroll()
 })
 
-// 浏览器后退/前进时，URL query 变化要重新载入（但只在当前真正激活时响应）
-watch(() => route.query, (newQ, oldQ) => {
+// keep-alive：离开（进详情）时保存滚动并停掉 query 监听；
+// 返回时恢复滚动 —— 不重载，所以"加载更多"的内容和原位置都还在，也不会闪回顶部
+onDeactivated(() => {
+  isActive.value = false
+  saveScroll()
+})
+onActivated(() => {
+  isActive.value = true
+  const saved = parseInt(sessionStorage.getItem('topic-list-scroll') || '0', 10)
+  if (saved > 0) {
+    nextTick(() => window.scrollTo({ top: saved, behavior: 'instant' }))
+  }
+})
+
+// 只有"筛选/排序真正变化"才重载；从详情返回时 query 和上次加载的一样 → 不重载
+watch(() => route.query, (newQ) => {
   if (!isActive.value) return
   if (route.name !== 'TopicClusters' && route.name !== 'Home') return
-  const same = JSON.stringify(newQ) === JSON.stringify(oldQ)
-  if (same) return
+  const s = JSON.stringify(newQ)
+  if (s === lastLoadedQueryStr) return
+  lastLoadedQueryStr = s
   restoreFromQuery()
   clusters.value = []
-  loadClusters(true)
+  loadClusters()
 })
 
 const loadClusters = async (restoreScroll = false) => {
@@ -447,34 +463,12 @@ const goToDetail = (id) => {
 }
 
 const formatFreshness = (val) => {
-  const map = { '24h': '24h 内', '7d': '7 天内', '30d': '30 天内', 'expired': '大于 30 天' }
+  const map = { 'today': '今日', 'yesterday': '昨日', 'earlier': '两天前' }
   return map[val] || val
-}
-
-const isNew = (cluster) => {
-  if (!cluster.created_at) return false
-  const created = new Date(cluster.created_at)
-  const now = new Date()
-  return (now - created) < 60 * 60 * 1000  // 1 小时内
 }
 </script>
 
 <style scoped>
-/* NEW 标签 */
-.tag-new {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  background: #E8453C;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
-  letter-spacing: 0.5px;
-  line-height: 1.4;
-}
-
 /* 滚动加载状态条 */
 .load-more {
   display: flex;
