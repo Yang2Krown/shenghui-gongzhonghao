@@ -19,6 +19,7 @@ from app.models.raw_info import RawInfo
 from app.models.source_registry import SourceRegistry
 from app.models.topic_candidate import TopicCandidate
 from datetime import datetime, timedelta
+from app.core.timezone import utcnow
 from app.services.preprocess.rules import MAX_CONTENT_AGE_DAYS, compute_freshness as _compute_freshness
 from app.models.info_cluster import INFO_TYPE_WEIGHT
 
@@ -118,7 +119,7 @@ async def get_topic_clusters(
     # 构建基础查询：
     # - 默认过滤掉超过 90 天的老话题（保留 published_at IS NULL 的）
     # - 默认只取 is_ai_relevant=True（预处理时打的标）—— 避免每次请求都把全表拉到内存过滤
-    cutoff = datetime.utcnow() - timedelta(days=MAX_CONTENT_AGE_DAYS)
+    cutoff = utcnow() - timedelta(days=MAX_CONTENT_AGE_DAYS)
     from sqlalchemy import or_
     query = select(InfoCluster).where(
         InfoCluster.is_ai_relevant.is_(True),
@@ -132,7 +133,7 @@ async def get_topic_clusters(
         query = query.where(InfoCluster.mined == mined)
     # freshness 实时过滤：按时间范围筛选，而非静态字段
     if freshness:
-        now = datetime.utcnow()
+        now = utcnow()
         # 用 published_at，缺失时用 created_at 兜底
         effective_dt = func.coalesce(InfoCluster.published_at, InfoCluster.created_at)
         if freshness == "24h":

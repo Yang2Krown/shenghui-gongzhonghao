@@ -6,6 +6,7 @@
 import asyncio
 import logging
 from datetime import datetime
+from app.core.timezone import utcnow
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from sqlalchemy import select
@@ -109,7 +110,7 @@ class ScrapingOrchestrator:
                 stats["items_fetched"] += len(items)
                 stats["items_new"] += new_count
                 stats["items_duplicate"] += dup_count
-                src.last_fetched_at = datetime.utcnow().isoformat()
+                src.last_fetched_at = utcnow().isoformat()
             stats["per_source"][src.platform] = entry
 
         await db.commit()
@@ -155,7 +156,7 @@ class ScrapingOrchestrator:
                 summary=item.summary,
                 content=item.content,
                 published_at=item.published_at,
-                scraped_at=datetime.utcnow(),
+                scraped_at=utcnow(),
                 engagement=item.engagement or {},
                 extras=item.extras or {},
                 state=RAW_STATE_PENDING,

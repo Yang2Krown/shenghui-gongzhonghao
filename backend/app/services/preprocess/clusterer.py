@@ -9,6 +9,7 @@
 
 import logging
 from datetime import datetime, timedelta
+from app.core.timezone import utcnow
 from typing import List, Optional
 
 from sqlalchemy import select, func
@@ -39,7 +40,7 @@ async def find_or_create_cluster(
 
     # pgvector 的 cosine distance 操作：column.cosine_distance(vec)
     distance = InfoCluster.centroid.cosine_distance(raw.embedding)
-    recent_cutoff = datetime.utcnow() - timedelta(days=RECENT_CLUSTER_DAYS)
+    recent_cutoff = utcnow() - timedelta(days=RECENT_CLUSTER_DAYS)
 
     stmt = (
         select(InfoCluster, distance.label("dist"))

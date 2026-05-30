@@ -4,6 +4,7 @@
 """
 
 from datetime import datetime, timedelta
+from app.core.timezone import utcnow
 from typing import Any, Dict, List, Optional
 
 from app.models.info_cluster import FRESHNESS_24H, FRESHNESS_7D, FRESHNESS_30D, FRESHNESS_EXPIRED
@@ -22,7 +23,7 @@ def is_recent(published_at: Optional[datetime], *, max_days: int = MAX_CONTENT_A
     """
     if not published_at:
         return True
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     return (now - published_at) <= timedelta(days=max_days)
 
 
@@ -36,7 +37,7 @@ def compute_freshness(published_at: Optional[datetime], *, now: Optional[datetim
     dt = published_at or fallback_dt
     if not dt:
         return FRESHNESS_EXPIRED
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     delta = now - dt
     if delta < timedelta(hours=24):
         return FRESHNESS_24H

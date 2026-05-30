@@ -11,6 +11,7 @@ import hashlib
 import logging
 import re
 from datetime import datetime
+from app.core.timezone import utcnow
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional
 
@@ -153,7 +154,7 @@ async def fetch_aihot(
             published_at=_parse_dt(
                 getattr(entry, "published", None) or getattr(entry, "updated", None)
             ),
-            scraped_at=datetime.utcnow(),
+            scraped_at=utcnow(),
             engagement={},
             extras={"feed_platform": feed_conf["platform"], "feed_key": feed_key},
             state=RAW_STATE_PENDING,
@@ -162,7 +163,7 @@ async def fetch_aihot(
         new_count += 1
 
     await db.flush()
-    source.last_fetched_at = datetime.utcnow().isoformat()
+    source.last_fetched_at = utcnow().isoformat()
     await db.commit()
 
     logger.info(f"AI HOT [{feed_key}] 完成: new={new_count} dup={dup_count}")

@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
+from app.core.timezone import utcnow
 from typing import Dict
 
 from sqlalchemy import select
@@ -20,7 +21,7 @@ async def cleanup_by_age(db: AsyncSession, max_days: int = MAX_CONTENT_AGE_DAYS)
 
     保留 published_at IS NULL 的（不知道时间但 scraped_at 是近期的，可能是新内容）。
     """
-    cutoff = datetime.utcnow() - timedelta(days=max_days)
+    cutoff = utcnow() - timedelta(days=max_days)
 
     # 标记 raw_info
     raws = (await db.execute(

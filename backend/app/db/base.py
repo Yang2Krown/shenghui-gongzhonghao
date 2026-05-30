@@ -3,6 +3,7 @@ from sqlalchemy import Column, Integer, DateTime, JSON, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime
+from app.core.timezone import utcnow
 
 
 # 统一 JSON 字段类型：Postgres 自动用 JSONB（可索引），SQLite/其它降级到通用 JSON。
@@ -32,4 +33,4 @@ class BaseModel(Base):
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
-        self.updated_at = datetime.utcnow()
+        self.updated_at = utcnow()
