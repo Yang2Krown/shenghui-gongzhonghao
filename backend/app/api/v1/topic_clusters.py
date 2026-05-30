@@ -21,7 +21,6 @@ from app.models.topic_candidate import TopicCandidate
 from datetime import datetime, timedelta
 from app.core.timezone import utcnow
 from app.services.preprocess.rules import MAX_CONTENT_AGE_DAYS, compute_freshness as _compute_freshness
-from app.models.info_cluster import INFO_TYPE_WEIGHT
 
 router = APIRouter()
 
@@ -122,14 +121,18 @@ async def get_topic_clusters(
     balanced=True 时：每种 info_type 至少保留 min_per_type 条（按 display_score），
     剩余槽位从全局高分补。保证类型多样性，避免资讯型刷屏。
     """
-    from sqlalchemy import or_, case, extract
+    from sqlalchemy import or_, case
 
     # 参数类型兜底（FastAPI Query 对象需取 .default 或显式转换）
     sort_by = str(sort_by) if sort_by else "display_score"
     sort_order = str(sort_order) if sort_order else "desc"
     mined = mined if isinstance(mined, bool) else None
 
-    cutoff = utcnow() - timedelta(days=MAX_CONTENT_AGE_DAYS)
+    _now = utcnow()
+    cutoff = _now - timedelta(days=MAX_CONTENT_AGE_DAYS)
+    # 时效自然日边界（北京时间）：今日 / 昨日 / 两天前
+    start_today = _now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_yesterday = start_today - timedelta(days=1)
     base_filter = [
         InfoCluster.is_ai_relevant.is_(True),
         or_(InfoCluster.published_at.is_(None), InfoCluster.published_at >= cutoff),
@@ -141,16 +144,14 @@ async def get_topic_clusters(
     if mined is not None:
         base_filter.append(InfoCluster.mined == mined)
     if freshness:
-        now = utcnow()
         effective_dt = func.coalesce(InfoCluster.published_at, InfoCluster.created_at)
-        if freshness == "24h":
-            base_filter.append(effective_dt >= now - timedelta(hours=24))
-        elif freshness == "7d":
-            base_filter.append(effective_dt >= now - timedelta(days=7))
-        elif freshness == "30d":
-            base_filter.append(effective_dt >= now - timedelta(days=30))
-        elif freshness == "expired":
-            base_filter.append(or_(effective_dt.is_(None), effective_dt < now - timedelta(days=30)))
+        if freshness == "today":
+            base_filter.append(effective_dt >= start_today)
+        elif freshness == "yesterday":
+            base_filter.append(effective_dt >= start_yesterday)
+            base_filter.append(effective_dt < start_today)
+        elif freshness == "earlier":
+            base_filter.append(or_(effective_dt.is_(None), effective_dt < start_yesterday))
     if keyword:
         base_filter.append(
             or_(
@@ -161,18 +162,12 @@ async def get_topic_clusters(
         )
 
     # display_score 表达式（与 SQL CASE 保持一致）
-    weight_case = case(
-        {k: v for k, v in INFO_TYPE_WEIGHT.items()},
-        value=InfoCluster.info_type,
-        else_=0.7,
-    )
+    # 所有类型平等：不再按 info_type 加权
     effective_ts = func.coalesce(InfoCluster.published_at, InfoCluster.created_at)
-    age_hours = extract("epoch", func.now() - effective_ts) / 3600.0
     freshness_boost = case(
-        (age_hours < 24, 2.0),
-        (age_hours < 24 * 7, 1.2),
-        (age_hours < 24 * 30, 0.8),
-        else_=0.4,
+        (effective_ts >= start_today, 2.0),
+        (effective_ts >= start_yesterday, 1.2),
+        else_=0.6,
     )
     # 多源加成：被多篇报道提及的话题加分
     # 1篇=1.0, 2篇=1.15, 3篇=1.25, 5篇=1.4, 10篇=1.6, 20篇=1.8
@@ -185,7 +180,7 @@ async def get_topic_clusters(
         (source_count_val >= 2, 1.15),
         else_=1.0,
     )
-    display_score_expr = (InfoCluster.heat_score * weight_case * freshness_boost * source_multiplier).label("display_score")
+    display_score_expr = (InfoCluster.heat_score * freshness_boost * source_multiplier).label("display_score")
 
     if sort_by == "display_score":
         order_col = display_score_expr
@@ -193,7 +188,7 @@ async def get_topic_clusters(
         order_col = getattr(InfoCluster, sort_by, InfoCluster.heat_score)
 
     # ── balanced 模式：每类保底 + 全局高分补齐 ──
-    _FRESHNESS_BOOST = {"24h": 2.0, "7d": 1.2, "30d": 0.8, "expired": 0.4}
+    _FRESHNESS_BOOST = {"today": 2.0, "yesterday": 1.2, "earlier": 0.6}
 
     if balanced and not info_type:
         # min_per_type: 每类至少几条（第一页保底，后续页纯分数）
@@ -267,9 +262,8 @@ async def get_topic_clusters(
 
     items = []
     for c in page_clusters:
-        weight = INFO_TYPE_WEIGHT.get(c.info_type, 0.7)
         live_freshness = _compute_freshness(c.published_at, fallback_dt=c.created_at)
-        boost = _FRESHNESS_BOOST.get(live_freshness, 0.4)
+        boost = _FRESHNESS_BOOST.get(live_freshness, 0.6)
         src_count = c.source_count or len(c.source_urls or []) or 1
         if src_count >= 20:
             src_mul = 1.8
@@ -283,7 +277,7 @@ async def get_topic_clusters(
             src_mul = 1.15
         else:
             src_mul = 1.0
-        display_score = round((c.heat_score or 0) * weight * boost * src_mul, 2)
+        display_score = round((c.heat_score or 0) * boost * src_mul, 2)
         items.append({
             "id": c.id,
             "core_title": c.core_title,
@@ -422,6 +416,8 @@ async def get_topic_cluster_detail(
             "low_fan_hit": cluster.low_fan_hit,
             "mined": cluster.mined,
             "created_at": cluster.created_at.isoformat() if cluster.created_at else None,
+            # 最新文章时间（合并时取最新）；前端右下角显示这个而非首次出现时间
+            "published_at": cluster.published_at.isoformat() if cluster.published_at else None,
             "candidates": candidate_list,
         },
     }

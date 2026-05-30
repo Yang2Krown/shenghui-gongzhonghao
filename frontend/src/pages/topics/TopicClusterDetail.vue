@@ -65,7 +65,7 @@
               <span>{{ cluster.source_urls?.length || 0 }} 篇原文</span>
             </div>
             <span class="text-xs" style="color: #9A968D;">
-              {{ cluster.created_at ? new Date(cluster.created_at).toLocaleDateString() : '' }}
+              {{ (cluster.published_at || cluster.created_at) ? new Date(cluster.published_at || cluster.created_at).toLocaleDateString() : '' }}
             </span>
           </div>
         </div>
@@ -456,7 +456,7 @@ const triggerMining = async () => {
 }
 
 const formatFreshness = (val) => {
-  const map = { '24h': '24h 内', '7d': '7 天内', '30d': '30 天内', 'expired': '大于 30 天' }
+  const map = { 'today': '今日', 'yesterday': '昨日', 'earlier': '两天前' }
   return map[val] || val
 }
 

@@ -1,93 +1,46 @@
 """
 任务调度模块
 
-全网采集按 source_type 拆分成独立任务，每个类型失败互不影响。
-AI HOT 保持独立链路，频率更高（每 2h 精选）。
+时间全部为北京时间（celery 配置 timezone="Asia/Shanghai" + enable_utc=False）。
+
+采集 / 预处理策略（鲁棒性优先）：
+- 采集：每天 5 波（06/10/14/18/22 点）。每波由"派发器"把每个启用源拆成独立子任务，
+  错峰 90 秒一个。每源独立抓取、独立提交、独立重试——任一源/任一波出问题，
+  下一波自动补上，白天新发布的内容也能当天采到。
+- 预处理：每 2 小时一趟，新采集的 raw_info 很快变成话题，前端尽快可见，
+  不用等到第二天。
+- 重算热度 + 回填低粉标记：中午、深夜各一次。
+- AI HOT 保持独立链路，频率更高。
 """
 from celery.schedules import crontab
 
 
 CELERY_BEAT_SCHEDULE = {
-    # ── 全网采集：按 source_type 分批，错开 5 分钟 ──
-    # RSS 类（轻量、稳定，最早跑）
-    "fetch-rss": {
-        "task": "scraper.fetch_source_type",
-        "schedule": crontab(hour=6, minute=0),
-        "kwargs": {"source_type": "rss"},
-    },
-    "fetch-github": {
-        "task": "scraper.fetch_source_type",
-        "schedule": crontab(hour=6, minute=5),
-        "kwargs": {"source_type": "github"},
-    },
-    "fetch-hackernews": {
-        "task": "scraper.fetch_source_type",
-        "schedule": crontab(hour=6, minute=10),
-        "kwargs": {"source_type": "hackernews"},
-    },
-    "fetch-tophub": {
-        "task": "scraper.fetch_source_type",
-        "schedule": crontab(hour=6, minute=15),
-        "kwargs": {"source_type": "tophub"},
-    },
-    "fetch-v2ex": {
-        "task": "scraper.fetch_source_type",
-        "schedule": crontab(hour=6, minute=20),
-        "kwargs": {"source_type": "v2ex"},
-    },
-    "fetch-reddit": {
-        "task": "scraper.fetch_source_type",
-        "schedule": crontab(hour=6, minute=25),
-        "kwargs": {"source_type": "reddit"},
-    },
-    "fetch-xhs-daily": {
-        "task": "scraper.fetch_source_type",
-        "schedule": crontab(hour=6, minute=30),
-        "kwargs": {"source_type": "xhs_daily"},
-    },
-    "fetch-gzh-explosive": {
-        "task": "scraper.fetch_source_type",
-        "schedule": crontab(hour=6, minute=35),
-        "kwargs": {"source_type": "gzh_explosive"},
-    },
-    # 搜狗微信搜索（替代 exa_wechat，国内无障碍）
-    "fetch-sogou-wechat": {
-        "task": "scraper.fetch_source_type",
-        "schedule": crontab(hour=6, minute=40),
-        "kwargs": {"source_type": "sogou_wechat"},
-    },
-    # 重量级（需要 Exa API / Playwright，放后面）
-    "fetch-exa-wechat": {
-        "task": "scraper.fetch_source_type",
-        "schedule": crontab(hour=6, minute=45),
-        "kwargs": {"source_type": "exa_wechat"},
-    },
-    "fetch-x-playwright": {
-        "task": "scraper.fetch_source_type",
-        "schedule": crontab(hour=6, minute=50),
-        "kwargs": {"source_type": "x_playwright"},
+    # ── 采集：每天 5 波，错峰派发每个源 ──
+    "dispatch-fetch": {
+        "task": "scraper.dispatch_fetch",
+        "schedule": crontab(minute=0, hour="6,10,14,18,22"),
+        "kwargs": {"gap_seconds": 90},
     },
 
-    # ── 预处理 ──
-    # 07:00 预处理：raw_info → InfoCluster（给采集留 1 小时窗口）
-    "morning-preprocess": {
+    # ── 预处理：每 2 小时一趟（:30），raw_info → InfoCluster ──
+    "preprocess-cycle": {
         "task": "preprocess.run_batch",
-        "schedule": crontab(hour=7, minute=0),
+        "schedule": crontab(minute=30, hour="*/2"),
         "kwargs": {"limit": 500},
     },
-    # 08:00 兜底再跑一次预处理（小批次，防超时）
-    "morning-preprocess-fallback": {
-        "task": "preprocess.run_batch",
-        "schedule": crontab(hour=8, minute=0),
-        "kwargs": {"limit": 500},
-    },
-    # 09:00 重算所有活跃 cluster 的 heat_score（让排序反映最新状态）
-    "morning-rescore": {
+
+    # ── 重算热度 + 回填低粉爆款标记：中午 + 深夜 ──
+    "rescore-midday": {
         "task": "preprocess.rescore",
-        "schedule": crontab(hour=9, minute=0),
+        "schedule": crontab(minute=0, hour=12),
+    },
+    "rescore-night": {
+        "task": "preprocess.rescore",
+        "schedule": crontab(minute=50, hour=23),
     },
 
-    # ── AI HIGH 独立链路（频率更高，与全网采集解耦）──
+    # ── AI HOT 独立链路（频率更高，与全网采集解耦）──
     # 精选：每 2 小时
     "aihot-selected": {
         "task": "scraper.fetch_aihot",

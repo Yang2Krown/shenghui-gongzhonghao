@@ -18,20 +18,10 @@ INFO_TYPE_CASE = "实操案例型"
 INFO_TYPE_OPINION = "观点分享型"
 INFO_TYPE_TUTORIAL = "教程型"
 
-# 时效新鲜度（设计文档 1.4 节）
-FRESHNESS_24H = "24h"
-FRESHNESS_7D = "7d"
-FRESHNESS_30D = "30d"
-FRESHNESS_EXPIRED = "expired"
-
-
-# info_type → 公众号创作价值权重
-INFO_TYPE_WEIGHT = {
-    INFO_TYPE_TUTORIAL: 1.8,    # 教程型 — 最适合公众号长内容
-    INFO_TYPE_CASE: 1.6,        # 实操案例型 — 工具实战分享
-    INFO_TYPE_OPINION: 1.1,     # 观点分享型
-    INFO_TYPE_NEWS: 1.0,        # 资讯型 — 不再降权，按热度排序
-}
+# 时效新鲜度：按自然日划分（北京时间）
+FRESHNESS_TODAY = "today"          # 今日
+FRESHNESS_YESTERDAY = "yesterday"  # 昨日
+FRESHNESS_EARLIER = "earlier"      # 两天前（前天及更早）
 
 
 class InfoCluster(BaseModel):
@@ -55,7 +45,7 @@ class InfoCluster(BaseModel):
     source_urls = Column(JSONField, default=list)                           # 所有 RawInfo URL 快照
 
     # 热度 / 时效
-    freshness = Column(String(20), nullable=True, index=True)          # 24h/7d/30d/expired
+    freshness = Column(String(20), nullable=True, index=True)          # today/yesterday/earlier
     heat_score = Column(Float, default=0.0, index=True)                # 0-10
     low_fan_hit = Column(Boolean, default=False)                       # 低粉爆款标记
     published_at = Column(DateTime, nullable=True)

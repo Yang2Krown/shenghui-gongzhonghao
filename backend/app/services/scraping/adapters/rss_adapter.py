@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class RSSAdapter(SourceAdapter):
     source_type = SOURCE_TYPE_RSS
 
-    DEFAULT_LIMIT = 30
+    DEFAULT_LIMIT = 50  # 尽量取全一个源当天的条目，避免截断（下游会去重）
 
     async def fetch(
         self,

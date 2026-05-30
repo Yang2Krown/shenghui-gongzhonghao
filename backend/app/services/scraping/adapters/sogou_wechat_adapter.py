@@ -26,6 +26,7 @@ from urllib.parse import quote, urljoin
 import httpx
 from bs4 import BeautifulSoup
 
+from app.core.timezone import utcnow
 from app.models.source_registry import SourceRegistry, SourceAccount, SOURCE_TYPE_SOGOU_WECHAT
 from app.services.scraping.base import FetchedItem, SourceAdapter
 
@@ -62,7 +63,7 @@ def _parse_relative_time(text: str) -> Optional[datetime]:
     """解析搜狗返回的相对时间（如 '2小时前'、'1天前'、'30分钟前'）。"""
     if not text:
         return None
-    now = datetime.now()
+    now = utcnow()
     m = re.search(r"(\d+)\s*天前", text)
     if m:
         return now - timedelta(days=int(m.group(1)))
@@ -92,9 +93,11 @@ class SogouWechatAdapter(SourceAdapter):
     ) -> List[FetchedItem]:
         cfg = source.fetch_config or {}
 
-        # 构建关键词列表（同 exa_wechat 逻辑）
+        # 构建关键词列表：
+        # 配了 fetch_config.keywords（主题词）→ 只用主题词搜索；
+        # 没配才回退到账号名（博主名）。避免英文博主名在中文公众号搜索里白搜。
         keywords = list(cfg.get("keywords") or [])
-        if accounts:
+        if not keywords and accounts:
             for acc in accounts:
                 if acc.display_name and acc.display_name not in keywords:
                     keywords.append(acc.display_name)

@@ -91,12 +91,69 @@ def fetch_wechat_search_task(self):
 
 @shared_task(bind=True, name="scraper.fetch_platform")
 def fetch_platform_task(self, platform: str):
-    """按 platform 单独抓（调试/补抓时用）。"""
+    """按 platform 单独抓（每个源一个独立任务：失败/卡死只影响自己，独立 commit + 重试）。"""
     try:
         result = asyncio.run(_run_orchestrator(platforms=[platform]))
+        logger.info(f"[{platform}] 完成：new={result.get('items_new')} dup={result.get('items_duplicate')}")
         return result
     except Exception as e:
         logger.error(f"[{platform}] 抓取失败: {e}")
+        self.retry(exc=e, countdown=90, max_retries=2)
+
+
+# 每个源派发的间隔（秒）：错峰拉长，避免一次性压一堆、也给每个源充足时间
+DISPATCH_GAP_SECONDS = 120
+
+# 派发顺序：轻量稳定的先跑，重量级（需 API / Playwright）的排后面
+_TYPE_ORDER = {
+    "rss": 0, "tophub": 1, "hackernews": 2, "v2ex": 3, "github": 4,
+    "reddit": 5, "xhs_daily": 6, "gzh_explosive": 7, "web": 8,
+    "sogou_wechat": 9, "exa_wechat": 10, "x_playwright": 11,
+}
+
+
+async def _list_enabled_platforms_ordered() -> List[Dict[str, str]]:
+    """列出所有启用、且有对应 adapter 的源 platform，按类型优先级排序。
+
+    排除 aihot（独立链路单独调度）和无 adapter 的类型。
+    """
+    from sqlalchemy import select
+    from app.models.source_registry import SourceRegistry
+
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(SourceRegistry.platform, SourceRegistry.source_type)
+            .where(SourceRegistry.enabled.is_(True))
+        )).all()
+
+    sources = [
+        {"platform": p, "source_type": t}
+        for (p, t) in rows
+        if t in _TYPE_ORDER
+    ]
+    sources.sort(key=lambda s: (_TYPE_ORDER.get(s["source_type"], 99), s["platform"]))
+    return sources
+
+
+@shared_task(bind=True, name="scraper.dispatch_fetch")
+def dispatch_fetch_task(self, gap_seconds: int = DISPATCH_GAP_SECONDS):
+    """采集派发器：把"全网采集"拆成每源一个独立任务，错峰排进上午。
+
+    取代过去"一个大任务抓全部 RSS"的做法——过去任一源卡死就把整批拖到超时、
+    commit 丢失。现在每个源独立任务、独立提交、独立重试，互不影响。
+    """
+    try:
+        sources = asyncio.run(_list_enabled_platforms_ordered())
+        for i, s in enumerate(sources):
+            fetch_platform_task.apply_async(args=[s["platform"]], countdown=i * gap_seconds)
+        last_eta_min = round((len(sources) - 1) * gap_seconds / 60, 1) if sources else 0
+        logger.info(
+            f"采集派发完成：{len(sources)} 个源，间隔 {gap_seconds}s，"
+            f"最后一个约 {last_eta_min} 分钟后开始"
+        )
+        return {"dispatched": len(sources), "gap_seconds": gap_seconds, "last_eta_min": last_eta_min}
+    except Exception as e:
+        logger.error(f"采集派发失败: {e}")
         self.retry(exc=e, countdown=60, max_retries=2)
 
 

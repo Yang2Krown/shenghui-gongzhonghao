@@ -19,7 +19,7 @@ class InfoClusterInput(BaseModel):
     info_type: str = Field(description="资讯型 / 实操案例型 / 观点分享型 / 教程型")
     direction: Optional[str] = None
     elements: dict = Field(default_factory=dict, description="{主体, 动作, 对象, 亮点, 争议, 数据}")
-    freshness: Optional[str] = Field(default=None, description="24h / 7d / 30d / expired")
+    freshness: Optional[str] = Field(default=None, description="today / yesterday / earlier")
     heat_score: float = 0.0
     low_fan_hit: bool = False
     source_urls: List[str] = Field(default_factory=list)

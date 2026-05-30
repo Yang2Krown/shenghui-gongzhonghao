@@ -1,5 +1,5 @@
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, DateTime, JSON, func
+from sqlalchemy import Column, Integer, DateTime, JSON
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime
@@ -21,8 +21,10 @@ class BaseModel(Base):
     __abstract__ = True
     
     id = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    # 时间戳统一用北京时间（utcnow() 返回 naive 北京时间）；
+    # 不能用 func.now()——数据库时区是 UTC，会比北京时间慢 8 小时。
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
     
     def to_dict(self):
         """转换为字典"""
