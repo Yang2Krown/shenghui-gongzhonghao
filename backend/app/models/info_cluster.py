@@ -25,13 +25,12 @@ FRESHNESS_30D = "30d"
 FRESHNESS_EXPIRED = "expired"
 
 
-# info_type → 公众号创作价值权重（路人甲TM 偏好：工具实操 > 教程 > 观点 > 资讯）
-# 同样的 heat_score，教程型卡片排序时是资讯型的 3.6 倍
+# info_type → 公众号创作价值权重
 INFO_TYPE_WEIGHT = {
     INFO_TYPE_TUTORIAL: 1.8,    # 教程型 — 最适合公众号长内容
     INFO_TYPE_CASE: 1.6,        # 实操案例型 — 工具实战分享
-    INFO_TYPE_OPINION: 1.1,     # 观点分享型 — 微微加权
-    INFO_TYPE_NEWS: 0.5,        # 资讯型 — 压后（不删，可筛）
+    INFO_TYPE_OPINION: 1.1,     # 观点分享型
+    INFO_TYPE_NEWS: 1.0,        # 资讯型 — 不再降权，按热度排序
 }
 
 

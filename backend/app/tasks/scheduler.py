@@ -50,6 +50,12 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=6, minute=35),
         "kwargs": {"source_type": "gzh_explosive"},
     },
+    # 搜狗微信搜索（替代 exa_wechat，国内无障碍）
+    "fetch-sogou-wechat": {
+        "task": "scraper.fetch_source_type",
+        "schedule": crontab(hour=6, minute=40),
+        "kwargs": {"source_type": "sogou_wechat"},
+    },
     # 重量级（需要 Exa API / Playwright，放后面）
     "fetch-exa-wechat": {
         "task": "scraper.fetch_source_type",
@@ -74,6 +80,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "preprocess.run_batch",
         "schedule": crontab(hour=8, minute=0),
         "kwargs": {"limit": 500},
+    },
+    # 09:00 重算所有活跃 cluster 的 heat_score（让排序反映最新状态）
+    "morning-rescore": {
+        "task": "preprocess.rescore",
+        "schedule": crontab(hour=9, minute=0),
     },
 
     # ── AI HIGH 独立链路（频率更高，与全网采集解耦）──

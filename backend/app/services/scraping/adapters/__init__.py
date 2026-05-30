@@ -15,6 +15,7 @@ from app.services.scraping.adapters.v2ex_adapter import V2EXAdapter
 from app.services.scraping.adapters.reddit_adapter import RedditAdapter
 from app.services.scraping.adapters.xhs_daily_adapter import XhsDailyAdapter
 from app.services.scraping.adapters.playwright_x_adapter import PlaywrightXAdapter
+from app.services.scraping.adapters.sogou_wechat_adapter import SogouWechatAdapter
 
 
 _REGISTERED = False
@@ -36,6 +37,7 @@ def register_adapters() -> None:
     orchestrator.register(RedditAdapter())
     orchestrator.register(XhsDailyAdapter())
     orchestrator.register(PlaywrightXAdapter())
+    orchestrator.register(SogouWechatAdapter())
     _REGISTERED = True
 
 

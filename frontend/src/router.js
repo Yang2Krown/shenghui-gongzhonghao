@@ -181,6 +181,8 @@ const router = createRouter({
     if (savedPosition) return savedPosition
     // 同一路径只变 query（点 chip / 写 URL 状态等），保持当前滚动位置不变
     if (to.path === from.path) return false
+    // keep-alive 组件由自己管理滚动位置（不回顶部）
+    if (['Home', 'TopicClusters'].includes(to.name)) return false
     // 切换路由：回到顶部
     return { top: 0 }
   }

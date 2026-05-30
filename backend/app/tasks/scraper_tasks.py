@@ -58,9 +58,9 @@ def fetch_all_sources_task(
 def fetch_source_type_task(self, source_type: str):
     """按单个 source_type 抓取，定时任务调用。失败不影响其他类型。"""
     try:
-        logger.info(f"[{source_type}] 抓取启动")
+        logger.info(f"[{source_type}] 抓取启动 (type={type(source_type).__name__})")
         result = asyncio.run(_run_orchestrator(source_types=[source_type]))
-        logger.info(f"[{source_type}] 完成：new={result.get('items_new')} dup={result.get('items_duplicate')}")
+        logger.info(f"[{source_type}] 完成：sources_total={result.get('sources_total')} new={result.get('items_new')} dup={result.get('items_duplicate')}")
         return result
     except Exception as e:
         logger.error(f"[{source_type}] 抓取失败: {e}")

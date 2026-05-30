@@ -153,18 +153,26 @@
       </div>
     </div>
 
-    <!-- 加载完成 -->
+    <!-- 加载更多 / 到底了 -->
     <div v-if="clusters.length > 0" class="load-more">
-      <span class="load-more-end">— 共 {{ pagination.total }} 条 —</span>
+      <div v-if="loadingMore" class="load-more-text">
+        <el-icon class="is-loading" :size="16" style="color: var(--clay);"><Loading /></el-icon>
+        <span>加载中...</span>
+      </div>
+      <span v-else-if="noMore" class="load-more-end">— 共 {{ pagination.total }} 条 —</span>
+      <span v-else class="load-more-end" @click="loadNextPage" style="cursor: pointer;">加载更多</span>
     </div>
   </div>
 </template>
 
+<script>
+export default { name: 'TopicClusters' }
+</script>
+
 <script setup>
 import { ref, reactive, onMounted, onUnmounted, onActivated, onDeactivated, watch, computed, nextTick } from 'vue'
 
-defineOptions({ name: 'TopicClusters' })   // keep-alive include 用这个名字匹配
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Loading, Folder, Refresh } from '@element-plus/icons-vue'
 import { get, post } from '@/api/api'
@@ -307,9 +315,11 @@ const reloadFromStart = () => {
 
 const pagination = reactive({
   page: 1,
-  pageSize: 999,   // 一次性加载全部
+  pageSize: 30,
   total: 0,
 })
+const loadingMore = ref(false)
+const noMore = computed(() => clusters.value.length >= pagination.total)
 
 // 从 URL query 还原状态（首次进入 / 浏览器后退时）
 // 改成无限滚动后不再保存 page，刷新统一从第 1 页开始
@@ -323,7 +333,7 @@ const restoreFromQuery = () => {
   filters.sort_by     = q.sort_by     ?? 'display_score'
   filters.sort_order  = q.sort_order  ?? 'desc'
   pagination.page     = 1
-  pagination.pageSize = 999
+  pagination.pageSize = 30
 }
 
 // 把筛选状态写进 URL query（不再写 page，刷新都从头开始）
@@ -341,26 +351,20 @@ const syncToQuery = () => {
 
 // keep-alive 期间用 isActive 守门，避免离开期间 route.query 抖动触发重载
 const isActive = ref(true)
-let scrollY = 0
+
+// 离开列表页时保存滚动位置到 sessionStorage
+const saveScroll = () => {
+  try { sessionStorage.setItem('topic-list-scroll', String(window.scrollY)) } catch {}
+}
 
 onMounted(() => {
   nextTick(_updateCols)
   restoreFromQuery()
-  loadClusters()
+  loadClusters(true)
 })
 
-onActivated(() => {
-  isActive.value = true
-  // 返回列表时重新拉数据，确保挖掘状态等变更即时显示
-  loadClusters()
-  nextTick(() => {
-    window.scrollTo({ top: scrollY, behavior: 'instant' in window ? 'instant' : 'auto' })
-  })
-})
-
-onDeactivated(() => {
-  isActive.value = false
-  scrollY = window.scrollY
+onBeforeRouteLeave(() => {
+  saveScroll()
 })
 
 // 浏览器后退/前进时，URL query 变化要重新载入（但只在当前真正激活时响应）
@@ -371,10 +375,10 @@ watch(() => route.query, (newQ, oldQ) => {
   if (same) return
   restoreFromQuery()
   clusters.value = []
-  loadClusters()
+  loadClusters(true)
 })
 
-const loadClusters = async () => {
+const loadClusters = async (restoreScroll = false) => {
   loading.value = true
   try {
     const params = {
@@ -382,6 +386,7 @@ const loadClusters = async () => {
       page_size: pagination.pageSize,
       sort_by: filters.sort_by,
       sort_order: filters.sort_order,
+      balanced: true,
     }
     if (filters.info_type) params.info_type = filters.info_type
     if (filters.direction) params.direction = filters.direction
@@ -392,11 +397,48 @@ const loadClusters = async () => {
     const res = await get('/topic-clusters', params)
     clusters.value = res.data.items || []
     pagination.total = res.data.total
+    pagination.page = 1
   } catch (error) {
     ElMessage.error('加载话题库失败')
     console.error(error)
   } finally {
     loading.value = false
+    if (restoreScroll) {
+      const saved = parseInt(sessionStorage.getItem('topic-list-scroll') || '0', 10)
+      if (saved > 0) {
+        nextTick(() => setTimeout(() => window.scrollTo({ top: saved, behavior: 'instant' }), 100))
+      }
+    }
+  }
+}
+
+const loadNextPage = async () => {
+  if (loadingMore.value || noMore.value) return
+  loadingMore.value = true
+  try {
+    const nextPage = pagination.page + 1
+    const params = {
+      page: nextPage,
+      page_size: pagination.pageSize,
+      sort_by: filters.sort_by,
+      sort_order: filters.sort_order,
+      balanced: false,
+    }
+    if (filters.info_type) params.info_type = filters.info_type
+    if (filters.direction) params.direction = filters.direction
+    if (filters.freshness) params.freshness = filters.freshness
+    if (filters.mined) params.mined = filters.mined
+    if (filters.keyword) params.keyword = filters.keyword
+
+    const res = await get('/topic-clusters', params)
+    const newItems = res.data.items || []
+    clusters.value = [...clusters.value, ...newItems]
+    pagination.page = nextPage
+    pagination.total = res.data.total
+  } catch (error) {
+    ElMessage.error('加载更多失败')
+  } finally {
+    loadingMore.value = false
   }
 }
 

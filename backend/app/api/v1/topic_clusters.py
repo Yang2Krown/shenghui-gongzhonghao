@@ -107,48 +107,52 @@ async def get_topic_clusters(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=1, le=1000),
+    page_size: int = Query(30, ge=1, le=200),
     info_type: Optional[str] = Query(None),
     direction: Optional[str] = Query(None),
     mined: Optional[bool] = Query(None),
     freshness: Optional[str] = Query(None),
     keyword: Optional[str] = Query(None),
-    sort_by: str = Query("display_score", description="display_score（按公众号价值加权）/ heat_score / created_at / source_count"),
+    sort_by: str = Query("display_score", description="display_score / heat_score / created_at / source_count"),
     sort_order: str = Query("desc"),
+    balanced: bool = Query(True, description="True=每类保底配额，False=纯分数排序"),
 ) -> Any:
-    # 构建基础查询：
-    # - 默认过滤掉超过 90 天的老话题（保留 published_at IS NULL 的）
-    # - 默认只取 is_ai_relevant=True（预处理时打的标）—— 避免每次请求都把全表拉到内存过滤
+    """话题库列表。
+
+    balanced=True 时：每种 info_type 至少保留 min_per_type 条（按 display_score），
+    剩余槽位从全局高分补。保证类型多样性，避免资讯型刷屏。
+    """
+    from sqlalchemy import or_, case, extract
+
+    # 参数类型兜底（FastAPI Query 对象需取 .default 或显式转换）
+    sort_by = str(sort_by) if sort_by else "display_score"
+    sort_order = str(sort_order) if sort_order else "desc"
+    mined = mined if isinstance(mined, bool) else None
+
     cutoff = utcnow() - timedelta(days=MAX_CONTENT_AGE_DAYS)
-    from sqlalchemy import or_
-    query = select(InfoCluster).where(
+    base_filter = [
         InfoCluster.is_ai_relevant.is_(True),
         or_(InfoCluster.published_at.is_(None), InfoCluster.published_at >= cutoff),
-    )
+    ]
     if info_type:
-        query = query.where(InfoCluster.info_type == info_type)
+        base_filter.append(InfoCluster.info_type == info_type)
     if direction:
-        query = query.where(InfoCluster.direction == direction)
+        base_filter.append(InfoCluster.direction == direction)
     if mined is not None:
-        query = query.where(InfoCluster.mined == mined)
-    # freshness 实时过滤：按时间范围筛选，而非静态字段
+        base_filter.append(InfoCluster.mined == mined)
     if freshness:
         now = utcnow()
-        # 用 published_at，缺失时用 created_at 兜底
         effective_dt = func.coalesce(InfoCluster.published_at, InfoCluster.created_at)
         if freshness == "24h":
-            query = query.where(effective_dt >= now - timedelta(hours=24))
+            base_filter.append(effective_dt >= now - timedelta(hours=24))
         elif freshness == "7d":
-            query = query.where(effective_dt >= now - timedelta(days=7))
+            base_filter.append(effective_dt >= now - timedelta(days=7))
         elif freshness == "30d":
-            query = query.where(effective_dt >= now - timedelta(days=30))
+            base_filter.append(effective_dt >= now - timedelta(days=30))
         elif freshness == "expired":
-            query = query.where(
-                or_(effective_dt.is_(None), effective_dt < now - timedelta(days=30))
-            )
+            base_filter.append(or_(effective_dt.is_(None), effective_dt < now - timedelta(days=30)))
     if keyword:
-        from sqlalchemy import or_
-        query = query.where(
+        base_filter.append(
             or_(
                 InfoCluster.core_title.ilike(f"%{keyword}%"),
                 InfoCluster.latest_title.ilike(f"%{keyword}%"),
@@ -156,18 +160,13 @@ async def get_topic_clusters(
             )
         )
 
-    # 排序：display_score = heat_score × info_type_weight × freshness_boost
-    # freshness_boost: 越新的话题加权越高，实现"新鲜优先"
-    #   24h 内 → ×2.0    7d 内 → ×1.2    30d 内 → ×0.8    更老 → ×0.4
-    from sqlalchemy import case, extract
+    # display_score 表达式（与 SQL CASE 保持一致）
     weight_case = case(
         {k: v for k, v in INFO_TYPE_WEIGHT.items()},
         value=InfoCluster.info_type,
         else_=0.7,
     )
-    # 用 COALESCE(published_at, created_at) 实时算时间差（单位：小时）
     effective_ts = func.coalesce(InfoCluster.published_at, InfoCluster.created_at)
-    # extract epoch 得到秒差，转小时
     age_hours = extract("epoch", func.now() - effective_ts) / 3600.0
     freshness_boost = case(
         (age_hours < 24, 2.0),
@@ -175,49 +174,116 @@ async def get_topic_clusters(
         (age_hours < 24 * 30, 0.8),
         else_=0.4,
     )
-    display_score_expr = (InfoCluster.heat_score * weight_case * freshness_boost).label("display_score")
+    # 多源加成：被多篇报道提及的话题加分
+    # 1篇=1.0, 2篇=1.15, 3篇=1.25, 5篇=1.4, 10篇=1.6, 20篇=1.8
+    source_count_val = func.coalesce(InfoCluster.source_count, 1)
+    source_multiplier = case(
+        (source_count_val >= 20, 1.8),
+        (source_count_val >= 10, 1.6),
+        (source_count_val >= 5, 1.4),
+        (source_count_val >= 3, 1.25),
+        (source_count_val >= 2, 1.15),
+        else_=1.0,
+    )
+    display_score_expr = (InfoCluster.heat_score * weight_case * freshness_boost * source_multiplier).label("display_score")
 
     if sort_by == "display_score":
         order_col = display_score_expr
     else:
         order_col = getattr(InfoCluster, sort_by, InfoCluster.heat_score)
-    if sort_order == "desc":
-        query = query.order_by(desc(order_col))
+
+    # ── balanced 模式：每类保底 + 全局高分补齐 ──
+    _FRESHNESS_BOOST = {"24h": 2.0, "7d": 1.2, "30d": 0.8, "expired": 0.4}
+
+    if balanced and not info_type:
+        # min_per_type: 每类至少几条（第一页保底，后续页纯分数）
+        min_per_type = 5 if page == 1 else 0
+
+        # 1. 先拿总数
+        count_q = select(func.count(InfoCluster.id)).where(*base_filter)
+        total = (await db.execute(count_q)).scalar() or 0
+
+        # 2. 按 info_type 分组取 top N
+        selected_ids = set()
+        type_counts = {}
+        if min_per_type > 0:
+            for t in ["资讯型", "实操案例型", "观点分享型", "教程型"]:
+                q = (
+                    select(InfoCluster.id)
+                    .where(*base_filter, InfoCluster.info_type == t)
+                    .order_by(desc(display_score_expr))
+                    .limit(min_per_type)
+                )
+                ids = [row[0] for row in (await db.execute(q)).all()]
+                selected_ids.update(ids)
+                type_counts[t] = len(ids)
+
+        # 3. 补齐剩余槽位：从全局高分里选没选过的
+        remaining = page_size - len(selected_ids)
+        if remaining > 0:
+            fill_q = (
+                select(InfoCluster.id)
+                .where(*base_filter)
+                .where(InfoCluster.id.notin_(selected_ids) if selected_ids else True)
+                .order_by(desc(display_score_expr))
+                .limit(remaining)
+            )
+            fill_ids = [row[0] for row in (await db.execute(fill_q)).all()]
+            selected_ids.update(fill_ids)
+
+        # 4. 拉完整对象，按 display_score 排序
+        if not selected_ids:
+            page_clusters = []
+        else:
+            fetch_q = (
+                select(InfoCluster)
+                .where(InfoCluster.id.in_(selected_ids))
+                .order_by(desc(display_score_expr))
+            )
+            page_clusters = (await db.execute(fetch_q)).scalars().all()
     else:
-        query = query.order_by(order_col)
+        # 普通分页模式
+        query = select(InfoCluster).where(*base_filter)
+        if sort_by == "display_score":
+            query = query.order_by(desc(display_score_expr))
+        else:
+            query = query.order_by(desc(order_col) if sort_order == "desc" else order_col)
 
-    # 总数（DB 层 count，不再把全表拉内存）
-    count_q = select(func.count()).select_from(query.subquery())
-    total = (await db.execute(count_q)).scalar() or 0
+        count_q = select(func.count(InfoCluster.id)).where(*base_filter)
+        total = (await db.execute(count_q)).scalar() or 0
+        page_query = query.offset((page - 1) * page_size).limit(page_size)
+        page_clusters = (await db.execute(page_query)).scalars().all()
 
-    # 当前页（SQL 层 LIMIT/OFFSET）
-    page_query = query.offset((page - 1) * page_size).limit(page_size)
-    page_clusters = (await db.execute(page_query)).scalars().all()
-
-    # 批量查询每个 cluster 的候选选题数
+    # 批量查询候选选题数
     cluster_ids = [c.id for c in page_clusters]
     candidate_counts = {}
     if cluster_ids:
         count_result = await db.execute(
-            select(
-                TopicCandidate.info_cluster_id,
-                func.count(TopicCandidate.id)
-            )
+            select(TopicCandidate.info_cluster_id, func.count(TopicCandidate.id))
             .where(TopicCandidate.info_cluster_id.in_(cluster_ids))
             .group_by(TopicCandidate.info_cluster_id)
         )
         candidate_counts = {row[0]: row[1] for row in count_result.all()}
 
-    # freshness_boost 映射（与 SQL 层 CASE 保持一致）
-    _FRESHNESS_BOOST = {"24h": 2.0, "7d": 1.2, "30d": 0.8, "expired": 0.4}
-
     items = []
     for c in page_clusters:
         weight = INFO_TYPE_WEIGHT.get(c.info_type, 0.7)
-        # 实时计算 freshness，不依赖数据库里预处理时写死的值
         live_freshness = _compute_freshness(c.published_at, fallback_dt=c.created_at)
         boost = _FRESHNESS_BOOST.get(live_freshness, 0.4)
-        display_score = round((c.heat_score or 0) * weight * boost, 2)
+        src_count = c.source_count or len(c.source_urls or []) or 1
+        if src_count >= 20:
+            src_mul = 1.8
+        elif src_count >= 10:
+            src_mul = 1.6
+        elif src_count >= 5:
+            src_mul = 1.4
+        elif src_count >= 3:
+            src_mul = 1.25
+        elif src_count >= 2:
+            src_mul = 1.15
+        else:
+            src_mul = 1.0
+        display_score = round((c.heat_score or 0) * weight * boost * src_mul, 2)
         items.append({
             "id": c.id,
             "core_title": c.core_title,
