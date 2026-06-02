@@ -7,19 +7,26 @@ const routes = [
     path: '/',
     component: () => import('@/components/layout/AppLayout.vue'),
     children: [
-      // 首页 = 话题库（新流程）
+      // 首页 = 内容资讯
       {
         path: '',
         name: 'Home',
         component: () => import('@/pages/topics/TopicClusterList.vue'),
-        meta: { title: '话题库' }
+        meta: { title: '内容资讯' }
       },
-      // 话题库主入口
+      // 内容资讯
+      {
+        path: 'content-info',
+        name: 'ContentInfo',
+        component: () => import('@/pages/topics/TopicClusterList.vue'),
+        meta: { title: '内容资讯' }
+      },
+      // 话题库（保留旧路由，兼容）
       {
         path: 'topic-clusters',
         name: 'TopicClusters',
         component: () => import('@/pages/topics/TopicClusterList.vue'),
-        meta: { title: '话题库' }
+        meta: { title: '内容资讯' }
       },
       {
         path: 'topic-clusters/:id',
@@ -50,12 +57,38 @@ const routes = [
       // ===== 旧路由 → 重定向，避免书签失效 =====
       {
         path: 'topics',
-        redirect: '/topic-clusters'
+        redirect: '/content-info'
       },
       {
         path: 'topics/:id',
-        redirect: '/topic-clusters'
+        redirect: '/content-info'
       },
+      // ===== 创作工具（新的独立页面） =====
+      {
+        path: 'creation/angle',
+        name: 'CreationAngle',
+        component: () => import('@/pages/tools/CreationAngle.vue'),
+        meta: { title: '创作角度' }
+      },
+      {
+        path: 'creation/outline',
+        name: 'CreationOutline',
+        component: () => import('@/pages/tools/CreationOutline.vue'),
+        meta: { title: '大纲生成' }
+      },
+      {
+        path: 'creation/body',
+        name: 'CreationBody',
+        component: () => import('@/pages/tools/CreationBody.vue'),
+        meta: { title: '正文生成' }
+      },
+      {
+        path: 'creation/title',
+        name: 'CreationTitle',
+        component: () => import('@/pages/tools/CreationTitle.vue'),
+        meta: { title: '标题生成' }
+      },
+      // ===== 我的创作（保留旧入口） =====
       {
         path: 'creation',
         name: 'Creation',
@@ -80,15 +113,48 @@ const routes = [
         component: () => import('@/pages/creation/CreationDraft.vue'),
         meta: { title: '草稿详情' }
       },
+      // ===== 内容仿写 =====
+      {
+        path: 'content-transform',
+        name: 'ContentTransform',
+        component: () => import('@/pages/rewrite/ContentTransform.vue'),
+        meta: { title: '转写' }
+      },
+      {
+        path: 'content-imitate',
+        name: 'ContentImitate',
+        component: () => import('@/pages/rewrite/ContentImitate.vue'),
+        meta: { title: '仿写' }
+      },
+      // ===== 创作历史 =====
+      {
+        path: 'creation-history',
+        name: 'CreationHistory',
+        component: () => import('@/pages/history/GenerationHistory.vue'),
+        meta: { title: '创作历史' }
+      },
+      {
+        path: 'history',
+        name: 'History',
+        component: () => import('@/pages/history/GenerationHistory.vue'),
+        meta: { title: '创作历史' }
+      },
+      // ===== 个人信息 =====
+      {
+        path: 'profile',
+        name: 'Profile',
+        component: () => import('@/pages/settings/ProfileSettings.vue'),
+        meta: { title: '个人信息' }
+      },
       {
         path: 'settings',
         name: 'Settings',
         component: () => import('@/pages/settings/ProfileSettings.vue'),
-        meta: { title: '设置' }
+        meta: { title: '个人信息' }
       },
       {
         path: 'settings/style',
-        redirect: '/settings'
+        redirect: '/profile'
       },
       // ===== 旧路由 → 重定向到创作工作台 =====
       {
@@ -145,12 +211,6 @@ const routes = [
         component: () => import('@/pages/titles/TitleScorer.vue'),
         meta: { title: '芒格版标题评分' }
       },
-      {
-        path: 'history',
-        name: 'History',
-        component: () => import('@/pages/history/GenerationHistory.vue'),
-        meta: { title: '生成记录' }
-      }
     ]
   },
   {
@@ -177,13 +237,9 @@ const router = createRouter({
   history: createWebHistory(),
   routes,
   scrollBehavior(to, from, savedPosition) {
-    // 浏览器前进/后退：还原原位置
     if (savedPosition) return savedPosition
-    // 同一路径只变 query（点 chip / 写 URL 状态等），保持当前滚动位置不变
     if (to.path === from.path) return false
-    // keep-alive 组件由自己管理滚动位置（不回顶部）
-    if (['Home', 'TopicClusters'].includes(to.name)) return false
-    // 切换路由：回到顶部
+    if (['Home', 'TopicClusters', 'ContentInfo'].includes(to.name)) return false
     return { top: 0 }
   }
 })
@@ -193,8 +249,7 @@ const PUBLIC_ROUTES = ['Login', 'Register', 'NotFound']
 
 // 全局前置守卫
 router.beforeEach((to, from, next) => {
-  // 设置页面标题
-  document.title = to.meta.title ? `${to.meta.title} - AI公众号内容运营平台` : 'AI公众号内容运营平台'
+  document.title = to.meta.title ? `${to.meta.title} - 公众号创作台` : '公众号创作台'
 
   const userStore = useUserStore()
   const isPublic = PUBLIC_ROUTES.includes(to.name)
@@ -205,7 +260,6 @@ router.beforeEach((to, from, next) => {
       query: { redirect: to.fullPath }
     })
   } else if (isPublic && userStore.isAuthenticated && to.name === 'Login') {
-    // 已登录用户访问登录页，跳转首页
     next({ path: '/' })
   } else {
     next()

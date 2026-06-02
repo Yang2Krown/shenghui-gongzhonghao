@@ -277,6 +277,243 @@ async def generate_content_async(
     }
 
 
+@router.post("/generate-adhoc", response_model=dict)
+async def generate_content_adhoc(
+    body: dict = {},
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """从自由输入的正文/大纲触发正文生成，写入数据库。
+
+    body 格式：
+    {
+        "outline_text": "大纲文本（纯文字）",
+        "sections": [                         # 可选，结构化大纲
+            {"section_number": 1, "subtitle": "小标题", "core_points": ["要点1"], "word_estimate": 500}
+        ],
+        "title": "文章标题",
+        "preference": "可选的创作风格偏好"
+    }
+    """
+    from sqlalchemy import select as sa_select
+    from app.db.session import AsyncSessionLocal
+    from app.services.content_generation.orchestrator import generate_content as cg_generate
+    from app.services.content_generation.schemas import ContentGenerationInput, StyleParams, SectionBrief
+    from app.models.topic_candidate import TopicCandidate
+    from app.models.outline import Outline
+
+    outline_text = body.get("outline_text", "")
+    sections_raw = body.get("sections", [])
+    title = body.get("title", "")
+    preference = body.get("preference", "")
+
+    if not outline_text and not sections_raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请提供大纲内容",
+        )
+
+    # 如果没有标题，从大纲文本提取
+    if not title:
+        lines = outline_text.strip().split("\n")
+        title = lines[0][:80] if lines else "未命名文章"
+
+    # 解析风格参数
+    style_params = None
+    if preference:
+        style_params = StyleParams(tone=preference)
+
+    # 解析 sections
+    sections = []
+    if sections_raw:
+        for s in sections_raw:
+            sections.append(SectionBrief(
+                section_number=s.get("section_number", 0),
+                subtitle=s.get("subtitle") or s.get("title", ""),
+                core_points=s.get("core_points", []),
+                spread_role=s.get("spread_role"),
+                word_estimate=s.get("word_estimate") or s.get("word_count", 500),
+                notes=s.get("notes"),
+            ))
+    else:
+        # 从纯文本大纲解析 sections（按段落分割）
+        paragraphs = [p.strip() for p in outline_text.split("\n\n") if p.strip()]
+        for i, para in enumerate(paragraphs):
+            first_line = para.split("\n")[0][:60]
+            points = [l.strip().lstrip("•-·123456789. ") for l in para.split("\n")[1:] if l.strip()]
+            sections.append(SectionBrief(
+                section_number=i + 1,
+                subtitle=first_line,
+                core_points=points if points else [para[:100]],
+                word_estimate=500,
+            ))
+
+    # 1. 创建 TopicCandidate 记录
+    candidate = TopicCandidate(
+        title=title,
+        direction="资讯型",
+        angle_note=outline_text[:200] if outline_text else "",
+        summary=outline_text[:500] if outline_text else "",
+        info_cluster_id=None,
+        verdict="selected",
+        veto_passed=True,
+    )
+    db.add(candidate)
+    await db.flush()
+
+    # 2. 创建 Outline 记录
+    outline = Outline(
+        candidate_id=candidate.id,
+        title=title,
+        direction="资讯型",
+        sections=[s.model_dump() for s in sections],
+        section_count=len(sections),
+        total_words=sum(s.word_estimate for s in sections),
+    )
+    db.add(outline)
+    await db.commit()
+    await db.refresh(outline)
+
+    run_id = progress_store.create_run()
+
+    await track_start(
+        user_id=current_user.id,
+        type="content_generate",
+        run_id=run_id,
+        input_snapshot={"candidate_id": candidate.id, "outline_id": outline.id},
+        display_title=f"正文生成 · {title[:30]}",
+        candidate_id=candidate.id,
+        resume_context={
+            "route": "/creation/body",
+            "query": {},
+        },
+    )
+
+    async def _run():
+        async with AsyncSessionLocal() as bg_db:
+            try:
+                # 重新加载
+                bg_candidate = (await bg_db.execute(
+                    sa_select(TopicCandidate).where(TopicCandidate.id == candidate.id)
+                )).scalar_one_or_none()
+                bg_outline = (await bg_db.execute(
+                    sa_select(Outline).where(Outline.id == outline.id)
+                )).scalar_one_or_none()
+
+                if not bg_candidate or not bg_outline:
+                    raise RuntimeError("候选或大纲记录不存在")
+
+                inp = ContentGenerationInput(
+                    topic_title=title,
+                    topic_direction="资讯型",
+                    topic_routine=None,
+                    value_promise=None,
+                    sections=sections,
+                    style_params=style_params,
+                    user_id=current_user.id,
+                )
+
+                async def _progress_cb(event):
+                    await progress_store.push(run_id, event)
+
+                output = await cg_generate(inp, progress_callback=_progress_cb)
+
+                # 格式化结果
+                def _dim(d):
+                    return {
+                        "score": d.score,
+                        "weight": d.weight,
+                        "evaluation": d.evaluation,
+                        "suggestions": d.suggestions,
+                    }
+
+                diag = output.diagnosis
+                result_data = {
+                    "final_text": output.final_text,
+                    "final_word_count": output.final_word_count,
+                    "section_count": output.section_count,
+                    "section_word_counts": output.section_word_counts,
+                    "rewrite_count": output.agent_c_rewrite_count,
+                    "style_anchor": output.style_anchor,
+                    "gold_sentences": [
+                        {
+                            "sentence_id": s.sentence_id,
+                            "sentence_type": s.sentence_type,
+                            "location": s.location,
+                            "section_number": s.section_number,
+                            "insert_method": s.insert_method,
+                            "content": s.content,
+                            "word_count": s.word_count,
+                        }
+                        for s in output.gold_sentences
+                    ],
+                    "rewrite_table": [
+                        {
+                            "location": it.location,
+                            "ai_taste_type": it.ai_taste_type,
+                            "priority": it.priority,
+                            "original_text": it.original_text,
+                            "rewritten_text": it.rewritten_text,
+                        }
+                        for it in (output.rewrite_table or [])
+                    ],
+                    "diagnosis": {
+                        "total_score": diag.total_score,
+                        "recommended_action": diag.recommended_action,
+                        "high_priority": diag.high_priority,
+                        "medium_priority": diag.medium_priority,
+                        "low_priority": diag.low_priority,
+                        "dimensions": {
+                            "title_fulfillment": _dim(diag.title_fulfillment),
+                            "outline_alignment": _dim(diag.outline_alignment),
+                            "word_compliance": _dim(diag.word_compliance),
+                            "style_consistency": _dim(diag.style_consistency),
+                            "deai_thoroughness": _dim(diag.deai_thoroughness),
+                            "gold_sentence_completeness": _dim(diag.gold_sentence_completeness),
+                            "opening_quality": _dim(diag.opening_quality),
+                            "ending_quality": _dim(diag.ending_quality),
+                        },
+                    },
+                }
+
+                await progress_store.push(run_id, {
+                    "event": "result",
+                    "data": result_data,
+                })
+                await track_complete(run_id, {
+                    "final_text": output.final_text,
+                    "final_word_count": output.final_word_count,
+                    "section_count": output.section_count,
+                    "rewrite_count": output.agent_c_rewrite_count,
+                    "style_anchor": output.style_anchor,
+                    "gold_sentences": [
+                        {"sentence_id": s.sentence_id, "sentence_type": s.sentence_type, "location": s.location, "content": s.content, "word_count": s.word_count}
+                        for s in output.gold_sentences
+                    ],
+                    "diagnosis": {
+                        "total_score": diag.total_score,
+                        "recommended_action": diag.recommended_action,
+                        "high_priority": diag.high_priority,
+                        "medium_priority": diag.medium_priority,
+                        "low_priority": diag.low_priority,
+                    },
+                })
+            except Exception as e:
+                await progress_store.push(run_id, {
+                    "event": "error",
+                    "data": {"message": str(e)},
+                })
+                await track_fail(run_id, str(e))
+
+    asyncio.create_task(_run())
+
+    return {
+        "code": 200,
+        "message": "正文生成任务已提交",
+        "data": {"run_id": run_id, "candidate_id": candidate.id, "outline_id": outline.id},
+    }
+
+
 @router.get("/stream/{run_id}")
 async def stream_content_progress(
     run_id: str,

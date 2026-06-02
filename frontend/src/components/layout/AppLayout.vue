@@ -1,264 +1,390 @@
 <template>
-  <div class="min-h-screen bg-ivory">
+  <div class="app-layout" style="min-height: 100vh; background: var(--ivory);">
     <!-- 侧边栏 -->
-    <el-aside :width="isCollapsed ? '64px' : '240px'" class="fixed left-0 top-0 bottom-0 bg-paper shadow-sh-1 border-r border-line transition-all duration-300 z-30">
+    <aside class="app-sidebar" :style="{ width: isCollapsed ? '64px' : '248px' }">
       <div class="flex flex-col h-full">
         <!-- Logo区域 -->
-        <div class="flex items-center justify-center h-16 border-b border-line">
-          <div v-if="!isCollapsed" class="flex items-center space-x-2">
-            <div class="w-8 h-8 bg-clay rounded-r-md flex items-center justify-center">
-              <span class="text-paper font-bold text-lg">AI</span>
-            </div>
-            <span class="text-lg font-bold text-ink">内容运营平台</span>
+        <div class="flex items-center" style="padding: 20px 20px 16px;">
+          <div style="width: 34px; height: 34px; border-radius: 8px 3px 8px 8px; background: var(--clay); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; font-family: var(--serif); flex-shrink: 0;">
+            公
           </div>
-          <div v-else class="w-8 h-8 bg-clay rounded-r-md flex items-center justify-center">
-            <span class="text-paper font-bold text-lg">AI</span>
+          <div v-if="!isCollapsed" style="margin-left: 11px; min-width: 0;">
+            <div class="font-semibold text-ink" style="font-size: 16px; line-height: 1.1;">公众号创作台</div>
+            <div class="text-xs text-ink-4" style="letter-spacing: .04em;">AI Content Studio</div>
           </div>
         </div>
+        <hr class="divider" style="margin: 0 16px;" />
 
         <!-- 导航菜单 -->
-        <el-menu
-          :default-active="activeMenu"
-          :collapse="isCollapsed"
-          class="flex-1 border-none"
-          @select="handleMenuSelect"
-        >
-          <el-menu-item index="topic-clusters">
-            <el-icon><Folder /></el-icon>
-            <template #title>话题库</template>
-          </el-menu-item>
+        <nav class="flex-1 overflow-y-auto" style="padding: 14px 12px; display: flex; flex-direction: column; gap: 3px;">
+          <template v-for="item in navItems" :key="item.id">
+            <!-- 普通菜单项 -->
+            <button
+              v-if="!item.children"
+              @click="navigateTo(item.id)"
+              :class="['nav-item', { 'nav-item--active': activeRoute === item.id }]"
+            >
+              <el-icon :size="19"><component :is="item.icon" /></el-icon>
+              <span>{{ item.label }}</span>
+            </button>
 
-          <el-menu-item index="creation">
-            <el-icon><Edit /></el-icon>
-            <template #title>我的创作</template>
-          </el-menu-item>
-
-          <el-menu-item index="custom-topic">
-            <el-icon><EditPen /></el-icon>
-            <template #title>自定义选题</template>
-          </el-menu-item>
-
-          <el-sub-menu index="titles">
-            <template #title>
-              <el-icon><ChatDotSquare /></el-icon>
-              <span>标题工具</span>
-            </template>
-            <el-menu-item index="standalone-title">智能起标题</el-menu-item>
-            <el-menu-item index="munger-generation">芒格标题生成</el-menu-item>
-            <el-menu-item index="munger-scorer">芒格标题评分</el-menu-item>
-          </el-sub-menu>
-
-          <el-menu-item index="wechat-to-xhs">
-            <el-icon><Switch /></el-icon>
-            <template #title>公众号转小红书</template>
-          </el-menu-item>
-
-          <el-menu-item index="history">
-            <el-icon><Clock /></el-icon>
-            <template #title>生成记录</template>
-          </el-menu-item>
-
-          <!-- 底部分隔 -->
-          <div class="flex-1"></div>
-
-          <el-menu-item index="settings">
-            <el-icon><Setting /></el-icon>
-            <template #title>设置</template>
-          </el-menu-item>
-        </el-menu>
+            <!-- 可折叠分组 -->
+            <div v-else>
+              <button
+                @click="toggleGroup(item.id)"
+                :class="['nav-item nav-item--group', { 'nav-item--active': isChildActive(item) }]"
+              >
+                <el-icon :size="19"><component :is="item.icon" /></el-icon>
+                <span style="flex: 1; text-align: left;">{{ item.label }}</span>
+                <el-icon
+                  :size="15"
+                  class="nav-chevron"
+                  :class="{ 'nav-chevron--open': openGroups[item.id] }"
+                >
+                  <ArrowRight />
+                </el-icon>
+              </button>
+              <div v-if="openGroups[item.id]" class="nav-group-children">
+                <button
+                  v-for="child in item.children"
+                  :key="child.id"
+                  @click="navigateTo(child.id)"
+                  :class="['nav-item nav-item--indent', { 'nav-item--active': activeRoute === child.id }]"
+                >
+                  <span>{{ child.label }}</span>
+                </button>
+              </div>
+            </div>
+          </template>
+        </nav>
 
         <!-- 用户信息 -->
-        <div class="p-4 border-t border-line">
-          <div v-if="userStore.user" class="flex items-center space-x-3">
-            <el-avatar :size="32" :src="userStore.user.avatar_url" class="flex-shrink-0">
-              {{ userStore.user.username?.charAt(0)?.toUpperCase() }}
-            </el-avatar>
-            <div v-if="!isCollapsed" class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-ink truncate">
-                {{ userStore.user.full_name || userStore.user.username }}
-              </p>
-              <p class="text-xs text-ink-3 truncate">
-                {{ userStore.user.email }}
-              </p>
+        <div style="padding: 14px; border-top: 1px solid var(--line);">
+          <button class="nav-user-btn" @click="navigateTo('profile')">
+            <div style="width: 34px; height: 34px; border-radius: 50%; background: var(--clay); color: #fff; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 600; font-family: var(--serif);">
+              {{ userStore.user?.username?.charAt(0)?.toUpperCase() || 'U' }}
             </div>
-          </div>
-          <div v-else class="flex items-center justify-center">
-            <el-button type="primary" @click="$router.push('/login')">
-              登录
-            </el-button>
-          </div>
+            <div v-if="!isCollapsed" style="text-align: left; min-width: 0;">
+              <div class="text-sm font-semibold text-ink truncate" style="max-width: 140px;">
+                {{ userStore.user?.full_name || userStore.user?.username || '用户' }}
+              </div>
+              <div class="text-xs text-ink-4 truncate" style="max-width: 140px;">
+                专业版
+              </div>
+            </div>
+          </button>
         </div>
       </div>
-    </el-aside>
+    </aside>
 
     <!-- 主内容区 -->
-    <div :style="{ marginLeft: isCollapsed ? '64px' : '240px' }" class="transition-all duration-300">
+    <div :style="{ marginLeft: isCollapsed ? '64px' : '248px' }" class="transition-all duration-300">
       <!-- 顶部导航栏 -->
-      <el-header class="fixed top-0 right-0 bg-paper shadow-sh-1 border-b border-line z-20 flex items-center justify-between px-6" :style="{ left: isCollapsed ? '64px' : '240px' }">
-        <div class="flex items-center space-x-4">
-          <!-- 折叠按钮 -->
-          <el-button
-            :icon="isCollapsed ? 'Expand' : 'Fold'"
-            text
-            @click="toggleSidebar"
-            class="text-ink-3 hover:text-ink"
-          />
-
-          <!-- 面包屑导航 -->
-          <el-breadcrumb separator="/">
-            <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
-            <el-breadcrumb-item v-for="(item, index) in breadcrumbs" :key="index" :to="item.path">
-              {{ item.title }}
-            </el-breadcrumb-item>
-          </el-breadcrumb>
+      <header class="app-topbar" :style="{ left: isCollapsed ? '64px' : '248px' }">
+        <div class="flex items-center" style="gap: 8px; color: var(--ink-4); font-size: 13px;">
+          <span>首页</span>
+          <template v-if="currentGroup">
+            <el-icon :size="13"><ArrowRight /></el-icon>
+            <span>{{ currentGroup }}</span>
+          </template>
+          <el-icon :size="13"><ArrowRight /></el-icon>
+          <span class="font-semibold text-ink-2">{{ currentLabel }}</span>
         </div>
-
-        <div class="flex items-center space-x-4">
-          <!-- 用户下拉菜单 -->
-          <el-dropdown v-if="userStore.user" @command="handleUserCommand">
-            <div class="flex items-center space-x-2 cursor-pointer">
-              <el-avatar :size="28" :src="userStore.user.avatar_url">
-                {{ userStore.user.username?.charAt(0)?.toUpperCase() }}
-              </el-avatar>
-              <span class="text-sm text-ink-2">
-                {{ userStore.user.full_name || userStore.user.username }}
-              </span>
-              <el-icon class="text-ink-4">
-                <ArrowDown />
-              </el-icon>
-            </div>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="settings">
-                  <el-icon><Setting /></el-icon>
-                  设置
-                </el-dropdown-item>
-                <el-dropdown-item divided command="logout">
-                  <el-icon><SwitchButton /></el-icon>
-                  退出登录
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
-      </el-header>
+        <!-- 折叠按钮 -->
+        <button @click="isCollapsed = !isCollapsed" class="nav-collapse-btn">
+          <el-icon :size="18">
+            <component :is="isCollapsed ? 'Expand' : 'Fold'" />
+          </el-icon>
+        </button>
+      </header>
 
       <!-- 页面内容 -->
-      <el-main class="pt-20 pb-8 px-6">
-        <router-view v-slot="{ Component }">
-          <keep-alive :include="['TopicClusters']">
-            <component :is="Component" />
-          </keep-alive>
-        </router-view>
-      </el-main>
+      <main style="padding-top: 60px;">
+        <div style="padding: 32px 32px 80px;" class="fade-in">
+          <router-view v-slot="{ Component }">
+            <keep-alive :include="['TopicClusters']">
+              <component :is="Component" />
+            </keep-alive>
+          </router-view>
+        </div>
+      </main>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { Edit, Setting, SwitchButton, ArrowDown, Expand, Fold, DataBoard, Folder, Document, ChatDotSquare, Switch, EditPen, Clock } from '@element-plus/icons-vue'
+import {
+  Edit, Setting, ArrowRight, Expand, Fold,
+  Document, ChatDotSquare, Switch, EditPen, Clock
+} from '@element-plus/icons-vue'
+
+// 自定义图标组件
+const IconFeed = document.createElement('div') // placeholder, 使用 el-icon
+const IconTool = EditPen
+const IconSwap = Switch
+const IconAngle = EditPen
+const IconOutline = Document
+const IconBody = Document
+const IconTitle = ChatDotSquare
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-// 侧边栏折叠状态
 const isCollapsed = ref(false)
 
-// 当前激活的菜单
-const activeMenu = computed(() => {
+const openGroups = reactive({
+  create: true,
+  rewrite: true,
+})
+
+// 导航结构
+const navItems = [
+  {
+    id: 'content-info',
+    label: '内容资讯',
+    icon: 'Document',
+  },
+  {
+    id: 'create',
+    label: '创作工具',
+    icon: 'EditPen',
+    children: [
+      { id: 'creation-angle', label: '创作角度' },
+      { id: 'creation-outline', label: '大纲生成' },
+      { id: 'creation-body', label: '正文生成' },
+      { id: 'creation-title', label: '标题生成' },
+    ],
+  },
+  {
+    id: 'rewrite',
+    label: '内容仿写',
+    icon: 'Switch',
+    children: [
+      { id: 'content-transform', label: '转写' },
+      { id: 'content-imitate', label: '仿写' },
+    ],
+  },
+  {
+    id: 'creation-history',
+    label: '创作历史',
+    icon: 'Clock',
+  },
+  {
+    id: 'profile',
+    label: '个人信息',
+    icon: 'User',
+  },
+]
+
+// 当前激活路由
+const activeRoute = computed(() => {
   const path = route.path
-  if (path === '/' || path.startsWith('/topic-clusters')) return 'topic-clusters'
-  if (path.startsWith('/topic-candidates')) return 'topic-candidates'
-  if (path.startsWith('/creation')) return 'creation'
-  if (path.startsWith('/custom-topic')) return 'custom-topic'
-  if (path.startsWith('/settings')) return 'settings'
-  if (path.startsWith('/standalone-title') || path.startsWith('/munger-generation') || path.startsWith('/munger-scorer')) return 'titles'
-  if (path.startsWith('/wechat-to-xhs')) return 'wechat-to-xhs'
-  return 'topic-clusters'
+  if (path === '/' || path.startsWith('/topic-clusters') || path === '/content-info') return 'content-info'
+  if (path.startsWith('/creation/angle')) return 'creation-angle'
+  if (path.startsWith('/creation/outline')) return 'creation-outline'
+  if (path.startsWith('/creation/body')) return 'creation-body'
+  if (path.startsWith('/creation/title')) return 'creation-title'
+  if (path.startsWith('/creation')) {
+    // 检查是否是旧的创作列表页面
+    if (path === '/creation' || path === '/creation/') return 'creation'
+    return 'creation'
+  }
+  if (path.startsWith('/content-transform')) return 'content-transform'
+  if (path.startsWith('/content-imitate')) return 'content-imitate'
+  if (path.startsWith('/history') || path.startsWith('/creation-history')) return 'creation-history'
+  if (path.startsWith('/settings') || path.startsWith('/profile')) return 'profile'
+  return 'content-info'
 })
 
-// 面包屑导航
-const breadcrumbs = computed(() => {
-  const matched = route.matched.filter(item => item.meta && item.meta.title)
-  return matched.map(item => ({
-    title: item.meta.title,
-    path: item.path
-  }))
+// 当前分组名
+const currentGroup = computed(() => {
+  const id = activeRoute.value
+  for (const item of navItems) {
+    if (item.id === id) return null
+    if (item.children?.some(c => c.id === id)) return item.label
+  }
+  return null
 })
 
-// 切换侧边栏
-const toggleSidebar = () => {
-  isCollapsed.value = !isCollapsed.value
+// 当前标签
+const currentLabel = computed(() => {
+  const id = activeRoute.value
+  for (const item of navItems) {
+    if (item.id === id) return item.label
+    if (item.children) {
+      const child = item.children.find(c => c.id === id)
+      if (child) return child.label
+    }
+  }
+  return ''
+})
+
+// 是否有子项激活
+const isChildActive = (item) => {
+  return item.children?.some(c => c.id === activeRoute.value)
 }
 
-// 菜单选择处理
-const handleMenuSelect = (index) => {
-  const menuRoutes = {
-    'topic-clusters': '/topic-clusters',
-    'topic-candidates': '/topic-candidates',
-    'creation': '/creation',
-    'custom-topic': '/custom-topic',
-    'settings': '/settings',
-    'standalone-title': '/standalone-title',
-    'munger-generation': '/munger-generation',
-    'munger-scorer': '/munger-scorer',
-    'wechat-to-xhs': '/wechat-to-xhs',
-    'history': '/history',
-  }
-
-  if (index === 'titles') {
-    return // sub-menu header, do nothing
-  }
-
-  if (menuRoutes[index]) {
-    router.push(menuRoutes[index])
-  }
+// 切换分组
+const toggleGroup = (id) => {
+  openGroups[id] = !openGroups[id]
 }
 
-// 用户命令处理
-const handleUserCommand = (command) => {
-  switch (command) {
-    case 'settings':
-      router.push('/settings')
-      break
-    case 'logout':
-      userStore.logout()
-      router.push('/login')
-      break
-  }
+// 路由映射
+const routeMap = {
+  'content-info': '/content-info',
+  'creation-angle': '/creation/angle',
+  'creation-outline': '/creation/outline',
+  'creation-body': '/creation/body',
+  'creation-title': '/creation/title',
+  'content-transform': '/content-transform',
+  'content-imitate': '/content-imitate',
+  'creation-history': '/creation-history',
+  'profile': '/profile',
+  'creation': '/creation',
 }
 
-// 监听路由变化，更新面包屑
-watch(route, () => {
-  // 路由变化时的处理
-}, { immediate: true })
+// 导航
+const navigateTo = (id) => {
+  const path = routeMap[id]
+  if (path) {
+    router.push(path)
+    window.scrollTo({ top: 0 })
+  }
+}
 </script>
 
 <style scoped>
-.el-aside {
+.app-sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--paper);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  z-index: 30;
   overflow: hidden;
+  transition: width 0.3s cubic-bezier(.32,.72,0,1);
 }
 
-.el-menu {
-  border-right: none;
+.app-topbar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 60px;
+  background: rgba(250,249,245,.85);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  transition: left 0.3s cubic-bezier(.32,.72,0,1);
 }
 
-.el-menu-item {
-  height: 50px;
-  line-height: 50px;
+/* 导航项 */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--r-md);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: transparent;
+  transition: all 0.14s;
 }
 
-.el-menu-item.is-active {
-  background-color: var(--el-color-primary-light-9);
-  color: var(--el-color-primary);
+.nav-item:hover {
+  color: var(--ink);
+  background: var(--bone);
 }
 
-.el-header {
-  height: 64px;
-  line-height: 64px;
+.nav-item--active {
+  font-weight: 600;
+  color: var(--clay-deep);
+  background: var(--clay-tint);
+}
+
+.nav-item--group {
+  font-weight: 600;
+}
+
+.nav-item--indent {
+  padding: 9px 14px 9px 40px;
+  font-size: 13px;
+}
+
+.nav-chevron {
+  color: var(--ink-4);
+  transition: transform 0.18s;
+}
+
+.nav-chevron--open {
+  transform: rotate(90deg);
+}
+
+.nav-group-children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+/* 用户按钮 */
+.nav-user-btn {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: var(--r-md);
+  font-family: inherit;
+  transition: background 0.14s;
+}
+
+.nav-user-btn:hover {
+  background: var(--bone);
+}
+
+/* 折叠按钮 */
+.nav-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  transition: all 0.14s;
+}
+
+.nav-collapse-btn:hover {
+  background: var(--bone);
+  color: var(--ink);
+}
+
+.divider {
+  height: 1px;
+  background: var(--line);
+  border: 0;
 }
 </style>

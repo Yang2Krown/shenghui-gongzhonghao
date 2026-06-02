@@ -52,6 +52,219 @@ async def trigger_mining(
     return {"code": 200, "message": "挖掘完成", "data": result}
 
 
+@router.post("/mine-adhoc", response_model=dict)
+async def trigger_adhoc_mining(
+    body: dict = {},
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """从自由输入的信息源触发选题挖掘，写入数据库。
+
+    body 格式：
+    {
+        "sources": [
+            {"type": "text", "content": "文字内容..."},
+            {"type": "link", "content": "https://..."},
+            {"type": "file", "content": "文件内容（已解析的文本）..."}
+        ],
+        "preference": "可选的创作风格偏好"
+    }
+    """
+    sources = body.get("sources", [])
+    preference = body.get("preference", "")
+
+    if not sources:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="至少提供一个信息源",
+        )
+
+    # 合并所有信息源内容
+    combined_text_parts = []
+    for src in sources:
+        content = (src.get("content") or "").strip()
+        if content:
+            combined_text_parts.append(content)
+
+    if not combined_text_parts:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="信息源内容不能为空",
+        )
+
+    combined_text = "\n\n".join(combined_text_parts)
+
+    # 从合并文本中提取标题
+    lines = combined_text.strip().split("\n")
+    core_title = lines[0][:80] if lines else combined_text[:80]
+
+    # 1. 创建 InfoCluster 记录
+    cluster = InfoCluster(
+        core_title=core_title,
+        summary=combined_text[:500] if len(combined_text) > 500 else combined_text,
+        info_type="资讯型",
+        direction=None,
+        elements={},
+        freshness="today",
+        heat_score=5.0,
+        source_urls=[],
+        mined=False,
+    )
+    db.add(cluster)
+    await db.commit()
+    await db.refresh(cluster)
+
+    run_id = progress_store.create_run()
+
+    async def _run():
+        from app.db.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as bg_db:
+            try:
+                async def _progress_cb(event):
+                    await progress_store.push(run_id, event)
+
+                # 重新加载 cluster
+                bg_cluster = (await bg_db.execute(
+                    select(InfoCluster).where(InfoCluster.id == cluster.id)
+                )).scalar_one_or_none()
+                if not bg_cluster:
+                    raise RuntimeError(f"InfoCluster {cluster.id} 已不存在")
+
+                # 构造 InfoClusterInput
+                info_input = InfoClusterInput(
+                    cluster_id=bg_cluster.id,
+                    core_title=core_title,
+                    summary=bg_cluster.summary or "",
+                    info_type="资讯型",
+                    direction=None,
+                    elements={},
+                    freshness="today",
+                    heat_score=5.0,
+                    low_fan_hit=False,
+                    source_urls=[],
+                )
+
+                # Agent A: 衍生候选选题
+                await _progress_cb({
+                    "event": "step_start",
+                    "data": {"step": 1, "agent": "沈知远 · 选题衍生员", "action": "正在分析信息源，衍生候选选题...", "avatar": "/agents/agent-a.png"},
+                })
+                candidates_a = await derive_candidates(info_input)
+                await _progress_cb({
+                    "event": "step_done",
+                    "data": {"step": 1, "agent": "沈知远 · 选题衍生员"},
+                })
+
+                # Agent B: 评分
+                await _progress_cb({
+                    "event": "step_start",
+                    "data": {"step": 2, "agent": "白景明 · 选题评分员", "action": "正在评分评估候选选题...", "avatar": "/agents/agent-b.png"},
+                })
+                b_input = AgentBInput(
+                    cluster_id=bg_cluster.id,
+                    core_title=core_title,
+                    info_type="资讯型",
+                    freshness="today",
+                    candidates=candidates_a,
+                )
+                result_b = await score_candidates(b_input)
+                await _progress_cb({
+                    "event": "step_done",
+                    "data": {"step": 2, "agent": "白景明 · 选题评分员"},
+                })
+
+                # 写入数据库
+                total_candidates = 0
+                angles = []
+                for scored in result_b.candidates:
+                    tc = TopicCandidate(
+                        info_cluster_id=bg_cluster.id,
+                        title=scored.title,
+                        summary=scored.summary,
+                        direction=scored.direction,
+                        routine=scored.routine,
+                        dimension_combo=scored.dimension_combo,
+                        value_promise=scored.value_promise,
+                        angle_note=scored.angle_note,
+                        persona_divergence=scored.persona_divergence,
+                        persona_divergence_flag=scored.persona_divergence_flag,
+                        veto_passed=scored.veto_passed,
+                        veto_reasons=scored.veto_reasons,
+                        business_sensitive=scored.business_sensitive,
+                        weighted_score=scored.weighted_score,
+                        verdict=scored.verdict,
+                    )
+                    bg_db.add(tc)
+                    await bg_db.flush()
+
+                    for pr in scored.persona_reviews:
+                        bg_db.add(PersonaReview(
+                            candidate_id=tc.id,
+                            persona=pr.persona,
+                            score=pr.score,
+                            rationale=pr.rationale,
+                        ))
+                    bg_db.add(CandidateScore(
+                        candidate_id=tc.id,
+                        pain_point=scored.pain_point.score,
+                        value_density=scored.value_density.score,
+                        propagation=scored.propagation.score,
+                        differentiation=scored.differentiation.score,
+                        freshness=scored.freshness.score,
+                        audience_fit=scored.audience_fit.score,
+                        evidence={
+                            "pain_point": scored.pain_point.evidence,
+                            "value_density": scored.value_density.evidence,
+                            "propagation": scored.propagation.evidence,
+                            "differentiation": scored.differentiation.evidence,
+                            "freshness": scored.freshness.evidence,
+                            "audience_fit": scored.audience_fit.evidence,
+                        },
+                    ))
+
+                    angles.append({
+                        "id": tc.id,
+                        "title": scored.title,
+                        "summary": scored.summary,
+                        "direction": scored.direction,
+                        "routine": scored.routine,
+                        "value_promise": scored.value_promise,
+                        "angle_note": scored.angle_note,
+                        "weighted_score": scored.weighted_score,
+                        "verdict": scored.verdict,
+                        "veto_passed": scored.veto_passed,
+                        "persona_reviews": [
+                            {"persona": pr.persona, "score": pr.score, "rationale": pr.rationale}
+                            for pr in scored.persona_reviews
+                        ],
+                    })
+                    total_candidates += 1
+
+                # 标记 cluster 已挖掘
+                bg_cluster.mined = True
+                await bg_db.commit()
+
+                await progress_store.push(run_id, {
+                    "event": "result",
+                    "data": {
+                        "cluster_id": bg_cluster.id,
+                        "angles": angles,
+                        "total": total_candidates,
+                        "stats": result_b.stats,
+                    },
+                })
+            except Exception as e:
+                logger.exception("自由输入挖掘失败")
+                await progress_store.push(run_id, {
+                    "event": "error",
+                    "data": {"message": f"挖掘失败: {type(e).__name__}: {str(e)[:200]}"},
+                })
+
+    asyncio.create_task(_run())
+
+    return {"code": 200, "message": "挖掘任务已提交", "data": {"run_id": run_id, "cluster_id": cluster.id}}
+
+
 @router.get("/stream/{run_id}")
 async def stream_mining_progress(
     run_id: str,

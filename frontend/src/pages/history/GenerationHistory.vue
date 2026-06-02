@@ -3,8 +3,8 @@
     <!-- 页面标题和操作栏 -->
     <div class="flex justify-between items-center mb-6">
       <div>
-        <h1 class="text-h2 font-serif text-ink">生成记录</h1>
-        <p class="text-ink-3 mt-1">查看所有 AI 生成历史，点击可恢复到对应页面继续创作</p>
+        <h1 class="text-h2 font-serif text-ink">创作历史</h1>
+        <p class="text-ink-3 mt-1">你的所有生成记录，可随时查看与复用</p>
       </div>
       <el-button @click="fetchRecords" :loading="loading">
         <el-icon><Refresh /></el-icon>

@@ -1,0 +1,254 @@
+<template>
+  <div style="max-width: 860px; margin: 0 auto;">
+    <div class="tool-hero">
+      <div class="kicker">
+        <el-icon :size="14"><Switch /></el-icon>
+        内容仿写 · 转写
+      </div>
+      <h1 class="font-serif text-ink" style="font-size: 38px; line-height: 1.15; letter-spacing: -.01em;">
+        一篇内容，<span class="text-clay">换个平台</span>重新表达
+      </h1>
+      <p class="text-body text-ink-3" style="margin-top: 12px; max-width: 600px;">
+        把一篇内容从一个平台的语言风格，转写成另一个平台的风格与排版。在下方切换转换方向。
+      </p>
+    </div>
+
+    <!-- 转换方向 -->
+    <div class="card soft-panel" style="padding: 0; overflow: visible; margin-bottom: 16px;">
+      <div class="panel-head">
+        <div style="display: flex; align-items: center; gap: 11px;">
+          <div class="panel-icon" style="background: var(--clay-tint); color: var(--clay-deep);">
+            <el-icon :size="17"><Switch /></el-icon>
+          </div>
+          <div>
+            <div class="text-sm font-semibold text-ink">转换方向</div>
+            <div class="text-xs text-ink-4">选择源平台与目标平台</div>
+          </div>
+        </div>
+      </div>
+      <div style="padding: 22px;">
+        <div style="display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;">
+          <!-- 源平台 -->
+          <div style="flex: 1; min-width: 168px;">
+            <div class="text-xs text-ink-4 uppercase font-semibold" style="margin-bottom: 9px; letter-spacing: .08em;">从（源平台）</div>
+            <div class="platform-select" @click="showFromMenu = !showFromMenu">
+              <span class="platform-dot" :style="{ background: platforms[from].color }">{{ platforms[from].dot }}</span>
+              <span style="flex: 1; text-align: left; font-weight: 600;">{{ platforms[from].label }}</span>
+              <el-icon :size="16" class="text-ink-4"><ArrowRight /></el-icon>
+            </div>
+            <div v-if="showFromMenu" class="platform-menu slide-up">
+              <div @click="showFromMenu = false" style="position: fixed; inset: 0; z-index: 40;"></div>
+              <div style="position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 41; background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--sh-3); padding: 6px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                <button v-for="pid in sourcePlatforms" :key="pid"
+                  @click="pickFrom(pid)"
+                  :class="['platform-option', { 'platform-option--active': pid === from }]">
+                  <span class="platform-dot" :style="{ background: platforms[pid].color }">{{ platforms[pid].dot }}</span>
+                  <span style="flex: 1; text-align: left;">{{ platforms[pid].label }}</span>
+                  <el-icon v-if="pid === from" :size="15" class="text-clay"><Check /></el-icon>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 互换按钮 -->
+          <button @click="swapPlatforms" class="swap-btn"
+            @mouseenter="$event.target.style.borderColor = 'var(--clay)'; $event.target.style.background = 'var(--clay-tint)'"
+            @mouseleave="$event.target.style.borderColor = 'var(--line)'; $event.target.style.background = 'var(--paper)'">
+            <el-icon :size="18"><Switch /></el-icon>
+          </button>
+
+          <!-- 目标平台 -->
+          <div style="flex: 1; min-width: 168px;">
+            <div class="text-xs text-ink-4 uppercase font-semibold" style="margin-bottom: 9px; letter-spacing: .08em;">转换成（目标平台）</div>
+            <div class="platform-select" @click="showToMenu = !showToMenu">
+              <span class="platform-dot" :style="{ background: platforms[to].color }">{{ platforms[to].dot }}</span>
+              <span style="flex: 1; text-align: left; font-weight: 600;">{{ platforms[to].label }}</span>
+              <el-icon :size="16" class="text-ink-4"><ArrowRight /></el-icon>
+            </div>
+            <div v-if="showToMenu" class="platform-menu slide-up">
+              <div @click="showToMenu = false" style="position: fixed; inset: 0; z-index: 40;"></div>
+              <div style="position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 41; background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--sh-3); padding: 6px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                <button v-for="pid in targetPlatforms.filter(t => t !== from)" :key="pid"
+                  @click="pickTo(pid)"
+                  :class="['platform-option', { 'platform-option--active': pid === to }]">
+                  <span class="platform-dot" :style="{ background: platforms[pid].color }">{{ platforms[pid].dot }}</span>
+                  <span style="flex: 1; text-align: left;">{{ platforms[pid].label }}</span>
+                  <el-icon v-if="pid === to" :size="15" class="text-clay"><Check /></el-icon>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 方向回显 -->
+        <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line);">
+          <span class="badge badge-clay" style="font-size: 13px; padding: 5px 12px;">
+            <span class="platform-dot" :style="{ background: platforms[from].color, width: '16px', height: '16px', fontSize: '9px' }">{{ platforms[from].dot }}</span>
+            {{ platforms[from].label }}
+          </span>
+          <el-icon :size="18" class="text-clay"><ArrowRight /></el-icon>
+          <span class="badge badge-clay" style="font-size: 13px; padding: 5px 12px;">
+            <span class="platform-dot" :style="{ background: platforms[to].color, width: '16px', height: '16px', fontSize: '9px' }">{{ platforms[to].dot }}</span>
+            {{ platforms[to].label }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 原文输入 -->
+    <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 16px;">
+      <div class="panel-head">
+        <div style="display: flex; align-items: center; gap: 11px;">
+          <div class="panel-icon" style="background: var(--clay-tint); color: var(--clay-deep);">
+            <el-icon :size="17"><Document /></el-icon>
+          </div>
+          <div>
+            <div class="text-sm font-semibold text-ink">{{ platforms[from].label }}原文</div>
+            <div class="text-xs text-ink-4">粘贴链接或正文内容</div>
+          </div>
+        </div>
+      </div>
+      <div style="padding: 22px;">
+        <div class="seg" style="margin-bottom: 16px;">
+          <button @click="inputMode = 'link'" :class="['seg-btn', { 'seg-btn-active': inputMode === 'link' }]">链接</button>
+          <button @click="inputMode = 'text'" :class="['seg-btn', { 'seg-btn-active': inputMode === 'text' }]">文字</button>
+        </div>
+        <el-input v-if="inputMode === 'link'" v-model="inputValue"
+          :placeholder="`粘贴${platforms[from].label}原文链接`" />
+        <el-input v-else v-model="inputValue" type="textarea" :rows="7"
+          :placeholder="`粘贴${platforms[from].label}原文内容……`" />
+      </div>
+    </div>
+
+    <!-- 额外要求 -->
+    <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 16px;">
+      <div class="panel-head">
+        <div style="display: flex; align-items: center; gap: 11px;">
+          <div class="panel-icon" style="background: var(--pine-soft); color: var(--pine);">
+            <el-icon :size="17"><Edit /></el-icon>
+          </div>
+          <div>
+            <div class="text-sm font-semibold text-ink">额外要求 <span class="text-xs text-ink-4" style="font-weight: 400;">选填</span></div>
+            <div class="text-xs text-ink-4">补充转写时的额外要求</div>
+          </div>
+        </div>
+      </div>
+      <div style="padding: 22px;">
+        <div style="display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px;">
+          <button v-for="chip in rewriteChips" :key="chip" @click="toggleChip(chip)"
+            :class="['type-chip', { 'type-chip-active': preference.includes(chip) }]">
+            {{ chip }}
+          </button>
+        </div>
+        <el-input v-model="preference" type="textarea" :rows="3"
+          placeholder="例如：标题更有网感，正文分段短一些，结尾加一句互动引导……" />
+      </div>
+    </div>
+
+    <button class="cta-bar" :disabled="!canGenerate || generating" @click="handleGenerate">
+      <template v-if="generating">
+        <el-icon class="spin"><Loading /></el-icon> 正在转写…
+      </template>
+      <template v-else>转写为{{ platforms[to].label }}</template>
+    </button>
+
+    <div v-if="generating" style="margin-top: 24px;" class="fade-in">
+      <div style="text-align: center; padding: 56px 0;">
+        <el-icon :size="30" class="spin text-clay" style="margin: 0 auto;"><Loading /></el-icon>
+        <p class="text-sm text-ink-3" style="margin-top: 14px;">正在转写为{{ platforms[to].label }}风格…</p>
+      </div>
+    </div>
+
+    <div v-if="result && !generating" class="fade-in" style="margin-top: 32px;">
+      <RewriteResult :result="result" />
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Switch, Document, Edit, Loading, ArrowRight, Check } from '@element-plus/icons-vue'
+import RewriteResult from './RewriteResult.vue'
+
+const platforms = {
+  wechat: { id: 'wechat', label: '公众号', dot: '公', color: '#07C160' },
+  xhs: { id: 'xhs', label: '小红书', dot: '书', color: '#FF2442' },
+  douyin: { id: 'douyin', label: '抖音', dot: '抖', color: '#000000' },
+  zhihu: { id: 'zhihu', label: '知乎', dot: '知', color: '#0084FF' },
+}
+const sourcePlatforms = ['wechat', 'xhs', 'douyin', 'zhihu']
+const targetPlatforms = ['wechat', 'xhs']
+const rewriteChips = ['更口语', '更精简', '更有网感', '加 emoji', '去 AI 味', '保留原意']
+
+const from = ref('wechat')
+const to = ref('xhs')
+const showFromMenu = ref(false)
+const showToMenu = ref(false)
+const inputMode = ref('link')
+const inputValue = ref('')
+const preference = ref('')
+const generating = ref(false)
+const result = ref(null)
+
+const canGenerate = computed(() => inputValue.value.trim().length > 3)
+
+const pickFrom = (pid) => { from.value = pid; if (pid === to.value) to.value = targetPlatforms.find(t => t !== pid); showFromMenu.value = false }
+const pickTo = (pid) => { to.value = pid; if (pid === from.value) from.value = sourcePlatforms.find(s => s !== pid); showToMenu.value = false }
+const swapPlatforms = () => {
+  if (targetPlatforms.includes(from.value) && sourcePlatforms.includes(to.value)) {
+    const tmp = from.value; from.value = to.value; to.value = tmp
+  } else {
+    to.value = targetPlatforms.find(t => t !== from.value)
+  }
+}
+
+const toggleChip = (chip) => {
+  if (preference.value.includes(chip)) {
+    preference.value = preference.value.replace(new RegExp(chip + '[、，,]?'), '').trim()
+  } else {
+    preference.value = preference.value ? preference.value.replace(/[、，,]?\s*$/, '') + '、' + chip : chip
+  }
+}
+
+const handleGenerate = async () => {
+  generating.value = true
+  result.value = null
+  // TODO: 调用后端 API
+  await new Promise(r => setTimeout(r, 1600))
+  result.value = {
+    title: '别再被风口绑架了😮‍💨这4个动作我真的劝你立刻做',
+    body: `姐妹们，最近是不是也被各种"风口""趋势"刷到焦虑了🥹\n\n我蹲了一年多，跟你们说点大实话👇\n\n1️⃣ 信息源砍一半\n只留能给你"事实"的，删掉只会贩卖情绪的账号\n\n2️⃣ 目标拆到周\n别张口就是年度规划，先把这周能做的做完\n\n3️⃣ 问自己一句\n抛开所有声音，这件事对我到底意味着什么❓\n\n4️⃣ 不在浪尖做决定\n潮水还会再来，清醒的人从不慌\n\n真的，焦虑退散，行动起来✨`,
+    tags: ['认知觉醒', '自我成长', '搞钱思维', '反内耗', '干货分享'],
+  }
+  generating.value = false
+}
+</script>
+
+<style scoped>
+.tool-hero { position: relative; margin-bottom: 26px; }
+.tool-hero .kicker { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--clay-deep); background: var(--clay-tint); border: 1px solid var(--clay-soft); padding: 5px 12px; border-radius: var(--r-pill); margin-bottom: 14px; }
+.soft-panel { background: radial-gradient(120% 80% at 100% 0%, rgba(204,120,92,.06) 0%, transparent 55%), var(--paper); }
+.panel-head { display: flex; align-items: center; justify-content: space-between; padding: 17px 24px; border-bottom: 1px solid var(--line); }
+.panel-icon { width: 32px; height: 32px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.platform-select { width: 100%; display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: var(--r-md); border: 1.5px solid var(--line); background: var(--paper); cursor: pointer; font-family: inherit; font-size: 15px; transition: all .15s; }
+.platform-select:hover { border-color: var(--clay-soft); }
+.platform-dot { width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0; }
+.platform-option { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: none; background: transparent; cursor: pointer; border-radius: var(--r-sm); font-family: inherit; font-size: 14px; font-weight: 600; color: var(--ink-2); transition: background .12s; }
+.platform-option:hover { background: var(--bone); }
+.platform-option--active { background: var(--clay-tint); color: var(--clay-deep); }
+.swap-btn { width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line); background: var(--paper); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; color: var(--clay); box-shadow: var(--sh-1); transition: all .15s; }
+.seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--bone); border-radius: var(--r-pill); }
+.seg-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: none; background: transparent; color: var(--ink-3); font-family: inherit; font-size: 13px; font-weight: 600; border-radius: var(--r-pill); cursor: pointer; transition: all .18s; }
+.seg-btn:hover { color: var(--ink); }
+.seg-btn-active { background: var(--paper); color: var(--clay-deep); box-shadow: var(--sh-1); }
+.cta-bar { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; font-family: inherit; font-weight: 600; font-size: 16px; color: #fff; cursor: pointer; border: none; border-radius: var(--r-lg); padding: 16px 24px; background: linear-gradient(135deg, var(--clay) 0%, var(--clay-deep) 100%); box-shadow: 0 10px 28px rgba(204,120,92,.30); transition: all .2s; }
+.cta-bar:hover:not([disabled]) { transform: translateY(-2px); box-shadow: 0 16px 38px rgba(204,120,92,.38); }
+.cta-bar[disabled] { background: var(--bone); color: var(--ink-4); box-shadow: none; cursor: not-allowed; transform: none; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.fade-in { animation: fadeIn .28s cubic-bezier(.32,.72,0,1); }
+.slide-up { animation: slideUp .3s cubic-bezier(.32,.72,0,1) both; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+</style>

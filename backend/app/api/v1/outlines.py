@@ -188,6 +188,302 @@ async def trigger_outline_generation(
     }
 
 
+@router.post("/generate-adhoc", response_model=dict)
+async def trigger_adhoc_outline_generation(
+    body: dict = {},
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """从自由输入的信息源触发大纲生成，写入数据库。
+
+    body 格式：
+    {
+        "sources": [
+            {"type": "text", "content": "文字内容..."},
+            {"type": "link", "content": "https://..."},
+            {"type": "file", "content": "文件内容..."}
+        ],
+        "angle": "可选的创作角度",
+        "preference": "可选的创作风格偏好"
+    }
+    """
+    from app.services.outline_generation.schemas import (
+        OutlineInput, AgentBInput, AgentCInput, AgentDInput,
+    )
+    from app.services.outline_generation.agent_a_creator import create_outline_candidates
+    from app.services.outline_generation.agent_b_reviewer import review_outline
+    from app.services.outline_generation.agent_c_critic import criticize_outline
+    from app.services.outline_generation.agent_d_inspector import inspect_outline
+
+    sources = body.get("sources", [])
+    angle = body.get("angle", "")
+    preference = body.get("preference", "")
+
+    if not sources:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="至少提供一个信息源",
+        )
+
+    # 合并所有信息源内容
+    combined_text_parts = []
+    for src in sources:
+        content = (src.get("content") or "").strip()
+        if content:
+            combined_text_parts.append(content)
+
+    if not combined_text_parts:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="信息源内容不能为空",
+        )
+
+    combined_text = "\n\n".join(combined_text_parts)
+
+    # 从合并文本中提取标题
+    lines = combined_text.strip().split("\n")
+    title = lines[0][:80] if lines else combined_text[:80]
+
+    # 构建创作偏好说明
+    angle_note = angle or ""
+    if preference:
+        angle_note = f"{angle_note}\n\n【创作偏好】{preference}" if angle_note else f"【创作偏好】{preference}"
+
+    # 1. 先创建 TopicCandidate 记录
+    candidate = TopicCandidate(
+        title=title,
+        direction="资讯型",
+        angle_note=angle_note or combined_text[:200],
+        summary=combined_text[:500] if len(combined_text) > 500 else combined_text,
+        info_cluster_id=None,
+        verdict="selected",
+        veto_passed=True,
+    )
+    db.add(candidate)
+    await db.flush()  # 获取 candidate.id
+
+    # 2. 创建 Outline 记录
+    outline = Outline(
+        candidate_id=candidate.id,
+        title=title,
+        direction="资讯型",
+    )
+    db.add(outline)
+    await db.flush()  # 获取 outline.id
+
+    await db.commit()
+
+    run_id = progress_store.create_run()
+
+    # 记录到 generation tracker
+    await track_start(
+        user_id=current_user.id,
+        type="outline_generate",
+        run_id=run_id,
+        input_snapshot={"candidate_id": candidate.id, "sources_count": len(sources)},
+        display_title=f"大纲生成 · {title[:30]}",
+        candidate_id=candidate.id,
+        resume_context={
+            "route": "/creation/outline",
+            "query": {},
+        },
+    )
+
+    async def _run():
+        from app.db.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as bg_db:
+            try:
+                async def _progress_cb(event):
+                    await progress_store.push(run_id, event)
+
+                # 重新加载 candidate 和 outline
+                bg_candidate = (await bg_db.execute(
+                    select(TopicCandidate).where(TopicCandidate.id == candidate.id)
+                )).scalar_one_or_none()
+                bg_outline = (await bg_db.execute(
+                    select(Outline).where(Outline.id == outline.id)
+                )).scalar_one_or_none()
+
+                if not bg_candidate or not bg_outline:
+                    raise RuntimeError("候选或大纲记录不存在")
+
+                # 构建 OutlineInput
+                outline_input = OutlineInput(
+                    candidate_id=bg_candidate.id,
+                    title=title,
+                    direction="资讯型",
+                    routine=None,
+                    value_promise=None,
+                    angle_note=angle_note or combined_text[:200],
+                    info_cluster_id=None,
+                    core_title=title,
+                    summary=combined_text[:500] if len(combined_text) > 500 else combined_text,
+                    creation_guidance=None,
+                )
+
+                # Agent A: 生成 3 个候选大纲
+                await _progress_cb({
+                    "event": "step_start",
+                    "data": {"step": 1, "agent": "顾清和 · 大纲创作员", "action": "正在生成 3 个候选大纲...", "avatar": "/agents/outline-a.png"},
+                })
+                a_candidates = await create_outline_candidates(outline_input)
+
+                # 写入 OutlineCandidate
+                for cand in a_candidates:
+                    bg_db.add(OutlineCandidate(
+                        outline_id=bg_outline.id,
+                        candidate_number=cand.candidate_number,
+                        hook_type=cand.hook_type,
+                        skeleton_feature=cand.skeleton_feature,
+                        sections=[s.model_dump() for s in cand.sections],
+                        total_words=cand.total_words,
+                    ))
+                await bg_db.flush()
+
+                await _progress_cb({
+                    "event": "step_done",
+                    "data": {"step": 1, "agent": "顾清和 · 大纲创作员"},
+                })
+
+                # Agent B: 评审
+                await _progress_cb({
+                    "event": "step_start",
+                    "data": {"step": 2, "agent": "陆言之 · 大纲评审员", "action": "正在评审大纲，选择最优方案...", "avatar": "/agents/outline-b.png"},
+                })
+                b_input = AgentBInput(
+                    outline_id=bg_outline.id,
+                    title=title,
+                    direction="资讯型",
+                    candidates=a_candidates,
+                )
+                review_result = await review_outline(b_input)
+
+                bg_db.add(OutlineReview(
+                    outline_id=bg_outline.id,
+                    selected_candidate=review_result.selected_candidate,
+                    review_reason=review_result.review_reason,
+                    reviewed_sections=[s.model_dump() for s in review_result.sections],
+                ))
+                await bg_db.flush()
+
+                await _progress_cb({
+                    "event": "step_done",
+                    "data": {"step": 2, "agent": "陆言之 · 大纲评审员"},
+                })
+
+                # Agent C: 挑刺
+                await _progress_cb({
+                    "event": "step_start",
+                    "data": {"step": 3, "agent": "刁亦凡 · 大纲挑刺员", "action": "正在模拟读者挑刺，修订问题...", "avatar": "/agents/outline-c.png"},
+                })
+                c_input = AgentCInput(
+                    outline_id=bg_outline.id,
+                    title=title,
+                    sections=review_result.sections,
+                )
+                criticism_result = await criticize_outline(c_input)
+
+                bg_db.add(OutlineCriticism(
+                    outline_id=bg_outline.id,
+                    overall_feeling=criticism_result.overall_feeling,
+                    problem_sections=[p.model_dump() for p in criticism_result.problem_sections],
+                    revised_sections=[s.model_dump() for s in criticism_result.revised_sections],
+                ))
+                await bg_db.flush()
+
+                await _progress_cb({
+                    "event": "step_done",
+                    "data": {"step": 3, "agent": "刁亦凡 · 大纲挑刺员"},
+                })
+
+                # Agent D: 自检
+                await _progress_cb({
+                    "event": "step_start",
+                    "data": {"step": 4, "agent": "简行舟 · 大纲自检员", "action": "正在自检评分，输出最终大纲...", "avatar": "/agents/outline-d.png"},
+                })
+                d_input = AgentDInput(
+                    outline_id=bg_outline.id,
+                    title=title,
+                    sections=criticism_result.revised_sections,
+                )
+                inspection_result = await inspect_outline(d_input)
+
+                bg_db.add(OutlineInspection(
+                    outline_id=bg_outline.id,
+                    hook_score=inspection_result.hook_score.score,
+                    value_ladder_score=inspection_result.value_ladder_score.score,
+                    rhythm_score=inspection_result.rhythm_score.score,
+                    title_scan_score=inspection_result.title_scan_score.score,
+                    trigger_score=inspection_result.trigger_score.score,
+                    length_score=inspection_result.length_score.score,
+                    total_score=inspection_result.total_score,
+                    verdict=inspection_result.verdict,
+                    deduction_reasons=[d.model_dump() for d in inspection_result.deduction_reasons],
+                ))
+
+                # 更新 Outline 主表
+                bg_outline.sections = [s.model_dump() for s in criticism_result.revised_sections]
+                bg_outline.total_words = sum(s.word_count for s in criticism_result.revised_sections)
+                bg_outline.section_count = len(criticism_result.revised_sections)
+                bg_outline.inspection_score = {
+                    "hook": inspection_result.hook_score.model_dump(),
+                    "value_ladder": inspection_result.value_ladder_score.model_dump(),
+                    "rhythm": inspection_result.rhythm_score.model_dump(),
+                    "title_scan": inspection_result.title_scan_score.model_dump(),
+                    "trigger": inspection_result.trigger_score.model_dump(),
+                    "length": inspection_result.length_score.model_dump(),
+                }
+                bg_outline.total_score = inspection_result.total_score
+                bg_outline.passed = inspection_result.verdict
+                bg_outline.generation_process = {
+                    "attempts": 1,
+                    "selected_candidate": review_result.selected_candidate,
+                    "review_reason": review_result.review_reason,
+                    "criticism": criticism_result.overall_feeling,
+                    "problem_sections_count": len(criticism_result.problem_sections),
+                }
+
+                await bg_db.commit()
+
+                await _progress_cb({
+                    "event": "step_done",
+                    "data": {"step": 4, "agent": "简行舟 · 大纲自检员"},
+                })
+
+                # 推送结果
+                result_data = _outline_to_dict(bg_outline)
+                result_data["review"] = {
+                    "selected_candidate": review_result.selected_candidate,
+                    "review_reason": review_result.review_reason,
+                }
+                result_data["criticism"] = {
+                    "overall_feeling": criticism_result.overall_feeling,
+                    "problem_count": len(criticism_result.problem_sections),
+                }
+
+                await progress_store.push(run_id, {
+                    "event": "result",
+                    "data": result_data,
+                })
+                await track_complete(run_id, result_data, display_title=f"大纲生成 · {title[:30]}")
+
+            except Exception as e:
+                logger.exception("自由输入大纲生成失败")
+                await progress_store.push(run_id, {
+                    "event": "error",
+                    "data": {"message": f"大纲生成失败: {type(e).__name__}: {str(e)[:200]}"},
+                })
+                await track_fail(run_id, str(e))
+
+    asyncio.create_task(_run())
+
+    return {
+        "code": 200,
+        "message": "大纲生成任务已提交",
+        "data": {"run_id": run_id, "candidate_id": candidate.id, "outline_id": outline.id},
+    }
+
+
 @router.get("/stream/{run_id}")
 async def stream_outline_progress(
     run_id: str,

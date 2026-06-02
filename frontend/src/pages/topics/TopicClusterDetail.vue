@@ -17,7 +17,7 @@
       <!-- 双栏布局：左侧详情 + 右侧面板 -->
       <div class="detail-layout" :class="{ 'has-panel': showPanel }">
         <!-- 左栏：话题详情 -->
-        <div class="detail-main">
+        <div ref="mainRef" class="detail-main">
           <div class="detail-card">
             <div class="p-6">
               <!-- 标签行 -->
@@ -36,18 +36,18 @@
               <!-- 摘要 -->
               <p v-if="cluster.summary_zh || cluster.summary"
                  class="mt-4"
-                 style="color: #6B6862; font-size: 15px; line-height: 1.75;
+                 style="color: #4A4641; font-size: 16px; line-height: 1.8;
                         display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
                 {{ cluster.summary_zh || cluster.summary }}
               </p>
 
               <!-- 信息要素 -->
-              <div v-if="cluster.elements && Object.keys(cluster.elements).length > 0" class="mt-5">
-                <div class="flex items-center gap-2 mb-3">
+              <div v-if="cluster.elements && Object.keys(cluster.elements).length > 0" class="mt-14">
+                <div class="flex items-center gap-2 mb-2">
                   <span class="section-bar"></span>
-                  <h4 class="t-h4 c-ink">信息要素</h4>
+                  <h4 style="font-size: 13px; font-weight: 600; color: var(--ink-3);">信息要素</h4>
                 </div>
-                <div class="flex flex-wrap gap-2">
+                <div class="flex flex-wrap gap-1.5">
                   <span v-for="(val, key) in cluster.elements" :key="key" class="element-tag" v-show="val">
                     <span class="element-key">{{ key }}</span>
                     <span class="element-val">{{ val }}</span>
@@ -56,11 +56,10 @@
               </div>
 
               <!-- 原文来源 -->
-              <div v-if="cluster.raw_infos?.length > 0 || cluster.source_urls?.length > 0" class="mt-6 pt-5" style="border-top: 1px solid var(--line);">
-                <div class="flex items-center gap-2 mb-4">
+              <div v-if="cluster.raw_infos?.length > 0 || cluster.source_urls?.length > 0" class="mt-4 pt-4" style="border-top: 1px solid var(--line);">
+                <div class="flex items-center gap-2 mb-2">
                   <span class="section-bar"></span>
-                  <h4 class="t-h4 c-ink">原文来源</h4>
-                  <span class="t-xs c-ink4">{{ cluster.raw_infos?.length || cluster.source_urls?.length }} 篇</span>
+                  <h4 style="font-size: 12px; font-weight: 600; color: var(--ink-4);">原文来源</h4>
                 </div>
 
                 <!-- 完整原文卡片 -->
@@ -79,10 +78,8 @@
                         {{ formatRelativeTime(raw.published_at) }}
                       </span>
                     </div>
-                    <div class="source-title">{{ raw.title }}</div>
-                    <div v-if="raw.summary" class="source-summary">{{ raw.summary }}</div>
-                    <div class="source-footer">
-                      <span v-if="raw.author" class="source-author">{{ raw.author }}</span>
+                    <div class="source-title-row">
+                      <span class="source-title">{{ raw.title }}</span>
                       <span class="source-link">阅读原文 &rarr;</span>
                     </div>
                   </a>
@@ -106,18 +103,14 @@
               </div>
 
               <!-- 底部操作栏 -->
-              <div class="flex justify-between items-center mt-5 pt-4" style="border-top: 1px solid var(--line);">
-                <span class="t-xs c-ink4">
-                  主要来源 · {{ cluster.source_count || cluster.source_urls?.length || 0 }} 篇原文
-                </span>
+              <div class="flex justify-end items-center mt-3 pt-3" style="border-top: 1px solid var(--line);">
                 <!-- 已挖掘：显示"选题角度"；未挖掘：显示"用它创作" -->
                 <button
                   v-if="isMined"
-                  class="btn-creative"
+                  class="btn-creative" style="font-family: 'Source Han Serif SC', 'Songti SC', Georgia, serif;"
                   @click="showMinedCandidates"
                   :disabled="showPanel"
                 >
-                  <span class="btn-creative-icon">✨</span>
                   选题角度
                 </button>
                 <button
@@ -135,16 +128,12 @@
         </div>
 
         <!-- 右栏：面板（挖掘中 / 已挖掘的选题角度） -->
-        <div v-if="showPanel" class="detail-panel">
+        <div v-if="showPanel" ref="panelRef" class="detail-panel" :style="{ height: panelHeight }">
           <div class="panel-inner">
             <!-- Panel Header -->
             <div class="panel-header">
               <div>
-                <div class="flex items-center gap-2">
-                  <span class="panel-icon">✨</span>
-                  <h3 class="t-h4 c-ink">{{ panelTitle }}</h3>
-                </div>
-                <p class="t-xs c-ink3 mt-1">{{ panelSubtitle }}</p>
+                <h3 class="t-h4 c-ink" style="font-family: 'Source Han Serif SC', 'Songti SC', Georgia, serif;">{{ panelTitle }}</h3>
               </div>
               <button class="panel-close" @click="closePanel">&times;</button>
             </div>
@@ -163,7 +152,7 @@
               <!-- 已挖掘：展示选题角度列表 -->
               <div v-else-if="panelCandidates.length > 0" class="fade-in">
                 <div class="flex items-center justify-between mb-3">
-                  <span class="t-sm c-ink3" style="font-weight: 600;">推荐选题 · {{ panelCandidates.length }} 个</span>
+                  <span class="t-sm c-ink3" style="font-family: 'Source Han Serif SC', 'Songti SC', Georgia, serif; font-weight: 600;">推荐选题 · {{ panelCandidates.length }} 个</span>
                 </div>
 
                 <div v-for="(candidate, i) in panelCandidates" :key="candidate.id" class="angle-card slide-up" :style="{ animationDelay: `${i * 50}ms` }">
@@ -211,7 +200,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
@@ -239,6 +228,46 @@ const isMined = computed(() => {
 
 // 面板状态
 const showPanel = ref(false)
+const mainRef = ref(null)
+const panelRef = ref(null)
+const panelHeight = ref('auto')
+let resizeObserver = null
+
+// 同步右侧面板高度 = 左侧内容高度
+const syncPanelHeight = () => {
+  if (mainRef.value) {
+    panelHeight.value = mainRef.value.offsetHeight + 'px'
+  }
+}
+
+watch(showPanel, (val) => {
+  if (val) {
+    nextTick(() => {
+      syncPanelHeight()
+      // 再等一帧确保布局完成
+      requestAnimationFrame(() => {
+        syncPanelHeight()
+        // 用 ResizeObserver 持续监听左侧高度变化
+        if (mainRef.value && !resizeObserver) {
+          resizeObserver = new ResizeObserver(() => syncPanelHeight())
+          resizeObserver.observe(mainRef.value)
+        }
+      })
+    })
+  } else {
+    if (resizeObserver) {
+      resizeObserver.disconnect()
+      resizeObserver = null
+    }
+  }
+})
+
+onUnmounted(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+})
 const panelMode = ref('mining') // 'mining' | 'candidates'
 const miningRunning = ref(false)
 const miningStepText = ref('')
@@ -285,6 +314,7 @@ const startMining = async () => {
       miningRunning.value = false
       loadCluster().then(() => {
         panelMode.value = 'candidates'
+        nextTick(syncPanelHeight)
       })
       stopWatch()
     }
@@ -451,11 +481,13 @@ const startCreation = (candidate) => {
   width: 460px;
   flex-shrink: 0;
   position: relative;
+  overflow: hidden;
 }
 
 .panel-inner {
   display: flex;
   flex-direction: column;
+  height: 100%;
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -497,7 +529,6 @@ const startCreation = (candidate) => {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
-  max-height: 600px;
 }
 
 .loading-state {
@@ -690,22 +721,22 @@ const startCreation = (candidate) => {
 .element-tag {
   display: inline-flex;
   align-items: baseline;
-  gap: 5px;
-  padding: 6px 13px;
-  background: var(--clay-tint);
-  border: 1px solid var(--clay-soft);
+  gap: 4px;
+  padding: 4px 10px;
+  background: #F3EDE7;
+  border: 1px solid #D5CCC4;
   border-radius: 999px;
 }
 
 .element-key {
-  font-size: 12px;
-  color: var(--clay-deep);
+  font-size: 10px;
+  color: #9C8B7A;
   font-weight: 600;
 }
 
 .element-val {
-  font-size: 13px;
-  color: var(--ink-2);
+  font-size: 11px;
+  color: var(--ink-3);
   font-weight: 600;
 }
 
@@ -714,8 +745,8 @@ const startCreation = (candidate) => {
   display: block;
   background: var(--paper);
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 12px 14px;
+  border-radius: 8px;
+  padding: 10px 12px;
   text-decoration: none;
   transition: all 0.18s;
 }
@@ -728,37 +759,45 @@ const startCreation = (candidate) => {
 .source-card-header {
   display: flex;
   align-items: center;
-  gap: 8;
+  justify-content: space-between;
   margin-bottom: 4px;
 }
 
 .source-platform {
   display: inline-block;
-  padding: 2px 8px;
+  padding: 1px 6px;
   border-radius: 999px;
-  background: var(--clay-tint);
-  color: var(--clay-deep);
-  font-size: 11px;
+  background: #F3EDE7;
+  color: #9C8B7A;
+  font-size: 10px;
   font-weight: 500;
-  border: 1px solid var(--clay-soft);
+  border: 1px solid #D5CCC4;
 }
 
 .source-time {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--ink-4);
 }
 
 .source-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  color: var(--ink);
+  color: var(--ink-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.source-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .source-summary {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--ink-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -770,7 +809,7 @@ const startCreation = (candidate) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 6px;
+  margin-top: 4px;
   font-size: 12px;
 }
 
@@ -780,7 +819,9 @@ const startCreation = (candidate) => {
 
 .source-link {
   color: var(--clay-deep);
+  font-size: 11px;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 /* Source Item (legacy) */

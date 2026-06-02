@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>前端重构清单 · 公众号创作台</title>
+  <style>
+    :root {
+      --clay: #CC785C;
+      --clay-deep: #A85A40;
+      --clay-soft: #E9B79E;
+      --clay-tint: #F5E2D5;
+      --pine: #3F5C52;
+      --pine-soft: #C9D4CD;
+      --sand: #C49B5C;
+      --sand-soft: #ECDCBF;
+      --paper: #FAF9F5;
+      --ivory: #F5F1EB;
+      --bone: #EFEAE0;
+      --line: #E4DDCE;
+      --ink: #1F1F1E;
+      --ink-2: #3A3935;
+      --ink-3: #6B6862;
+      --ink-4: #9A968D;
+      --leaf: #5C8A5C;
+      --crimson: #B85450;
+      --r-sm: 6px;
+      --r-md: 10px;
+      --r-lg: 16px;
+      --r-pill: 999px;
+      --sh-1: 0 1px 2px rgba(31,31,30,.04), 0 0 0 1px rgba(31,31,30,.04);
+      --sh-2: 0 4px 12px rgba(31,31,30,.06), 0 0 0 1px rgba(31,31,30,.04);
+      --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      --serif: "Source Han Serif SC", "Songti SC", Georgia, serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--sans);
+      background: var(--ivory);
+      color: var(--ink);
+      line-height: 1.7;
+      padding: 40px 20px 80px;
+    }
+
+    .container { max-width: 800px; margin: 0 auto; }
+
+    /* Header */
+    .header {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      box-shadow: var(--sh-1);
+      padding: 32px;
+      margin-bottom: 32px;
+    }
+    .header h1 {
+      font-family: var(--serif);
+      font-size: 28px;
+      font-weight: 500;
+      color: var(--ink);
+      margin-bottom: 8px;
+    }
+    .header p {
+      color: var(--ink-3);
+      font-size: 14px;
+    }
+
+    /* Progress bar */
+    .progress-wrap {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      box-shadow: var(--sh-1);
+      padding: 20px 24px;
+      margin-bottom: 32px;
+      position: sticky;
+      top: 20px;
+      z-index: 10;
+    }
+    .progress-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .progress-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink-2);
+    }
+    .progress-count {
+      font-size: 13px;
+      color: var(--ink-4);
+    }
+    .progress-count b { color: var(--clay-deep); }
+    .progress-bar {
+      height: 8px;
+      background: var(--bone);
+      border-radius: var(--r-pill);
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--clay), var(--clay-deep));
+      border-radius: var(--r-pill);
+      transition: width 0.4s cubic-bezier(.32,.72,0,1);
+    }
+
+    /* Section */
+    .section {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      box-shadow: var(--sh-1);
+      margin-bottom: 24px;
+      overflow: hidden;
+    }
+    .section-header {
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .section-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 16px;
+    }
+    .section-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .section-badge {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: var(--r-pill);
+      background: var(--clay-tint);
+      color: var(--clay-deep);
+      border: 1px solid var(--clay-soft);
+    }
+    .section-body { padding: 8px 24px 16px; }
+
+    /* Check item */
+    .check-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--bone);
+      transition: opacity 0.2s;
+    }
+    .check-item:last-child { border-bottom: none; }
+    .check-item.done { opacity: 0.55; }
+    .check-item.done .check-label { text-decoration: line-through; color: var(--ink-4); }
+
+    .check-box {
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
+      border: 2px solid var(--line);
+      flex-shrink: 0;
+      margin-top: 2px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.18s;
+      background: var(--paper);
+    }
+    .check-box:hover { border-color: var(--clay-soft); }
+    .check-box.checked {
+      background: var(--clay);
+      border-color: var(--clay);
+    }
+    .check-box.checked::after {
+      content: '';
+      width: 10px;
+      height: 6px;
+      border-left: 2px solid #fff;
+      border-bottom: 2px solid #fff;
+      transform: rotate(-45deg) translateY(-1px);
+    }
+
+    .check-content { flex: 1; min-width: 0; }
+    .check-label {
+      font-size: 14px;
+      color: var(--ink-2);
+      font-weight: 500;
+      line-height: 1.5;
+    }
+    .check-detail {
+      font-size: 12px;
+      color: var(--ink-4);
+      margin-top: 2px;
+    }
+    .check-detail code {
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 11px;
+      background: var(--bone);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--clay-deep);
+    }
+
+    /* Tag */
+    .tag {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: var(--r-pill);
+      margin-left: 6px;
+      vertical-align: middle;
+      letter-spacing: 0.03em;
+    }
+    .tag-done { background: rgba(92,138,92,.12); color: var(--leaf); }
+    .tag-mock { background: var(--sand-soft); color: #8a6d33; }
+    .tag-api { background: var(--pine-soft); color: var(--pine); }
+
+    /* Sub group */
+    .sub-group {
+      margin-left: 32px;
+      padding-left: 12px;
+      border-left: 2px solid var(--bone);
+    }
+
+    /* Reset button */
+    .reset-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink-4);
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: var(--r-sm);
+      padding: 6px 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .reset-btn:hover { background: var(--bone); color: var(--ink); border-color: var(--clay-soft); }
+
+    @media (max-width: 640px) {
+      body { padding: 20px 12px 60px; }
+      .header, .section { padding: 16px; }
+      .section-body { padding: 8px 16px 12px; }
+      .sub-group { margin-left: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>前端重构清单</h1>
+      <p>公众号创作台 · UI 重构后的待办事项，逐项打勾确认</p>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-top">
+        <span class="progress-label">整体进度</span>
+        <span class="progress-count"><b id="doneCount">0</b> / <span id="totalCount">0</span> 项已完成</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width: 0%;"></div>
+      </div>
+    </div>
+
+    <!-- Section 1: Already done -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: var(--clay-tint); color: var(--clay-deep);">&#10003;</div>
+        <span class="section-title">已完成的前端修改</span>
+        <span class="section-badge">8 项</span>
+      </div>
+      <div class="section-body">
+        <label class="check-item" data-key="s1-1">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">侧边栏导航重构 (AppLayout.vue) <span class="tag tag-done">已完成</span></div>
+            <div class="check-detail">按设计稿重写导航结构：内容资讯 / 创作工具(4项) / 内容仿写(2项) / 创作历史 / 个人信息</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s1-2">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">"话题库" 重命名为 "内容资讯" <span class="tag tag-done">已完成</span></div>
+            <div class="check-detail">TopicClusterList.vue 标题 + 错误提示文案已更新</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s1-3">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">"生成记录" 重命名为 "创作历史" <span class="tag tag-done">已完成</span></div>
+            <div class="check-detail">GenerationHistory.vue 标题 + 描述已更新</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s1-4">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">新增 创作角度 页 <span class="tag tag-done">已完成</span></div>
+            <div class="check-detail"><code>/creation/angle</code> → pages/tools/CreationAngle.vue · 多信息源 + 创作偏好 + 角度结果</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s1-5">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">新增 大纲生成 页 <span class="tag tag-done">已完成</span></div>
+            <div class="check-detail"><code>/creation/outline</code> → pages/tools/CreationOutline.vue · 从角度页接收参数</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s1-6">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">新增 正文生成 页 <span class="tag tag-done">已完成</span></div>
+            <div class="check-detail"><code>/creation/body</code> → pages/tools/CreationBody.vue · 大纲输入 → 正文输出</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s1-7">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">新增 标题生成 页 <span class="tag tag-done">已完成</span></div>
+            <div class="check-detail"><code>/creation/title</code> → pages/tools/CreationTitle.vue · 支持文字/链接/文档三种输入</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s1-8">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">新增 转写 + 仿写 页 <span class="tag tag-done">已完成</span></div>
+            <div class="check-detail"><code>/content-transform</code> <code>/content-imitate</code> → pages/rewrite/ · 平台切换 + 额外要求</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s1-9">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">新增 PipelineStepper 共享组件 <span class="tag tag-done">已完成</span></div>
+            <div class="check-detail">创作流程进度条：角度(4步) → 大纲(3步) → 正文(2步) → 标题(1步)</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s1-10">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">路由重构 + 旧路由兼容 <span class="tag tag-done">已完成</span></div>
+            <div class="check-detail">新增路由 8 条，旧路由重定向 /topics /history /settings，保留兼容</div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Section 2: API - Creation Tools -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: var(--pine-soft); color: var(--pine);">API</div>
+        <span class="section-title">创作工具 · 接入真实 API</span>
+        <span class="section-badge">4 项</span>
+      </div>
+      <div class="section-body">
+        <label class="check-item" data-key="s2-1">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">创作角度 API 对接 <span class="tag tag-mock">当前模拟</span></div>
+            <div class="check-detail"><code>POST /api/v1/outlines/inspect-angle</code><br/>请求：信息源列表 + 创作偏好 · 返回：角度列表 (tag, title, desc, heat)</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s2-2">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">大纲生成 API 对接 <span class="tag tag-mock">当前模拟</span></div>
+            <div class="check-detail"><code>POST /api/v1/outlines/generate</code><br/>请求：信息源列表 + 创作偏好 · 返回：大纲标题 + 章节列表</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s2-3">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">正文生成 API 对接 <span class="tag tag-mock">当前模拟</span></div>
+            <div class="check-detail"><code>POST /api/v1/ai/generate</code><br/>请求：大纲内容 + 创作偏好 · 返回：正文文本</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s2-4">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">标题生成 API 对接 <span class="tag tag-mock">当前模拟</span></div>
+            <div class="check-detail"><code>POST /api/v1/ai/generate</code><br/>请求：正文(文字/链接/文档) + 创作偏好 · 返回：标题列表 (title, score, tags)</div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Section 3: API - Rewrite -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: var(--sand-soft); color: #8a6d33;">API</div>
+        <span class="section-title">内容仿写 · 接入真实 API</span>
+        <span class="section-badge">2 项</span>
+      </div>
+      <div class="section-body">
+        <label class="check-item" data-key="s3-1">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">转写 API 对接 <span class="tag tag-mock">当前模拟</span></div>
+            <div class="check-detail"><code>POST /api/v1/ai/transform</code><br/>请求：源平台 + 目标平台 + 原文 + 额外要求 · 返回：标题、正文、标签</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s3-2">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">仿写 API 对接 <span class="tag tag-mock">当前模拟</span></div>
+            <div class="check-detail"><code>POST /api/v1/ai/imitate</code><br/>请求：参考内容(链接/文字) + 额外要求 · 返回：标题、正文</div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Section 4: Shared features -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: var(--clay-tint); color: var(--clay-deep);">+</div>
+        <span class="section-title">共享功能待完善</span>
+        <span class="section-badge">4 项</span>
+      </div>
+      <div class="section-body">
+        <label class="check-item" data-key="s4-1">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">PDF / 文件上传后端处理</div>
+            <div class="check-detail">前端已支持选择文件，需要后端接收、存储、解析文件内容</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s4-2">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">多信息源存储与管理</div>
+            <div class="check-detail">创作角度和大纲生成页面支持多信息源（文字/PDF/链接），需要后端支持</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s4-3">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">创作流程状态恢复</div>
+            <div class="check-detail">页面间参数传递已通过 query 实现，但需要后端支持保存/恢复创作状态</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s4-4">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">新页面生成结果保存到创作历史</div>
+            <div class="check-detail">6 个新页面的生成结果需要写入创作历史记录</div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Section 5: UI Polish -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: var(--bone); color: var(--ink-3);">UI</div>
+        <span class="section-title">视觉 / 交互微调</span>
+        <span class="section-badge">可选</span>
+      </div>
+      <div class="section-body">
+        <label class="check-item" data-key="s5-1">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">窄屏响应式适配</div>
+            <div class="check-detail">创作角度结果卡片双列布局在窄屏下是否需要堆叠为单列</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s5-2">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">内容资讯详情页的「用它创作」抽屉</div>
+            <div class="check-detail">设计稿中有右侧并排角度面板，当前版本未实现（保持原有跳转逻辑）</div>
+          </div>
+        </label>
+        <label class="check-item" data-key="s5-3">
+          <div class="check-box"></div>
+          <div class="check-content">
+            <div class="check-label">个人信息页头像上传功能验证</div>
+            <div class="check-detail">确认 ProfileSettings 的头像上传与保存在新路由下正常工作</div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Reset -->
+    <div style="text-align: center; margin-top: 32px;">
+      <button class="reset-btn" onclick="resetAll()">&#8634; 重置所有勾选</button>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'gzh-frontend-checklist';
+
+    function loadState() {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+      catch { return {}; }
+    }
+    function saveState(state) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function updateProgress() {
+      const items = document.querySelectorAll('.check-item');
+      const total = items.length;
+      let done = 0;
+      items.forEach(item => {
+        if (item.classList.contains('done')) done++;
+      });
+      document.getElementById('totalCount').textContent = total;
+      document.getElementById('doneCount').textContent = done;
+      document.getElementById('progressFill').style.width =
+        total > 0 ? (done / total * 100) + '%' : '0%';
+    }
+
+    function init() {
+      const state = loadState();
+      document.querySelectorAll('.check-item').forEach(item => {
+        const key = item.dataset.key;
+        const box = item.querySelector('.check-box');
+        if (state[key]) {
+          box.classList.add('checked');
+          item.classList.add('done');
+        }
+        box.addEventListener('click', () => {
+          box.classList.toggle('checked');
+          item.classList.toggle('done');
+          const s = loadState();
+          s[key] = box.classList.contains('checked');
+          saveState(s);
+          updateProgress();
+        });
+      });
+      updateProgress();
+    }
+
+    function resetAll() {
+      if (!confirm('确定要重置所有勾选吗？')) return;
+      localStorage.removeItem(STORAGE_KEY);
+      document.querySelectorAll('.check-box').forEach(b => b.classList.remove('checked'));
+      document.querySelectorAll('.check-item').forEach(i => i.classList.remove('done'));
+      updateProgress();
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -3,8 +3,8 @@
     <!-- 页面标题 -->
     <div class="mb-6" style="display: flex; justify-content: space-between; align-items: flex-start;">
       <div>
-        <h1 class="font-serif text-ink" style="font-size: 30px; font-weight: 500; line-height: 1.2;">话题库</h1>
-        <p class="mt-1" style="color: #6B6862; font-size: 14px;">信息聚合后的原始话题，点击可查看衍生的候选选题</p>
+        <h1 class="font-serif text-ink" style="font-size: 30px; font-weight: 500; line-height: 1.2;">内容资讯</h1>
+        <p class="mt-1" style="color: #6B6862; font-size: 14px;">聚合各平台的热点资讯，点击任意一条查看详情与原文来源</p>
       </div>
       <el-button :icon="Refresh" :loading="refreshing" @click="manualRefresh">手动抓取</el-button>
     </div>
@@ -415,7 +415,7 @@ const loadClusters = async (restoreScroll = false) => {
     pagination.total = res.data.total
     pagination.page = 1
   } catch (error) {
-    ElMessage.error('加载话题库失败')
+    ElMessage.error('加载内容资讯失败')
     console.error(error)
   } finally {
     loading.value = false
