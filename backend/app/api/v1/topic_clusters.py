@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.core.security import get_current_user
+from app.core.background import spawn
 from app.db.session import get_db
 from app.models.user import User
 from app.models.info_cluster import InfoCluster
@@ -92,7 +93,7 @@ async def manual_refresh(
         }
 
     _refresh_running = True
-    asyncio.create_task(_do_refresh())
+    spawn(_do_refresh())
 
     return {
         "code": 200,

@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from fastapi import Depends
 from app.core.progress import progress_store
+from app.core.background import spawn
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.title_munger import (
@@ -112,7 +113,7 @@ async def munger_title_generate(
         resume_context={"route": "/munger-generation", "query": {}},
     )
 
-    asyncio.create_task(
+    spawn(
         _run_munger_generate_background(request.content, run_id)
     )
 
@@ -147,7 +148,7 @@ async def munger_title_score(
         resume_context={"route": "/munger-scorer", "query": {}},
     )
 
-    asyncio.create_task(
+    spawn(
         _run_munger_score_background(request.title, request.summary, run_id)
     )
 

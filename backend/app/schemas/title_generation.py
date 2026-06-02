@@ -19,10 +19,15 @@ class TopicInfo(BaseModel):
     
     @validator('direction')
     def validate_direction(cls, v):
-        """验证内容方向"""
-        valid_directions = ['实践型', '解决问题型', '教程型', '观点型', '整活型', '资讯型']
-        if v not in valid_directions:
-            raise ValueError(f'内容方向必须是以下之一: {", ".join(valid_directions)}')
+        """验证内容方向（支持组合，如"实践型+观点型"）"""
+        valid_directions = {'实践型', '解决问题型', '教程型', '观点型', '整活型', '资讯型'}
+        # 支持组合方向（+、/、, 分隔），只要其中每个方向合法即可
+        parts = [p.strip() for p in v.replace('/', '+').replace(',', '+').split('+') if p.strip()]
+        if not parts:
+            raise ValueError(f'内容方向不能为空')
+        bad = [p for p in parts if p not in valid_directions]
+        if bad:
+            raise ValueError(f'内容方向包含无效值: {", ".join(bad)}。允许值: {", ".join(valid_directions)}')
         return v
 
 

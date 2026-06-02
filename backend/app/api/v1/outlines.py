@@ -16,6 +16,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.core.security import get_current_user
 from app.core.progress import progress_store
+from app.core.background import spawn
 from app.db.session import get_db
 from app.models.user import User
 from app.models.outline import (
@@ -103,7 +104,7 @@ async def trigger_angle_inspection(
                 })
                 await track_fail(run_id, str(e))
 
-    asyncio.create_task(_run())
+    spawn(_run())
 
     return {
         "code": 200,
@@ -179,7 +180,7 @@ async def trigger_outline_generation(
                 })
                 await track_fail(run_id, str(e))
 
-    asyncio.create_task(_run())
+    spawn(_run())
 
     return {
         "code": 200,
@@ -475,7 +476,7 @@ async def trigger_adhoc_outline_generation(
                 })
                 await track_fail(run_id, str(e))
 
-    asyncio.create_task(_run())
+    spawn(_run())
 
     return {
         "code": 200,
@@ -897,7 +898,7 @@ async def reevaluate_outline(
                 })
                 await track_fail(run_id, str(e))
 
-    asyncio.create_task(_run())
+    spawn(_run())
 
     return {
         "code": 200,

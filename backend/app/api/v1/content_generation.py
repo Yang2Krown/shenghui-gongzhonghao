@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
 from app.core.progress import progress_store
+from app.core.background import spawn
 from app.db.session import get_db
 from app.models.user import User
 from app.services.generation_tracker import track_start, track_complete, track_fail
@@ -268,7 +269,7 @@ async def generate_content_async(
                 })
                 await track_fail(run_id, str(e))
 
-    asyncio.create_task(_run())
+    spawn(_run())
 
     return {
         "code": 200,
@@ -505,7 +506,7 @@ async def generate_content_adhoc(
                 })
                 await track_fail(run_id, str(e))
 
-    asyncio.create_task(_run())
+    spawn(_run())
 
     return {
         "code": 200,
@@ -845,7 +846,7 @@ async def reevaluate_content(
             })
             await track_fail(run_id, str(e))
 
-    asyncio.create_task(_run())
+    spawn(_run())
 
     return {
         "code": 200,

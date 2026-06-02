@@ -16,6 +16,7 @@ from sqlalchemy.orm import joinedload
 
 from app.core.security import get_current_user
 from app.core.progress import progress_store
+from app.core.background import spawn
 from app.db.session import get_db
 from app.models.user import User
 from app.models.topic_candidate import TopicCandidate, PersonaReview, CandidateScore
@@ -260,9 +261,24 @@ async def trigger_adhoc_mining(
                     "data": {"message": f"挖掘失败: {type(e).__name__}: {str(e)[:200]}"},
                 })
 
-    asyncio.create_task(_run())
+    spawn(_run())
 
     return {"code": 200, "message": "挖掘任务已提交", "data": {"run_id": run_id, "cluster_id": cluster.id}}
+
+
+@router.get("/progress/{run_id}", response_model=dict)
+async def get_mining_progress(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """轮询式进度查询（绕开 SSE，避免反向代理缓冲流式响应）。
+
+    前端每隔 1-2 秒查一次，返回当前步骤 / Agent / 是否完成 / 结果。
+    """
+    snap = progress_store.snapshot(run_id)
+    if snap is None:
+        return {"code": 404, "message": "run 不存在或已过期", "data": {"exists": False}}
+    return {"code": 200, "message": "ok", "data": snap}
 
 
 @router.get("/stream/{run_id}")
@@ -295,7 +311,8 @@ async def stream_mining_progress(
 
 
 async def _mine_one(db: AsyncSession, cluster_id: int) -> dict:
-    """挖单个指定簇。返回 run_id，前端通过 SSE 获取实时进度。"""
+    """挖单个指定簇。返回 run_id，前端通过轮询获取实时进度。"""
+    logger.info(f"[mine] 开始挖掘 cluster_id={cluster_id}")
     cluster = (await db.execute(
         select(InfoCluster).where(InfoCluster.id == cluster_id)
     )).scalar_one_or_none()
@@ -351,7 +368,7 @@ async def _mine_one(db: AsyncSession, cluster_id: int) -> dict:
                     "data": {"message": f"挖掘失败: {type(e).__name__}: {str(e)[:200]}"},
                 })
 
-    asyncio.create_task(_run())
+    spawn(_run())
 
     return {"code": 200, "message": "挖掘任务已提交", "data": {"run_id": run_id}}
 

@@ -107,23 +107,22 @@
 
               <!-- 底部操作栏 -->
               <div class="flex justify-end items-center mt-3 pt-3" style="border-top: 1px solid var(--line);">
-                <!-- 已挖掘：显示"选题角度"；未挖掘：显示"用它创作" -->
+                <!-- 已挖掘：显示"查看选题"；未挖掘：显示"挖掘选题" -->
                 <button
                   v-if="isMined"
                   class="btn-creative" style="font-family: 'Source Han Serif SC', 'Songti SC', Georgia, serif;"
                   @click="showMinedCandidates"
                   :disabled="showPanel"
                 >
-                  选题角度
+                  查看选题
                 </button>
                 <button
                   v-else
-                  class="btn-creative"
+                  class="btn-creative" style="font-family: 'Source Han Serif SC', 'Songti SC', Georgia, serif;"
                   @click="startMining"
                   :disabled="miningRunning"
                 >
-                  <span class="btn-creative-icon">✨</span>
-                  {{ miningRunning ? '挖掘中...' : '用它创作' }}
+                  {{ miningRunning ? '挖掘中...' : '挖掘选题' }}
                 </button>
               </div>
             </div>
@@ -147,21 +146,19 @@
               <div v-if="miningRunning" class="mining-progress">
                 <!-- 当前 Agent 头像 -->
                 <div class="mining-avatar">
-                  <img v-if="currentMiningStep?.avatar" :src="currentMiningStep.avatar" :alt="currentMiningStep.agent" />
-                  <el-icon v-else class="is-loading" :size="28" style="color: var(--clay);"><Loading /></el-icon>
+                  <img :src="miningCurrentStep?.avatar || '/agents/agent-a.png'" :alt="miningCurrentStep?.agent" />
                 </div>
 
                 <!-- Agent 名称 + 当前动作 -->
-                <div v-if="currentMiningStep" class="mining-agent-name">{{ currentMiningStep.agent }}</div>
-                <div v-if="currentMiningStep?.action" class="mining-action">{{ currentMiningStep.action }}</div>
+                <div class="mining-agent-name">{{ miningCurrentStep?.agent || '沈知远 · 选题衍生员' }}</div>
+                <div class="mining-action">{{ miningCurrentStep?.action || '正在分析信息源，衍生候选选题…' }}</div>
 
                 <!-- 进度条 -->
                 <div class="mining-bar">
-                  <div class="mining-bar-fill" :style="{ width: miningPercent + '%' }"></div>
+                  <div class="mining-bar-fill" :class="{ 'no-step-transition': miningProgress.noStepTransition.value }" :style="{ width: miningPercent + '%' }"></div>
                 </div>
                 <div class="mining-bar-meta">
-                  <span v-if="miningStepCount">第 {{ miningStepNo }} / {{ miningStepCount }} 步</span>
-                  <span v-else>准备中…</span>
+                  <span>第 {{ miningStepNo }} / {{ Math.max(miningProgress.steps.value.length, 2) }} 步</span>
                   <span>{{ miningPercent }}%</span>
                 </div>
 
@@ -372,24 +369,35 @@ onUnmounted(() => {
 })
 const panelMode = ref('mining') // 'mining' | 'candidates'
 const miningRunning = ref(false)
-const miningStepText = ref('')
 
-// Agent 进度（SSE）
+// Agent 进度（轮询，绕开 SSE 避免反代缓冲）
 const miningProgress = useAgentProgress()
+const MINING_TOTAL_STEPS = 2        // 挖掘固定 2 个 Agent
 
-// 进度展示用的派生值（顶层 computed 在模板里自动解包）
-const currentMiningStep = computed(() => {
+const miningStepNo = computed(() => {
+  const idx = miningProgress.currentStepIndex.value
+  return Math.min(Math.max(idx + 1, 1), MINING_TOTAL_STEPS)
+})
+const miningPercent = computed(() => Math.round(miningProgress.stepPercent.value))
+
+// 当前显示的 Agent（从 composable 的 steps 取，和大纲/正文/标题用法一致）
+const miningCurrentStep = computed(() => {
   const i = miningProgress.currentStepIndex.value
   return i >= 0 ? miningProgress.steps.value[i] : null
 })
-const miningStepCount = computed(() => miningProgress.steps.value.length)
-const miningStepNo = computed(() =>
-  Math.min(miningProgress.currentStepIndex.value + 1, miningStepCount.value || 1)
-)
-// 单条进度条按"当前步进度"展示，配合"第 N / M 步"标签，避免步骤数边发现边变导致的回跳
-const miningPercent = computed(() => Math.round(miningProgress.stepPercent.value))
 
-// 面板标题
+// 监听 composable 完成：isRunning 变 false 且有 result 时触发成功回调
+// 需要同时 watch result 和 isRunning，因为 _finishStep 先设 result 再延迟设 isRunning=false
+watch(
+  [() => miningProgress.result.value, () => miningProgress.isRunning.value],
+  ([r, running]) => {
+    if (r && !running) {
+      onMiningSuccess(r)
+    }
+  }
+)
+
+// 面板标题// 面板标题
 const panelTitle = computed(() => {
   if (panelMode.value === 'mining') return '挖掘选题中'
   return '选题角度'
@@ -501,51 +509,76 @@ const showMinedCandidates = () => {
   syncCandidates()
 }
 
+// ── 轮询挖掘进度（绕开 SSE）──────────────────────
+let pollTimer = null
+const POLL_INTERVAL = 1500
+
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+const onMiningSuccess = (result) => {
+  ElMessage.success(`挖掘完成，生成 ${result?.total_candidates ?? '?'} 个候选`)
+  miningRunning.value = false
+  // 标记该话题已挖掘，返回列表页时定点刷新标签
+  try { sessionStorage.setItem('topic-mined-id', String(cluster.value?.id || route.params.id)) } catch {}
+  loadCluster().then(() => {
+    panelMode.value = 'candidates'
+    syncCandidates()
+    nextTick(syncPanelHeight)
+  })
+}
+
+const onMiningError = (msg) => {
+  ElMessage.error(`挖掘失败: ${msg}`)
+
+  miningRunning.value = false
+}
+
+const pollProgress = async (runId) => {
+  try {
+    const res = await get(`/topic-candidates/progress/${runId}`)
+    const d = res?.data || {}
+    if (d.exists === false) return  // run 还没建好或已清理，下次再试
+
+    // 把快照喂给 composable（它会处理 step 切换动画、100% 补满、归零等）
+    miningProgress.applySnapshot(d)
+
+    if (d.error) {
+      stopPolling()
+      onMiningError(d.error)
+      return
+    }
+    if (d.done && d.result) {
+      stopPolling()
+      // composable 的 _finishStep 已经在处理完成动画
+      // 等 isRunning=false 后由外部 watch(result) 触发 onMiningSuccess
+    }
+  } catch {
+    // 单次轮询失败忽略，下次继续
+  }
+}
+
 // 开始挖掘
 const startMining = async () => {
   if (!cluster.value?.id) return
+  // 先停掉旧轮询（防止多次点击导致泄漏）
+  stopPolling()
+  miningProgress.reset()
   miningRunning.value = true
   panelMode.value = 'mining'
   showPanel.value = true
 
-  // 监听 SSE 结果
-  const stopWatch = watch(() => miningProgress.result.value, (newResult) => {
-    if (newResult) {
-      ElMessage.success(`挖掘完成，生成 ${newResult.total_candidates ?? '?'} 个候选`)
-      miningRunning.value = false
-      // 标记该话题已挖掘，返回列表页时定点刷新标签
-      try { sessionStorage.setItem('topic-mined-id', String(cluster.value?.id || route.params.id)) } catch {}
-      loadCluster().then(() => {
-        panelMode.value = 'candidates'
-        syncCandidates()
-        nextTick(syncPanelHeight)
-      })
-      stopWatch()
-    }
-  })
-
-  // 监听 SSE 错误
-  const stopErrorWatch = watch(() => miningProgress.error.value, (newError) => {
-    if (newError) {
-      ElMessage.error(`挖掘失败: ${newError}`)
-      miningRunning.value = false
-      stopErrorWatch()
-    }
-  })
-
-  // 监听步骤更新
-  const stopStepsWatch = watch(() => miningProgress.steps.value, (steps) => {
-    const current = steps[miningProgress.currentStepIndex.value]
-    if (current) {
-      miningStepText.value = current.action
-    }
-  })
 
   try {
     const res = await post('/topic-candidates/mine', { cluster_id: cluster.value.id })
     const data = res?.data || {}
     if (data.skipped) {
       ElMessage.info('该话题已经挖掘过')
+    
       await loadCluster()
       miningRunning.value = false
       panelMode.value = 'candidates'
@@ -554,11 +587,14 @@ const startMining = async () => {
     }
     const runId = data.run_id
     if (runId) {
-      miningProgress.start(`/api/v1/topic-candidates/stream/${runId}`)
+      // 立即查一次，之后定时轮询
+      pollProgress(runId)
+      pollTimer = setInterval(() => pollProgress(runId), POLL_INTERVAL)
     }
   } catch (error) {
     const detail = error?.response?.data?.detail || error?.message || '挖掘失败'
     ElMessage.error(`挖掘失败: ${detail}`)
+  
     miningRunning.value = false
   }
 }
@@ -566,6 +602,8 @@ const startMining = async () => {
 const closePanel = () => {
   showPanel.value = false
   miningRunning.value = false
+  stopPolling()
+
 }
 
 const goOutline = () => {
@@ -588,7 +626,8 @@ onMounted(() => {
 onUnmounted(() => {
   document.body.style.overflow = ''
   window.removeEventListener('resize', calcLayoutHeight)
-  miningProgress.stop()
+  stopPolling()
+
 })
 
 const loadCluster = async () => {
@@ -831,8 +870,14 @@ const startCreation = (candidate) => {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, var(--clay-soft), var(--clay));
-  transition: width 0.3s ease;
+  transition: width 1s ease;
 }
+
+/* 归零瞬间禁用过渡，避免出现 100%→0% 的倒退动画 */
+.mining-bar-fill.no-transition {
+  transition: none;
+}
+
 
 .mining-bar-meta {
   width: 100%;
@@ -1318,6 +1363,11 @@ const startCreation = (candidate) => {
   display: flex;
   flex-direction: column;
 }
+
+/* 固定区块（标题/简介/信息要素等）不收缩，只让原文来源区收缩 + 内部滚动，
+   避免内容多时简介被挤压裁切成半行 */
+.card-body > * { flex-shrink: 0; }
+.card-body > .source-section { flex-shrink: 1; }
 
 /* Section Bar */
 .section-bar {

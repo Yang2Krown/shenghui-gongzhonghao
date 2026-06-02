@@ -15,6 +15,7 @@ import logging
 
 from app.db.session import get_db, AsyncSessionLocal
 from app.core.progress import progress_store
+from app.core.background import spawn
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.task import Task, TaskStatus
@@ -634,7 +635,7 @@ async def reevaluate_title_candidate(
                 })
                 await track_fail(run_id, str(e))
 
-    asyncio.create_task(_run())
+    spawn(_run())
 
     return {
         "code": 200,

@@ -179,8 +179,8 @@
                 <div class="section-title">{{ agent.issuesLabel || '问题点' }}</div>
                 <div class="issue-list">
                   <div v-for="(p, i) in agent.issues" :key="i" class="issue-item">
-                    <span v-if="p.location" class="issue-loc">{{ p.location }}</span>
-                    <span class="issue-text">{{ typeof p === 'string' ? p : (p.text || p.description || p.reason) }}</span>
+                    <div v-if="p.location" class="issue-loc">{{ p.location }}</div>
+                    <div class="issue-text">{{ typeof p === 'string' ? p : (p.text || p.description || p.reason) }}</div>
                   </div>
                 </div>
               </div>
@@ -449,6 +449,8 @@ function shortLabel(label) {
   height: 100%;
   border-radius: 50%;
   object-fit: cover;
+  /* 头像四周自带留白，放大裁掉一圈 */
+  transform: scale(1.12);
 }
 
 .dot-a {
@@ -856,9 +858,9 @@ function shortLabel(label) {
 
 .issue-item {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 6px 10px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
   background: var(--ivory);
   border-radius: var(--r-sm);
   font-size: 13px;
@@ -870,10 +872,9 @@ function shortLabel(label) {
   color: var(--ink-3);
   font-family: var(--font-mono, monospace);
   background: var(--bone);
-  padding: 1px 6px;
+  padding: 2px 8px;
   border-radius: var(--r-xs);
-  flex-shrink: 0;
-  white-space: nowrap;
+  width: fit-content;
 }
 
 .issue-text {

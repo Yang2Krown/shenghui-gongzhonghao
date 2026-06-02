@@ -11,6 +11,7 @@
         :is-active="i === currentStepIndex"
         :show-progress="i === currentStepIndex"
         :percent="i === currentStepIndex ? stepPercent : (i < currentStepIndex ? 100 : 0)"
+        :no-transition="progress.noStepTransition.value"
         class="mb-2"
       />
     </div>

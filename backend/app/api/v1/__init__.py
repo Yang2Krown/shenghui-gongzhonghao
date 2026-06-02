@@ -1,8 +1,14 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress
 
 api_router = APIRouter()
+
+# 通用进度轮询（绕开 SSE）
+api_router.include_router(
+    progress.router,
+    tags=["进度"]
+)
 
 # 认证路由
 api_router.include_router(

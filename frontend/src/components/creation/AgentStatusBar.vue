@@ -13,7 +13,7 @@
     </div>
     <div class="progress-wrapper" v-if="showProgress">
       <div class="progress-track">
-        <div class="progress-fill" :style="{ width: percent + '%' }"></div>
+        <div class="progress-fill" :class="{ 'no-step-transition': noTransition }" :style="{ width: percent + '%' }"></div>
       </div>
       <span class="progress-text">{{ percent.toFixed(2) }}%</span>
     </div>
@@ -28,6 +28,7 @@ const props = defineProps({
   action: { type: String, default: '' },
   isActive: { type: Boolean, default: false },
   percent: { type: Number, default: 0 },
+  noTransition: { type: Boolean, default: false },
   showProgress: { type: Boolean, default: false },
   avatar: { type: String, default: '' },
 })
@@ -130,6 +131,10 @@ const agentLabel = computed(() => {
   background: linear-gradient(90deg, var(--clay-deep), var(--clay));
   border-radius: 2px;
   transition: width 0.3s ease;
+}
+
+.progress-fill.no-step-transition {
+  transition: none !important;
 }
 
 .progress-text {
