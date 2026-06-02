@@ -73,11 +73,20 @@ async def generate_outline(
     if angle_report_data:
         angle_report = CreationAngleInspectionOutput(**angle_report_data)
     else:
-        angle_report = await inspect_creation_angle(
-            candidate,
-            llm_client=llm_client,
-            model=model,
-            progress_callback=progress_callback,
+        # 跳过角度体检，直接用空报告（角度体检已从前端工作流中移除）
+        angle_report = CreationAngleInspectionOutput(
+            candidate_id=candidate.id,
+            title=candidate.title,
+            source_audit={"verdict": "跳过", "source_domains": [], "intersection": "", "supplement_suggestions": []},
+            source_score=0,
+            angle_audit={"obvious_angles": [], "why_avoid": "", "current_angle": "", "verdict": "跳过", "unexpected": False, "reasonable": False, "core_tension": "", "alternative_angles": []},
+            angle_score=0,
+            rhythm_audit={"verdict": "跳过", "emotion_map": "", "rhythm_curve": "", "escalation_suggestion": "", "opening_hook": "", "ending_aftershock": "", "transition_hooks": []},
+            rhythm_score=0,
+            total_score=0,
+            overall_verdict="跳过",
+            creation_guidance={},
+            core_suggestion="角度体检已跳过",
         )
     
     # 构建输入

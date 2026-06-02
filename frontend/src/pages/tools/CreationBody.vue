@@ -22,13 +22,50 @@
           </div>
           <div>
             <div class="text-sm font-semibold text-ink">大纲</div>
-            <div class="text-xs text-ink-4">粘贴或输入文章大纲，每行一个要点</div>
+            <div class="text-xs text-ink-4">粘贴文字或上传文件</div>
           </div>
         </div>
       </div>
       <div style="padding: 22px;">
-        <el-input v-model="outline" type="textarea" :rows="8"
+        <div class="seg" style="margin-bottom: 16px;">
+          <button :class="['seg-btn', { 'seg-btn-active': !fileName }]" @click="removeFile()">
+            文字输入
+          </button>
+          <button :class="['seg-btn', { 'seg-btn-active': !!fileName }]" @click="$refs.bodyFileInput?.click()">
+            上传文件
+          </button>
+        </div>
+        <el-input v-if="!fileName" v-model="outline" type="textarea" :rows="8"
           placeholder="粘贴或输入文章大纲，每行一个要点……" />
+        <div v-else>
+          <div v-if="fileUploading" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+            <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
+            <span class="text-sm text-ink-3">正在提取文件内容…</span>
+          </div>
+          <div v-else style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
+                <el-icon class="text-clay"><Document /></el-icon> {{ fileName }}
+                <span v-if="fileText" class="text-xs text-ink-4">· {{ fileText.length }} 字</span>
+              </span>
+              <button @click="removeFile()" class="btn-text text-sm">移除</button>
+            </div>
+            <div v-if="fileText" class="text-xs text-ink-4" style="margin-top: 8px; max-height: 60px; overflow: hidden; line-height: 1.5;">
+              {{ fileText.slice(0, 200) }}…
+            </div>
+          </div>
+        </div>
+        <div v-if="!fileName" class="dropzone" :class="{ 'dropzone-active': dragOver }"
+          @click="$refs.bodyFileInput?.click()"
+          @dragover.prevent="dragOver = true"
+          @dragleave="dragOver = false"
+          @drop="handleFileDrop"
+          style="margin-top: 12px;">
+          <el-icon :size="22" style="margin: 0 auto 6px;"><Upload /></el-icon>
+          <div class="text-sm font-medium">或拖拽上传 PDF / Word / TXT / MD</div>
+        </div>
+        <input ref="bodyFileInput" type="file" accept=".pdf,.docx,.txt,.md" style="display:none"
+          @change="handleFileUpload" />
       </div>
     </div>
 
@@ -146,11 +183,11 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Document, Edit, Loading, Refresh, CopyDocument, ArrowRight, Check } from '@element-plus/icons-vue'
+import { Document, Edit, Loading, Refresh, CopyDocument, ArrowRight, Check, Upload } from '@element-plus/icons-vue'
 import PipelineStepper from '@/components/creation/PipelineStepper.vue'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
-import api from '@/api/api'
+import api, { uploadFile } from '@/api/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -159,10 +196,73 @@ const progress = useAgentProgress()
 const styleChips = ['理性克制', '犀利观点', '亲切口语', '故事化', '干货清单', '反共识']
 
 const outline = ref(route.query.outline || '')
+const fileName = ref('')
+const fileText = ref('')
+const fileUploading = ref(false)
 const preference = ref('')
 const result = ref(null)
 
-const canGenerate = computed(() => outline.value.trim().length > 4 && !progress.isRunning.value)
+const canGenerate = computed(() => {
+  const hasContent = fileName.value ? !!fileText.value : outline.value.trim().length > 4
+  return hasContent && !progress.isRunning.value
+})
+
+const handleFileUpload = async (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  fileName.value = file.name
+  fileUploading.value = true
+  fileText.value = ''
+
+  try {
+    const res = await uploadFile(file)
+    const data = res.data || res
+    fileText.value = data.text || ''
+    if (!fileText.value) {
+      ElMessage.warning('文件内容提取为空，请检查文件')
+      fileName.value = ''
+    }
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '文件上传失败')
+    fileName.value = ''
+  } finally {
+    fileUploading.value = false
+  }
+}
+
+const removeFile = () => {
+  fileName.value = ''
+  fileText.value = ''
+}
+
+const dragOver = ref(false)
+
+const handleFileDrop = async (event) => {
+  event.preventDefault()
+  dragOver.value = false
+  const file = event.dataTransfer?.files?.[0]
+  if (!file) return
+
+  fileName.value = file.name
+  fileUploading.value = true
+  fileText.value = ''
+
+  try {
+    const res = await uploadFile(file)
+    const data = res.data || res
+    fileText.value = data.text || ''
+    if (!fileText.value) {
+      ElMessage.warning('文件内容提取为空，请检查文件')
+      fileName.value = ''
+    }
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '文件上传失败')
+    fileName.value = ''
+  } finally {
+    fileUploading.value = false
+  }
+}
 
 const toggleChip = (chip) => {
   if (preference.value.includes(chip)) {
@@ -182,10 +282,12 @@ const handleGenerate = async () => {
   result.value = null
   progress.stop()
 
+  const outlineContent = fileName.value ? fileText.value : outline.value
+
   try {
     const res = await api.post('/content-generation/generate-adhoc', {
-      outline_text: outline.value,
-      title: outline.value.split('\n')[0]?.slice(0, 80) || '未命名文章',
+      outline_text: outlineContent,
+      title: outlineContent.split('\n')[0]?.slice(0, 80) || '未命名文章',
       preference: preference.value,
     }, { timeout: 10000 })
 
@@ -221,9 +323,19 @@ onUnmounted(() => {
 .soft-panel { background: radial-gradient(120% 80% at 100% 0%, rgba(204,120,92,.06) 0%, transparent 55%), var(--paper); }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 17px 24px; border-bottom: 1px solid var(--line); }
 .panel-icon { width: 32px; height: 32px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--bone); border-radius: var(--r-pill); }
+.seg-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: none; background: transparent; color: var(--ink-3); font-family: inherit; font-size: 13px; font-weight: 600; border-radius: var(--r-pill); cursor: pointer; transition: all .18s; }
+.seg-btn:hover { color: var(--ink); }
+.seg-btn-active { background: var(--paper); color: var(--clay-deep); box-shadow: var(--sh-1); }
+.dropzone { border: 1px dashed var(--line); border-radius: var(--r-lg); background: var(--paper); padding: 22px; text-align: center; cursor: pointer; transition: all .15s; color: var(--ink-3); }
+.dropzone:hover { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
+.dropzone-active { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
 .cta-bar { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; font-family: inherit; font-weight: 600; font-size: 16px; color: #fff; cursor: pointer; border: none; border-radius: var(--r-lg); padding: 16px 24px; background: linear-gradient(135deg, var(--clay) 0%, var(--clay-deep) 100%); box-shadow: 0 10px 28px rgba(204,120,92,.30); transition: all .2s; }
 .cta-bar:hover:not([disabled]) { transform: translateY(-2px); box-shadow: 0 16px 38px rgba(204,120,92,.38); }
 .cta-bar[disabled] { background: var(--bone); color: var(--ink-4); box-shadow: none; cursor: not-allowed; transform: none; }
+.type-chip { display: inline-flex; align-items: center; gap: 4px; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 500; background: var(--paper); color: #6B6862; border: 1px solid var(--line); cursor: pointer; transition: all 0.15s; }
+.type-chip:hover { background: #F0EDE3; color: var(--ink); }
+.type-chip-active { background: var(--clay); color: #fff; border-color: var(--clay); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .fade-in { animation: fadeIn .28s cubic-bezier(.32,.72,0,1); }

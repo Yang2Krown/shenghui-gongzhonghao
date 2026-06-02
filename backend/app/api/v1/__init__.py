@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools
 
 api_router = APIRouter()
 
@@ -128,4 +128,11 @@ api_router.include_router(
     xhs_debug.router,
     prefix="/xhs-debug",
     tags=["小红书调试"]
+)
+
+# 创作工具路由
+api_router.include_router(
+    creation_tools.router,
+    prefix="/creation-tools",
+    tags=["创作工具"]
 )

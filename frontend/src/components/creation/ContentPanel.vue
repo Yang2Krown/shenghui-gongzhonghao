@@ -129,7 +129,7 @@
           重新评估
         </el-button>
         <el-button type="primary" @click="confirmContent">
-          确认正文
+          下一步
           <el-icon class="el-icon--right"><ArrowRight /></el-icon>
         </el-button>
       </div>
@@ -138,7 +138,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Edit, MagicStick, CircleCloseFilled, DocumentCopy, Document, Refresh, ArrowRight } from '@element-plus/icons-vue'
 import AgentStatusBar from './AgentStatusBar.vue'
@@ -152,6 +152,7 @@ const props = defineProps({
   outlineData: { type: Object, default: null },
   titleData: { type: Object, default: null },
   initialContent: { type: Object, default: null },
+  autoGenerate: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['complete', 'next-step', 'save-draft'])
@@ -201,6 +202,13 @@ watch(() => props.initialContent, (ic) => {
     status.value = 'completed'
   }
 }, { immediate: true })
+
+// 自动开始生成
+onMounted(() => {
+  if (props.autoGenerate && status.value === 'idle') {
+    generateContent()
+  }
+})
 
 onUnmounted(() => {
   progress.stop()

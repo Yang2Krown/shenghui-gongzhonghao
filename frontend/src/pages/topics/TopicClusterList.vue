@@ -376,6 +376,15 @@ onDeactivated(() => {
 })
 onActivated(() => {
   isActive.value = true
+  // 详情页挖掘完成后返回：定点把对应卡片标为"已挖掘"，避免整页重载丢失滚动/分页
+  try {
+    const minedId = sessionStorage.getItem('topic-mined-id')
+    if (minedId) {
+      const c = clusters.value.find(x => String(x.id) === minedId)
+      if (c) c.mined = true
+      sessionStorage.removeItem('topic-mined-id')
+    }
+  } catch {}
   const saved = parseInt(sessionStorage.getItem('topic-list-scroll') || '0', 10)
   if (saved > 0) {
     nextTick(() => window.scrollTo({ top: saved, behavior: 'instant' }))

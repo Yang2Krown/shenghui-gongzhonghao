@@ -89,4 +89,18 @@ export const put = (url, data = {}, config = {}) => api.put(url, data, config)
 export const patch = (url, data = {}, config = {}) => api.patch(url, data, config)
 export const del = (url, config = {}) => api.delete(url, config)
 
+/**
+ * 上传文件并提取文本内容
+ * @param {File} file - 要上传的文件
+ * @returns {Promise<{filename: string, text: string, char_count: number}>}
+ */
+export const uploadFile = (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post('/creation-tools/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  })
+}
+
 export default api

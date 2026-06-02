@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>创作工作流 · 数据传递图</title>
+  <style>
+    :root {
+      --clay: #CC785C;
+      --clay-deep: #A85A40;
+      --clay-soft: #E9B79E;
+      --clay-tint: #F5E2D5;
+      --pine: #3F5C52;
+      --pine-soft: #C9D4CD;
+      --sand: #C49B5C;
+      --sand-soft: #ECDCBF;
+      --paper: #FAF9F5;
+      --ivory: #F5F1EB;
+      --bone: #EFEAE0;
+      --line: #E4DDCE;
+      --ink: #1F1F1E;
+      --ink-2: #3A3935;
+      --ink-3: #6B6862;
+      --ink-4: #9A968D;
+      --leaf: #5C8A5C;
+      --crimson: #B85450;
+      --r-sm: 6px;
+      --r-md: 10px;
+      --r-lg: 16px;
+      --r-pill: 999px;
+      --sh-1: 0 1px 2px rgba(31,31,30,.04), 0 0 0 1px rgba(31,31,30,.04);
+      --sh-2: 0 4px 12px rgba(31,31,30,.06), 0 0 0 1px rgba(31,31,30,.04);
+      --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      --serif: "Source Han Serif SC", "Songti SC", Georgia, serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--sans); background: var(--ivory); color: var(--ink); line-height: 1.7; padding: 32px 20px 80px; }
+    .container { max-width: 960px; margin: 0 auto; }
+
+    .header { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--sh-1); padding: 28px 32px; margin-bottom: 32px; }
+    .header h1 { font-family: var(--serif); font-size: 24px; font-weight: 500; margin-bottom: 6px; }
+    .header p { color: var(--ink-3); font-size: 14px; }
+
+    /* Step cards */
+    .flow { display: flex; flex-direction: column; gap: 0; position: relative; }
+    .flow::before {
+      content: ''; position: absolute; left: 39px; top: 44px; bottom: 44px; width: 3px;
+      background: linear-gradient(180deg, var(--clay) 0%, var(--clay-soft) 50%, var(--line) 100%);
+      border-radius: 2px; z-index: 0;
+    }
+
+    .step-card {
+      background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-lg);
+      box-shadow: var(--sh-1); position: relative; z-index: 1; cursor: pointer;
+      transition: all 0.2s; margin-left: 64px;
+    }
+    .step-card:hover { box-shadow: var(--sh-2); border-color: var(--clay-soft); }
+    .step-card.active { border-color: var(--clay); box-shadow: 0 0 0 3px rgba(204,120,92,.12), var(--sh-2); }
+
+    .step-num {
+      position: absolute; left: -52px; top: 20px; width: 38px; height: 38px; border-radius: 50%;
+      background: var(--clay); color: #fff; display: flex; align-items: center; justify-content: center;
+      font-size: 15px; font-weight: 700; font-family: var(--serif); z-index: 2;
+      box-shadow: 0 2px 8px rgba(204,120,92,.25);
+    }
+
+    .step-header { padding: 18px 24px; display: flex; align-items: center; gap: 14px; }
+    .step-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+    .step-title-wrap { flex: 1; }
+    .step-title { font-size: 16px; font-weight: 600; }
+    .step-sub { font-size: 12px; color: var(--ink-4); margin-top: 2px; }
+    .step-toggle { font-size: 18px; color: var(--ink-4); transition: transform 0.2s; }
+    .step-card.active .step-toggle { transform: rotate(180deg); }
+
+    .step-body { padding: 0 24px 20px; display: none; }
+    .step-card.active .step-body { display: block; }
+
+    /* Data tags */
+    .data-section { margin-top: 14px; }
+    .data-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--ink-4); text-transform: uppercase; margin-bottom: 8px; }
+    .data-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .data-tag {
+      display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: var(--r-pill);
+      font-size: 12px; font-weight: 500; border: 1px solid var(--line); background: var(--bone);
+      color: var(--ink-2); cursor: default; transition: all 0.15s;
+    }
+    .data-tag:hover { border-color: var(--clay-soft); background: var(--clay-tint); }
+    .data-tag .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .dot-in { background: var(--pine); }
+    .dot-out { background: var(--clay); }
+    .dot-db { background: var(--sand); }
+
+    /* API box */
+    .api-box {
+      margin-top: 12px; padding: 12px 16px; background: var(--ivory); border: 1px solid var(--line);
+      border-radius: var(--r-md); font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+      color: var(--ink-2); line-height: 1.6;
+    }
+    .api-method { font-weight: 700; color: var(--pine); }
+    .api-path { color: var(--clay-deep); }
+
+    /* Arrow connector */
+    .arrow-connector {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      padding: 10px 0; margin-left: 64px; position: relative; z-index: 1;
+    }
+    .arrow-line { flex: 1; height: 1px; background: var(--line); }
+    .arrow-badge {
+      padding: 4px 14px; border-radius: var(--r-pill); font-size: 11px; font-weight: 600;
+      background: var(--clay-tint); color: var(--clay-deep); border: 1px solid var(--clay-soft);
+      white-space: nowrap;
+    }
+
+    /* DB section */
+    .db-card {
+      background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-lg);
+      box-shadow: var(--sh-1); padding: 20px 24px; margin-top: 16px;
+    }
+    .db-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .db-tables { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+    .db-table {
+      padding: 10px 14px; background: var(--ivory); border: 1px solid var(--line); border-radius: var(--r-sm);
+      font-size: 12px;
+    }
+    .db-table-name { font-weight: 600; color: var(--pine); font-family: "SF Mono", Menlo, monospace; margin-bottom: 4px; }
+    .db-table-desc { color: var(--ink-4); font-size: 11px; }
+
+    /* Legend */
+    .legend {
+      display: flex; gap: 20px; padding: 14px 20px; background: var(--paper); border: 1px solid var(--line);
+      border-radius: var(--r-lg); margin-bottom: 24px; flex-wrap: wrap;
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    @media (max-width: 640px) {
+      .flow::before { left: 29px; }
+      .step-card { margin-left: 48px; }
+      .step-num { left: -42px; width: 32px; height: 32px; font-size: 13px; }
+      .arrow-connector { margin-left: 48px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>创作工作流 · 数据传递图</h1>
+      <p>点击每个步骤卡片展开查看：输入数据、API 调用、输出数据、写入的数据库表</p>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background: var(--pine);"></div> 输入数据</div>
+      <div class="legend-item"><div class="legend-dot" style="background: var(--clay);"></div> 输出数据</div>
+      <div class="legend-item"><div class="legend-dot" style="background: var(--sand);"></div> 写入数据库</div>
+    </div>
+
+    <div class="flow">
+
+      <!-- Step 0: URL 入口 -->
+      <div class="step-card" onclick="toggle(this)">
+        <div class="step-num">0</div>
+        <div class="step-header">
+          <div class="step-icon" style="background: var(--bone); color: var(--ink-3);">🔗</div>
+          <div class="step-title-wrap">
+            <div class="step-title">URL 入口参数</div>
+            <div class="step-sub">从内容资讯点击"用它创作"跳转过来</div>
+          </div>
+          <div class="step-toggle">▾</div>
+        </div>
+        <div class="step-body">
+          <div class="api-box">
+            <span class="api-path">/creation/new?candidate_id=123&cluster_id=45&topic_title=xxx&topic_direction=资讯型</span>
+          </div>
+          <div class="data-section">
+            <div class="data-label">传递参数</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-in"></span>candidate_id — 选题候选 ID</span>
+              <span class="data-tag"><span class="dot dot-in"></span>cluster_id — 话题簇 ID</span>
+              <span class="data-tag"><span class="dot dot-in"></span>topic_title — 选题标题</span>
+              <span class="data-tag"><span class="dot dot-in"></span>topic_direction — 内容方向</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-connector">
+        <div class="arrow-line"></div>
+        <div class="arrow-badge">candidate_id 传入</div>
+        <div class="arrow-line"></div>
+      </div>
+
+      <!-- Step 1: 角度体检 -->
+      <div class="step-card" onclick="toggle(this)">
+        <div class="step-num">1</div>
+        <div class="step-header">
+          <div class="step-icon" style="background: var(--clay-tint); color: var(--clay-deep);">🔍</div>
+          <div class="step-title-wrap">
+            <div class="step-title">创作角度体检</div>
+            <div class="step-sub">三关审计：信息源 → 角度陌生化 → 节奏设计</div>
+          </div>
+          <div class="step-toggle">▾</div>
+        </div>
+        <div class="step-body">
+          <div class="data-section">
+            <div class="data-label">输入</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-in"></span>candidate_id</span>
+            </div>
+          </div>
+          <div class="api-box">
+            <span class="api-method">POST</span> <span class="api-path">/api/v1/outlines/inspect-angle</span><br/>
+            { "candidate_id": 123 }
+          </div>
+          <div class="data-section">
+            <div class="data-label">SSE 实时推送</div>
+            <div class="data-tags">
+              <span class="data-tag">step_start → 沈知衡 · 信息源审计员</span>
+              <span class="data-tag">step_done</span>
+              <span class="data-tag">step_start → 许见微 · 角度陌生化检验员</span>
+              <span class="data-tag">step_done</span>
+              <span class="data-tag">step_start → 林起伏 · 节奏设计师</span>
+              <span class="data-tag">step_done</span>
+            </div>
+          </div>
+          <div class="data-section">
+            <div class="data-label">输出 (angle_report)</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-out"></span>source_audit — 信息源审计结果</span>
+              <span class="data-tag"><span class="dot dot-out"></span>source_score — 信息源评分</span>
+              <span class="data-tag"><span class="dot dot-out"></span>angle_audit — 角度审计结果</span>
+              <span class="data-tag"><span class="dot dot-out"></span>angle_score — 角度评分</span>
+              <span class="data-tag"><span class="dot dot-out"></span>rhythm_audit — 节奏设计</span>
+              <span class="data-tag"><span class="dot dot-out"></span>rhythm_score — 节奏评分</span>
+              <span class="data-tag"><span class="dot dot-out"></span>total_score — 综合评分</span>
+              <span class="data-tag"><span class="dot dot-out"></span>overall_verdict — 判定结果</span>
+              <span class="data-tag"><span class="dot dot-out"></span>creation_guidance — 创作指导</span>
+            </div>
+          </div>
+          <div class="data-section">
+            <div class="data-label">写入数据库</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-db"></span>generation_records (type=angle_inspection)</span>
+            </div>
+          </div>
+          <div class="data-section">
+            <div class="data-label">传给下一步</div>
+            <div style="padding: 10px 14px; background: var(--clay-tint); border-radius: var(--r-sm); border-left: 3px solid var(--clay); font-size: 13px; color: var(--ink-2);">
+              angle_report → 作为参数传给大纲生成，指导大纲创作
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-connector">
+        <div class="arrow-line"></div>
+        <div class="arrow-badge">angle_report 传递</div>
+        <div class="arrow-line"></div>
+      </div>
+
+      <!-- Step 2: 大纲生成 -->
+      <div class="step-card" onclick="toggle(this)">
+        <div class="step-num">2</div>
+        <div class="step-header">
+          <div class="step-icon" style="background: var(--pine-soft); color: var(--pine);">📝</div>
+          <div class="step-title-wrap">
+            <div class="step-title">大纲生成</div>
+            <div class="step-sub">四 Agent：顾清和(创作) → 陆言之(评审) → 刁亦凡(挑刺) → 简行舟(自检)</div>
+          </div>
+          <div class="step-toggle">▾</div>
+        </div>
+        <div class="step-body">
+          <div class="data-section">
+            <div class="data-label">输入</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-in"></span>candidate_id</span>
+              <span class="data-tag"><span class="dot dot-in"></span>angle_report (从上一步)</span>
+            </div>
+          </div>
+          <div class="api-box">
+            <span class="api-method">POST</span> <span class="api-path">/api/v1/outlines/generate</span><br/>
+            { "candidate_id": 123, "angle_report": {...} }
+          </div>
+          <div class="data-section">
+            <div class="data-label">后端内部：从 DB 读取选题信息构建 OutlineInput</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-in"></span>candidate.title</span>
+              <span class="data-tag"><span class="dot dot-in"></span>candidate.direction</span>
+              <span class="data-tag"><span class="dot dot-in"></span>candidate.routine</span>
+              <span class="data-tag"><span class="dot dot-in"></span>candidate.value_promise</span>
+              <span class="data-tag"><span class="dot dot-in"></span>candidate.angle_note</span>
+              <span class="data-tag"><span class="dot dot-in"></span>creation_guidance (from angle_report)</span>
+            </div>
+          </div>
+          <div class="data-section">
+            <div class="data-label">输出 (outline_data)</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-out"></span>id — 大纲 ID</span>
+              <span class="data-tag"><span class="dot dot-out"></span>title — 大纲标题</span>
+              <span class="data-tag"><span class="dot dot-out"></span>direction — 内容方向</span>
+              <span class="data-tag"><span class="dot dot-out"></span>sections — 章节列表 [{section_number, title, core_points, word_count}]</span>
+              <span class="data-tag"><span class="dot dot-out"></span>total_words — 总字数</span>
+              <span class="data-tag"><span class="dot dot-out"></span>section_count — 章节数</span>
+              <span class="data-tag"><span class="dot dot-out"></span>inspection_score — 自检评分 {hook, value_ladder, rhythm, ...}</span>
+              <span class="data-tag"><span class="dot dot-out"></span>total_score — 综合分</span>
+              <span class="data-tag"><span class="dot dot-out"></span>passed — 是否通过</span>
+            </div>
+          </div>
+          <div class="data-section">
+            <div class="data-label">写入数据库</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-db"></span>outlines (主表)</span>
+              <span class="data-tag"><span class="dot dot-db"></span>outline_candidates (3个候选)</span>
+              <span class="data-tag"><span class="dot dot-db"></span>outline_reviews (评审结果)</span>
+              <span class="data-tag"><span class="dot dot-db"></span>outline_criticism (挑刺结果)</span>
+              <span class="data-tag"><span class="dot dot-db"></span>outline_inspections (自检评分)</span>
+            </div>
+          </div>
+          <div class="data-section">
+            <div class="data-label">传给下一步</div>
+            <div style="padding: 10px 14px; background: var(--pine-soft); border-radius: var(--r-sm); border-left: 3px solid var(--pine); font-size: 13px; color: var(--ink-2);">
+              outlineData (含 id, title, sections, direction) → 传给标题生成和正文生成<br/>
+              父组件存储为 <code>currentOutlineId</code> 和 <code>currentOutlineData</code>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-connector">
+        <div class="arrow-line"></div>
+        <div class="arrow-badge">outlineData 传递 (title + sections + direction)</div>
+        <div class="arrow-line"></div>
+      </div>
+
+      <!-- Step 3: 标题生成 -->
+      <div class="step-card" onclick="toggle(this)">
+        <div class="step-num">3</div>
+        <div class="step-header">
+          <div class="step-icon" style="background: var(--sand-soft); color: #8a6d33;">💡</div>
+          <div class="step-title-wrap">
+            <div class="step-title">标题生成</div>
+            <div class="step-sub">内容分析 → 甄意浓(创作) → 尚怀瑾(评审) → 于思齐(预测) → 丁既明(判定)</div>
+          </div>
+          <div class="step-toggle">▾</div>
+        </div>
+        <div class="step-body">
+          <div class="data-section">
+            <div class="data-label">输入</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-in"></span>candidate_id</span>
+              <span class="data-tag"><span class="dot dot-in"></span>outlineData (从上一步)</span>
+            </div>
+          </div>
+          <div class="api-box">
+            <span class="api-method">POST</span> <span class="api-path">/api/v1/title-generation/</span><br/>
+            {<br/>
+            &nbsp;&nbsp;"topic": { "title": "...", "direction": "...", "method": "...", "value_promise": "..." },<br/>
+            &nbsp;&nbsp;"outline": { "section_titles": [...], "key_points": [...], "spread_tags": [...] }<br/>
+            }
+          </div>
+          <div class="data-section">
+            <div class="data-label">从 outlineData 提取的字段</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-in"></span>outlineData.title → topic.title</span>
+              <span class="data-tag"><span class="dot dot-in"></span>outlineData.direction → topic.direction</span>
+              <span class="data-tag"><span class="dot dot-in"></span>outlineData.sections[].title → outline.section_titles</span>
+              <span class="data-tag"><span class="dot dot-in"></span>outlineData.sections[].core_points → outline.key_points</span>
+            </div>
+          </div>
+          <div class="data-section">
+            <div class="data-label">输出 (selectedTitle)</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-out"></span>title — 推荐标题文本</span>
+              <span class="data-tag"><span class="dot dot-out"></span>score / final_score — 综合评分</span>
+              <span class="data-tag"><span class="dot dot-out"></span>b_score — 评审分</span>
+              <span class="data-tag"><span class="dot dot-out"></span>c_click_willingness — 点击意愿</span>
+              <span class="data-tag"><span class="dot dot-out"></span>method — 标题方法</span>
+              <span class="data-tag"><span class="dot dot-out"></span>reason — 推荐理由</span>
+            </div>
+          </div>
+          <div class="data-section">
+            <div class="data-label">写入数据库</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-db"></span>tasks</span>
+              <span class="data-tag"><span class="dot dot-db"></span>title_generation_results</span>
+              <span class="data-tag"><span class="dot dot-db"></span>title_candidates (10-15个)</span>
+              <span class="data-tag"><span class="dot dot-db"></span>final_recommendations (Top 3)</span>
+            </div>
+          </div>
+          <div class="data-section">
+            <div class="data-label">传给下一步</div>
+            <div style="padding: 10px 14px; background: var(--sand-soft); border-radius: var(--r-sm); border-left: 3px solid var(--sand); font-size: 13px; color: var(--ink-2);">
+              selectedTitle → 父组件存储为 <code>selectedTitle</code>，传给正文生成
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-connector">
+        <div class="arrow-line"></div>
+        <div class="arrow-badge">candidate_id + outline_id → 从 DB 读取</div>
+        <div class="arrow-line"></div>
+      </div>
+
+      <!-- Step 4: 正文生成 -->
+      <div class="step-card" onclick="toggle(this)">
+        <div class="step-num">4</div>
+        <div class="step-header">
+          <div class="step-icon" style="background: rgba(92,138,92,.12); color: var(--leaf);">✍️</div>
+          <div class="step-title-wrap">
+            <div class="step-title">正文生成</div>
+            <div class="step-sub">温如言(撰写) → 居怀金(金句) → 景澄之(去AI味) → 钟可期(自检)</div>
+          </div>
+          <div class="step-toggle">▾</div>
+        </div>
+        <div class="step-body">
+          <div class="data-section">
+            <div class="data-label">输入</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-in"></span>candidate_id</span>
+              <span class="data-tag"><span class="dot dot-in"></span>outline_id (从 outlineData.id)</span>
+              <span class="data-tag"><span class="dot dot-in"></span>outlineData (props 传入，用于显示)</span>
+              <span class="data-tag"><span class="dot dot-in"></span>titleData (props 传入，用于显示)</span>
+            </div>
+          </div>
+          <div class="api-box">
+            <span class="api-method">POST</span> <span class="api-path">/api/v1/content-generation/generate</span><br/>
+            { "candidate_id": 123, "outline_id": 456 }
+          </div>
+          <div class="data-section">
+            <div class="data-label">后端从 DB 读取</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-in"></span>topic_candidates → title, direction, routine, value_promise</span>
+              <span class="data-tag"><span class="dot dot-in"></span>outlines → sections (title, core_points, word_count, spread_role, notes)</span>
+            </div>
+          </div>
+          <div class="data-section">
+            <div class="data-label">输出 (contentData)</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-out"></span>final_text — 完整正文</span>
+              <span class="data-tag"><span class="dot dot-out"></span>final_word_count — 字数</span>
+              <span class="data-tag"><span class="dot dot-out"></span>section_count — 章节数</span>
+              <span class="data-tag"><span class="dot dot-out"></span>gold_sentences — 金句列表</span>
+              <span class="data-tag"><span class="dot dot-out"></span>diagnosis — 8维度诊断 {total_score, dimensions}</span>
+              <span class="data-tag"><span class="dot dot-out"></span>rewrite_count — 去AI味改写处数</span>
+              <span class="data-tag"><span class="dot dot-out"></span>style_anchor — 风格锚点</span>
+              <span class="data-tag"><span class="dot dot-out"></span>rewrite_table — 改写对照表</span>
+            </div>
+          </div>
+          <div class="data-section">
+            <div class="data-label">写入数据库</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-db"></span>generation_records (type=content_generate)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-connector">
+        <div class="arrow-line"></div>
+        <div class="arrow-badge">全部数据 → 保存草稿</div>
+        <div class="arrow-line"></div>
+      </div>
+
+      <!-- Step 5: 保存 -->
+      <div class="step-card" onclick="toggle(this)">
+        <div class="step-num">5</div>
+        <div class="step-header">
+          <div class="step-icon" style="background: var(--bone); color: var(--ink-3);">💾</div>
+          <div class="step-title-wrap">
+            <div class="step-title">保存草稿</div>
+            <div class="step-sub">汇总所有步骤的数据，写入 content_creations 表</div>
+          </div>
+          <div class="step-toggle">▾</div>
+        </div>
+        <div class="step-body">
+          <div class="data-section">
+            <div class="data-label">保存字段</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-out"></span>title — 最终标题 (selectedTitle.title)</span>
+              <span class="data-tag"><span class="dot dot-out"></span>content — 正文 JSON (contentData)</span>
+              <span class="data-tag"><span class="dot dot-out"></span>summary — 摘要 (前120字)</span>
+              <span class="data-tag"><span class="dot dot-out"></span>word_count — 字数</span>
+              <span class="data-tag"><span class="dot dot-out"></span>candidate_id — 关联选题</span>
+              <span class="data-tag"><span class="dot dot-out"></span>outline_id — 关联大纲</span>
+              <span class="data-tag"><span class="dot dot-out"></span>各步骤 status (outline_status, title_status, content_status)</span>
+            </div>
+          </div>
+          <div class="data-section">
+            <div class="data-label">写入数据库</div>
+            <div class="data-tags">
+              <span class="data-tag"><span class="dot dot-db"></span>content_creations</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- DB summary -->
+    <div class="db-card">
+      <div class="db-title">🗄️ 涉及的数据库表</div>
+      <div class="db-tables">
+        <div class="db-table">
+          <div class="db-table-name">topic_candidates</div>
+          <div class="db-table-desc">选题候选（角度体检和大纲生成的入口）</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">outlines</div>
+          <div class="db-table-desc">大纲主表（标题生成和正文生成的入口）</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">outline_candidates</div>
+          <div class="db-table-desc">大纲候选（Agent A 生成的 3 个方案）</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">outline_reviews</div>
+          <div class="db-table-desc">大纲评审（Agent B 选出最优方案）</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">outline_criticism</div>
+          <div class="db-table-desc">大纲挑刺（Agent C 修订问题）</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">outline_inspections</div>
+          <div class="db-table-desc">大纲自检（Agent D 评分判定）</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">title_generation_results</div>
+          <div class="db-table-desc">标题生成结果元数据</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">title_candidates</div>
+          <div class="db-table-desc">标题候选（10-15个，含各 Agent 评分）</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">final_recommendations</div>
+          <div class="db-table-desc">最终推荐标题（Top 3）</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">generation_records</div>
+          <div class="db-table-desc">生成记录（角度体检 + 正文生成）</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">content_creations</div>
+          <div class="db-table-desc">我的创作（最终保存的草稿）</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Key insight -->
+    <div class="db-card" style="border-color: var(--clay-soft); margin-top: 16px;">
+      <div class="db-title" style="color: var(--clay-deep);">💡 关键机制</div>
+      <div style="font-size: 13px; color: var(--ink-2); line-height: 1.8;">
+        <p><strong>所有中间数据都通过父组件 <code>CreationEditor.vue</code> 的 ref 变量中转</strong>，不直接在子组件间传递。</p>
+        <p style="margin-top: 8px;">每个子组件通过 <code>emit('complete', data)</code> 把结果交给父组件，父组件存到 ref 里再通过 props 传给下一个子组件：</p>
+        <ul style="margin: 8px 0 0 20px;">
+          <li><code>currentOutlineData</code> — 大纲数据（大纲→标题、大纲→正文都用这个）</li>
+          <li><code>selectedTitle</code> — 选中的标题（标题→正文）</li>
+          <li><code>finalContent</code> — 最终正文（正文→保存草稿）</li>
+        </ul>
+        <p style="margin-top: 10px;">后端方面，<strong>大纲生成</strong>是唯一直接消费 <code>angle_report</code> 的步骤；<strong>标题生成</strong>和<strong>正文生成</strong>都是通过 <code>candidate_id</code> + <code>outline_id</code> 从数据库读取前面步骤产生的数据。</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function toggle(el) {
+      el.classList.toggle('active');
+    }
+    // 默认展开第一步
+    document.querySelector('.step-card').classList.add('active');
+  </script>
+</body>
+</html>

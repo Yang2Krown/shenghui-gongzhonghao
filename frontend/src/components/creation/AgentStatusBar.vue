@@ -56,8 +56,8 @@ const agentLabel = computed(() => {
 }
 
 .agent-avatar {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   background: var(--clay-tint);
   color: var(--clay-deep);
@@ -83,6 +83,8 @@ const agentLabel = computed(() => {
   height: 100%;
   border-radius: 50%;
   object-fit: cover;
+  /* 头像四周自带留白，放大裁掉一圈 */
+  transform: scale(1.12);
 }
 
 .agent-info {

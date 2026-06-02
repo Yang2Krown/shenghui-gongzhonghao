@@ -57,6 +57,7 @@ def _build_user_prompt(input_data: AgentBInput) -> str:
 ---
 候选ID: {c.candidate_id}
 标题: {c.title}
+简介: {c.summary or '（无）'}
 方向: {c.direction}
 套路: {c.routine}
 维度组合: {', '.join(c.dimension_combo) if c.dimension_combo else '无'}
@@ -271,6 +272,18 @@ async def score_candidates(
 
         scored.weighted_score = round(_calculate_weighted_score(scored), 2)
         scored.verdict = _determine_verdict(scored)
+
+    # 透传 Agent A 的描述性字段：Agent B 评分时不输出 summary/angle_note，
+    # 这里按 candidate_id 把 Agent A 的原文合并回来，避免简介丢失。
+    a_map = {c.candidate_id: c for c in input_data.candidates}
+    for scored in output.candidates:
+        src = a_map.get(scored.candidate_id)
+        if not src:
+            continue
+        if not scored.summary:
+            scored.summary = src.summary
+        if not scored.angle_note:
+            scored.angle_note = src.angle_note
 
     # 统计
     stats = {"total": len(output.candidates)}

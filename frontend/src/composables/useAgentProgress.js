@@ -1,9 +1,14 @@
 /**
  * useAgentProgress — SSE 驱动的 Agent 进度 composable
  *
- * 所有 SSE 事件先入队，再按固定间隔逐个处理。
- * 这样即使代理层把整个响应缓冲到最后才交付（事件同时到达），
- * 前端依然能播放完整的步骤切换 + 进度条动画。
+ * 事件先入队，再按固定间隔逐个处理：即使代理层偶尔把多条事件一次性吐出，
+ * 前端依然能播放出完整的步骤切换 + 进度条动画。
+ *
+ * 状态机刻意做得简单、抗乱序：
+ *   - 收到 step_start：立即切到该步、进度归零、开始平滑爬升（不延迟、不排队，
+ *     避免后续事件打断切换导致"步骤闪过/进度条卡住"）。
+ *   - 收到 step_done / complete：停止爬升、把当前步推满（靠 CSS 过渡平滑到 100%）。
+ *   - 收到 result / error：结束。
  */
 
 import { ref, computed } from 'vue'
@@ -18,14 +23,12 @@ export function useAgentProgress() {
   const isRunning = ref(false)
 
   let _es = null
-  let _stepTimer = null
-  let _rushing = false
-  let _pendingStep = null
+  let _climbTimer = null
 
-  // ── 事件队列（解决代理缓冲导致事件同时到达的问题） ──
+  // ── 事件队列（应对代理把多条事件一次性吐出的情况） ──
   let _eventQueue = []
   let _drainTimer = null
-  const DRAIN_INTERVAL = 600
+  const DRAIN_INTERVAL = 400
 
   function _enqueue(handler) {
     _eventQueue.push(handler)
@@ -73,17 +76,20 @@ export function useAgentProgress() {
       _enqueue(() => _handleStepStart(data))
     })
 
-    _es.addEventListener('step_done', (e) => {
+    _es.addEventListener('step_done', () => {
       _enqueue(() => _handleStepDone())
     })
 
-    _es.addEventListener('complete', (e) => {
+    _es.addEventListener('complete', () => {
       _enqueue(() => _handleStepDone())
     })
 
     _es.addEventListener('result', (e) => {
       const data = JSON.parse(e.data)
       _enqueue(() => {
+        // 收尾：把当前步推满，标记结束
+        _stopClimb()
+        stepPercent.value = 100
         result.value = data
         isRunning.value = false
       })
@@ -107,7 +113,7 @@ export function useAgentProgress() {
       }
 
       _flushQueue()
-      _stopAll()
+      _stopClimb()
       error.value = msg
       isRunning.value = false
       if (_es) {
@@ -121,6 +127,7 @@ export function useAgentProgress() {
   function _handleStepStart(data) {
     const idx = data.step - 1
 
+    // 补齐占位，保证 steps[idx] 可写
     while (steps.value.length <= idx) {
       steps.value.push({ agent: `Agent ${steps.value.length + 1}`, action: '' })
     }
@@ -131,27 +138,43 @@ export function useAgentProgress() {
       avatar: data.avatar || '',
     }
 
-    if (_rushing) {
-      if (_pendingStep === null || idx > _pendingStep.idx) {
-        _pendingStep = { idx }
-      }
-    } else if (currentStepIndex.value < 0) {
-      currentStepIndex.value = idx
-      stepPercent.value = 0
-      _startSmoothProgress()
-    } else {
-      _switchToStep(idx)
-    }
+    // 立即切到该步并开始爬升（不延迟、不排队）
+    currentStepIndex.value = idx
+    stepPercent.value = 0
+    _startSmoothProgress()
   }
 
   function _handleStepDone() {
-    _rushToFull()
+    // 当前步骤完成：停止爬升，推满到 100%（CSS 过渡会平滑这一跳）
+    _stopClimb()
+    stepPercent.value = 100
+  }
+
+  // ── 平滑进度动画：在 step_start 到 step_done 之间缓慢爬到 95% ──
+  function _startSmoothProgress() {
+    _stopClimb()
+    stepPercent.value = 0
+
+    const TICK = 150
+    _climbTimer = setInterval(() => {
+      const cur = stepPercent.value
+      if (cur < 30) {
+        stepPercent.value = Math.min(cur + 2.5, 30)
+      } else if (cur < 70) {
+        const remaining = 70 - cur
+        stepPercent.value = Math.min(cur + Math.max(0.5, remaining * 0.06), 70)
+      } else if (cur < 95) {
+        const remaining = 95 - cur
+        stepPercent.value = Math.min(cur + Math.max(0.15, remaining * 0.03), 95)
+      }
+      // 95% 之后停住，等 step_done 推满，避免"卡在 99% 又不结束"的观感
+    }, TICK)
   }
 
   // ── 停止 ──────────────────────────────────────────
   function stop() {
     _flushQueue()
-    _stopAll()
+    _stopClimb()
     if (_es) {
       _es.close()
       _es = null
@@ -159,77 +182,11 @@ export function useAgentProgress() {
     isRunning.value = false
   }
 
-  // ── 切换到新步骤 ──
-  function _switchToStep(idx) {
-    _stepTimer = setTimeout(() => {
-      _stepTimer = null
-      currentStepIndex.value = idx
-      stepPercent.value = 0
-      _startSmoothProgress()
-    }, 800)
-  }
-
-  // ── 平滑进度动画 ──
-  function _startSmoothProgress() {
-    _stopAll()
-    stepPercent.value = 0
-
-    const TICK = 150
-
-    _stepTimer = setInterval(() => {
-      const cur = stepPercent.value
-
-      if (cur < 30) {
-        stepPercent.value = Math.min(cur + 2.5, 30)
-      } else if (cur < 75) {
-        const remaining = 75 - cur
-        stepPercent.value = Math.min(cur + Math.max(0.5, remaining * 0.06), 75)
-      } else if (cur < 95) {
-        const remaining = 95 - cur
-        stepPercent.value = Math.min(cur + Math.max(0.2, remaining * 0.03), 95)
-      } else if (cur < 99.50) {
-        const remaining = 99.50 - cur
-        stepPercent.value = Math.min(cur + Math.max(0.05, remaining * 0.015), 99.50)
-      }
-    }, TICK)
-  }
-
-  // ── 冲刺到 100% ──
-  function _rushToFull() {
-    _stopAll()
-    _rushing = true
-    _pendingStep = null
-
-    const TICK = 30
-    _stepTimer = setInterval(() => {
-      const cur = stepPercent.value
-      if (cur >= 100) {
-        stepPercent.value = 100
-        clearInterval(_stepTimer)
-        _stepTimer = null
-        _rushing = false
-
-        if (_pendingStep) {
-          const next = _pendingStep
-          _pendingStep = null
-          _switchToStep(next.idx)
-        }
-        return
-      }
-      const remaining = 100 - cur
-      stepPercent.value = Math.min(cur + Math.max(1, remaining * 0.12), 100)
-    }, TICK)
-  }
-
-  // ── 清理所有定时器 ──
-  function _stopAll() {
-    if (_stepTimer) {
-      clearInterval(_stepTimer)
-      clearTimeout(_stepTimer)
-      _stepTimer = null
+  function _stopClimb() {
+    if (_climbTimer) {
+      clearInterval(_climbTimer)
+      _climbTimer = null
     }
-    _rushing = false
-    _pendingStep = null
   }
 
   // ── 计算属性 ──────────────────────────────────────

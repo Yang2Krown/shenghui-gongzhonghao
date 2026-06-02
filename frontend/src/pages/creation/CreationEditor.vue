@@ -59,61 +59,37 @@
       </button>
     </div>
 
-    <!-- 内容区：Tab header 隐藏，顶部四步是唯一导航 -->
-    <el-tabs v-model="activeTab" class="workspace-tabs">
-      <!-- Tab 1: 大纲 -->
-      <el-tab-pane name="outline">
-        <template #label>
-          <span class="tab-label-wrapper">
-            <span>大纲管理</span>
-            <span class="tab-status-dot" :class="getStatusClass('outline')"></span>
-          </span>
-        </template>
-        <OutlinePanel
-          :candidate-id="candidateId"
-          :outline-id="currentOutlineId"
-          :active-workflow-step="activeWorkflowStep"
-          @pipeline-status="onPipelineStatus"
-          @complete="onOutlineComplete"
-          @next-step="goWorkflowStep('title')"
-        />
-        <!-- 大纲数据由本步骤生成，后续步骤直接复用 currentOutlineData -->
-      </el-tab-pane>
-
-      <!-- Tab 2: 标题 -->
-      <el-tab-pane name="title" :disabled="outlineStatus !== 'completed'">
-        <template #label>
-          <span class="tab-label-wrapper">
-            <span>标题生成</span>
-            <span class="tab-status-dot" :class="getStatusClass('title')"></span>
-          </span>
-        </template>
-        <TitlePanel
-          :candidate-id="candidateId"
-          :outline-data="currentOutlineData"
-          @complete="onTitleComplete"
-          @next-step="goWorkflowStep('content')"
-        />
-      </el-tab-pane>
-
-      <!-- Tab 3: 正文 -->
-      <el-tab-pane name="content" :disabled="titleStatus !== 'completed'">
-        <template #label>
-          <span class="tab-label-wrapper">
-            <span>正文生成</span>
-            <span class="tab-status-dot" :class="getStatusClass('content')"></span>
-          </span>
-        </template>
-        <ContentPanel
-          :candidate-id="candidateId"
-          :outline-data="currentOutlineData"
-          :title-data="selectedTitle"
-          :initial-content="finalContent"
-          @complete="onContentComplete"
-          @save-draft="onSaveDraft"
-        />
-      </el-tab-pane>
-    </el-tabs>
+    <!-- 内容区：通过 activeTab 直接切换 -->
+    <div class="workspace-content">
+      <OutlinePanel
+        v-if="activeTab === 'outline'"
+        :candidate-id="candidateId"
+        :outline-id="currentOutlineId"
+        :active-workflow-step="activeWorkflowStep"
+        @pipeline-status="onPipelineStatus"
+        @complete="onOutlineComplete"
+        @next-step="goWorkflowStep('content')"
+      />
+      <ContentPanel
+        v-if="activeTab === 'content'"
+        :candidate-id="candidateId"
+        :outline-data="currentOutlineData"
+        :title-data="selectedTitle"
+        :initial-content="finalContent"
+        :auto-generate="autoGenerateContent"
+        @complete="onContentComplete"
+        @next-step="goWorkflowStep('title')"
+        @save-draft="onSaveDraft"
+      />
+      <TitlePanel
+        v-if="activeTab === 'title'"
+        :candidate-id="candidateId"
+        :outline-data="currentOutlineData"
+        :content-data="finalContent"
+        :auto-generate="autoGenerateTitle"
+        @complete="onTitleComplete"
+      />
+    </div>
   </div>
 </template>
 
@@ -143,7 +119,9 @@ const isEditing = computed(() => !!route.params.id)
 
 // 状态
 const activeTab = ref('outline')
-const activeWorkflowStep = ref('angle')
+const activeWorkflowStep = ref('outline')
+const autoGenerateContent = ref(false)
+const autoGenerateTitle = ref(false)
 const saving = ref(false)
 const publishing = ref(false)
 const currentOutlineId = ref(null)
@@ -155,30 +133,26 @@ const finalContent = ref(null)
 const isDirty = ref(false)
 
 // 创作步骤状态
-const angleStatus = ref('idle')
 const outlineStatus = ref('idle')
-const titleStatus = ref('idle')
 const contentStatus = ref('idle')
+const titleStatus = ref('idle')
 
 const steps = computed(() => [
-  { key: 'angle', label: '创作角度体检', status: angleStatus.value },
   { key: 'outline', label: '大纲', status: outlineStatus.value },
-  { key: 'title', label: '标题', status: titleStatus.value },
   { key: 'content', label: '正文', status: contentStatus.value },
+  { key: 'title', label: '标题', status: titleStatus.value },
 ])
 
 const stepToTab = {
-  angle: 'outline',
   outline: 'outline',
-  title: 'title',
   content: 'content',
+  title: 'title',
 }
 
 const canOpenStep = (key) => {
-  if (key === 'angle') return true
-  if (key === 'outline') return angleStatus.value === 'completed'
-  if (key === 'title') return outlineStatus.value === 'completed'
-  if (key === 'content') return titleStatus.value === 'completed'
+  if (key === 'outline') return true
+  if (key === 'content') return outlineStatus.value === 'completed'
+  if (key === 'title') return contentStatus.value === 'completed'
   return false
 }
 
@@ -262,11 +236,20 @@ const restoreFromHistory = async (recordId) => {
         // 没有 outline_id，直接用快照
         currentOutlineData.value = snap
       }
-      angleStatus.value = 'completed'
       outlineStatus.value = 'completed'
     }
 
-    // 5. 恢复标题
+    // 5. 恢复正文
+    const contentRecord = byType['content_generate']
+    if (contentRecord && contentRecord.output_snapshot) {
+      const snap = contentRecord.output_snapshot
+      if (snap.final_text) {
+        finalContent.value = snap
+      }
+      contentStatus.value = 'completed'
+    }
+
+    // 6. 恢复标题
     const titleRecord = byType['title_generate']
     if (titleRecord && titleRecord.output_snapshot) {
       const snap = titleRecord.output_snapshot
@@ -277,27 +260,14 @@ const restoreFromHistory = async (recordId) => {
       titleStatus.value = 'completed'
     }
 
-    // 6. 恢复正文
-    const contentRecord = byType['content_generate']
-    if (contentRecord && contentRecord.output_snapshot) {
-      const snap = contentRecord.output_snapshot
-      // content_generate 的 output_snapshot 只存了摘要信息
-      // 如果有 final_text 就用，否则标记 completed 但不填内容
-      if (snap.final_text) {
-        finalContent.value = snap
-      }
-      contentStatus.value = 'completed'
-    }
-
     // 7. 跳到对应步骤（根据点击的记录类型决定）
     const typeToStep = {
-      angle_inspection: 'angle',
       outline_generate: 'outline',
       outline_reevaluate: 'outline',
-      title_generate: 'title',
-      title_reevaluate: 'title',
       content_generate: 'content',
       content_reevaluate: 'content',
+      title_generate: 'title',
+      title_reevaluate: 'title',
     }
     const targetStep = typeToStep[record.type] || 'outline'
     goWorkflowStep(targetStep)
@@ -331,7 +301,6 @@ onMounted(async () => {
         // 恢复大纲
         if (creation.outline_id) {
           currentOutlineId.value = creation.outline_id
-          angleStatus.value = 'completed'
           outlineStatus.value = creation.outline_status || 'completed'
           try {
             const outlineRes = await outlineApi.getOutline(creation.outline_id)
@@ -364,32 +333,20 @@ onMounted(async () => {
   }
 })
 
-const onPipelineStatus = ({ angle, outline }) => {
-  if (angle) angleStatus.value = angle
+const onPipelineStatus = ({ outline }) => {
   if (outline) outlineStatus.value = outline
-  if (angle === 'generating') goWorkflowStep('angle')
   if (outline === 'generating') goWorkflowStep('outline')
 }
 
-// 大纲完成回调（留在当前 tab，不自动跳转）
+// 大纲完成回调
 const onOutlineComplete = (outlineData) => {
   isDirty.value = true
-  angleStatus.value = 'completed'
   outlineStatus.value = 'completed'
   goWorkflowStep('outline')
-  // 大纲流水线 SSE 返回的字段是 outline_id；获取详情接口返回的是 id —— 两边兼容
   const oid = outlineData?.id ?? outlineData?.outline_id ?? null
   currentOutlineId.value = oid
   currentOutlineData.value = outlineData ? { ...outlineData, id: oid } : null
-  ElMessage.success('大纲生成完成，可切换到标题生成')
-}
-
-// 标题完成回调
-const onTitleComplete = (titleData) => {
-  isDirty.value = true
-  titleStatus.value = 'completed'
-  selectedTitle.value = titleData
-  goWorkflowStep('title')
+  ElMessage.success('大纲生成完成，可切换到正文生成')
 }
 
 // 正文完成回调
@@ -398,6 +355,15 @@ const onContentComplete = (contentData) => {
   contentStatus.value = 'completed'
   finalContent.value = contentData || null
   goWorkflowStep('content')
+  ElMessage.success('正文生成完成，可切换到标题生成')
+}
+
+// 标题完成回调
+const onTitleComplete = (titleData) => {
+  isDirty.value = true
+  titleStatus.value = 'completed'
+  selectedTitle.value = titleData
+  goWorkflowStep('title')
   ElMessage.success('创作流程完成！')
 }
 
@@ -473,7 +439,6 @@ const publishCreation = async () => {
 
 const getStatusClass = (key) => {
   const statusMap = {
-    angle: angleStatus.value,
     outline: outlineStatus.value,
     title: titleStatus.value,
     content: contentStatus.value,
@@ -488,6 +453,17 @@ const getStatusClass = (key) => {
 const goWorkflowStep = (key) => {
   activeWorkflowStep.value = key
   activeTab.value = stepToTab[key] || 'outline'
+  // 切换到正文/标题时自动触发生成
+  if (key === 'content') {
+    autoGenerateContent.value = true
+    autoGenerateTitle.value = false
+  } else if (key === 'title') {
+    autoGenerateTitle.value = true
+    autoGenerateContent.value = false
+  } else {
+    autoGenerateContent.value = false
+    autoGenerateTitle.value = false
+  }
 }
 
 // ── 离开提示 ──
@@ -526,21 +502,13 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.workspace-tabs :deep(.el-tabs__header) {
-  display: none;
-}
-
-.workspace-tabs :deep(.el-tabs__content) {
-  overflow: visible;
-}
-
 .creation-workspace {
   padding-bottom: 73px;
 }
 
 .workflow-steps {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
   background: var(--paper);
   border: 1px solid var(--line);

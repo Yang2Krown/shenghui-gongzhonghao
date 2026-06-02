@@ -40,18 +40,32 @@
           <el-input v-model="value" placeholder="粘贴文章链接" style="padding-left: 40px;" />
         </div>
         <div v-else>
-          <div v-if="fileName" style="display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
-            <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
-              <el-icon class="text-clay"><Document /></el-icon> {{ fileName }}
-            </span>
-            <button @click="fileName = ''" class="btn-text text-sm">移除</button>
+          <div v-if="fileUploading" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+            <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
+            <span class="text-sm text-ink-3">正在提取文件内容…</span>
           </div>
-          <div v-else class="dropzone" @click="$refs.fileInput?.click()">
+          <div v-else-if="fileName" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
+                <el-icon class="text-clay"><Document /></el-icon> {{ fileName }}
+                <span v-if="fileText" class="text-xs text-ink-4">· {{ fileText.length }} 字</span>
+              </span>
+              <button @click="removeFile()" class="btn-text text-sm">移除</button>
+            </div>
+            <div v-if="fileText" class="text-xs text-ink-4" style="margin-top: 8px; max-height: 60px; overflow: hidden; line-height: 1.5;">
+              {{ fileText.slice(0, 200) }}…
+            </div>
+          </div>
+          <div v-else class="dropzone" :class="{ 'dropzone-active': dragOver }"
+            @click="$refs.fileInput?.click()"
+            @dragover.prevent="dragOver = true"
+            @dragleave="dragOver = false"
+            @drop="handleFileDrop">
             <el-icon :size="22" style="margin: 0 auto 6px;"><Upload /></el-icon>
-            <div class="text-sm font-medium">点击上传 PDF / Word / TXT</div>
+            <div class="text-sm font-medium">点击或拖拽上传 PDF / Word / TXT / MD</div>
           </div>
-          <input ref="fileInput" type="file" accept=".pdf,.doc,.docx,.txt" class="hidden"
-            @change="(e) => fileName = e.target.files?.[0]?.name || ''" />
+          <input ref="fileInput" type="file" accept=".pdf,.docx,.txt,.md" style="display:none"
+            @change="handleFileUpload" />
         </div>
       </div>
     </div>
@@ -180,12 +194,12 @@ import { ChatDotSquare, Document, Link, Upload, Edit, Loading, Refresh, CopyDocu
 import PipelineStepper from '@/components/creation/PipelineStepper.vue'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
-import api from '@/api/api'
+import api, { uploadFile } from '@/api/api'
 
 const progress = useAgentProgress()
 
 const inputModes = [
-  { key: 'text', label: '文字' },
+  { key: 'text', label: '文本' },
   { key: 'link', label: '链接' },
   { key: 'file', label: '文档' },
 ]
@@ -194,13 +208,72 @@ const styleChips = ['理性克制', '犀利观点', '亲切口语', '故事化',
 const mode = ref('text')
 const value = ref('')
 const fileName = ref('')
+const fileText = ref('')
+const fileUploading = ref(false)
 const preference = ref('')
 const result = ref(null)
 
 const canGenerate = computed(() => {
-  const hasContent = mode.value === 'file' ? !!fileName.value : value.value.trim().length > 10
+  const hasContent = mode.value === 'file' ? !!fileText.value : value.value.trim().length > 10
   return hasContent && !progress.isRunning.value
 })
+
+const handleFileUpload = async (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  fileName.value = file.name
+  fileUploading.value = true
+  fileText.value = ''
+
+  try {
+    const res = await uploadFile(file)
+    const data = res.data || res
+    fileText.value = data.text || ''
+    if (!fileText.value) {
+      ElMessage.warning('文件内容提取为空，请检查文件')
+      fileName.value = ''
+    }
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '文件上传失败')
+    fileName.value = ''
+  } finally {
+    fileUploading.value = false
+  }
+}
+
+const removeFile = () => {
+  fileName.value = ''
+  fileText.value = ''
+}
+
+const dragOver = ref(false)
+
+const handleFileDrop = async (event) => {
+  event.preventDefault()
+  dragOver.value = false
+  const file = event.dataTransfer?.files?.[0]
+  if (!file) return
+
+  fileName.value = file.name
+  fileUploading.value = true
+  fileText.value = ''
+
+  try {
+    const res = await uploadFile(file)
+    const data = res.data || res
+    fileText.value = data.text || ''
+    if (!fileText.value) {
+      ElMessage.warning('文件内容提取为空，请检查文件')
+      fileName.value = ''
+    }
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '文件上传失败')
+    fileName.value = ''
+  } finally {
+    fileUploading.value = false
+  }
+}
 
 const toggleChip = (chip) => {
   if (preference.value.includes(chip)) {
@@ -220,7 +293,7 @@ const handleGenerate = async () => {
   result.value = null
   progress.stop()
 
-  const content = value.value.trim()
+  const content = mode.value === 'file' ? fileText.value : value.value.trim()
   if (!content || content.length < 10) {
     ElMessage.warning('请输入至少 10 个字符的正文内容')
     return
@@ -268,6 +341,10 @@ onUnmounted(() => {
 .cta-bar[disabled] { background: var(--bone); color: var(--ink-4); box-shadow: none; cursor: not-allowed; transform: none; }
 .dropzone { border: 1px dashed var(--line); border-radius: var(--r-lg); background: var(--paper); padding: 22px; text-align: center; cursor: pointer; transition: all .15s; color: var(--ink-3); }
 .dropzone:hover { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
+.dropzone-active { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
+.type-chip { display: inline-flex; align-items: center; gap: 4px; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 500; background: var(--paper); color: #6B6862; border: 1px solid var(--line); cursor: pointer; transition: all 0.15s; }
+.type-chip:hover { background: #F0EDE3; color: var(--ink); }
+.type-chip-active { background: var(--clay); color: #fff; border-color: var(--clay); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .fade-in { animation: fadeIn .28s cubic-bezier(.32,.72,0,1); }

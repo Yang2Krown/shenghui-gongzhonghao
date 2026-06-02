@@ -145,7 +145,7 @@
 </template>
 
 <script setup>
-import { ref, watch, computed, onUnmounted } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { MagicStick, CircleCloseFilled, DocumentCopy, Document, Refresh, ArrowRight, Aim } from '@element-plus/icons-vue'
 import AgentStatusBar from './AgentStatusBar.vue'
@@ -157,6 +157,8 @@ import { useAgentProgress } from '@/composables/useAgentProgress'
 const props = defineProps({
   candidateId: { type: [Number, String], default: null },
   outlineData: { type: Object, default: null },
+  contentData: { type: Object, default: null },
+  autoGenerate: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['complete', 'next-step'])
@@ -207,6 +209,13 @@ watch(() => progress.error.value, (newError) => {
     errorMessage.value = newError
     generating.value = false
     ElMessage.error('标题生成失败')
+  }
+})
+
+// 自动开始生成
+onMounted(() => {
+  if (props.autoGenerate && status.value === 'idle') {
+    generateTitles()
   }
 })
 
