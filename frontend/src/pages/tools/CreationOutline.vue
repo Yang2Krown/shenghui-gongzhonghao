@@ -48,9 +48,40 @@
           </div>
           <el-input v-if="source.kind === 'text'" v-model="source.text" type="textarea" :rows="4"
             placeholder="粘贴或输入文字内容，如新闻、笔记、观点、数据……" />
-          <div v-else-if="source.kind === 'link'" style="position: relative;">
-            <el-icon :size="16" style="position: absolute; left: 13px; top: 13px; color: var(--ink-4); z-index: 1;"><Link /></el-icon>
-            <el-input v-model="source.url" placeholder="粘贴文章链接" style="padding-left: 38px;" />
+          <div v-else-if="source.kind === 'link'">
+            <!-- 链接加载中 -->
+            <div v-if="source.linkExtracting" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+              <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
+              <span class="text-sm text-ink-3">正在提取链接内容…</span>
+            </div>
+            <!-- 链接已提取 -->
+            <div v-else-if="source.linkTitle" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
+                  <el-icon class="text-clay"><Link /></el-icon> {{ source.linkTitle }}
+                  <span v-if="source.linkPlatform" class="text-xs text-ink-4" style="padding: 2px 8px; background: var(--line); border-radius: 12px;">{{ source.linkPlatform }}</span>
+                </span>
+                <button @click="removeLink(source)" class="btn-text text-sm">移除</button>
+              </div>
+              <div v-if="source.linkContent" class="text-xs text-ink-4" style="margin-top: 8px; max-height: 60px; overflow: hidden; line-height: 1.5;">
+                {{ source.linkContent.slice(0, 200) }}…
+              </div>
+            </div>
+            <!-- 链接输入框 -->
+            <div v-else style="position: relative;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="flex: 1; position: relative;">
+                  <el-icon :size="16" style="position: absolute; left: 13px; top: 13px; color: var(--ink-4); z-index: 1;"><Link /></el-icon>
+                  <el-input v-model="source.url" placeholder="粘贴文章链接（公众号 / 小红书 / 知乎 / 抖音 等）"
+                    style="padding-left: 38px;" />
+                </div>
+                <button @click="handleLinkExtract(source)" :disabled="!source.url || source.linkExtracting"
+                  style="padding: 8px 16px; background: var(--clay); color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;"
+                  :style="{ opacity: (!source.url || source.linkExtracting) ? 0.5 : 1 }">
+                  确认
+                </button>
+              </div>
+            </div>
           </div>
           <div v-else-if="source.kind === 'file'">
             <div v-if="source.fileUploading" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
@@ -195,7 +226,7 @@ import {
 import PipelineStepper from '@/components/creation/PipelineStepper.vue'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
-import api, { uploadFile } from '@/api/api'
+import api, { uploadFile, extractLinkContent } from '@/api/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -208,7 +239,20 @@ const sourceKinds = [
 ]
 const styleChips = ['理性克制', '犀利观点', '亲切口语', '故事化', '干货清单', '反共识']
 
-const sources = ref([{ kind: 'text', text: route.query.angle || '', url: '', fileName: '', fileText: '', fileUploading: false, dragOver: false }])
+const sources = ref([{
+  kind: 'text',
+  text: route.query.angle || '',
+  url: '',
+  fileName: '',
+  fileText: '',
+  fileUploading: false,
+  dragOver: false,
+  linkExtracting: false,
+  linkTitle: '',
+  linkContent: '',
+  linkPlatform: '',
+  linkAuthor: '',
+}])
 const fileInputs = reactive({})
 const preference = ref('')
 const result = ref(null)
@@ -243,6 +287,36 @@ const handleFileUpload = async (source, event) => {
 const removeFile = (source) => {
   source.fileName = ''
   source.fileText = ''
+}
+
+const handleLinkExtract = async (source) => {
+  const url = (source.url || '').trim()
+  if (!url) return
+
+  source.linkExtracting = true
+  try {
+    const res = await extractLinkContent(url)
+    const data = res.data || res
+    source.linkTitle = data.title || '未知标题'
+    source.linkContent = data.content || ''
+    source.linkPlatform = data.platform || '网页'
+    source.linkAuthor = data.author || ''
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '链接提取失败')
+    source.linkTitle = ''
+    source.linkContent = ''
+    source.linkPlatform = ''
+  } finally {
+    source.linkExtracting = false
+  }
+}
+
+const removeLink = (source) => {
+  source.url = ''
+  source.linkTitle = ''
+  source.linkContent = ''
+  source.linkPlatform = ''
+  source.linkAuthor = ''
 }
 
 const setFileInputRef = (el, index) => {
@@ -308,7 +382,17 @@ const handleGenerate = async () => {
     .filter(s => s.text || s.url || s.fileText)
     .map(s => {
       if (s.kind === 'text') return { type: 'text', content: s.text }
-      if (s.kind === 'link') return { type: 'link', content: s.url }
+      if (s.kind === 'link') {
+        // 优先使用前端已提取的内容
+        if (s.linkTitle) {
+          const parts = []
+          if (s.linkTitle) parts.push(`标题：${s.linkTitle}`)
+          if (s.linkAuthor) parts.push(`作者：${s.linkAuthor}`)
+          if (s.linkContent) parts.push(s.linkContent)
+          return { type: 'text', content: parts.join('\n') }
+        }
+        return { type: 'link', content: s.url }
+      }
       if (s.kind === 'file') return { type: 'text', content: s.fileText || '' }
       return { type: 'text', content: '' }
     })

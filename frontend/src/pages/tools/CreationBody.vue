@@ -22,27 +22,68 @@
           </div>
           <div>
             <div class="text-sm font-semibold text-ink">大纲</div>
-            <div class="text-xs text-ink-4">粘贴文字或上传文件</div>
+            <div class="text-xs text-ink-4">支持文字 / 链接 / 文件</div>
           </div>
         </div>
       </div>
       <div style="padding: 22px;">
         <div class="seg" style="margin-bottom: 16px;">
-          <button :class="['seg-btn', { 'seg-btn-active': !fileName }]" @click="removeFile()">
+          <button :class="['seg-btn', { 'seg-btn-active': inputMode === 'text' }]" @click="inputMode = 'text'">
             文字输入
           </button>
-          <button :class="['seg-btn', { 'seg-btn-active': !!fileName }]" @click="$refs.bodyFileInput?.click()">
+          <button :class="['seg-btn', { 'seg-btn-active': inputMode === 'link' }]" @click="inputMode = 'link'">
+            链接
+          </button>
+          <button :class="['seg-btn', { 'seg-btn-active': inputMode === 'file' }]" @click="inputMode = 'file'">
             上传文件
           </button>
         </div>
-        <el-input v-if="!fileName" v-model="outline" type="textarea" :rows="8"
+
+        <!-- 文字输入 -->
+        <el-input v-if="inputMode === 'text'" v-model="outline" type="textarea" :rows="8"
           placeholder="粘贴或输入文章大纲，每行一个要点……" />
+
+        <!-- 链接输入 -->
+        <div v-else-if="inputMode === 'link'">
+          <div v-if="linkExtracting" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+            <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
+            <span class="text-sm text-ink-3">正在提取链接内容…</span>
+          </div>
+          <div v-else-if="linkTitle" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
+                <el-icon class="text-clay"><Link /></el-icon> {{ linkTitle }}
+                <span v-if="linkPlatform" class="text-xs text-ink-4" style="padding: 2px 8px; background: var(--line); border-radius: 12px;">{{ linkPlatform }}</span>
+              </span>
+              <button @click="removeLink()" class="btn-text text-sm">移除</button>
+            </div>
+            <div v-if="linkContent" class="text-xs text-ink-4" style="margin-top: 8px; max-height: 60px; overflow: hidden; line-height: 1.5;">
+              {{ linkContent.slice(0, 200) }}…
+            </div>
+          </div>
+          <div v-else style="position: relative;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="flex: 1; position: relative;">
+                <el-icon :size="16" style="position: absolute; left: 13px; top: 13px; color: var(--ink-4); z-index: 1;"><Link /></el-icon>
+                <el-input v-model="linkUrl" placeholder="粘贴文章链接（公众号 / 小红书 / 知乎 / 抖音 等）"
+                  style="padding-left: 38px;" />
+              </div>
+              <button @click="handleLinkExtract()" :disabled="!linkUrl || linkExtracting"
+                style="padding: 8px 16px; background: var(--clay); color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;"
+                :style="{ opacity: (!linkUrl || linkExtracting) ? 0.5 : 1 }">
+                确认
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 文件上传 -->
         <div v-else>
           <div v-if="fileUploading" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
             <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
             <span class="text-sm text-ink-3">正在提取文件内容…</span>
           </div>
-          <div v-else style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+          <div v-else-if="fileName" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
             <div style="display: flex; align-items: center; justify-content: space-between;">
               <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
                 <el-icon class="text-clay"><Document /></el-icon> {{ fileName }}
@@ -54,18 +95,17 @@
               {{ fileText.slice(0, 200) }}…
             </div>
           </div>
+          <div v-else class="dropzone" :class="{ 'dropzone-active': dragOver }"
+            @click="$refs.bodyFileInput?.click()"
+            @dragover.prevent="dragOver = true"
+            @dragleave="dragOver = false"
+            @drop="handleFileDrop">
+            <el-icon :size="22" style="margin: 0 auto 6px;"><Upload /></el-icon>
+            <div class="text-sm font-medium">点击或拖拽上传 PDF / Word / TXT / MD</div>
+          </div>
+          <input ref="bodyFileInput" type="file" accept=".pdf,.docx,.txt,.md" style="display:none"
+            @change="handleFileUpload" />
         </div>
-        <div v-if="!fileName" class="dropzone" :class="{ 'dropzone-active': dragOver }"
-          @click="$refs.bodyFileInput?.click()"
-          @dragover.prevent="dragOver = true"
-          @dragleave="dragOver = false"
-          @drop="handleFileDrop"
-          style="margin-top: 12px;">
-          <el-icon :size="22" style="margin: 0 auto 6px;"><Upload /></el-icon>
-          <div class="text-sm font-medium">或拖拽上传 PDF / Word / TXT / MD</div>
-        </div>
-        <input ref="bodyFileInput" type="file" accept=".pdf,.docx,.txt,.md" style="display:none"
-          @change="handleFileUpload" />
       </div>
     </div>
 
@@ -187,7 +227,7 @@ import { Document, Edit, Loading, Refresh, CopyDocument, ArrowRight, Check, Uplo
 import PipelineStepper from '@/components/creation/PipelineStepper.vue'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
-import api, { uploadFile } from '@/api/api'
+import api, { uploadFile, extractLinkContent } from '@/api/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -195,10 +235,16 @@ const progress = useAgentProgress()
 
 const styleChips = ['理性克制', '犀利观点', '亲切口语', '故事化', '干货清单', '反共识']
 
+const inputMode = ref('text')
 const outline = ref(route.query.outline || '')
 const fileName = ref('')
 const fileText = ref('')
 const fileUploading = ref(false)
+const linkUrl = ref('')
+const linkExtracting = ref(false)
+const linkTitle = ref('')
+const linkContent = ref('')
+const linkPlatform = ref('')
 const preference = ref('')
 const result = ref(null)
 
@@ -234,6 +280,34 @@ const handleFileUpload = async (event) => {
 const removeFile = () => {
   fileName.value = ''
   fileText.value = ''
+}
+
+const handleLinkExtract = async () => {
+  const url = (linkUrl.value || '').trim()
+  if (!url) return
+
+  linkExtracting.value = true
+  try {
+    const res = await extractLinkContent(url)
+    const data = res.data || res
+    linkTitle.value = data.title || '未知标题'
+    linkContent.value = data.content || ''
+    linkPlatform.value = data.platform || '网页'
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '链接提取失败')
+    linkTitle.value = ''
+    linkContent.value = ''
+    linkPlatform.value = ''
+  } finally {
+    linkExtracting.value = false
+  }
+}
+
+const removeLink = () => {
+  linkUrl.value = ''
+  linkTitle.value = ''
+  linkContent.value = ''
+  linkPlatform.value = ''
 }
 
 const dragOver = ref(false)
@@ -282,7 +356,18 @@ const handleGenerate = async () => {
   result.value = null
   progress.stop()
 
-  const outlineContent = fileName.value ? fileText.value : outline.value
+  let outlineContent = ''
+  if (inputMode.value === 'link' && linkTitle.value) {
+    // 优先使用链接提取的内容
+    const parts = []
+    if (linkTitle.value) parts.push(`标题：${linkTitle.value}`)
+    if (linkContent.value) parts.push(linkContent.value)
+    outlineContent = parts.join('\n')
+  } else if (inputMode.value === 'file') {
+    outlineContent = fileText.value
+  } else {
+    outlineContent = outline.value
+  }
 
   try {
     const res = await api.post('/content-generation/generate-adhoc', {

@@ -1,10 +1,11 @@
 """
 链接内容提取服务
-支持：小红书、微信公众号、抖音
+支持：小红书、微信公众号、抖音、知乎
 """
 import re
 import json
 import logging
+from pathlib import Path
 from typing import Optional, Dict, Any, List
 from urllib.parse import urlparse, unquote
 
@@ -45,8 +46,10 @@ def detect_platform(url: str) -> Optional[str]:
         return 'xhs'
     if 'mp.weixin.qq.com' in lower or 'weixin.qq.com' in lower:
         return 'gzh'
-    if 'douyin.com' in lower or 'iesdouyin.com' in lower:
+    if 'douyin.com' in lower or 'iesdouyin.com' in lower or 'v.douyin.com' in lower:
         return 'douyin'
+    if 'zhihu.com' in lower:
+        return 'zhihu'
     return None
 
 
@@ -579,21 +582,38 @@ def _extract_aweme_id(url: str) -> Optional[str]:
 
 def _parse_douyin_share_text(text: str) -> dict:
     """从分享文本中提取内容"""
+    # 提取【】中的内容作为标题/核心内容
+    title_match = re.search(r'【(.+?)】', text)
+    title = title_match.group(1) if title_match else ""
+
     # 移除 URL
     text = re.sub(r'https?://[^\s]+', '', text)
-    # 移除抖音分享前缀（如 "5.69 k@p.Du 06/23 III:/"）
-    text = re.sub(r'^[\d.]+\s*\S+\s*\d{2}/\d{2}\s*\S+\s*/\s*', '', text)
-    # 移除 @ 提及
-    text = re.sub(r'@\S+\s*', '', text)
 
     # 提取话题标签
     tags = re.findall(r'#(\S+?)(?:\s|$|#)', text)
-    # 从文本中移除话题标签（保留文案）
-    content = re.sub(r'#\S+\s*', '', text).strip()
+
+    # 移除【】本身（保留里面的内容）
+    text_without_brackets = re.sub(r'【[^】]*】', '', text)
+
+    # 尝试提取有意义的中文短语（连续中文字符，至少2个字）
+    # 只匹配纯中文字符，不包含标点和特殊符号
+    chinese_phrases = re.findall(r'[一-鿿]{2,}', text_without_brackets)
+    content = ''.join(chinese_phrases).strip()
+
+    # 检查是否包含提示词
+    has_prompt_words = content and ('复制' in content or '打开' in content or '搜索' in content or '作品' in content or '链接' in content or '观看' in content)
+
+    # 如果提取到的内容包含提示词，使用【】中的内容
+    if has_prompt_words:
+        content = title if title else ""
+    # 如果还是没有内容且不是因为提示词被清空，尝试更宽松的提取
+    elif not content:
+        # 移除所有非中文字符
+        content = re.sub(r'[^一-鿿]+', '', text_without_brackets).strip()
 
     return {
-        "title": "",
-        "content": content,
+        "title": title,
+        "content": content or title,  # 最后兜底使用标题
         "author": "",
         "tags": tags,
         "platform": "douyin"
@@ -700,12 +720,287 @@ def _parse_douyin_meta(html: str, url: str) -> dict:
     }
 
 
+# ========== 知乎提取 ==========
+
+# 知乎配置文件路径
+ZHIHU_CONFIG_PATH = Path(__file__).parent.parent.parent / "config" / "zhihu.json"
+
+def _load_zhihu_config() -> dict:
+    """加载知乎配置"""
+    try:
+        if ZHIHU_CONFIG_PATH.exists():
+            return json.loads(ZHIHU_CONFIG_PATH.read_text(encoding='utf-8'))
+    except Exception as e:
+        logger.warning(f"加载知乎配置失败: {e}")
+    return {}
+
+def _get_zhihu_cookie() -> str:
+    """获取知乎 cookie"""
+    config = _load_zhihu_config()
+    cookie_parts = []
+    for key in ['zhihu_session', 'z_c0', '_xsrf', '_zap', 'd_c0']:
+        value = config.get('cookie', {}).get(key, '')
+        if value:
+            cookie_parts.append(f"{key}={value}")
+    return '; '.join(cookie_parts)
+
+def _extract_zhihu_ids(url: str) -> Dict[str, Optional[str]]:
+    """从 URL 中提取知乎 ID"""
+    patterns = [
+        # 问题回答
+        (r'zhihu\.com/question/(\d+)/answer/(\d+)', 'answer'),
+        (r'zhihu\.com/answer/(\d+)', 'answer'),
+        # 专栏文章
+        (r'zhihu\.com/p/(\d+)', 'article'),
+        (r'zhuanlan\.zhihu\.com/p/(\d+)', 'article'),
+        # 问题页面
+        (r'zhihu\.com/question/(\d+)', 'question'),
+    ]
+
+    for pattern, content_type in patterns:
+        match = re.search(pattern, url)
+        if match:
+            groups = match.groups()
+            return {
+                'type': content_type,
+                'question_id': groups[0] if content_type in ('answer', 'question') and len(groups) > 0 else None,
+                'answer_id': groups[1] if content_type == 'answer' and len(groups) > 1 else groups[0] if content_type == 'answer' else None,
+                'article_id': groups[0] if content_type == 'article' else None,
+            }
+
+    return {'type': 'unknown'}
+
+def _html_to_text(html: str) -> str:
+    """将 HTML 转换为纯文本"""
+    text = html
+    text = re.sub(r'<br\s*/?>', '\n', text)
+    text = re.sub(r'<p[^>]*>', '\n', text)
+    text = re.sub(r'</p>', '', text)
+    text = re.sub(r'<img[^>]*alt="([^"]*)"[^>]*/>', r'[\1]', text)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'&nbsp;', ' ', text)
+    text = re.sub(r'&amp;', '&', text)
+    text = re.sub(r'&lt;', '<', text)
+    text = re.sub(r'&gt;', '>', text)
+    text = re.sub(r'&quot;', '"', text)
+    text = re.sub(r'&#39;', "'", text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+async def _extract_via_jina(url: str) -> Dict[str, Any]:
+    """使用 Jina Reader 提取知乎内容（无需 cookie）"""
+    try:
+        # 直接使用 httpx 调用 Jina Reader
+        jina_url = f"https://r.jina.ai/{url}"
+        headers = {
+            "Accept": "text/markdown",
+            "User-Agent": "Mozilla/5.0",
+        }
+
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            resp = await client.get(jina_url, headers=headers)
+            resp.raise_for_status()
+            markdown = resp.text
+
+        # 解析 Markdown 提取标题和内容
+        title = ""
+        content = ""
+        author = ""
+
+        # 提取标题（# 开头的行）
+        title_match = re.search(r'^#\s+(.+)$', markdown, re.MULTILINE)
+        if title_match:
+            title = title_match.group(1).strip()
+            # 移除标题行
+            markdown = markdown[:title_match.start()] + markdown[title_match.end():]
+
+        # 提取作者（**作者：xxx** 或 作者：xxx）
+        author_match = re.search(r'(?:\*\*|)作者[：:]\s*(.+?)(?:\*\*|$)', markdown, re.MULTILINE)
+        if author_match:
+            author = author_match.group(1).strip()
+
+        # 清理内容
+        content = markdown.strip()
+        # 移除多余的空行
+        content = re.sub(r'\n{3,}', '\n\n', content)
+
+        return {
+            "title": title,
+            "content": content or "提取失败，请使用「粘贴文字」方式添加",
+            "author": author,
+            "tags": [],
+            "platform": "zhihu"
+        }
+
+    except Exception as e:
+        logger.error(f"Jina Reader 提取知乎失败: {e}")
+        return {"title": "", "content": f"提取失败: {str(e)[:200]}", "author": "", "tags": [], "platform": "zhihu"}
+
+
+async def _extract_via_api(url: str, cookie: str = None) -> Dict[str, Any]:
+    """使用知乎移动端 API 提取（无需 cookie）"""
+    try:
+        # 解析 URL 获取 ID
+        ids = _extract_zhihu_ids(url)
+        logger.info(f"知乎链接解析: {ids}")
+
+        title = ""
+        content = ""
+        author = ""
+
+        # 使用移动端 API（无需登录）
+        headers = {
+            "User-Agent": "osee2unifiedRel498/5.8.0 iOS/16.0 (iPhone14,2)",
+            "Accept": "application/json",
+            "x-api-version": "3.0.91",
+        }
+
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, verify=False) as client:
+            if ids['type'] == 'answer' and ids.get('answer_id'):
+                api_url = f"https://api.zhihu.com/answers/{ids['answer_id']}?include=content,excerpt,author"
+                resp = await client.get(api_url, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+                title = data.get('question', {}).get('title', '')
+                content_html = data.get('content', '') or data.get('excerpt', '')
+                content = _html_to_text(content_html)
+                author = data.get('author', {}).get('name', '')
+
+            elif ids['type'] == 'article' and ids.get('article_id'):
+                api_url = f"https://api.zhihu.com/articles/{ids['article_id']}?include=content,excerpt,author"
+                resp = await client.get(api_url, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+                title = data.get('title', '')
+                content_html = data.get('content', '') or data.get('excerpt', '')
+                content = _html_to_text(content_html)
+                author = data.get('author', {}).get('name', '')
+
+            elif ids['type'] == 'question':
+                question_id = ids.get('question_id')
+                if question_id:
+                    api_url = f"https://api.zhihu.com/questions/{question_id}?include=detail,excerpt"
+                    resp = await client.get(api_url, headers=headers)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    title = data.get('title', '')
+                    content_html = data.get('detail', '') or data.get('excerpt', '')
+                    content = _html_to_text(content_html)
+
+        return {
+            "title": title,
+            "content": content or "提取失败，请使用「粘贴文字」方式添加",
+            "author": author,
+            "tags": [],
+            "platform": "zhihu"
+        }
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"知乎 API 请求失败: {e.response.status_code}")
+        return {"title": "", "content": f"API 请求失败，状态码: {e.response.status_code}", "author": "", "tags": [], "platform": "zhihu"}
+
+
+async def extract_zhihu(url: str, cookie: str = None) -> Dict[str, Any]:
+    """
+    提取知乎内容（回答或文章）
+    优先使用移动端 API（无需 cookie），失败则尝试其他方式
+    :param url: 知乎链接
+    :param cookie: 可选的 cookie
+    :return: {title, content, author, tags, platform}
+    """
+    # 方案 1: 使用知乎移动端 API（无需 cookie，推荐）
+    result = await _extract_via_api(url)
+    if result.get('content') and "提取失败" not in result['content'] and "请求失败" not in result['content']:
+        return result
+
+    # 方案 2: 使用 Jina Reader
+    result = await _extract_via_jina(url)
+    if result.get('content') and "提取失败" not in result['content']:
+        return result
+
+    # 方案 3: 使用页面解析（需要 cookie）
+    if not cookie:
+        cookie = _get_zhihu_cookie()
+    return await _extract_zhihu_page(url, cookie)
+
+
+async def _extract_zhihu_page(url: str, cookie: str = None) -> Dict[str, Any]:
+    """页面解析方式提取知乎内容（备用方案）"""
+    try:
+        clean_url = url.split('?')[0] if '?' in url else url
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "Referer": "https://www.zhihu.com/",
+        }
+        if cookie:
+            headers["Cookie"] = cookie
+
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, verify=False) as client:
+            resp = await client.get(clean_url, headers=headers)
+            resp.raise_for_status()
+            html = resp.text
+
+        title = ""
+        content = ""
+        author = ""
+
+        # 提取标题
+        title_match = re.search(r'<h1[^>]*class="QuestionHeader-title"[^>]*>(.*?)</h1>', html)
+        if not title_match:
+            title_match = re.search(r'<h1[^>]*class="Post-Title"[^>]*>(.*?)</h1>', html)
+        if not title_match:
+            title_match = re.search(r'<title[^>]*>(.*?)</title>', html)
+        if title_match:
+            title = re.sub(r'<[^>]+>', '', title_match.group(1)).strip()
+            title = re.sub(r'\s*[-–]\s*知乎\s*$', '', title)
+
+        # 提取作者
+        author_match = re.search(r'<a[^>]*class="UserLink-link"[^>]*>(.*?)</a>', html)
+        if not author_match:
+            author_match = re.search(r'<span[^>]*class="AuthorInfo-name"[^>]*>(.*?)</span>', html)
+        if author_match:
+            author = re.sub(r'<[^>]+>', '', author_match.group(1)).strip()
+
+        # 提取内容
+        content_match = re.search(r'<div[^>]*class="RichContent-inner"[^>]*>(.*?)</div>\s*(?=<div[^>]*class="ContentItem-actions")', html, re.DOTALL)
+        if not content_match:
+            content_match = re.search(r'<div[^>]*class="Post-RichTextContainer"[^>]*>(.*?)</div>\s*(?=<div[^>]*class="ContentItem-actions")', html, re.DOTALL)
+        if not content_match:
+            content_match = re.search(r'class="RichText[^"]*"[^>]*>(.*?)</div>', html, re.DOTALL)
+
+        if content_match:
+            content = _html_to_text(content_match.group(1))
+
+        if not content:
+            meta_match = re.search(r'<meta[^>]*name="description"[^>]*content="([^"]*)"', html)
+            if meta_match:
+                content = meta_match.group(1).strip()
+
+        return {
+            "title": title,
+            "content": content or "提取失败，请使用「粘贴文字」方式添加",
+            "author": author,
+            "tags": [],
+            "platform": "zhihu"
+        }
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"知乎页面请求失败: {e.response.status_code}")
+        return {"title": "", "content": f"请求失败，状态码: {e.response.status_code}", "author": "", "tags": [], "platform": "zhihu"}
+    except Exception as e:
+        logger.error(f"知乎页面提取失败: {e}")
+        return {"title": "", "content": f"提取失败: {str(e)[:200]}", "author": "", "tags": [], "platform": "zhihu"}
+
+
 # ========== 统一入口 ==========
 
 async def extract_link_content(url: str, cookie: str = None) -> Dict[str, Any]:
     """
     自动识别链接平台并提取内容
-    :param url: 链接或分享文本
+    :param url: 链接或分享文本（支持带文字的分享格式）
     :param cookie: 可选的 cookie
     :return: {title, content, author, tags, platform}
     """
@@ -719,7 +1014,10 @@ async def extract_link_content(url: str, cookie: str = None) -> Dict[str, Any]:
     elif platform == 'gzh':
         return await extract_wechat(actual_url, cookie)
     elif platform == 'douyin':
+        # 抖音需要传入原始分享文本（包含文案）
         return await extract_douyin(url, cookie)
+    elif platform == 'zhihu':
+        return await extract_zhihu(actual_url, cookie)
     else:
         return {
             "title": "",

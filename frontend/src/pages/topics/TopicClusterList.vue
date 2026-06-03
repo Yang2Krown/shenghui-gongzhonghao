@@ -168,6 +168,8 @@ export default { name: 'TopicClusters' }
 </script>
 
 <script setup>
+defineOptions({ name: 'TopicClusterList' })
+
 import { ref, reactive, onMounted, onUnmounted, onActivated, onDeactivated, watch, computed, nextTick } from 'vue'
 
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router'
@@ -357,11 +359,32 @@ const saveScroll = () => {
 // 记录"上次真正加载用的 query"，用来区分"筛选变化"(要重载) 和"从详情页返回"(不重载)
 let lastLoadedQueryStr = JSON.stringify(route.query)
 
+// 详情页挖掘完成后返回：定点把对应卡片标为"已挖掘"
+const _pendingMinedId = ref(null)
+try {
+  const minedId = sessionStorage.getItem('topic-mined-id')
+  if (minedId) {
+    _pendingMinedId.value = minedId
+    sessionStorage.removeItem('topic-mined-id')
+  }
+} catch {}
+
 onMounted(() => {
   nextTick(_updateCols)
   restoreFromQuery()
   lastLoadedQueryStr = JSON.stringify(route.query)
   loadClusters(true)
+})
+
+// 数据加载完后，把待标记的 mined 状态刷上去
+watch(clusters, (list) => {
+  if (_pendingMinedId.value && list.length) {
+    const c = list.find(x => String(x.id) === _pendingMinedId.value)
+    if (c) {
+      c.mined = true
+      _pendingMinedId.value = null
+    }
+  }
 })
 
 onBeforeRouteLeave(() => {

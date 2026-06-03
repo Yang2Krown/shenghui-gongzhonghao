@@ -1,0 +1,13 @@
+{
+  "cookie": {
+    "zhihu_session": "V3afjq4jBt1mb7X8LoeX59PCWips42Mt8eq47xaduUI",
+    "z_c0": "",
+    "_xsrf": "HCaTZqABaZrV9NMox2ySLcNMaPrKCsXK",
+    "_zap": "7edad9bd-2aed-467f-a7cd-fb911a6ee49a",
+    "d_c0": "rSVUai04_BuPTsufrN3dT7TfktN7Ht1Yzxk=|1773562628"
+  },
+  "api": {
+    "question_answer": "https://www.zhihu.com/api/v4/answers/{answer_id}?include=content,excerpt,created_time,updated_time,voteup_count,comment_count,author",
+    "article": "https://www.zhihu.com/api/v4/articles/{article_id}?include=content,excerpt,created_time,updated_time,voteup_count,comment_count,author"
+  }
+}

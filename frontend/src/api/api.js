@@ -103,4 +103,13 @@ export const uploadFile = (file) => {
   })
 }
 
+/**
+ * 提取链接内容（公众号/小红书/抖音等）
+ * @param {string} url - 链接地址
+ * @returns {Promise<{title: string, content: string, author: string, platform: string}>}
+ */
+export const extractLinkContent = (url) => {
+  return api.post('/creation-tools/extract-link', { url }, { timeout: 30000 })
+}
+
 export default api

@@ -35,9 +35,37 @@
         </div>
         <el-input v-if="mode === 'text'" v-model="value" type="textarea" :rows="8"
           placeholder="粘贴文章正文……" />
-        <div v-else-if="mode === 'link'" style="position: relative;">
-          <el-icon :size="17" style="position: absolute; left: 14px; top: 14px; color: var(--ink-4); z-index: 1;"><Link /></el-icon>
-          <el-input v-model="value" placeholder="粘贴文章链接" style="padding-left: 40px;" />
+        <div v-else-if="mode === 'link'">
+          <div v-if="linkExtracting" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+            <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
+            <span class="text-sm text-ink-3">正在提取链接内容…</span>
+          </div>
+          <div v-else-if="linkTitle" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
+                <el-icon class="text-clay"><Link /></el-icon> {{ linkTitle }}
+                <span v-if="linkPlatform" class="text-xs text-ink-4" style="padding: 2px 8px; background: var(--line); border-radius: 12px;">{{ linkPlatform }}</span>
+              </span>
+              <button @click="removeLink()" class="btn-text text-sm">移除</button>
+            </div>
+            <div v-if="linkContent" class="text-xs text-ink-4" style="margin-top: 8px; max-height: 60px; overflow: hidden; line-height: 1.5;">
+              {{ linkContent.slice(0, 200) }}…
+            </div>
+          </div>
+          <div v-else style="position: relative;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="flex: 1; position: relative;">
+                <el-icon :size="16" style="position: absolute; left: 13px; top: 13px; color: var(--ink-4); z-index: 1;"><Link /></el-icon>
+                <el-input v-model="linkUrl" placeholder="粘贴文章链接（公众号 / 小红书 / 知乎 / 抖音 等）"
+                  style="padding-left: 38px;" />
+              </div>
+              <button @click="handleLinkExtract()" :disabled="!linkUrl || linkExtracting"
+                style="padding: 8px 16px; background: var(--clay); color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;"
+                :style="{ opacity: (!linkUrl || linkExtracting) ? 0.5 : 1 }">
+                确认
+              </button>
+            </div>
+          </div>
         </div>
         <div v-else>
           <div v-if="fileUploading" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
@@ -194,7 +222,7 @@ import { ChatDotSquare, Document, Link, Upload, Edit, Loading, Refresh, CopyDocu
 import PipelineStepper from '@/components/creation/PipelineStepper.vue'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
-import api, { uploadFile } from '@/api/api'
+import api, { uploadFile, extractLinkContent } from '@/api/api'
 
 const progress = useAgentProgress()
 
@@ -210,11 +238,23 @@ const value = ref('')
 const fileName = ref('')
 const fileText = ref('')
 const fileUploading = ref(false)
+const linkUrl = ref('')
+const linkExtracting = ref(false)
+const linkTitle = ref('')
+const linkContent = ref('')
+const linkPlatform = ref('')
 const preference = ref('')
 const result = ref(null)
 
 const canGenerate = computed(() => {
-  const hasContent = mode.value === 'file' ? !!fileText.value : value.value.trim().length > 10
+  let hasContent = false
+  if (mode.value === 'link') {
+    hasContent = !!linkTitle.value
+  } else if (mode.value === 'file') {
+    hasContent = !!fileText.value
+  } else {
+    hasContent = value.value.trim().length > 10
+  }
   return hasContent && !progress.isRunning.value
 })
 
@@ -245,6 +285,34 @@ const handleFileUpload = async (event) => {
 const removeFile = () => {
   fileName.value = ''
   fileText.value = ''
+}
+
+const handleLinkExtract = async () => {
+  const url = (linkUrl.value || '').trim()
+  if (!url) return
+
+  linkExtracting.value = true
+  try {
+    const res = await extractLinkContent(url)
+    const data = res.data || res
+    linkTitle.value = data.title || '未知标题'
+    linkContent.value = data.content || ''
+    linkPlatform.value = data.platform || '网页'
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '链接提取失败')
+    linkTitle.value = ''
+    linkContent.value = ''
+    linkPlatform.value = ''
+  } finally {
+    linkExtracting.value = false
+  }
+}
+
+const removeLink = () => {
+  linkUrl.value = ''
+  linkTitle.value = ''
+  linkContent.value = ''
+  linkPlatform.value = ''
 }
 
 const dragOver = ref(false)
@@ -293,7 +361,19 @@ const handleGenerate = async () => {
   result.value = null
   progress.stop()
 
-  const content = mode.value === 'file' ? fileText.value : value.value.trim()
+  let content = ''
+  if (mode.value === 'link' && linkTitle.value) {
+    // 优先使用链接提取的内容
+    const parts = []
+    if (linkTitle.value) parts.push(`标题：${linkTitle.value}`)
+    if (linkContent.value) parts.push(linkContent.value)
+    content = parts.join('\n')
+  } else if (mode.value === 'file') {
+    content = fileText.value
+  } else {
+    content = value.value.trim()
+  }
+
   if (!content || content.length < 10) {
     ElMessage.warning('请输入至少 10 个字符的正文内容')
     return

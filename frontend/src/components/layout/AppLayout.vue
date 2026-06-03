@@ -102,7 +102,7 @@
       <main style="padding-top: 60px;">
         <div style="padding: 32px 32px 80px;" class="fade-in">
           <router-view v-slot="{ Component }">
-            <keep-alive :include="['TopicClusters']">
+            <keep-alive :include="['TopicClusterList']">
               <component :is="Component" />
             </keep-alive>
           </router-view>

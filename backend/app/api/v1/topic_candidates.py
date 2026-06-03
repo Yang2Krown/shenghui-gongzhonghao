@@ -81,11 +81,38 @@ async def trigger_adhoc_mining(
         )
 
     # 合并所有信息源内容
+    from app.services.link_extractor import extract_link_content
     combined_text_parts = []
     for src in sources:
         content = (src.get("content") or "").strip()
+        src_type = src.get("type", "text")
+
         if content:
-            combined_text_parts.append(content)
+            if src_type == "link":
+                # 链接类型：调用链接提取服务获取实际内容
+                try:
+                    extracted = await extract_link_content(content)
+                    title = extracted.get("title", "")
+                    text_content = extracted.get("content", "")
+                    author = extracted.get("author", "")
+                    platform = extracted.get("platform", "")
+
+                    # 组合提取结果
+                    parts = []
+                    if title:
+                        parts.append(f"标题：{title}")
+                    if author:
+                        parts.append(f"作者：{author}")
+                    if text_content:
+                        parts.append(text_content)
+
+                    combined_text_parts.append("\n".join(parts) if parts else content)
+                except Exception as e:
+                    # 提取失败时降级使用原始链接
+                    combined_text_parts.append(content)
+            else:
+                # 文本/文件类型：直接使用
+                combined_text_parts.append(content)
 
     if not combined_text_parts:
         raise HTTPException(
