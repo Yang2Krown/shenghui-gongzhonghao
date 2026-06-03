@@ -159,6 +159,8 @@ const props = defineProps({
   candidateId: { type: [Number, String], default: null },
   outlineData: { type: Object, default: null },
   contentData: { type: Object, default: null },
+  initialTitles: { type: Object, default: null },
+  stepStatus: { type: String, default: 'idle' },
   autoGenerate: { type: Boolean, default: false },
 })
 
@@ -215,6 +217,22 @@ watch(() => progress.error.value, (newError) => {
 
 // 自动开始生成
 onMounted(() => {
+  // 如果父组件标记该步骤已完成且有已保存的标题数据，恢复状态
+  if (props.stepStatus === 'completed' && props.initialTitles) {
+    const saved = props.initialTitles
+    // initialTitles 可能是单个标题对象或 { titles: [...] } 格式
+    const list = Array.isArray(saved.titles) ? saved.titles
+      : Array.isArray(saved) ? saved
+      : saved.title ? [saved]
+      : []
+    if (list.length) {
+      titles.value = list.map((t) => ({ ...t, editable_title: t.title }))
+      status.value = 'completed'
+      selectedIndex.value = 0
+      generating.value = false
+      return
+    }
+  }
   if (props.autoGenerate && status.value === 'idle') {
     generateTitles()
   }
@@ -261,6 +279,15 @@ const generateTitles = async () => {
         key_points: keyPoints,
         spread_tags: outline?.spread_tags || [],
       },
+    }
+
+    // 传入正文数据，让标题参考实际生成的内容
+    const cd = props.contentData
+    if (cd) {
+      payload.content = {
+        final_text: cd.final_text || cd.content || '',
+        gold_sentences: cd.gold_sentences || [],
+      }
     }
 
     const res = await post('/title-generation/', payload)

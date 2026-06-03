@@ -286,11 +286,18 @@ class TitleGenerationService:
         )
         
         try:
-            # 调用Agent A
+            # 调用Agent A（传入正文，让标题参考实际内容）
+            content_dict = None
+            if request.content:
+                content_dict = {
+                    "final_text": request.content.final_text or "",
+                    "gold_sentences": request.content.gold_sentences or [],
+                }
             result = await self.agent_a.generate_titles(
                 topic=request.topic,
                 outline=request.outline,
                 feedback=feedback,
+                content=content_dict,
             )
             
             # 保存候选标题

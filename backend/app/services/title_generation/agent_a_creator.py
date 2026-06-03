@@ -77,26 +77,29 @@ class TitleCreatorAgent(BaseAgent):
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """
         执行标题生成任务
-        
+
         Args:
             topic: 选题信息
             outline: 大纲信息
             feedback: 重生反馈（可选）
-            
+            content: 正文信息（可选）
+
         Returns:
             包含候选标题列表的字典
         """
         topic = kwargs.get("topic")
         outline = kwargs.get("outline")
         feedback = kwargs.get("feedback")
-        
-        return await self.generate_titles(topic, outline, feedback)
-    
+        content = kwargs.get("content")
+
+        return await self.generate_titles(topic, outline, feedback, content)
+
     async def generate_titles(
         self,
         topic: TopicInfo,
         outline: OutlineInfo,
         feedback: Optional[str] = None,
+        content: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """
         生成标题候选
@@ -114,7 +117,7 @@ class TitleCreatorAgent(BaseAgent):
         MAX_RETRIES = 3
         logger.info(f"Agent A 开始生成标题，选题: {topic.title}")
 
-        prompt = self._build_prompt(topic, outline, feedback)
+        prompt = self._build_prompt(topic, outline, feedback, content)
         system_prompt = self._get_system_prompt()
 
         last_response = ""
@@ -177,6 +180,7 @@ class TitleCreatorAgent(BaseAgent):
         topic: TopicInfo,
         outline: OutlineInfo,
         feedback: Optional[str] = None,
+        content: Optional[dict] = None,
     ) -> str:
         """
         构建提示词
@@ -185,12 +189,33 @@ class TitleCreatorAgent(BaseAgent):
             topic: 选题信息
             outline: 大纲信息
             feedback: 重生反馈
+            content: 正文信息（可选）
 
         Returns:
             完整的提示词
         """
         # 加载完整的标题套路库
         title_library = _load_title_methods_library()
+
+        # 构建正文参考部分
+        content_section = ""
+        if content and content.get("final_text"):
+            gold = content.get("gold_sentences") or []
+            gold_text = "\n".join(f"  - {s}" for s in gold) if gold else "  无"
+            # 正文截取前 2000 字 + 末尾 500 字，避免 prompt 过长
+            full_text = content["final_text"]
+            if len(full_text) > 2500:
+                truncated = full_text[:2000] + "\n\n...（正文中间省略）...\n\n" + full_text[-500:]
+            else:
+                truncated = full_text
+            content_section = f"""
+
+最终正文（标题生成必须参考正文内容，确保标题与正文内容一致）:
+{truncated}
+
+正文金句:
+{gold_text}
+"""
 
         prompt = f"""【输入】
 选题:
@@ -203,6 +228,7 @@ class TitleCreatorAgent(BaseAgent):
 - 各节小标题: {', '.join(outline.section_titles)}
 - 关键信息点: {', '.join(outline.key_points)}
 - 传播标签分布: {', '.join(outline.spread_tags) if outline.spread_tags else '无'}
+{content_section}
 
 【参考资产 - 标题套路库】
 {title_library}

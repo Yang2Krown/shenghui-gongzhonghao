@@ -86,6 +86,8 @@
         :candidate-id="candidateId"
         :outline-data="currentOutlineData"
         :content-data="finalContent"
+        :initial-titles="selectedTitle"
+        :step-status="titleStatus"
         :auto-generate="autoGenerateTitle"
         @complete="onTitleComplete"
       />
@@ -354,7 +356,7 @@ const onContentComplete = (contentData) => {
   isDirty.value = true
   contentStatus.value = 'completed'
   finalContent.value = contentData || null
-  goWorkflowStep('content')
+  // 不在这里调 goWorkflowStep —— 由 @next-step 事件统一处理导航
   ElMessage.success('正文生成完成，可切换到标题生成')
 }
 
@@ -453,12 +455,12 @@ const getStatusClass = (key) => {
 const goWorkflowStep = (key) => {
   activeWorkflowStep.value = key
   activeTab.value = stepToTab[key] || 'outline'
-  // 切换到正文/标题时自动触发生成
+  // 只在步骤未完成时自动触发生成；已完成的步骤直接展示结果
   if (key === 'content') {
-    autoGenerateContent.value = true
+    autoGenerateContent.value = contentStatus.value !== 'completed'
     autoGenerateTitle.value = false
   } else if (key === 'title') {
-    autoGenerateTitle.value = true
+    autoGenerateTitle.value = titleStatus.value !== 'completed'
     autoGenerateContent.value = false
   } else {
     autoGenerateContent.value = false

@@ -48,7 +48,6 @@
       <div class="result-left">
         <!-- 统计信息 -->
         <div class="card p-4 mb-4">
-          <h3 v-if="titleData?.title" class="selected-title">{{ titleData.title }}</h3>
           <div class="flex flex-wrap items-center gap-6 text-sm">
             <div>
               <span class="text-ink-3">字数：</span>
@@ -365,21 +364,79 @@ const highlightFragments = computed(() => {
   return fragments
 })
 
+/** 去掉 LLM 可能添加的装饰性前缀，返回核心句干 */
+function stripDecoration(s) {
+  return s
+    .replace(/^[\s—–\-:=：·•>】\]）)]*(?:金句|去AI味|改写|rewrite|句子)[\s：:—–\-]*/i, '')
+    .replace(/[\s—–\-:=：·•<【\[(（]*$/i, '')
+    .trim()
+}
+
+/** 归一化：去空白+标点，用于模糊比对 */
+function normalize(s) {
+  return s.replace(/[\s　]+/g, '').replace(/[，。！？；：（）【】、""''—–\-.,!?;:()[\]{}"']/g, '')
+}
+
 // 对一段已 escapeHtml 的文本做高亮标记
 function applyHighlights(html) {
   const frags = highlightFragments.value
   if (!frags.length) return html
 
-  for (const frag of frags) {
-    const escaped = escapeHtml(frag.text)
-    if (!escaped) continue
-    const idx = html.indexOf(escaped)
-    if (idx === -1) continue
+  // 预处理：对每个片段准备多个候选匹配文本
+  const candidates = frags.map(f => {
+    const stripped = stripDecoration(f.text)
+    const texts = [f.text]                  // 原文
+    if (stripped !== f.text && stripped.length >= 4) {
+      texts.push(stripped)                  // 去装饰版
+    }
+    return { ...f, texts }
+  })
+
+  // 已包裹区间 [start, end)
+  const wrapped = []
+  const isCovered = (s, e) => wrapped.some(([ws, we]) => s < we && e > ws)
+
+  for (const frag of candidates) {
     const cls = frag.type === 'gold' ? 'hl-gold' : 'hl-deai'
     const tipLabel = frag.type === 'gold' ? '金句' : '去AI味改写'
     const tipDetail = escapeHtml(frag.label)
-    const tag = `<mark class="${cls}" data-hl-type="${tipLabel}" data-hl-detail="${tipDetail}">${escaped}</mark>`
-    html = html.substring(0, idx) + tag + html.substring(idx + escaped.length)
+
+    let matched = false
+    for (const text of frag.texts) {
+      const escaped = escapeHtml(text)
+      if (!escaped || escaped.length < 4) continue
+      const idx = html.indexOf(escaped)
+      if (idx === -1 || isCovered(idx, idx + escaped.length)) continue
+
+      const tag = `<mark class="${cls}" data-hl-type="${tipLabel}" data-hl-detail="${tipDetail}">${escaped}</mark>`
+      html = html.substring(0, idx) + tag + html.substring(idx + escaped.length)
+      wrapped.push([idx, idx + tag.length])
+      matched = true
+      break
+    }
+    if (matched) continue
+
+    // 兜底：取核心句干前 12 字做子串搜索
+    const seed = stripDecoration(frag.text).replace(/\s+/g, '').slice(0, 12)
+    if (seed.length < 4) continue
+    const seedEsc = escapeHtml(seed)
+    const idx = html.indexOf(seedEsc)
+    if (idx === -1 || isCovered(idx, idx + seedEsc.length)) continue
+    // 向后找到标点/标签边界，截取完整句子
+    let end = idx + seedEsc.length
+    const htmlLen = html.length
+    while (end < htmlLen && end - idx < frag.text.length * 2) {
+      const ch = html[end]
+      if (/[。！？\n]/.test(ch) || /<\/?(?:p|h[1-6]|br)/.test(html.slice(end, end + 10))) break
+      end++
+    }
+    // 回退到最后一个完整字（不在标签中间）
+    while (end > idx && /[>]/.test(html[end - 1])) end--
+    const matchText = html.substring(idx, end)
+    if (matchText.length < 4) continue
+    const tag = `<mark class="${cls}" data-hl-type="${tipLabel}" data-hl-detail="${tipDetail}">${matchText}</mark>`
+    html = html.substring(0, idx) + tag + html.substring(end)
+    wrapped.push([idx, idx + tag.length])
   }
   return html
 }

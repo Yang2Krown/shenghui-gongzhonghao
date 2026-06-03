@@ -38,10 +38,18 @@ class OutlineInfo(BaseModel):
     spread_tags: List[str] = Field(default_factory=list, description="传播标签分布")
 
 
+class ContentInfo(BaseModel):
+    """正文信息模式（用于标题生成参考）"""
+    final_text: str = Field(default="", description="最终正文内容")
+    final_word_count: Optional[int] = Field(None, description="正文字数")
+    gold_sentences: Optional[List[str]] = Field(default_factory=list, description="金句列表")
+
+
 class TitleGenerationRequest(BaseModel):
     """标题生成请求模式"""
     topic: TopicInfo = Field(..., description="选题信息")
     outline: OutlineInfo = Field(..., description="大纲信息")
+    content: Optional[ContentInfo] = Field(None, description="正文信息（可选，用于标题参考正文）")
     use_primary_model: Optional[bool] = Field(True, description="是否使用主模型")
 
 
