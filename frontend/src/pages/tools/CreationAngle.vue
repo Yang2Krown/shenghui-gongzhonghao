@@ -1,6 +1,6 @@
 <template>
-  <div style="max-width: 860px; margin: 0 auto;">
-    <!-- Hero -->
+  <!-- Hero：外面单独放，用同宽容器包住保持对齐 -->
+  <div :style="{ maxWidth: showPanel ? '1320px' : '860px', margin: '0 auto', transition: 'max-width 0.32s cubic-bezier(.32,.72,0,1)' }">
     <div class="tool-hero">
       <div class="kicker">
         <el-icon :size="14"><EditPen /></el-icon>
@@ -13,6 +13,13 @@
         投喂任意信息源 —— 文字、PDF 或链接，可以一次给多个。AI 会替你拆出几个陌生化、有张力的切入口。
       </p>
     </div>
+  </div>
+
+  <!-- Flex 行：表单 + 右侧面板 -->
+  <div class="creation-layout" :class="{ 'has-panel': showPanel }">
+  <div ref="mainRef" style="max-width: 860px; margin: 0 auto; flex: 1; min-width: 0;">
+    <!-- 信息源+偏好+按钮 整体，用于面板高度对齐 -->
+    <div ref="formRef">
 
     <!-- 信息源面板 -->
     <div class="card soft-panel" style="padding: 0; overflow: hidden; margin-bottom: 16px;">
@@ -151,93 +158,145 @@
     <!-- 生成按钮 -->
     <button class="cta-bar" :disabled="!canGenerate || progress.isRunning.value" @click="handleGenerate">
       <template v-if="progress.isRunning.value">
-        <el-icon class="spin"><Loading /></el-icon> 正在发掘角度…
+        <el-icon class="spin"><Loading /></el-icon> 正在挖掘角度…
       </template>
-      <template v-else>生成创作角度</template>
+      <template v-else>{{ ctaLabel }}</template>
     </button>
+
+    </div><!-- /formRef -->
+
     <p v-if="!canGenerate" class="text-xs text-ink-4" style="text-align: center; margin-top: 10px;">
       至少填写一个信息源即可开始
     </p>
-
-    <!-- Agent 进度 -->
-    <div v-if="progress.isRunning.value" style="margin-top: 24px;" class="fade-in">
-      <AgentStatusBar
-        v-for="(step, idx) in progress.steps.value"
-        :key="idx"
-        :agent-name="step.agent"
-        :action="step.action"
-        :avatar="step.avatar"
-        :is-active="idx === progress.currentStepIndex.value"
-        :show-progress="idx === progress.currentStepIndex.value"
-        :percent="idx === progress.currentStepIndex.value ? progress.stepPercent.value : (idx < progress.currentStepIndex.value ? 100 : 0)"
-        class="mb-2"
-      />
-    </div>
 
     <!-- 错误提示 -->
     <div v-if="progress.error.value" class="card" style="margin-top: 16px; padding: 16px; border-color: var(--crimson);">
       <p class="text-sm" style="color: var(--crimson);">{{ progress.error.value }}</p>
     </div>
+  </div>
 
-    <!-- 结果 -->
-    <div v-if="results && !progress.isRunning.value" class="fade-in" style="margin-top: 32px;">
-      <PipelineStepper current="angle" />
-
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
-        <div style="display: flex; align-items: baseline; gap: 10px;">
-          <h2 class="font-serif text-ink" style="font-size: 22px; font-weight: 600;">推荐角度</h2>
-          <span class="text-sm text-ink-4">为你找到 {{ results.length }} 个切入口</span>
-        </div>
-        <button class="btn-ghost btn-sm" @click="handleGenerate">
-          <el-icon :size="15"><Refresh /></el-icon> 换一批
-        </button>
+  <!-- 右栏：滑入面板 -->
+  <div v-if="showPanel" ref="panelRef" class="creation-panel" :style="{ height: panelHeight }">
+    <div class="panel-inner">
+      <div class="panel-header">
+        <h3 class="font-serif text-ink" style="font-size: 17px; font-weight: 600;">{{ panelTitle }}</h3>
+        <button class="panel-close" @click="closePanel">&times;</button>
       </div>
+      <div class="panel-body">
+        <!-- 挖掘中 -->
+        <div v-if="panelMode === 'mining'" class="mining-progress">
+          <div class="mining-avatar">
+            <img :src="miningCurrentStep?.avatar || '/agents/agent-a.png'" :alt="miningCurrentStep?.agent" />
+          </div>
+          <div class="mining-agent-name">{{ miningCurrentStep?.agent || '沈知远 · 选题衍生员' }}</div>
+          <div class="mining-action">{{ miningCurrentStep?.action || '正在分析信息源，衍生候选角度…' }}</div>
+          <div class="mining-bar">
+            <div class="mining-bar-fill" :class="{ 'no-step-transition': progress.noStepTransition.value }" :style="{ width: miningPercent + '%' }"></div>
+          </div>
+          <div class="mining-bar-meta">
+            <span>第 {{ miningStepNo }} / {{ Math.max(progress.steps.value.length, 2) }} 步</span>
+            <span>{{ miningPercent }}%</span>
+          </div>
+          <p class="mining-title">正在挖掘角度，请稍候…</p>
+        </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-        <div v-for="(angle, index) in results" :key="angle.id || index"
-          class="card lift slide-up"
-          :style="{ animationDelay: `${index * 70}ms` }"
-          style="padding: 22px; display: flex; flex-direction: column;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <div style="display: flex; align-items: center; gap: 9px;">
-              <span class="font-serif text-clay" style="font-size: 22px; font-weight: 600; line-height: 1;">
-                {{ String(index + 1).padStart(2, '0') }}
-              </span>
-              <span class="badge badge-clay">{{ angle.routine || angle.direction }}</span>
-            </div>
-            <span class="badge" :class="angle.verdict === 'selected' ? 'badge-success' : angle.verdict === 'backup' ? 'badge-warning' : 'badge-info'">
-              {{ angle.verdict === 'selected' ? '推荐' : angle.verdict === 'backup' ? '备选' : angle.verdict }}
-            </span>
-          </div>
-          <h3 class="font-serif text-ink" style="font-size: 19px; line-height: 1.4; font-weight: 600;">{{ angle.title }}</h3>
-          <p class="text-sm text-ink-3" style="margin-top: 9px; flex: 1;">{{ angle.summary || angle.value_promise }}</p>
-          <div v-if="angle.angle_note" class="text-xs text-ink-4" style="margin-top: 8px; padding: 8px 10px; background: var(--bone); border-radius: var(--r-sm);">
-            切入：{{ angle.angle_note }}
-          </div>
-          <div style="margin-top: 16px; display: flex; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line);">
-            <button class="btn-dark btn-sm" @click="goToOutline(angle.title)">
-              用此角度写大纲 <el-icon :size="14"><ArrowRight /></el-icon>
+        <!-- 角度轮播 -->
+        <div v-else-if="currentCandidate" class="carousel fade-in">
+          <div class="carousel-top">
+            <span class="carousel-counter">推荐角度 · 第 {{ currentCandidateIndex + 1 }} / {{ totalCandidates }} 个</span>
+            <button class="btn-reshuffle" @click="reshuffleCandidates" :disabled="totalCandidates <= 1">
+              <span class="reshuffle-icon">↻</span> 换一批
             </button>
-            <button class="btn-text btn-sm" @click="copyText(angle.title)">
-              <el-icon :size="15"><CopyDocument /></el-icon> 复制
+          </div>
+          <transition name="angle-swap" mode="out-in">
+            <div class="angle-hero" :key="currentCandidate.title">
+              <div class="angle-hero-head">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span class="angle-index">{{ String(currentCandidateIndex + 1).padStart(2, '0') }}</span>
+                  <span v-if="currentCandidate.routine || currentCandidate.direction" class="angle-direction">
+                    {{ currentCandidate.routine || currentCandidate.direction }}
+                  </span>
+                </div>
+                <span class="angle-verdict" :class="currentCandidate.verdict === 'selected' ? 'verdict-selected' : 'verdict-backup'">
+                  {{ currentCandidate.verdict === 'selected' ? '推荐' : currentCandidate.verdict === 'backup' ? '备选' : currentCandidate.verdict }}
+                </span>
+              </div>
+              <div class="angle-scroll">
+                <h3 class="angle-title font-serif">{{ currentCandidate.title }}</h3>
+                <p v-if="currentCandidate.summary || currentCandidate.value_promise" class="angle-summary">
+                  {{ currentCandidate.summary || currentCandidate.value_promise }}
+                </p>
+                <div v-if="currentCandidate.angle_note" class="angle-info">
+                  <div class="info-block">
+                    <span class="info-label">角度说明</span>
+                    <p class="info-text">{{ currentCandidate.angle_note }}</p>
+                  </div>
+                </div>
+
+                <!-- 评分维度 -->
+                <div v-if="currentCandidate.score" class="score-section">
+                  <span class="info-label">评分维度</span>
+                  <div class="score-grid">
+                    <div v-for="dim in scoreDimensions" :key="dim.key"
+                      v-show="currentCandidate.score[dim.key] != null" class="score-cell">
+                      <span class="score-dim-label">{{ dim.label }}</span>
+                      <span class="score-dim-value" :style="{ color: getScoreColor(currentCandidate.score[dim.key]) }">
+                        {{ currentCandidate.score[dim.key] != null ? currentCandidate.score[dim.key].toFixed(1) : '—' }}
+                      </span>
+                    </div>
+                  </div>
+                  <!-- 评分依据 -->
+                  <div v-if="getEvidenceData(currentCandidate.score.evidence).items.length" class="evidence-list">
+                    <div v-for="item in getEvidenceData(currentCandidate.score.evidence).items" :key="item.label" class="evidence-item">
+                      <span class="evidence-dim">{{ item.label }}</span>
+                      <span class="evidence-text">{{ item.text }}</span>
+                    </div>
+                  </div>
+                  <p v-else-if="getEvidenceData(currentCandidate.score.evidence).text" class="score-evidence">
+                    {{ getEvidenceData(currentCandidate.score.evidence).text }}
+                  </p>
+                </div>
+              </div>
+              <div class="angle-hero-foot">
+                <button class="btn-copy" @click="copyAngle(currentCandidate)">
+                  <span class="copy-icon">⧉</span> 复制
+                </button>
+                <button class="btn-write-outline" @click="goToOutline(currentCandidate)">
+                  用此角度写大纲 <span style="font-size: 12px;">→</span>
+                </button>
+              </div>
+            </div>
+          </transition>
+          <div class="carousel-nav">
+            <button class="nav-arrow" @click="prevCandidate" :disabled="totalCandidates <= 1" aria-label="上一个">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+            <div class="nav-dots">
+              <button v-for="(c, i) in candidateList" :key="i" class="nav-dot"
+                :class="{ active: i === currentCandidateIndex }" @click="currentCandidateIndex = i"
+                :aria-label="`第 ${i + 1} 个`"></button>
+            </div>
+            <button class="nav-arrow" @click="nextCandidate" :disabled="totalCandidates <= 1" aria-label="下一个">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
             </button>
           </div>
         </div>
+
+        <div v-else class="empty-state"><p style="color: #6B6862;">暂无角度数据</p></div>
       </div>
     </div>
+  </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted, watch, reactive } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   EditPen, Document, Delete, Plus, Upload, Link,
   Edit, Loading, Refresh, ArrowRight, CopyDocument, Check
 } from '@element-plus/icons-vue'
-import PipelineStepper from '@/components/creation/PipelineStepper.vue'
-import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
 
@@ -245,15 +304,15 @@ const router = useRouter()
 const progress = useAgentProgress()
 
 const sourceKinds = [
-  { key: 'text', label: '文本' },
   { key: 'file', label: '文件' },
   { key: 'link', label: '链接' },
+  { key: 'text', label: '文本' },
 ]
 
 const styleChips = ['理性克制', '犀利观点', '亲切口语', '故事化', '干货清单', '反共识']
 
 const sources = ref([{
-  kind: 'text',
+  kind: 'file',
   text: '',
   url: '',
   fileName: '',
@@ -268,7 +327,83 @@ const sources = ref([{
 }])
 const fileInputs = reactive({})
 const preference = ref('')
-const results = ref(null)
+
+// ── 面板状态 ──
+const showPanel = ref(false)
+const mainRef = ref(null)
+const formRef = ref(null)
+const panelRef = ref(null)
+const panelHeight = ref('auto')
+const layoutHeight = ref('auto')
+const panelMode = ref('mining')
+const candidateList = ref([])
+const currentCandidateIndex = ref(0)
+let resizeObserver = null
+
+const totalCandidates = computed(() => candidateList.value.length)
+const currentCandidate = computed(() => candidateList.value[currentCandidateIndex.value] || null)
+
+const panelTitle = computed(() => {
+  if (panelMode.value === 'mining') return '发掘角度中'
+  return '推荐角度'
+})
+
+const miningStepNo = computed(() => {
+  const idx = progress.currentStepIndex.value
+  return Math.min(Math.max(idx + 1, 1), 2)
+})
+const miningPercent = computed(() => Math.round(progress.stepPercent.value))
+const miningCurrentStep = computed(() => {
+  const i = progress.currentStepIndex.value
+  return i >= 0 ? progress.steps.value[i] : null
+})
+
+// 布局高度
+const calcLayoutHeight = () => {
+  if (mainRef.value) {
+    const top = mainRef.value.getBoundingClientRect().top
+    layoutHeight.value = (window.innerHeight - top - 24) + 'px'
+  } else {
+    layoutHeight.value = (window.innerHeight - 108) + 'px'
+  }
+}
+
+const syncPanelHeight = () => {
+  if (formRef.value) {
+    panelHeight.value = formRef.value.offsetHeight + 'px'
+  }
+}
+
+watch(showPanel, (val) => {
+  if (val) {
+    nextTick(() => {
+      syncPanelHeight()
+      requestAnimationFrame(() => {
+        syncPanelHeight()
+        if (formRef.value && !resizeObserver) {
+          resizeObserver = new ResizeObserver(() => syncPanelHeight())
+          resizeObserver.observe(formRef.value)
+        }
+      })
+    })
+  } else {
+    if (resizeObserver) {
+      resizeObserver.disconnect()
+      resizeObserver = null
+    }
+  }
+})
+
+onMounted(() => {
+  calcLayoutHeight()
+  window.addEventListener('resize', calcLayoutHeight)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', calcLayoutHeight)
+  if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null }
+  progress.stop()
+})
 
 const filledCount = computed(() =>
   sources.value.filter(s => s.text || s.url || s.fileText).length
@@ -276,9 +411,15 @@ const filledCount = computed(() =>
 
 const canGenerate = computed(() => filledCount.value > 0 && !progress.isRunning.value)
 
+const ctaLabel = computed(() => {
+  if (progress.isRunning.value) return null // 用 template slot
+  if (candidateList.value.length > 0) return '重新生成角度'
+  return '生成创作角度'
+})
+
 const addSource = () => {
   sources.value.push({
-    kind: 'text',
+    kind: 'file',
     text: '',
     url: '',
     fileName: '',
@@ -408,13 +549,21 @@ const handleFileDrop = async (source, event) => {
 // 监听 SSE 结果
 watch(() => progress.result.value, (data) => {
   if (data?.angles) {
-    results.value = data.angles
+    candidateList.value = data.angles
+    currentCandidateIndex.value = 0
+    panelMode.value = 'candidates'
+    nextTick(syncPanelHeight)
   }
 })
 
 const handleGenerate = async () => {
-  results.value = null
   progress.stop()
+  candidateList.value = []
+  currentCandidateIndex.value = 0
+
+  // 打开面板
+  panelMode.value = 'mining'
+  showPanel.value = true
 
   // 构造信息源
   const apiSources = sources.value
@@ -447,6 +596,7 @@ const handleGenerate = async () => {
     const runId = res?.run_id || res?.data?.run_id
     if (!runId) {
       ElMessage.error('未能获取任务 ID')
+      showPanel.value = false
       return
     }
 
@@ -454,21 +604,83 @@ const handleGenerate = async () => {
     progress.start(`/api/v1/topic-candidates/stream/${runId}`)
   } catch (err) {
     ElMessage.error(err?.response?.data?.detail || err.message || '请求失败')
+    showPanel.value = false
   }
 }
 
-const goToOutline = (angle) => {
-  router.push({ path: '/creation/outline', query: { angle } })
+const closePanel = () => {
+  showPanel.value = false
+  progress.stop()
 }
 
-const copyText = (text) => {
+const goToOutline = (candidate) => {
+  router.push({
+    path: '/creation/new',
+    query: {
+      candidate_id: candidate.id,
+      topic_title: candidate.title,
+    }
+  })
+}
+
+const copyAngle = (angle) => {
+  const text = `${angle.title}\n${angle.summary || angle.value_promise || ''}`.trim()
   navigator.clipboard?.writeText(text).catch(() => {})
   ElMessage.success('已复制')
 }
 
-onUnmounted(() => {
-  progress.stop()
-})
+// 评分维度
+const scoreDimensions = [
+  { key: 'pain_point', label: '痛点直击' },
+  { key: 'value_density', label: '价值密度' },
+  { key: 'propagation', label: '传播触发' },
+  { key: 'differentiation', label: '差异化' },
+  { key: 'freshness', label: '新鲜度' },
+  { key: 'audience_fit', label: '受众适配' },
+]
+
+const getScoreColor = (score) => {
+  if (!score) return 'var(--ink-3)'
+  if (score >= 7) return 'var(--leaf)'
+  if (score >= 5) return 'var(--sand)'
+  return 'var(--crimson)'
+}
+
+const getEvidenceData = (evidence) => {
+  let ev = evidence
+  if (ev == null || ev === '') return { items: [], text: '' }
+  if (typeof ev === 'string') {
+    const t = ev.trim()
+    if (t.startsWith('{')) {
+      try { ev = JSON.parse(t) } catch { return { items: [], text: ev } }
+    } else {
+      return { items: [], text: ev }
+    }
+  }
+  if (ev && typeof ev === 'object') {
+    const labelMap = Object.fromEntries(scoreDimensions.map(d => [d.key, d.label]))
+    const items = Object.entries(ev)
+      .filter(([, v]) => v != null && v !== '')
+      .map(([k, v]) => ({ label: labelMap[k] || k, text: String(v) }))
+    return { items, text: '' }
+  }
+  return { items: [], text: String(ev) }
+}
+
+const prevCandidate = () => {
+  if (totalCandidates.value === 0) return
+  currentCandidateIndex.value =
+    (currentCandidateIndex.value - 1 + totalCandidates.value) % totalCandidates.value
+}
+const nextCandidate = () => {
+  if (totalCandidates.value === 0) return
+  currentCandidateIndex.value = (currentCandidateIndex.value + 1) % totalCandidates.value
+}
+const reshuffleCandidates = () => {
+  if (totalCandidates.value <= 1) return
+  candidateList.value = [...candidateList.value].sort(() => Math.random() - 0.5)
+  currentCandidateIndex.value = 0
+}
 </script>
 
 <style scoped>
@@ -517,4 +729,127 @@ onUnmounted(() => {
 @keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .lift { transition: transform .2s cubic-bezier(.32,.72,0,1), box-shadow .2s, border-color .2s; }
 .lift:hover { transform: translateY(-3px); box-shadow: var(--sh-3); border-color: var(--clay-soft); }
+
+/* ── 双栏布局 ── */
+.creation-layout {
+  display: flex;
+  gap: 20px;
+  align-items: stretch;
+  max-width: 860px;
+  margin: 0 auto;
+  height: 100%;
+  transition: max-width 0.32s cubic-bezier(.32,.72,0,1);
+}
+.creation-layout.has-panel { max-width: 1320px; }
+.creation-panel {
+  width: 460px;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+.panel-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--sh-2);
+  overflow: hidden;
+}
+.panel-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.panel-close {
+  background: transparent; border: none; font-size: 22px; line-height: 1;
+  padding: 2px 8px; cursor: pointer; color: var(--ink-4); transition: color 0.15s;
+}
+.panel-close:hover { color: var(--ink); }
+.panel-body { flex: 1; overflow-y: auto; padding: 20px; }
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 0; }
+
+/* 挖掘进度 */
+.mining-progress { height: 100%; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
+.mining-avatar {
+  width: 96px; height: 96px; border-radius: 50%; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--paper); border: 2px solid var(--clay-soft);
+  box-shadow: 0 0 0 6px var(--clay-tint);
+  animation: avatarPulse 1.8s ease-in-out infinite;
+}
+.mining-avatar img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.12); }
+@keyframes avatarPulse {
+  0%, 100% { box-shadow: 0 0 0 6px var(--clay-tint); }
+  50% { box-shadow: 0 0 0 11px rgba(204,120,92,0); }
+}
+.mining-agent-name { margin-top: 16px; font-size: 15px; font-weight: 600; color: var(--ink); font-family: 'Source Han Serif SC', 'Songti SC', Georgia, serif; }
+.mining-action { margin-top: 6px; max-width: 320px; font-size: 13px; line-height: 1.6; color: var(--ink-3); text-align: center; }
+.mining-bar { width: 100%; max-width: 320px; height: 6px; margin-top: 24px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.mining-bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--clay-soft), var(--clay)); transition: width 1s ease; }
+.mining-bar-fill.no-step-transition { transition: none; }
+.mining-bar-meta { width: 100%; max-width: 320px; margin-top: 8px; display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-4); }
+.mining-title { margin-top: 18px; font-size: 13px; color: var(--ink-4); }
+
+/* 轮播 */
+.carousel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.carousel-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.carousel-counter { font-size: 13px; font-weight: 600; color: var(--ink-3); font-family: 'Source Han Serif SC', 'Songti SC', Georgia, serif; }
+.btn-reshuffle { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: none; color: var(--clay-deep); font-size: 13px; font-weight: 600; cursor: pointer; transition: color 0.15s; }
+.btn-reshuffle:hover:not(:disabled) { color: var(--clay); }
+.btn-reshuffle:disabled { opacity: 0.4; cursor: not-allowed; }
+.reshuffle-icon { font-size: 14px; }
+
+/* 主卡片 */
+.angle-hero { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--clay-soft); border-radius: 16px; background: var(--paper); box-shadow: var(--sh-1); padding: 22px; }
+.angle-hero-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.angle-index { font-family: 'Source Han Serif SC', 'Songti SC', Georgia, serif; font-size: 28px; font-weight: 600; color: var(--clay); line-height: 1; }
+.angle-direction { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--clay-tint); color: var(--clay-deep); border: 1px solid var(--clay-soft); }
+.angle-verdict { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.verdict-selected { background: rgba(92,138,92,.12); color: var(--leaf); }
+.verdict-backup { background: var(--sand-soft); color: #8a6d33; }
+.angle-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; margin-right: -4px; }
+.angle-title { font-size: 22px; font-weight: 500; color: var(--ink); line-height: 1.4; margin-bottom: 10px; }
+.angle-summary { font-size: 14px; line-height: 1.75; color: var(--ink-3); }
+.angle-info { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.info-label { display: block; font-size: 11px; font-weight: 600; color: var(--ink-4); letter-spacing: 0.03em; margin-bottom: 5px; }
+.info-text { font-size: 13px; line-height: 1.7; color: var(--ink-3); }
+/* 评分维度 */
+.score-section { margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--line); }
+.score-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.score-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+.score-dim-label { font-size: 11px; color: var(--ink-4); font-weight: 500; }
+.score-dim-value { font-family: 'Source Han Serif SC', 'Songti SC', Georgia, serif; font-size: 20px; font-weight: 600; line-height: 1; }
+.score-evidence { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--paper-2, #F6F1EB); font-size: 12px; line-height: 1.75; color: var(--ink-3); white-space: pre-line; }
+.evidence-list { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.evidence-item { display: flex; gap: 8px; font-size: 12px; line-height: 1.7; }
+.evidence-dim { flex-shrink: 0; font-weight: 600; color: var(--ink-3); min-width: 56px; }
+.evidence-text { color: var(--ink-4); }
+
+.angle-hero-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.btn-copy { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: none; color: var(--ink-3); font-size: 13px; font-weight: 500; cursor: pointer; transition: color 0.15s; }
+.btn-copy:hover { color: var(--ink); }
+.copy-icon { font-size: 14px; }
+.btn-write-outline { display: inline-flex; align-items: center; gap: 5px; padding: 8px 14px; background: var(--clay); color: #fff; border: none; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 16px rgba(204,120,92,.20); transition: background 0.15s, transform 0.15s; font-family: 'Source Han Serif SC', 'Songti SC', Georgia, serif; }
+.btn-write-outline:hover { background: var(--clay-deep); }
+.btn-write-outline:active { transform: translateY(1px); }
+
+/* 底部导航 */
+.carousel-nav { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 18px; }
+.nav-arrow { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--paper); color: var(--ink-3); cursor: pointer; transition: all 0.15s; }
+.nav-arrow:hover:not(:disabled) { border-color: var(--clay-soft); color: var(--clay); background: var(--clay-tint); }
+.nav-arrow:disabled { opacity: 0.35; cursor: not-allowed; }
+.nav-dots { display: flex; align-items: center; gap: 8px; }
+.nav-dot { width: 8px; height: 8px; border-radius: 999px; border: none; padding: 0; background: var(--clay-soft); cursor: pointer; transition: all 0.22s cubic-bezier(.32,.72,0,1); }
+.nav-dot.active { width: 22px; background: var(--clay); }
+
+/* 卡片切换动画 */
+.angle-swap-enter-active, .angle-swap-leave-active { transition: opacity 0.18s ease, transform 0.18s ease; }
+.angle-swap-enter-from { opacity: 0; transform: translateY(8px); }
+.angle-swap-leave-to { opacity: 0; transform: translateY(-8px); }
 </style>

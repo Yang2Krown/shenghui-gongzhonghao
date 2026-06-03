@@ -457,267 +457,32 @@ def _extract_wechat_content(html: str) -> str:
 
 async def extract_douyin(url: str, cookie: str = None) -> Dict[str, Any]:
     """
-    提取抖音视频文案 - 参考保险 Agent 项目，多策略级联
+    提取抖音视频内容 - 复用增强版 DouyinExtractor
+    支持：分享文本解析、机领网 API、火山方舟视频内容提取
     :param url: 抖音链接或分享文本
     :param cookie: 可选的 cookie
-    :return: {title, content, author, tags, platform}
+    :return: {title, content, author, tags, platform, video_url, stats}
     """
     try:
-        # 如果是分享文本，先提取 URL 和文案
-        actual_url = extract_url_from_text(url)
-        share_text = url if actual_url else ''
+        from app.services.douyin_extractor import DouyinExtractor
 
-        if actual_url:
-            url = actual_url
+        extractor = DouyinExtractor(cookie)
+        result = await extractor.extract(url)
 
-        # 策略 A：直接解析分享文本（最可靠，无需网络）
-        if share_text:
-            share_result = _parse_douyin_share_text(share_text)
-            if share_result and share_result.get('content'):
-                logger.info(f"从分享文本提取成功: content_len={len(share_result['content'])}")
-                return share_result
+        # 统一返回格式
+        return {
+            "title": result.get('title', ''),
+            "content": result.get('content', ''),
+            "author": result.get('author', ''),
+            "tags": result.get('tags', []),
+            "platform": "douyin",
+            "video_url": result.get('video_url', ''),
+            "stats": result.get('stats', {}),
+        }
 
-        # 处理短链接
-        if 'v.douyin.com' in url or 'iesdouyin.com' in url:
-            url = await _resolve_douyin_short_url(url)
-            logger.info(f"抖音短链接解析后: {url}")
-
-        # 提取 aweme_id
-        aweme_id = _extract_aweme_id(url)
-        if not aweme_id:
-            return {"title": "", "content": "无法解析抖音链接，请检查链接格式", "author": "", "tags": [], "platform": "douyin"}
-
-        logger.info(f"抖音 aweme_id: {aweme_id}")
-
-        # 策略 B：获取页面内容并解析
-        html = await fetch_html(url, cookie=cookie)
-        logger.info(f"抖音 HTML 长度: {len(html)}")
-
-        # 尝试从 RENDER_DATA 提取
-        result = _parse_douyin_render_data(html, aweme_id)
-        if result and result.get('content'):
-            logger.info(f"抖音 RENDER_DATA 提取成功, content_len={len(result.get('content', ''))}")
-            return result
-
-        # 策略 C：从 meta 标签提取
-        result = _parse_douyin_meta(html, url)
-        if result and result.get('content'):
-            logger.info(f"抖音 meta 提取成功: content_len={len(result.get('content', ''))}")
-            return result
-
-        # 策略 D：从 HTML 中正则提取
-        result = _parse_douyin_html_regex(html)
-        if result and result.get('content'):
-            logger.info(f"抖音正则提取成功: content_len={len(result.get('content', ''))}")
-            return result
-
-        # 最后回退到分享文本
-        if share_text:
-            return _parse_douyin_share_text(share_text)
-
-        return {"title": "", "content": "提取失败，请使用「粘贴文字」方式添加", "author": "", "tags": [], "platform": "douyin"}
-
-    except httpx.HTTPStatusError as e:
-        logger.error(f"抖音请求失败: {e.response.status_code}")
-        return {"title": "", "content": f"请求失败，状态码: {e.response.status_code}，可能需要登录或链接已失效", "author": "", "tags": [], "platform": "douyin"}
     except Exception as e:
         logger.error(f"抖音提取失败: {e}")
         return {"title": "", "content": f"提取失败: {str(e)[:200]}", "author": "", "tags": [], "platform": "douyin"}
-
-
-def _parse_douyin_html_regex(html: str) -> dict:
-    """从 HTML 中正则提取抖音内容"""
-    # 提取 desc 字段（视频描述）
-    desc_patterns = [
-        r'"desc"\s*:\s*"((?:[^"\\]|\\.)*)"',
-        r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"',
-    ]
-
-    for pattern in desc_patterns:
-        match = re.search(pattern, html)
-        if match:
-            desc = match.group(1)
-            # 处理转义字符
-            desc = desc.replace('\\n', '\n').replace('\\"', '"')
-            if desc and len(desc) > 5:
-                return {"title": "", "content": desc, "author": "", "tags": [], "platform": "douyin"}
-
-    return {"title": "", "content": "", "author": "", "tags": [], "platform": "douyin"}
-
-
-async def _resolve_douyin_short_url(url: str) -> str:
-    """解析抖音短链接"""
-    try:
-        async with httpx.AsyncClient(
-            timeout=10.0,
-            follow_redirects=False,
-            verify=False
-        ) as client:
-            resp = await client.get(
-                url,
-                headers={"User-Agent": CHROME_UA},
-                follow_redirects=False
-            )
-            if resp.status_code in (301, 302):
-                return resp.headers.get('Location', url)
-            return url
-    except Exception:
-        return url
-
-
-def _extract_aweme_id(url: str) -> Optional[str]:
-    """从 URL 中提取 aweme_id"""
-    patterns = [
-        r'/video/(\d+)',
-        r'/note/(\d+)',
-        r'aweme_id=(\d+)',
-        r'modal_id=(\d+)',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
-    return None
-
-
-def _parse_douyin_share_text(text: str) -> dict:
-    """从分享文本中提取内容"""
-    # 提取【】中的内容作为标题/核心内容
-    title_match = re.search(r'【(.+?)】', text)
-    title = title_match.group(1) if title_match else ""
-
-    # 移除 URL
-    text = re.sub(r'https?://[^\s]+', '', text)
-
-    # 提取话题标签
-    tags = re.findall(r'#(\S+?)(?:\s|$|#)', text)
-
-    # 移除【】本身（保留里面的内容）
-    text_without_brackets = re.sub(r'【[^】]*】', '', text)
-
-    # 尝试提取有意义的中文短语（连续中文字符，至少2个字）
-    # 只匹配纯中文字符，不包含标点和特殊符号
-    chinese_phrases = re.findall(r'[一-鿿]{2,}', text_without_brackets)
-    content = ''.join(chinese_phrases).strip()
-
-    # 检查是否包含提示词
-    has_prompt_words = content and ('复制' in content or '打开' in content or '搜索' in content or '作品' in content or '链接' in content or '观看' in content)
-
-    # 如果提取到的内容包含提示词，使用【】中的内容
-    if has_prompt_words:
-        content = title if title else ""
-    # 如果还是没有内容且不是因为提示词被清空，尝试更宽松的提取
-    elif not content:
-        # 移除所有非中文字符
-        content = re.sub(r'[^一-鿿]+', '', text_without_brackets).strip()
-
-    return {
-        "title": title,
-        "content": content or title,  # 最后兜底使用标题
-        "author": "",
-        "tags": tags,
-        "platform": "douyin"
-    }
-
-
-def _parse_douyin_render_data(html: str, aweme_id: str) -> Optional[dict]:
-    """从 RENDER_DATA 中提取抖音视频信息"""
-    try:
-        # 查找 RENDER_DATA 或 __NEXT_DATA__
-        patterns = [
-            r'<script[^>]*id="RENDER_DATA"[^>]*>(.*?)</script>',
-            r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>',
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, html, re.DOTALL)
-            if match:
-                data_text = unquote(match.group(1))
-                try:
-                    data = json.loads(data_text)
-                    # 搜索 aweme 数据
-                    result = _find_aweme_in_data(data, aweme_id)
-                    if result:
-                        return result
-                except json.JSONDecodeError:
-                    continue
-
-        return None
-    except Exception as e:
-        logger.warning(f"RENDER_DATA 解析失败: {e}")
-        return None
-
-
-def _find_aweme_in_data(data: Any, aweme_id: str) -> Optional[dict]:
-    """在嵌套数据中搜索 aweme 信息"""
-    if isinstance(data, dict):
-        # 检查是否有 desc 字段（视频描述）
-        if 'desc' in data and isinstance(data['desc'], str):
-            desc = data['desc']
-            # 提取作者
-            author = ''
-            if 'author' in data and isinstance(data['author'], dict):
-                author = data['author'].get('nickname', '')
-
-            # 提取话题标签
-            tags = []
-            if 'text_extra' in data:
-                for item in data['text_extra']:
-                    if isinstance(item, dict) and 'hashtag_name' in item:
-                        tags.append(item['hashtag_name'])
-
-            if desc:
-                return {
-                    "title": "",
-                    "content": desc,
-                    "author": author,
-                    "tags": tags,
-                    "platform": "douyin"
-                }
-
-        # 递归搜索
-        for value in data.values():
-            result = _find_aweme_in_data(value, aweme_id)
-            if result:
-                return result
-
-    elif isinstance(data, list):
-        for item in data:
-            result = _find_aweme_in_data(item, aweme_id)
-            if result:
-                return result
-
-    return None
-
-
-def _parse_douyin_meta(html: str, url: str) -> dict:
-    """从 meta 标签中提取抖音信息"""
-    title = ''
-    content = ''
-
-    # 提取 og:title
-    title_match = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]*)"', html)
-    if title_match:
-        title = title_match.group(1)
-
-    # 提取 og:description
-    desc_match = re.search(r'<meta[^>]*property="og:description"[^>]*content="([^"]*)"', html)
-    if desc_match:
-        content = desc_match.group(1)
-
-    # 提取 author
-    author = ''
-    author_match = re.search(r'"nickname"\s*:\s*"([^"]+)"', html)
-    if author_match:
-        author = author_match.group(1)
-
-    return {
-        "title": title,
-        "content": content,
-        "author": author,
-        "tags": [],
-        "platform": "douyin"
-    }
 
 
 # ========== 知乎提取 ==========

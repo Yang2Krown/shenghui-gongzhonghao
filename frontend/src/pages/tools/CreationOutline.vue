@@ -112,7 +112,7 @@
               @change="(e) => handleFileUpload(source, e)" />
           </div>
         </div>
-        <button @click="sources.push({ kind: 'text', text: '', url: '', fileName: '', fileText: '', fileUploading: false, dragOver: false })" class="btn-ghost" style="border-style: dashed; margin-top: 8px;">
+        <button @click="sources.push({ kind: 'file', text: '', url: '', fileName: '', fileText: '', fileUploading: false, dragOver: false })" class="btn-ghost" style="border-style: dashed; margin-top: 8px;">
           <el-icon :size="16"><Plus /></el-icon> 添加信息源
         </button>
       </div>
@@ -233,14 +233,14 @@ const router = useRouter()
 const progress = useAgentProgress()
 
 const sourceKinds = [
-  { key: 'text', label: '文本' },
   { key: 'file', label: '文件' },
   { key: 'link', label: '链接' },
+  { key: 'text', label: '文本' },
 ]
 const styleChips = ['理性克制', '犀利观点', '亲切口语', '故事化', '干货清单', '反共识']
 
 const sources = ref([{
-  kind: 'text',
+  kind: 'file',
   text: route.query.angle || '',
   url: '',
   fileName: '',

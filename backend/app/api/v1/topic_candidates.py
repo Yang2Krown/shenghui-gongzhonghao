@@ -265,6 +265,22 @@ async def trigger_adhoc_mining(
                             {"persona": pr.persona, "score": pr.score, "rationale": pr.rationale}
                             for pr in scored.persona_reviews
                         ],
+                        "score": {
+                            "pain_point": scored.pain_point.score,
+                            "value_density": scored.value_density.score,
+                            "propagation": scored.propagation.score,
+                            "differentiation": scored.differentiation.score,
+                            "freshness": scored.freshness.score,
+                            "audience_fit": scored.audience_fit.score,
+                            "evidence": {
+                                "pain_point": scored.pain_point.evidence,
+                                "value_density": scored.value_density.evidence,
+                                "propagation": scored.propagation.evidence,
+                                "differentiation": scored.differentiation.evidence,
+                                "freshness": scored.freshness.evidence,
+                                "audience_fit": scored.audience_fit.evidence,
+                            },
+                        },
                     })
                     total_candidates += 1
 

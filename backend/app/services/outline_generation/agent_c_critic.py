@@ -117,6 +117,29 @@ async def criticize_outline(
             logger.warning(f"Agent C 第 {attempt}/{MAX_RETRIES} 次输出解析失败: {result.text[:300]}")
             continue
 
+        # 补全 LLM 可能遗漏的字段
+        if "problem_sections" not in parsed or not isinstance(parsed["problem_sections"], list):
+            parsed["problem_sections"] = []
+        for sec in parsed["problem_sections"]:
+            sec.setdefault("section_number", 0)
+            sec.setdefault("problem_type", "未知")
+            sec.setdefault("feedback", "")
+            sec.setdefault("suggestion", "")
+
+        if "revised_sections" not in parsed or not isinstance(parsed["revised_sections"], list):
+            # 用原始输入的 sections 作为 fallback
+            parsed["revised_sections"] = [
+                {
+                    "section_number": s.section_number,
+                    "title": s.title,
+                    "core_points": s.core_points,
+                    "word_count": s.word_count,
+                    "propagation_tags": s.propagation_tags,
+                    "notes": s.notes,
+                }
+                for s in input_data.sections
+            ]
+
         output = AgentCOutput(**parsed)
 
         if "不想看" in output.overall_feeling or "关了" in output.overall_feeling:

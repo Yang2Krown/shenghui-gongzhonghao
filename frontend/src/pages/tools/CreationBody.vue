@@ -22,89 +22,90 @@
           </div>
           <div>
             <div class="text-sm font-semibold text-ink">大纲</div>
-            <div class="text-xs text-ink-4">支持文字 / 链接 / 文件</div>
+            <div class="text-xs text-ink-4">支持文件 / 链接 / 文本</div>
           </div>
         </div>
       </div>
       <div style="padding: 22px;">
         <div class="seg" style="margin-bottom: 16px;">
-          <button :class="['seg-btn', { 'seg-btn-active': inputMode === 'text' }]" @click="inputMode = 'text'">
-            文字输入
+          <button :class="['seg-btn', { 'seg-btn-active': inputMode === 'file' }]" @click="inputMode = 'file'">
+            文件
           </button>
           <button :class="['seg-btn', { 'seg-btn-active': inputMode === 'link' }]" @click="inputMode = 'link'">
             链接
           </button>
-          <button :class="['seg-btn', { 'seg-btn-active': inputMode === 'file' }]" @click="inputMode = 'file'">
-            上传文件
+          <button :class="['seg-btn', { 'seg-btn-active': inputMode === 'text' }]" @click="inputMode = 'text'">
+            文本
           </button>
         </div>
 
-        <!-- 文字输入 -->
-        <el-input v-if="inputMode === 'text'" v-model="outline" type="textarea" :rows="8"
-          placeholder="粘贴或输入文章大纲，每行一个要点……" />
-
-        <!-- 链接输入 -->
-        <div v-else-if="inputMode === 'link'">
-          <div v-if="linkExtracting" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
-            <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
-            <span class="text-sm text-ink-3">正在提取链接内容…</span>
-          </div>
-          <div v-else-if="linkTitle" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-              <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
-                <el-icon class="text-clay"><Link /></el-icon> {{ linkTitle }}
-                <span v-if="linkPlatform" class="text-xs text-ink-4" style="padding: 2px 8px; background: var(--line); border-radius: 12px;">{{ linkPlatform }}</span>
-              </span>
-              <button @click="removeLink()" class="btn-text text-sm">移除</button>
+        <div class="tab-grid">
+          <div v-show="inputMode === 'file'">
+            <div v-if="fileUploading" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+              <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
+              <span class="text-sm text-ink-3">正在提取文件内容…</span>
             </div>
-            <div v-if="linkContent" class="text-xs text-ink-4" style="margin-top: 8px; max-height: 60px; overflow: hidden; line-height: 1.5;">
-              {{ linkContent.slice(0, 200) }}…
-            </div>
-          </div>
-          <div v-else style="position: relative;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <div style="flex: 1; position: relative;">
-                <el-icon :size="16" style="position: absolute; left: 13px; top: 13px; color: var(--ink-4); z-index: 1;"><Link /></el-icon>
-                <el-input v-model="linkUrl" placeholder="粘贴文章链接（公众号 / 小红书 / 知乎 / 抖音 等）"
-                  style="padding-left: 38px;" />
+            <div v-else-if="fileName" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
+                  <el-icon class="text-clay"><Document /></el-icon> {{ fileName }}
+                  <span v-if="fileText" class="text-xs text-ink-4">· {{ fileText.length }} 字</span>
+                </span>
+                <button @click="removeFile()" class="btn-text text-sm">移除</button>
               </div>
-              <button @click="handleLinkExtract()" :disabled="!linkUrl || linkExtracting"
-                style="padding: 8px 16px; background: var(--clay); color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;"
-                :style="{ opacity: (!linkUrl || linkExtracting) ? 0.5 : 1 }">
-                确认
-              </button>
+              <div v-if="fileText" class="text-xs text-ink-4" style="margin-top: 8px; max-height: 60px; overflow: hidden; line-height: 1.5;">
+                {{ fileText.slice(0, 200) }}…
+              </div>
             </div>
+            <div v-else class="dropzone" :class="{ 'dropzone-active': dragOver }"
+              @click="$refs.bodyFileInput?.click()"
+              @dragover.prevent="dragOver = true"
+              @dragleave="dragOver = false"
+              @drop="handleFileDrop">
+              <el-icon :size="22" style="margin: 0 auto 6px;"><Upload /></el-icon>
+              <div class="text-sm font-medium">点击或拖拽上传 PDF / Word / TXT / MD</div>
+            </div>
+            <input ref="bodyFileInput" type="file" accept=".pdf,.docx,.txt,.md" style="display:none"
+              @change="handleFileUpload" />
           </div>
-        </div>
 
-        <!-- 文件上传 -->
-        <div v-else>
-          <div v-if="fileUploading" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
-            <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
-            <span class="text-sm text-ink-3">正在提取文件内容…</span>
-          </div>
-          <div v-else-if="fileName" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-              <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
-                <el-icon class="text-clay"><Document /></el-icon> {{ fileName }}
-                <span v-if="fileText" class="text-xs text-ink-4">· {{ fileText.length }} 字</span>
-              </span>
-              <button @click="removeFile()" class="btn-text text-sm">移除</button>
+          <div v-show="inputMode === 'link'">
+            <div v-if="linkExtracting" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+              <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
+              <span class="text-sm text-ink-3">正在提取链接内容…</span>
             </div>
-            <div v-if="fileText" class="text-xs text-ink-4" style="margin-top: 8px; max-height: 60px; overflow: hidden; line-height: 1.5;">
-              {{ fileText.slice(0, 200) }}…
+            <div v-else-if="linkTitle" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
+                  <el-icon class="text-clay"><Link /></el-icon> {{ linkTitle }}
+                  <span v-if="linkPlatform" class="text-xs text-ink-4" style="padding: 2px 8px; background: var(--line); border-radius: 12px;">{{ linkPlatform }}</span>
+                </span>
+                <button @click="removeLink()" class="btn-text text-sm">移除</button>
+              </div>
+              <div v-if="linkContent" class="text-xs text-ink-4" style="margin-top: 8px; max-height: 60px; overflow: hidden; line-height: 1.5;">
+                {{ linkContent.slice(0, 200) }}…
+              </div>
+            </div>
+            <div v-else style="position: relative;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="flex: 1; position: relative;">
+                  <el-icon :size="16" style="position: absolute; left: 13px; top: 13px; color: var(--ink-4); z-index: 1;"><Link /></el-icon>
+                  <el-input v-model="linkUrl" placeholder="粘贴文章链接（公众号 / 小红书 / 知乎 / 抖音 等）"
+                    style="padding-left: 38px;" />
+                </div>
+                <button @click="handleLinkExtract()" :disabled="!linkUrl || linkExtracting"
+                  style="padding: 8px 16px; background: var(--clay); color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;"
+                  :style="{ opacity: (!linkUrl || linkExtracting) ? 0.5 : 1 }">
+                  确认
+                </button>
+              </div>
             </div>
           </div>
-          <div v-else class="dropzone" :class="{ 'dropzone-active': dragOver }"
-            @click="$refs.bodyFileInput?.click()"
-            @dragover.prevent="dragOver = true"
-            @dragleave="dragOver = false"
-            @drop="handleFileDrop">
-            <el-icon :size="22" style="margin: 0 auto 6px;"><Upload /></el-icon>
-            <div class="text-sm font-medium">点击或拖拽上传 PDF / Word / TXT / MD</div>
+
+          <div v-show="inputMode === 'text'">
+            <el-input v-model="outline" type="textarea" :rows="5"
+              placeholder="粘贴或输入文章大纲，每行一个要点……" style="resize: none;" />
           </div>
-          <input ref="bodyFileInput" type="file" accept=".pdf,.docx,.txt,.md" style="display:none"
-            @change="handleFileUpload" />
         </div>
       </div>
     </div>
@@ -235,7 +236,7 @@ const progress = useAgentProgress()
 
 const styleChips = ['理性克制', '犀利观点', '亲切口语', '故事化', '干货清单', '反共识']
 
-const inputMode = ref('text')
+const inputMode = ref('file')
 const outline = ref(route.query.outline || '')
 const fileName = ref('')
 const fileText = ref('')
