@@ -309,6 +309,108 @@ async def trigger_adhoc_mining(
     return {"code": 200, "message": "挖掘任务已提交", "data": {"run_id": run_id, "cluster_id": cluster.id}}
 
 
+@router.post("/create-adhoc", response_model=dict)
+async def create_adhoc_candidate(
+    body: dict = {},
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """从自由输入的信息源同步创建候选选题，直接返回 candidate_id。
+
+    用于大纲生成流程：输入信息源 → 创建候选 → 跳转创作页自动生成大纲。
+    """
+    sources = body.get("sources", [])
+    preference = body.get("preference", "")
+
+    if not sources:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="至少提供一个信息源",
+        )
+
+    # 合并所有信息源内容
+    from app.services.link_extractor import extract_link_content
+    combined_text_parts = []
+    for src in sources:
+        content = (src.get("content") or "").strip()
+        src_type = src.get("type", "text")
+
+        if content:
+            if src_type == "link":
+                try:
+                    extracted = await extract_link_content(content)
+                    title = extracted.get("title", "")
+                    text_content = extracted.get("content", "")
+                    author = extracted.get("author", "")
+                    parts = []
+                    if title:
+                        parts.append(f"标题：{title}")
+                    if author:
+                        parts.append(f"作者：{author}")
+                    if text_content:
+                        parts.append(text_content)
+                    combined_text_parts.append("\n".join(parts) if parts else content)
+                except Exception:
+                    combined_text_parts.append(content)
+            else:
+                combined_text_parts.append(content)
+
+    combined_text = "\n\n".join(combined_text_parts).strip()
+    if not combined_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="信息源内容为空",
+        )
+
+    # 取前 200 字作为摘要，截断最后一个完整句子
+    summary = combined_text[:200]
+    last_period = max(summary.rfind("。"), summary.rfind("！"), summary.rfind("？"), summary.rfind("."))
+    if last_period > 50:
+        summary = summary[:last_period + 1]
+
+    # 取前 30 字作为标题
+    title = combined_text[:30]
+    last_boundary = max(title.rfind("，"), title.rfind("。"), title.rfind(" "), title.rfind("\n"))
+    if last_boundary > 10:
+        title = title[:last_boundary]
+
+    # 创建 InfoCluster
+    cluster = InfoCluster(
+        core_title=title,
+        summary=summary,
+        source_count=len(sources),
+        mined=False,
+    )
+    db.add(cluster)
+    await db.flush()
+
+    # 创建 TopicCandidate
+    candidate = TopicCandidate(
+        info_cluster_id=cluster.id,
+        title=title,
+        summary=summary,
+        direction="",
+        routine="",
+        value_promise="",
+        angle_note=preference or "",
+        veto_passed=True,
+        verdict="selected",
+    )
+    db.add(candidate)
+    await db.commit()
+    await db.refresh(candidate)
+
+    return {
+        "code": 200,
+        "message": "候选选题已创建",
+        "data": {
+            "candidate_id": candidate.id,
+            "title": candidate.title,
+            "cluster_id": cluster.id,
+        },
+    }
+
+
 @router.get("/progress/{run_id}", response_model=dict)
 async def get_mining_progress(
     run_id: str,

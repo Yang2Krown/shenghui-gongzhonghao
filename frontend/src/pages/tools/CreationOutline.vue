@@ -144,93 +144,28 @@
     </div>
 
     <!-- 生成按钮 -->
-    <button class="cta-bar" :disabled="!canGenerate || progress.isRunning.value" @click="handleGenerate">
-      <template v-if="progress.isRunning.value">
-        <el-icon class="spin"><Loading /></el-icon> 正在搭建结构…
+    <button class="cta-bar" :disabled="!canGenerate || submitting" @click="handleGenerate">
+      <template v-if="submitting">
+        <el-icon class="spin"><Loading /></el-icon> 正在创建选题…
       </template>
       <template v-else>生成大纲</template>
     </button>
-
-    <!-- Agent 进度 -->
-    <div v-if="progress.isRunning.value" style="margin-top: 24px;" class="fade-in">
-      <AgentStatusBar
-        v-for="(step, idx) in progress.steps.value"
-        :key="idx"
-        :agent-name="step.agent"
-        :action="step.action"
-        :avatar="step.avatar"
-        :is-active="idx === progress.currentStepIndex.value"
-        :show-progress="idx === progress.currentStepIndex.value"
-        :percent="idx === progress.currentStepIndex.value ? progress.stepPercent.value : (idx < progress.currentStepIndex.value ? 100 : 0)"
-        class="mb-2"
-      />
-    </div>
-
-    <!-- 错误提示 -->
-    <div v-if="progress.error.value" class="card" style="margin-top: 16px; padding: 16px; border-color: var(--crimson);">
-      <p class="text-sm" style="color: var(--crimson);">{{ progress.error.value }}</p>
-    </div>
-
-    <!-- 结果 -->
-    <div v-if="result && !progress.isRunning.value" class="fade-in" style="margin-top: 32px;">
-      <PipelineStepper current="outline" />
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
-        <div style="display: flex; align-items: baseline; gap: 10px;">
-          <h2 class="font-serif text-ink" style="font-size: 22px; font-weight: 600;">文章大纲</h2>
-          <span class="text-sm text-ink-4">{{ result.sections.length }} 个章节</span>
-          <span v-if="result.inspection" class="badge badge-clay" style="font-size: 11px;">
-            评分 {{ result.inspection.total_score?.toFixed(1) }}
-          </span>
-        </div>
-        <button class="btn-ghost btn-sm" @click="handleGenerate">
-          <el-icon :size="15"><Refresh /></el-icon> 重新生成
-        </button>
-      </div>
-      <div class="card" style="padding: 30px;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px;">
-          <h2 class="text-ink font-serif" style="font-size: 22px; line-height: 1.35; font-weight: 500; flex: 1;">{{ result.title }}</h2>
-          <button class="btn-clay btn-sm" style="flex-shrink: 0;" @click="goToBody">
-            生成正文 <el-icon :size="14"><ArrowRight /></el-icon>
-          </button>
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 18px;">
-          <div v-for="(section, index) in result.sections" :key="index" class="slide-up"
-            :style="{ animationDelay: `${index * 60}ms`, display: 'flex', gap: '14px' }">
-            <div style="flex-shrink: 0; width: 30px; height: 30px; border-radius: var(--r-sm); background: var(--clay); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; font-family: var(--serif);">
-              {{ section.section_number || index + 1 }}
-            </div>
-            <div :style="{ flex: 1, paddingBottom: index < result.sections.length - 1 ? '18px' : '0', borderBottom: index < result.sections.length - 1 ? '1px solid var(--line)' : 'none' }">
-              <h4 class="text-sm font-semibold text-ink">{{ section.title }}</h4>
-              <ul style="margin: 8px 0 0; padding-left: 18px;">
-                <li v-for="(point, j) in section.core_points" :key="j" class="text-sm text-ink-2" style="margin-bottom: 4px;">{{ point }}</li>
-              </ul>
-              <div v-if="section.propagation_tags?.length" style="margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap;">
-                <span v-for="tag in section.propagation_tags" :key="tag" class="badge badge-info" style="font-size: 10px;">{{ tag }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onUnmounted, reactive } from 'vue'
+import { ref, computed, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   Document, Delete, Plus, Upload, Link, Edit,
-  Loading, Refresh, ArrowRight, Check
+  Loading
 } from '@element-plus/icons-vue'
-import PipelineStepper from '@/components/creation/PipelineStepper.vue'
-import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
-import { useAgentProgress } from '@/composables/useAgentProgress'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
 
 const route = useRoute()
 const router = useRouter()
-const progress = useAgentProgress()
+const submitting = ref(false)
 
 const sourceKinds = [
   { key: 'file', label: '文件' },
@@ -255,10 +190,9 @@ const sources = ref([{
 }])
 const fileInputs = reactive({})
 const preference = ref('')
-const result = ref(null)
 
 const filledCount = computed(() => sources.value.filter(s => s.text || s.url || s.fileText).length)
-const canGenerate = computed(() => filledCount.value > 0 && !progress.isRunning.value)
+const canGenerate = computed(() => filledCount.value > 0 && !submitting.value)
 
 const handleFileUpload = async (source, event) => {
   const file = event.target.files?.[0]
@@ -367,23 +301,14 @@ const toggleChip = (chip) => {
   }
 }
 
-// 监听 SSE 结果
-watch(() => progress.result.value, (data) => {
-  if (data?.sections) {
-    result.value = data
-  }
-})
-
 const handleGenerate = async () => {
-  result.value = null
-  progress.stop()
+  submitting.value = true
 
   const apiSources = sources.value
     .filter(s => s.text || s.url || s.fileText)
     .map(s => {
       if (s.kind === 'text') return { type: 'text', content: s.text }
       if (s.kind === 'link') {
-        // 优先使用前端已提取的内容
         if (s.linkTitle) {
           const parts = []
           if (s.linkTitle) parts.push(`标题：${s.linkTitle}`)
@@ -398,31 +323,32 @@ const handleGenerate = async () => {
     })
 
   try {
-    const res = await api.post('/outlines/generate-adhoc', {
+    // 同步创建候选选题，拿到 candidate_id 后跳转到创作页自动生成大纲
+    const res = await api.post('/topic-candidates/create-adhoc', {
       sources: apiSources,
-      angle: route.query.angle || '',
       preference: preference.value,
     }, { timeout: 10000 })
 
-    const runId = res?.run_id || res?.data?.run_id
-    if (!runId) {
-      ElMessage.error('未能获取任务 ID')
+    const data = res?.data || res
+    const candidateId = data?.candidate_id
+    if (!candidateId) {
+      ElMessage.error('未能创建选题')
       return
     }
 
-    progress.start(`/api/v1/outlines/stream/${runId}`)
+    router.push({
+      path: '/creation/new',
+      query: {
+        candidate_id: candidateId,
+        topic_title: data?.title || '',
+        auto_generate: 'true',
+      }
+    })
   } catch (err) {
     ElMessage.error(err?.response?.data?.detail || err.message || '请求失败')
+    submitting.value = false
   }
 }
-
-const goToBody = () => {
-  router.push({ path: '/creation/body', query: { outline: result.value?.title } })
-}
-
-onUnmounted(() => {
-  progress.stop()
-})
 </script>
 
 <style scoped>

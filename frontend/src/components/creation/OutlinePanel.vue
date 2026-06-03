@@ -212,6 +212,7 @@ const props = defineProps({
   candidateId: { type: [Number, String], default: null },
   outlineId: { type: [Number, String], default: null },
   activeWorkflowStep: { type: String, default: 'angle' },
+  autoGenerate: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['complete', 'next-step', 'pipeline-status'])
@@ -273,6 +274,9 @@ onMounted(async () => {
     } catch (e) {
       console.error('加载大纲失败:', e)
     }
+  } else if (props.autoGenerate && props.candidateId && status.value === 'idle') {
+    // 从大纲生成页跳转过来，自动开始生成
+    generateOutline()
   }
 })
 

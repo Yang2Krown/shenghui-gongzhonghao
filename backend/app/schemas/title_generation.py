@@ -13,13 +13,15 @@ from app.models.task import TaskStatus
 class TopicInfo(BaseModel):
     """选题信息模式"""
     title: str = Field(..., min_length=1, max_length=255, description="选题标题(草标题)")
-    direction: str = Field(..., description="内容方向(实践型/解决问题型/教程型/观点型/整活型/资讯型)")
-    method: str = Field(..., description="选题套路")
-    value_promise: str = Field(..., description="价值承诺")
-    
+    direction: str = Field(default="", description="内容方向(实践型/解决问题型/教程型/观点型/整活型/资讯型)")
+    method: str = Field(default="", description="选题套路")
+    value_promise: str = Field(default="", description="价值承诺")
+
     @validator('direction')
     def validate_direction(cls, v):
         """验证内容方向（支持组合，如"实践型+观点型"）"""
+        if not v:
+            return v  # 允许为空，从大纲流程过来时可能没有
         valid_directions = {'实践型', '解决问题型', '教程型', '观点型', '整活型', '资讯型'}
         # 支持组合方向（+、/、, 分隔），只要其中每个方向合法即可
         parts = [p.strip() for p in v.replace('/', '+').replace(',', '+').split('+') if p.strip()]

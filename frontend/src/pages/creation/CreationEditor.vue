@@ -66,6 +66,7 @@
         :candidate-id="candidateId"
         :outline-id="currentOutlineId"
         :active-workflow-step="activeWorkflowStep"
+        :auto-generate="autoGenerateOutline"
         @pipeline-status="onPipelineStatus"
         @complete="onOutlineComplete"
         @next-step="goWorkflowStep('content')"
@@ -118,6 +119,7 @@ const clusterId = computed(() => route.query.cluster_id || null)
 const topicTitle = computed(() => route.query.topic_title || '')
 const topicDirection = computed(() => route.query.topic_direction || '')
 const isEditing = computed(() => !!route.params.id)
+const autoGenerateOutline = computed(() => route.query.auto_generate === 'true')
 
 // 状态
 const activeTab = ref('outline')
