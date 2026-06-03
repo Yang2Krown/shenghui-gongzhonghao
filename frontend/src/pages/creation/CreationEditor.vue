@@ -31,7 +31,7 @@
     </header>
 
     <!-- 创作进度概览 -->
-    <div class="workflow-steps mb-6">
+    <div class="workflow-steps mb-6" :style="{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }">
       <button
         v-for="(step, i) in steps"
         :key="step.key"
@@ -78,6 +78,8 @@
         :title-data="selectedTitle"
         :initial-content="finalContent"
         :auto-generate="autoGenerateContent"
+        :outline-text="outlineTextFromQuery"
+        :topic-title="topicTitle"
         @complete="onContentComplete"
         @next-step="goWorkflowStep('title')"
         @save-draft="onSaveDraft"
@@ -120,11 +122,24 @@ const topicTitle = computed(() => route.query.topic_title || '')
 const topicDirection = computed(() => route.query.topic_direction || '')
 const isEditing = computed(() => !!route.params.id)
 const autoGenerateOutline = computed(() => route.query.auto_generate === 'true')
+const autoGenerateContentFromQuery = computed(() => route.query.auto_generate_content === 'true')
 
-// 状态
-const activeTab = ref('outline')
-const activeWorkflowStep = ref('outline')
-const autoGenerateContent = ref(false)
+// 从 sessionStorage 读取正文生成入口传来的大纲文本
+const outlineTextFromQuery = computed(() => {
+  if (autoGenerateContentFromQuery.value) {
+    const text = sessionStorage.getItem('creation_body_outline_text') || ''
+    // 读取后清除，避免刷新页面重复使用
+    if (text) sessionStorage.removeItem('creation_body_outline_text')
+    return text
+  }
+  return ''
+})
+
+// 状态：根据 query 参数决定初始步骤
+const initialStep = autoGenerateContentFromQuery.value ? 'content' : 'outline'
+const activeTab = ref(initialStep)
+const activeWorkflowStep = ref(initialStep)
+const autoGenerateContent = ref(autoGenerateContentFromQuery.value)
 const autoGenerateTitle = ref(false)
 const saving = ref(false)
 const publishing = ref(false)
@@ -141,11 +156,20 @@ const outlineStatus = ref('idle')
 const contentStatus = ref('idle')
 const titleStatus = ref('idle')
 
-const steps = computed(() => [
-  { key: 'outline', label: '大纲', status: outlineStatus.value },
-  { key: 'content', label: '正文', status: contentStatus.value },
-  { key: 'title', label: '标题', status: titleStatus.value },
-])
+const steps = computed(() => {
+  if (autoGenerateContentFromQuery.value) {
+    // 从正文生成入口进来，跳过大纲，只显示正文和标题
+    return [
+      { key: 'content', label: '正文', status: contentStatus.value },
+      { key: 'title', label: '标题', status: titleStatus.value },
+    ]
+  }
+  return [
+    { key: 'outline', label: '大纲', status: outlineStatus.value },
+    { key: 'content', label: '正文', status: contentStatus.value },
+    { key: 'title', label: '标题', status: titleStatus.value },
+  ]
+})
 
 const stepToTab = {
   outline: 'outline',
@@ -155,7 +179,7 @@ const stepToTab = {
 
 const canOpenStep = (key) => {
   if (key === 'outline') return true
-  if (key === 'content') return outlineStatus.value === 'completed'
+  if (key === 'content') return outlineStatus.value === 'completed' || autoGenerateContentFromQuery.value
   if (key === 'title') return contentStatus.value === 'completed'
   return false
 }

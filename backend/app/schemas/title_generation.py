@@ -35,8 +35,8 @@ class TopicInfo(BaseModel):
 
 class OutlineInfo(BaseModel):
     """大纲信息模式"""
-    section_titles: List[str] = Field(..., min_items=1, description="各节小标题")
-    key_points: List[str] = Field(..., min_items=1, description="关键信息点")
+    section_titles: List[str] = Field(default_factory=list, description="各节小标题")
+    key_points: List[str] = Field(default_factory=list, description="关键信息点")
     spread_tags: List[str] = Field(default_factory=list, description="传播标签分布")
 
 

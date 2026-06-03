@@ -153,6 +153,8 @@ const props = defineProps({
   titleData: { type: Object, default: null },
   initialContent: { type: Object, default: null },
   autoGenerate: { type: Boolean, default: false },
+  outlineText: { type: String, default: '' },  // 从正文生成入口传入的大纲文本
+  topicTitle: { type: String, default: '' },   // 从正文生成入口传入的标题
 })
 
 const emit = defineEmits(['complete', 'next-step', 'save-draft'])
@@ -217,22 +219,36 @@ onUnmounted(() => {
 
 const generateContent = async () => {
   const outlineId = props.outlineData?.id ?? props.outlineData?.outline_id
-  if (!props.candidateId || !outlineId) {
-    ElMessage.warning('缺少选题或大纲信息')
-    return
-  }
 
   status.value = 'generating'
   generating.value = true
   errorMessage.value = ''
 
   try {
-    const res = await post('/content-generation/generate', {
-      candidate_id: Number(props.candidateId),
-      outline_id: Number(outlineId),
-    })
+    let runId = null
 
-    const runId = res.data.run_id
+    if (outlineId && props.candidateId) {
+      // 有大纲 ID，使用标准接口
+      const res = await post('/content-generation/generate', {
+        candidate_id: Number(props.candidateId),
+        outline_id: Number(outlineId),
+      })
+      runId = res.data.run_id
+    } else if (props.outlineText) {
+      // 没有大纲 ID，从正文生成入口进来，使用 adhoc 接口
+      const res = await post('/content-generation/generate-adhoc', {
+        outline_text: props.outlineText,
+        title: props.topicTitle || props.outlineText.split('\n')[0]?.slice(0, 80) || '未命名文章',
+        preference: '',
+      })
+      runId = res?.data?.run_id || res?.run_id
+    } else {
+      ElMessage.warning('缺少选题或大纲信息')
+      generating.value = false
+      status.value = 'idle'
+      return
+    }
+
     if (runId) {
       progress.start(`/api/v1/content-generation/stream/${runId}`)
     }

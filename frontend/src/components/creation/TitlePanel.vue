@@ -248,10 +248,7 @@ const generateTitles = async () => {
     ElMessage.warning('缺少选题候选 ID')
     return
   }
-  if (!props.outlineData) {
-    ElMessage.warning('请先完成大纲生成')
-    return
-  }
+  // outlineData 为空时允许继续（从正文流程过来时没有大纲记录）
 
   status.value = 'generating'
   generating.value = true
