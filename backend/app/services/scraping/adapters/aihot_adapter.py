@@ -70,9 +70,8 @@ def _parse_dt(value: Any) -> Optional[datetime]:
 
 
 def _dedup_hash(url: str, title: str) -> str:
-    base = (url or "").strip().rstrip("/").lower()
-    if not base:
-        base = (title or "").strip().lower()
+    # 与 base.FetchedItem.dedup_hash 保持一致：优先标题，无标题再退回 URL
+    base = (title or "").strip().lower() or (url or "").strip().rstrip("/").lower()
     return hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
 
 
@@ -129,20 +128,30 @@ async def fetch_aihot(
 
     new_count = 0
     dup_count = 0
+    seen_hashes: set[str] = set()
 
     for entry in feed.entries[:limit]:
         url = getattr(entry, "link", "").strip()
         if not url:
             continue
 
+        title = (getattr(entry, "title", "") or url).strip()
+        h = _dedup_hash(url, title)
+
+        # 同批次去重（flush 在循环外，DB 查不到本批刚 add 的）
+        if h in seen_hashes:
+            dup_count += 1
+            continue
+
+        # 跨批次去重：按内容指纹（标题）查
         existing = (await db.execute(
-            select(RawInfo).where(RawInfo.url == url)
-        )).scalar_one_or_none()
+            select(RawInfo.id).where(RawInfo.dedup_hash == h).limit(1)
+        )).first()
         if existing:
             dup_count += 1
             continue
 
-        title = (getattr(entry, "title", "") or url).strip()
+        seen_hashes.add(h)
         db.add(RawInfo(
             source_registry_id=source.id,
             title=title[:500],
@@ -158,7 +167,7 @@ async def fetch_aihot(
             engagement={},
             extras={"feed_platform": feed_conf["platform"], "feed_key": feed_key},
             state=RAW_STATE_PENDING,
-            dedup_hash=_dedup_hash(url, title),
+            dedup_hash=h,
         ))
         new_count += 1
 

@@ -29,10 +29,13 @@ class FetchedItem:
     source_account_id: Optional[int] = None        # 命中的 SourceAccount（adapter 可选填）
 
     def dedup_hash(self) -> str:
-        """规范化 URL 后取 sha256 前 16 位，作为内容指纹。"""
-        base = (self.url or "").strip().rstrip("/").lower()
-        if not base:
-            base = (self.title or "").strip().lower()
+        """内容指纹（sha256 前 16 位）。
+
+        优先用规范化标题：同一篇文章经常有多个 URL（跟踪参数 / 短链 / s?__biz 形式），
+        但标题一致，用标题去重能挡住这类"换皮重复"。无标题时再退回规范化 URL。
+        """
+        title = (self.title or "").strip().lower()
+        base = title or (self.url or "").strip().rstrip("/").lower()
         return hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
 
 

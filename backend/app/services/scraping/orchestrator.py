@@ -136,17 +136,29 @@ class ScrapingOrchestrator:
     ) -> tuple[int, int]:
         new_count = 0
         dup_count = 0
+        seen_hashes: set[str] = set()
         for item in items:
             url = (item.url or "").strip()
             if not url:
                 continue
+
+            h = item.dedup_hash()
+            # 同批次去重：flush 在循环外，DB 查询看不到本批刚 add 的记录，
+            # 必须用内存 set 挡住同一批里的重复（否则同名文章会同时入库）
+            if h in seen_hashes:
+                dup_count += 1
+                continue
+
+            # 跨批次去重：按内容指纹（标题归一化）查，而非精确 URL，
+            # 这样同一篇文章换了 URL（跟踪参数等）也能识别为重复
             existing = (await db.execute(
-                select(RawInfo).where(RawInfo.url == url)
-            )).scalar_one_or_none()
+                select(RawInfo.id).where(RawInfo.dedup_hash == h).limit(1)
+            )).first()
             if existing:
                 dup_count += 1
                 continue
 
+            seen_hashes.add(h)
             db.add(RawInfo(
                 source_registry_id=source.id,
                 source_account_id=item.source_account_id,
