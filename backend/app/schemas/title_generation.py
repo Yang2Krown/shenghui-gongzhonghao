@@ -42,7 +42,22 @@ class ContentInfo(BaseModel):
     """正文信息模式（用于标题生成参考）"""
     final_text: str = Field(default="", description="最终正文内容")
     final_word_count: Optional[int] = Field(None, description="正文字数")
-    gold_sentences: Optional[List[str]] = Field(default_factory=list, description="金句列表")
+    gold_sentences: Optional[List[Any]] = Field(default_factory=list, description="金句列表（字符串或对象均可）")
+
+    @validator("gold_sentences", pre=True)
+    def normalize_gold_sentences(cls, v):
+        """兼容字符串列表和结构化金句对象列表"""
+        if not v:
+            return []
+        result = []
+        for item in v:
+            if isinstance(item, str):
+                result.append(item)
+            elif isinstance(item, dict):
+                result.append(item.get("content", ""))
+            else:
+                result.append(str(item))
+        return result
 
 
 class TitleGenerationRequest(BaseModel):

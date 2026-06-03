@@ -286,7 +286,7 @@ const generateTitles = async () => {
     if (cd) {
       payload.content = {
         final_text: cd.final_text || cd.content || '',
-        gold_sentences: cd.gold_sentences || [],
+        gold_sentences: (cd.gold_sentences || []).map(g => typeof g === 'string' ? g : (g.content || '')),
       }
     }
 
