@@ -544,7 +544,7 @@ const pollProgress = async (runId) => {
     const d = res?.data || {}
     if (d.exists === false) return  // run 还没建好或已清理，下次再试
 
-    // 把快照喂给 composable（它会处理 step 切换动画、100% 补满、归零等）
+    // 把快照喂给 composable（它会处理 step 切换动画、归零等）
     miningProgress.applySnapshot(d)
 
     if (d.error) {
@@ -554,8 +554,11 @@ const pollProgress = async (runId) => {
     }
     if (d.done && d.result) {
       stopPolling()
-      // composable 的 _finishStep 已经在处理完成动画
-      // 等 isRunning=false 后由外部 watch(result) 触发 onMiningSuccess
+      // 等进度条动画到 100% 后关闭面板、刷新数据
+      const resultData = d.result
+      setTimeout(() => {
+        onMiningSuccess(resultData)
+      }, 1500)
     }
   } catch {
     // 单次轮询失败忽略，下次继续
@@ -874,7 +877,7 @@ const startCreation = (candidate) => {
 }
 
 /* 归零瞬间禁用过渡，避免出现 100%→0% 的倒退动画 */
-.mining-bar-fill.no-transition {
+.mining-bar-fill.no-step-transition {
   transition: none;
 }
 

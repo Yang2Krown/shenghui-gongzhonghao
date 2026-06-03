@@ -97,6 +97,11 @@ export function useAgentProgress() {
   // ── 步切换动画：补满 100% → 停顿 → 切到新步 → 瞬间归零 → 开始爬 ──
   function _advanceStep(newIdx) {
     _stopClimb()
+    // 如果上一轮 advance 动画还在跑，先清掉（避免多次触发叠加）
+    if (_advanceTimer) {
+      clearTimeout(_advanceTimer)
+      _advanceTimer = null
+    }
 
     // 冲到 100% 触发 CSS transition
     if (stepPercent.value < 100) {
@@ -105,6 +110,7 @@ export function useAgentProgress() {
 
     // 等动画 + 停顿后切换
     _advanceTimer = setTimeout(() => {
+      _advanceTimer = null
       currentStepIndex.value = newIdx
       // 瞬间归零：禁用过渡 → 归零 → 下一帧恢复过渡
       noStepTransition.value = true
