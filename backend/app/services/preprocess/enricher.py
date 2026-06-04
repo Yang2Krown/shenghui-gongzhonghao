@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 VALID_INFO_TYPES = {INFO_TYPE_NEWS, INFO_TYPE_CASE, INFO_TYPE_OPINION, INFO_TYPE_TUTORIAL}
 
 
-SYSTEM_PROMPT = """你是一个内容信息抽取助手。给你一组来自多个来源的同主题资讯，你需要：
+SYSTEM_PROMPT = """你是一个内容信息抽取与整合助手。给你一组来自多个来源的同主题资讯，你需要：
 
 1. 判断这组信息属于哪种类型，**只能从以下 4 选 1**：
    - 资讯型：报道新发生的事件、产品发布、人事变动、数据公布
@@ -43,9 +43,18 @@ SYSTEM_PROMPT = """你是一个内容信息抽取助手。给你一组来自多�
    - 争议：是否存在争议点（一句话；没有就空字符串）
    - 数据：有没有具体数字 / 性能数据 / 价格数据（原文照抄关键数字）
 
+3. **综合分析全部来源资讯**，写一个整合后的标题和简介（不要直接抄某一篇的标题）：
+   - integrated_title：用中文重新概括这组资讯的共同主题，客观准确、信息量足，
+     不超过 30 字。不要营销腔、不要书名号 / 感叹号堆砌、不要"开课啦""速看"这类口水词。
+     如果多篇讲的是同一事件的不同侧面，标题要体现整体而非某一篇。
+   - integrated_summary：用中文整合多篇摘要，2-3 句、100-150 字，
+     覆盖这组资讯的核心信息（是什么、关键细节、为什么值得关注），客观陈述。
+
 **只输出严格 JSON**，格式：
 {
   "info_type": "资讯型 | 实操案例型 | 观点分享型 | 教程型",
+  "integrated_title": "...",
+  "integrated_summary": "...",
   "elements": {
     "主体": "...",
     "动作": "...",
@@ -124,8 +133,19 @@ async def enrich_cluster(
     cluster.info_type = info_type
     cluster.elements = elements
 
+    # 整合标题 / 简介：分析簇内全部资讯后 LLM 重写，写入前端优先展示的 _zh 字段。
+    # 原始 core_title / summary（种子文章的）保留作为兜底和对照。
+    integrated_title = (parsed.get("integrated_title") or "").strip()
+    if integrated_title:
+        cluster.core_title_zh = integrated_title[:500]
+
+    integrated_summary = (parsed.get("integrated_summary") or "").strip()
+    if integrated_summary:
+        cluster.summary_zh = integrated_summary
+
     logger.info(
-        f"cluster {cluster.id} enriched: type={info_type} usage={result.usage}"
+        f"cluster {cluster.id} enriched: type={info_type} "
+        f"title_zh={'✓' if integrated_title else '✗'} usage={result.usage}"
     )
     return True
 

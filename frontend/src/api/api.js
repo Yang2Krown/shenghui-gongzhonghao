@@ -76,6 +76,8 @@ api.interceptors.response.use(
       ElMessage.error('请求的资源不存在')
     } else if (status === 500) {
       ElMessage.error('服务器内部错误')
+    } else if (status === 502 || status === 503) {
+      ElMessage.error('服务暂时不可用，请刷新页面重试')
     } else {
       ElMessage.error(message)
     }
@@ -116,6 +118,15 @@ export const extractLinkContent = (url) => {
 }
 
 /**
+ * 提取公众号文章图文预览（包括图片）
+ * @param {string} url - 公众号文章链接
+ * @returns {Promise<{title: string, author: string, blocks: Array, tags: string[], image_count: number, text_content: string}>}
+ */
+export const extractLinkPreview = (url) => {
+  return api.post('/wechat-to-xhs/extract-link-preview', { url }, { timeout: 60000 })
+}
+
+/**
  * 内容转写 - 将内容从一个平台转写成另一个平台的风格
  * @param {Object} params - 转写参数
  * @param {string} params.content - 原文内容
@@ -139,6 +150,92 @@ export const transformContent = (params) => {
  */
 export const imitateContent = (params) => {
   return api.post('/content-imitate/imitate', params, { timeout: 60000 })
+}
+
+// ==================== 微信公众号草稿箱 API ====================
+
+/**
+ * 发布文章到微信公众号草稿箱
+ * @param {Object} params - 发布参数
+ * @param {string} params.title - 文章标题
+ * @param {string} params.content - 文章正文 HTML
+ * @param {string} [params.author] - 作者
+ * @param {string} [params.digest] - 摘要
+ * @param {string} params.appid - 公众号 AppID
+ * @param {string} params.app_secret - 公众号 AppSecret
+ * @param {string} [params.cover_image_url] - 封面图 URL
+ * @param {string} [params.cover_image_base64] - 封面图 Base64
+ * @returns {Promise<{success: boolean, media_id: string, message: string}>}
+ */
+export const createWechatDraft = (params) => {
+  return api.post('/wechat-draft/create-draft', params, { timeout: 60000 })
+}
+
+/**
+ * 测试公众号连接
+ * @param {string} appid - 公众号 AppID
+ * @param {string} appSecret - 公众号 AppSecret
+ * @returns {Promise<{success: boolean, message: string}>}
+ */
+export const testWechatConnection = (appid, appSecret) => {
+  return api.post('/wechat-draft/test-connection', null, { params: { appid, app_secret: appSecret }, timeout: 15000 })
+}
+
+// ==================== 小红书发布相关 API ====================
+
+/**
+ * 检查小红书登录状态
+ * @returns {Promise<{logged_in: boolean}>}
+ */
+export const checkXhsLogin = () => {
+  return api.post('/xhs-publish/check-login', {}, { timeout: 30000 })
+}
+
+/**
+ * 打开小红书登录页面
+ * @param {string} [account] - 账号名称
+ * @returns {Promise<{status: string}>}
+ */
+export const openXhsLoginPage = (account) => {
+  return api.get('/xhs-publish/login', { params: { account } }, { timeout: 30000 })
+}
+
+/**
+ * 启动小红书长文发布流程
+ * @param {Object} params - 发布参数
+ * @param {string} params.title - 文章标题
+ * @param {string} params.content - 文章正文
+ * @param {string} [params.account] - 账号名称
+ * @returns {Promise<{status: string, templates: Array}>}
+ */
+export const startXhsLongArticle = (params) => {
+  return api.post('/xhs-publish/start-long-article', params, { timeout: 60000 })
+}
+
+/**
+ * 选择小红书排版模板
+ * @param {string} name - 模板名称
+ * @returns {Promise<{status: string, name: string}>}
+ */
+export const selectXhsTemplate = (name) => {
+  return api.post('/xhs-publish/select-template', { name }, { timeout: 30000 })
+}
+
+/**
+ * 点击下一步并填写发布页描述
+ * @param {string} content - 发布页正文描述
+ * @returns {Promise<{status: string}>}
+ */
+export const clickXhsNextStep = (content) => {
+  return api.post('/xhs-publish/click-next-step', { content }, { timeout: 30000 })
+}
+
+/**
+ * 点击发布按钮
+ * @returns {Promise<{status: string}>}
+ */
+export const clickXhsPublish = () => {
+  return api.post('/xhs-publish/click-publish', {}, { timeout: 30000 })
 }
 
 export default api

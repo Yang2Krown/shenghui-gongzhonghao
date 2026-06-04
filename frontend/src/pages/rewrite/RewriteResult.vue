@@ -34,22 +34,56 @@
       </div>
     </div>
 
-    <!-- 复制全部 -->
-    <div style="display: flex; justify-content: center;">
+    <!-- 操作按钮 -->
+    <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;">
       <button class="btn-text btn-sm" @click="copyAll">
         <el-icon :size="15"><CopyDocument /></el-icon> 复制全部
       </button>
+      <button v-if="showPublishBtn" class="btn-publish" @click="showPublishDialog = true">
+        <el-icon :size="15"><Promotion /></el-icon> 发布到小红书
+      </button>
+      <button class="btn-wechat" @click="showWechatDraftDialog = true">
+        <el-icon :size="15"><Promotion /></el-icon> 发布到公众号草稿箱
+      </button>
     </div>
+
+    <!-- 发布弹窗 -->
+    <XhsPublishDialog
+      v-model="showPublishDialog"
+      :title="result.title"
+      :content="result.body"
+      :tags="result.tags"
+      :blocks="blocks"
+      @success="handlePublishSuccess"
+    />
+
+    <!-- 发布到公众号草稿箱弹窗 -->
+    <WechatDraftDialog
+      v-model="showWechatDraftDialog"
+      :title="result.title"
+      :content="result.body"
+      :content-html="result.contentHtml || result.body"
+    />
   </div>
 </template>
 
 <script setup>
+import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocument } from '@element-plus/icons-vue'
+import { CopyDocument, Promotion } from '@element-plus/icons-vue'
+import XhsPublishDialog from '@/components/XhsPublishDialog.vue'
+import WechatDraftDialog from '@/components/WechatDraftDialog.vue'
 
 const props = defineProps({
-  result: { type: Object, required: true }
+  result: { type: Object, required: true },
+  // 是否显示发布按钮（默认当目标平台是小红书时显示）
+  showPublishBtn: { type: Boolean, default: true },
+  // 图文混排数据，用于发布到小红书
+  blocks: { type: Array, default: () => [] }
 })
+
+const showPublishDialog = ref(false)
+const showWechatDraftDialog = ref(false)
 
 const copyText = (text) => {
   navigator.clipboard?.writeText(text).catch(() => {})
@@ -62,4 +96,52 @@ const copyAll = () => {
     (props.result.tags ? '\n\n' + props.result.tags.map(t => '#' + t).join(' ') : '')
   copyText(full)
 }
+
+const handlePublishSuccess = () => {
+  ElMessage.success('发布成功！')
+}
 </script>
+
+<style scoped>
+.btn-wechat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border: 1.5px solid #07c160;
+  border-radius: var(--r-pill);
+  background: linear-gradient(135deg, #07c160 0%, #06ae56 100%);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-wechat:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(7, 193, 96, 0.3);
+}
+
+.btn-publish {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border: 1.5px solid #FF2442;
+  border-radius: var(--r-pill);
+  background: linear-gradient(135deg, #FF2442 0%, #FF4D6A 100%);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-publish:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 36, 66, 0.3);
+}
+</style>

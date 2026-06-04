@@ -141,7 +141,7 @@
     </div>
 
     <div v-if="result && !generating" class="fade-in" style="margin-top: 32px;">
-      <RewriteResult :result="result" />
+      <RewriteResult :result="result" :showPublishBtn="true" />
     </div>
   </div>
 </template>

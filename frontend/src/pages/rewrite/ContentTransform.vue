@@ -223,7 +223,7 @@
     </div>
 
     <div v-if="result && !generating" class="fade-in" style="margin-top: 32px;">
-      <RewriteResult :result="result" />
+      <RewriteResult :result="result" :showPublishBtn="canPublish" :blocks="linkBlocks" />
     </div>
   </div>
 </template>
@@ -232,7 +232,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Switch, Document, Edit, Loading, ArrowRight, Check, Link, Upload } from '@element-plus/icons-vue'
-import { extractLinkContent, uploadFile, transformContent } from '@/api/api'
+import { extractLinkContent, extractLinkPreview, uploadFile, transformContent } from '@/api/api'
 import generationRecordApi from '@/api/generationRecord'
 import RewriteResult from './RewriteResult.vue'
 
@@ -269,6 +269,8 @@ const linkTitle = ref('')
 const linkContent = ref('')
 const linkPlatform = ref('')
 const linkAuthor = ref('')
+// 图文混排数据（用于发布到小红书）
+const linkBlocks = ref([])
 
 const canGenerate = computed(() => {
   if (inputMode.value === 'link') {
@@ -278,6 +280,11 @@ const canGenerate = computed(() => {
     return !!fileText.value
   }
   return inputValue.value.trim().length > 3
+})
+
+// 是否显示发布按钮（目标平台是小红书且有原文链接）
+const canPublish = computed(() => {
+  return to.value === 'xhs' && inputMode.value === 'link' && linkBlocks.value.length > 0
 })
 
 const pickFrom = (pid) => { from.value = pid; if (pid === to.value) to.value = targetPlatforms.find(t => t !== pid); showFromMenu.value = false }
@@ -303,17 +310,31 @@ const handleLinkExtract = async () => {
   if (!url) return
   linkExtracting.value = true
   try {
-    const res = await extractLinkContent(url)
-    const data = res.data || res
-    linkTitle.value = data.title || '未知标题'
-    linkContent.value = data.content || ''
-    linkPlatform.value = data.platform || '网页'
-    linkAuthor.value = data.author || ''
+    // 如果是公众号链接，同时提取 blocks 数据（用于发布）
+    const isWechatLink = /weixin|qq\.com/i.test(url)
+    if (isWechatLink) {
+      const previewRes = await extractLinkPreview(url)
+      const previewData = previewRes.data || previewRes
+      linkTitle.value = previewData.title || '未知标题'
+      linkContent.value = previewData.text_content || ''
+      linkPlatform.value = '公众号'
+      linkAuthor.value = previewData.author || ''
+      linkBlocks.value = previewData.blocks || []
+    } else {
+      const res = await extractLinkContent(url)
+      const data = res.data || res
+      linkTitle.value = data.title || '未知标题'
+      linkContent.value = data.content || ''
+      linkPlatform.value = data.platform || '网页'
+      linkAuthor.value = data.author || ''
+      linkBlocks.value = []
+    }
   } catch (e) {
     ElMessage.error('链接提取失败，请检查链接或使用文字模式')
     linkTitle.value = ''
     linkContent.value = ''
     linkPlatform.value = ''
+    linkBlocks.value = []
   } finally {
     linkExtracting.value = false
   }
@@ -325,6 +346,7 @@ const removeLink = () => {
   linkContent.value = ''
   linkPlatform.value = ''
   linkAuthor.value = ''
+  linkBlocks.value = []
 }
 
 const handleFileUpload = async (event) => {
