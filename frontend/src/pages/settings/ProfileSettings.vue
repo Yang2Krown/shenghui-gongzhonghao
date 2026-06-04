@@ -2,9 +2,15 @@
   <div class="settings-page">
     <!-- 个人信息区 -->
     <div class="profile-card">
+      <div class="logout-section">
+        <el-button type="danger" plain size="small" @click="handleLogout">
+          <el-icon><SwitchButton /></el-icon>
+          退出登录
+        </el-button>
+      </div>
       <div class="profile-left">
         <div class="relative inline-block">
-          <el-avatar :size="100" :src="userAvatar" class="bg-primary-500">
+          <el-avatar :size="100" :src="userAvatar" class="bg-primary-500" @error="onAvatarError">
             <span class="text-3xl">{{ userName.charAt(0).toUpperCase() }}</span>
           </el-avatar>
           <el-button class="avatar-upload-btn" circle size="small" @click="triggerAvatarUpload">
@@ -34,12 +40,6 @@
             <el-button type="primary" @click="saveProfile" :loading="saving">保存</el-button>
           </el-form-item>
         </el-form>
-        <div class="logout-section">
-          <el-button type="danger" plain @click="handleLogout">
-            <el-icon><SwitchButton /></el-icon>
-            退出登录
-          </el-button>
-        </div>
       </div>
     </div>
 
@@ -274,12 +274,17 @@ const handleAvatarChange = async (event) => {
     const response = await uploadAvatar(formData)
     // 添加时间戳避免缓存问题
     const avatarUrl = response.data.avatar_url + '?t=' + Date.now()
+    console.log('[Avatar] 上传成功, avatarUrl:', avatarUrl)
     userStore.updateUser({ avatar_url: avatarUrl })
     ElMessage.success('头像更新成功')
   } catch (e) {
     console.error('头像上传失败:', e)
     ElMessage.error('头像上传失败')
   }
+}
+
+const onAvatarError = () => {
+  console.warn('[Avatar] 图片加载失败, 当前 URL:', userAvatar.value)
 }
 
 // ── 风格训练 ──
@@ -397,6 +402,7 @@ onMounted(() => {
 
 /* ── 个人信息卡片 ── */
 .profile-card {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 32px;
@@ -428,9 +434,9 @@ onMounted(() => {
 }
 
 .logout-section {
-  margin-top: 24px;
-  padding-top: 24px;
-  border-top: 1px solid var(--line, #e5e5e5);
+  position: absolute;
+  top: 16px;
+  right: 16px;
 }
 
 /* ── 风格训练区 ── */

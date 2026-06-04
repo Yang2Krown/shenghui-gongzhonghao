@@ -1,5 +1,7 @@
 from typing import Any, List, Optional
+import os
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
@@ -215,6 +217,16 @@ async def get_articles(
     }
 
 
+@router.get("/avatar/{filename}")
+async def get_avatar(filename: str):
+    """获取头像文件（无需登录）"""
+    upload_dir = os.path.abspath("./uploads/avatars")
+    file_path = os.path.join(upload_dir, filename)
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="头像不存在")
+    return FileResponse(file_path)
+
+
 @router.post("/upload-avatar", response_model=dict)
 async def upload_avatar(
     avatar: UploadFile = File(...),
@@ -238,7 +250,6 @@ async def upload_avatar(
     
     try:
         # 保存文件
-        import os
         from datetime import datetime
 
         # 使用绝对路径，与 static files mount 保持一致
@@ -256,12 +267,14 @@ async def upload_avatar(
             content = await avatar.read()
             buffer.write(content)
 
-        # 更新用户头像URL
-        avatar_url = f"/uploads/avatars/{filename}"
-        current_user.avatar_url = avatar_url
-        db.add(current_user)
+        # 更新用户头像URL（用原生 SQL 确保写入数据库，绕过 ORM 缓存）
+        from sqlalchemy import text
+        avatar_url = f"/api/v1/users/avatar/{filename}"
+        await db.execute(
+            text("UPDATE users SET avatar_url = :url WHERE id = :id"),
+            {"url": avatar_url, "id": current_user.id}
+        )
         await db.commit()
-        await db.refresh(current_user)
 
         return {
             "code": 200,

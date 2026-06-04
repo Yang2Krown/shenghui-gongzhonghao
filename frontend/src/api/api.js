@@ -65,13 +65,16 @@ api.interceptors.response.use(
     }
     
     // 处理其他错误
+    const status = error.response?.status
     const message = error.response?.data?.detail || error.message || '请求失败'
-    
-    if (error.response?.status === 403) {
+
+    if (status === 413) {
+      ElMessage.error('文件太大，请压缩后重试（建议不超过 2MB）')
+    } else if (status === 403) {
       ElMessage.error('没有权限访问')
-    } else if (error.response?.status === 404) {
+    } else if (status === 404) {
       ElMessage.error('请求的资源不存在')
-    } else if (error.response?.status === 500) {
+    } else if (status === 500) {
       ElMessage.error('服务器内部错误')
     } else {
       ElMessage.error(message)

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { login as loginApi, register as registerApi, refreshToken as refreshTokenApi, getCurrentUser } from '@/api/auth'
 import { ElMessage } from 'element-plus'
+import router from '@/router'
 
 export const useUserStore = defineStore('user', () => {
   // 状态
@@ -136,6 +137,7 @@ export const useUserStore = defineStore('user', () => {
   const logout = () => {
     clearAuth()
     ElMessage.success('已退出登录')
+    router.push('/login')
   }
 
   // 清除认证信息
