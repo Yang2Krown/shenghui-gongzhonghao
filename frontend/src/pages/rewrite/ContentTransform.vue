@@ -232,7 +232,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Switch, Document, Edit, Loading, ArrowRight, Check, Link, Upload } from '@element-plus/icons-vue'
-import { extractLinkContent, uploadFile } from '@/api/api'
+import { extractLinkContent, uploadFile, transformContent } from '@/api/api'
 import RewriteResult from './RewriteResult.vue'
 
 const platforms = {
@@ -384,14 +384,42 @@ const handleFileDrop = async (event) => {
 const handleGenerate = async () => {
   generating.value = true
   result.value = null
-  // TODO: 调用后端 API
-  await new Promise(r => setTimeout(r, 1600))
-  result.value = {
-    title: '别再被风口绑架了😮‍💨这4个动作我真的劝你立刻做',
-    body: `姐妹们，最近是不是也被各种"风口""趋势"刷到焦虑了🥹\n\n我蹲了一年多，跟你们说点大实话👇\n\n1️⃣ 信息源砍一半\n只留能给你"事实"的，删掉只会贩卖情绪的账号\n\n2️⃣ 目标拆到周\n别张口就是年度规划，先把这周能做的做完\n\n3️⃣ 问自己一句\n抛开所有声音，这件事对我到底意味着什么❓\n\n4️⃣ 不在浪尖做决定\n潮水还会再来，清醒的人从不慌\n\n真的，焦虑退散，行动起来✨`,
-    tags: ['认知觉醒', '自我成长', '搞钱思维', '反内耗', '干货分享'],
+
+  try {
+    // 获取原文内容
+    let content = ''
+    let originalTitle = ''
+
+    if (inputMode.value === 'link') {
+      content = linkContent.value
+      originalTitle = linkTitle.value
+    } else if (inputMode.value === 'file') {
+      content = fileText.value
+    } else {
+      content = inputValue.value
+    }
+
+    // 调用后端 API
+    const res = await transformContent({
+      content,
+      source_platform: from.value,
+      target_platform: to.value,
+      original_title: originalTitle || undefined,
+      extra_requirements: preference.value || undefined,
+    })
+
+    const data = res.data || res
+    result.value = {
+      title: data.title || '',
+      body: data.content || '',
+      tags: data.tags || [],
+    }
+  } catch (error) {
+    console.error('转写失败:', error)
+    ElMessage.error(error?.response?.data?.detail || '转写失败，请稍后重试')
+  } finally {
+    generating.value = false
   }
-  generating.value = false
 }
 </script>
 

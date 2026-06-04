@@ -150,7 +150,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Document, Edit, Loading, Link, Upload } from '@element-plus/icons-vue'
-import { extractLinkContent, uploadFile } from '@/api/api'
+import { extractLinkContent, uploadFile, imitateContent } from '@/api/api'
 import RewriteResult from './RewriteResult.vue'
 
 const rewriteChips = ['更口语', '更精简', '更有网感', '加 emoji', '去 AI 味', '保留原意']
@@ -280,13 +280,40 @@ const handleFileDrop = async (event) => {
 const handleGenerate = async () => {
   generating.value = true
   result.value = null
-  // TODO: 调用后端 API
-  await new Promise(r => setTimeout(r, 1600))
-  result.value = {
-    title: '当"风口"成为集体幻觉：写给清醒者的一封信',
-    body: `开头不该是结论，而该是一道裂缝。\n\n去年这个时候，几乎所有人都在谈论同一个词。但很少有人停下来问一句：我们究竟是在追逐趋势，还是在逃避焦虑？\n\n一组被反复引用、却很少被读完的数据显示，真正完成转化的，不到声量的十分之一。\n\n这并不是要否定变化本身。真正值得警惕的，是"被制造出来的需求"——它借趋势之名，行贩卖之实。\n\n潮水还会再来。但清醒的人，从不在浪尖上做决定。`,
+
+  try {
+    // 获取参考内容
+    let content = ''
+    let title = ''
+
+    if (mode.value === 'link') {
+      content = linkContent.value
+      title = linkTitle.value
+    } else if (mode.value === 'file') {
+      content = fileText.value
+    } else {
+      content = value.value
+    }
+
+    // 调用后端 API
+    const res = await imitateContent({
+      content,
+      title: title || undefined,
+      extra_requirements: preference.value || undefined,
+    })
+
+    const data = res.data || res
+    result.value = {
+      title: data.title || '',
+      body: data.content || '',
+      tags: data.tags || [],
+    }
+  } catch (error) {
+    console.error('仿写失败:', error)
+    ElMessage.error(error?.response?.data?.detail || '仿写失败，请稍后重试')
+  } finally {
+    generating.value = false
   }
-  generating.value = false
 }
 </script>
 

@@ -112,4 +112,30 @@ export const extractLinkContent = (url) => {
   return api.post('/creation-tools/extract-link', { url }, { timeout: 30000 })
 }
 
+/**
+ * 内容转写 - 将内容从一个平台转写成另一个平台的风格
+ * @param {Object} params - 转写参数
+ * @param {string} params.content - 原文内容
+ * @param {string} params.source_platform - 源平台 (wechat/xhs/douyin/zhihu)
+ * @param {string} params.target_platform - 目标平台 (wechat/xhs)
+ * @param {string} [params.original_title] - 原文章标题
+ * @param {string} [params.extra_requirements] - 额外要求
+ * @returns {Promise<{title: string, content: string, tags: string[]}>}
+ */
+export const transformContent = (params) => {
+  return api.post('/content-transform/transform', params, { timeout: 60000 })
+}
+
+/**
+ * 内容仿写 - 学习参考内容的风格，创作原创内容
+ * @param {Object} params - 仿写参数
+ * @param {string} params.content - 参考内容
+ * @param {string} [params.title] - 参考内容标题
+ * @param {string} [params.extra_requirements] - 额外要求
+ * @returns {Promise<{title: string, content: string, tags: string[]}>}
+ */
+export const imitateContent = (params) => {
+  return api.post('/content-imitate/imitate', params, { timeout: 60000 })
+}
+
 export default api

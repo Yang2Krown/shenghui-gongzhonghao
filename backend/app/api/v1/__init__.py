@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate
 
 api_router = APIRouter()
 
@@ -141,4 +141,18 @@ api_router.include_router(
     creation_tools.router,
     prefix="/creation-tools",
     tags=["创作工具"]
+)
+
+# 内容转写路由
+api_router.include_router(
+    content_transform.router,
+    prefix="/content-transform",
+    tags=["内容转写"]
+)
+
+# 内容仿写路由
+api_router.include_router(
+    content_imitate.router,
+    prefix="/content-imitate",
+    tags=["内容仿写"]
 )
