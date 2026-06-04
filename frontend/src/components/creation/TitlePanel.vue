@@ -612,7 +612,7 @@ const agentFeedback = computed(() => {
 .title-bottom-bar {
   position: fixed;
   bottom: 0;
-  left: 240px;
+  left: 248px;
   right: 0;
   z-index: 100;
   background: var(--paper);

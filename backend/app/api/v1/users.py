@@ -240,26 +240,29 @@ async def upload_avatar(
         # 保存文件
         import os
         from datetime import datetime
-        
-        # 创建上传目录
-        upload_dir = "./uploads/avatars"
+
+        # 使用绝对路径，与 static files mount 保持一致
+        base_dir = os.path.abspath("./uploads")
+        upload_dir = os.path.join(base_dir, "avatars")
         os.makedirs(upload_dir, exist_ok=True)
-        
+
         # 生成文件名
         file_ext = avatar.filename.split(".")[-1]
         filename = f"{current_user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{file_ext}"
         file_path = os.path.join(upload_dir, filename)
-        
+
         # 保存文件
         with open(file_path, "wb") as buffer:
             content = await avatar.read()
             buffer.write(content)
-        
+
         # 更新用户头像URL
         avatar_url = f"/uploads/avatars/{filename}"
-        user_update = UserUpdate(avatar_url=avatar_url)
-        await user_crud.update(db, db_obj=current_user, obj_in=user_update)
-        
+        current_user.avatar_url = avatar_url
+        db.add(current_user)
+        await db.commit()
+        await db.refresh(current_user)
+
         return {
             "code": 200,
             "message": "头像上传成功",

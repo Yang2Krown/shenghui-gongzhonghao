@@ -34,6 +34,12 @@
             <el-button type="primary" @click="saveProfile" :loading="saving">保存</el-button>
           </el-form-item>
         </el-form>
+        <div class="logout-section">
+          <el-button type="danger" plain @click="handleLogout">
+            <el-icon><SwitchButton /></el-icon>
+            退出登录
+          </el-button>
+        </div>
       </div>
     </div>
 
@@ -186,7 +192,7 @@
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Camera } from '@element-plus/icons-vue'
+import { Camera, SwitchButton } from '@element-plus/icons-vue'
 import { updateProfile, uploadAvatar } from '@/api/auth'
 import {
   getStyleProfile,
@@ -242,6 +248,19 @@ const saveProfile = async () => {
   }
 }
 
+const handleLogout = async () => {
+  try {
+    await ElMessageBox.confirm('确定要退出登录吗？', '退出登录', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    userStore.logout()
+  } catch {
+    // 用户取消
+  }
+}
+
 const triggerAvatarUpload = () => avatarInput.value.click()
 
 const handleAvatarChange = async (event) => {
@@ -253,7 +272,9 @@ const handleAvatarChange = async (event) => {
     const formData = new FormData()
     formData.append('avatar', file)
     const response = await uploadAvatar(formData)
-    userStore.updateUser({ avatar_url: response.data.avatar_url })
+    // 添加时间戳避免缓存问题
+    const avatarUrl = response.data.avatar_url + '?t=' + Date.now()
+    userStore.updateUser({ avatar_url: avatarUrl })
     ElMessage.success('头像更新成功')
   } catch (e) {
     console.error('头像上传失败:', e)
@@ -404,6 +425,12 @@ onMounted(() => {
 
 .profile-form {
   max-width: 280px;
+}
+
+.logout-section {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line, #e5e5e5);
 }
 
 /* ── 风格训练区 ── */

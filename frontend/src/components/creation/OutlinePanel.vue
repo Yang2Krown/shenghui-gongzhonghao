@@ -66,17 +66,22 @@
               <span>{{ outline.total_words }} 字</span>
             </div>
             <!-- 视图切换 -->
-            <div class="view-toggle">
-              <button
-                class="toggle-btn"
-                :class="{ active: viewMode === 'edit' }"
-                @click="viewMode = 'edit'"
-              >编辑</button>
-              <button
-                class="toggle-btn"
-                :class="{ active: viewMode === 'preview' }"
-                @click="viewMode = 'preview'"
-              >预览</button>
+            <div class="flex items-center gap-2">
+              <el-button size="small" @click="copyAllOutline">
+                <el-icon class="mr-1"><DocumentCopy /></el-icon>复制全部
+              </el-button>
+              <div class="view-toggle">
+                <button
+                  class="toggle-btn"
+                  :class="{ active: viewMode === 'edit' }"
+                  @click="viewMode = 'edit'"
+                >编辑</button>
+                <button
+                  class="toggle-btn"
+                  :class="{ active: viewMode === 'preview' }"
+                  @click="viewMode = 'preview'"
+                >预览</button>
+              </div>
             </div>
           </div>
         </div>
@@ -86,7 +91,7 @@
           <div
             v-for="(section, idx) in outline.sections"
             :key="section.section_number || idx"
-            class="card p-4"
+            class="card section-card"
           >
             <div class="flex items-start gap-3">
               <span class="flex-shrink-0 w-7 h-7 rounded-full bg-clay-tint text-clay-deep flex items-center justify-center text-xs font-bold">
@@ -620,6 +625,10 @@ const agentFeedback = computed(() => {
   transition: box-shadow 0.2s ease;
 }
 
+.section-card {
+  padding: 16px 20px;
+}
+
 .preview-section:hover {
   box-shadow: var(--sh-1);
 }
@@ -628,7 +637,7 @@ const agentFeedback = computed(() => {
 .outline-bottom-bar {
   position: fixed;
   bottom: 0;
-  left: 240px;
+  left: 248px;
   right: 0;
   z-index: 100;
   background: var(--paper);

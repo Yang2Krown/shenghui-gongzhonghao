@@ -4,7 +4,7 @@
     <aside class="app-sidebar" :style="{ width: isCollapsed ? '64px' : '248px' }">
       <div class="flex flex-col h-full">
         <!-- Logo区域 -->
-        <div class="flex items-center" style="padding: 20px 20px 16px;">
+        <div class="flex items-center" style="padding: 13px 20px 13px;">
           <div style="width: 34px; height: 34px; border-radius: 8px 3px 8px 8px; background: var(--clay); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; font-family: var(--serif); flex-shrink: 0;">
             公
           </div>
@@ -13,10 +13,9 @@
             <div class="text-xs text-ink-4" style="letter-spacing: .04em;">AI Content Studio</div>
           </div>
         </div>
-        <hr class="divider" style="margin: 0 16px;" />
 
         <!-- 导航菜单 -->
-        <nav class="flex-1 overflow-y-auto" style="padding: 14px 12px; display: flex; flex-direction: column; gap: 3px;">
+        <nav class="flex-1 overflow-y-auto" style="padding: 14px 12px; display: flex; flex-direction: column; gap: 3px; border-top: 1px solid var(--line);">
           <template v-for="item in navItems" :key="item.id">
             <!-- 普通菜单项 -->
             <button
@@ -59,10 +58,16 @@
         </nav>
 
         <!-- 用户信息 -->
-        <div style="padding: 14px; border-top: 1px solid var(--line);">
-          <button class="nav-user-btn" @click="navigateTo('profile')">
-            <div style="width: 34px; height: 34px; border-radius: 50%; background: var(--clay); color: #fff; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 600; font-family: var(--serif);">
-              {{ userStore.user?.username?.charAt(0)?.toUpperCase() || 'U' }}
+        <div style="height: 65px; padding: 0 14px; border-top: 1px solid var(--line); display: flex; align-items: center;">
+          <button class="nav-user-btn" @click="navigateTo('profile')" style="padding: 6px 8px;">
+            <div style="width: 30px; height: 30px; border-radius: 50%; background: var(--clay); color: #fff; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 600; font-family: var(--serif); overflow: hidden;">
+              <img
+                v-if="userStore.userAvatar"
+                :src="userStore.userAvatar"
+                style="width: 100%; height: 100%; object-fit: cover;"
+                @error="(e) => e.target.style.display = 'none'"
+              />
+              <span v-else>{{ userStore.user?.username?.charAt(0)?.toUpperCase() || 'U' }}</span>
             </div>
             <div v-if="!isCollapsed" style="text-align: left; min-width: 0;">
               <div class="text-sm font-semibold text-ink truncate" style="max-width: 140px;">
@@ -90,12 +95,6 @@
           <el-icon :size="13"><ArrowRight /></el-icon>
           <span class="font-semibold text-ink-2">{{ currentLabel }}</span>
         </div>
-        <!-- 折叠按钮 -->
-        <button @click="isCollapsed = !isCollapsed" class="nav-collapse-btn">
-          <el-icon :size="18">
-            <component :is="isCollapsed ? 'Expand' : 'Fold'" />
-          </el-icon>
-        </button>
       </header>
 
       <!-- 页面内容 -->
@@ -382,9 +381,4 @@ const navigateTo = (id) => {
   color: var(--ink);
 }
 
-.divider {
-  height: 1px;
-  background: var(--line);
-  border: 0;
-}
 </style>
