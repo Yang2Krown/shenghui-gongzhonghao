@@ -223,6 +223,7 @@
 
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ChatDotSquare, Document, Link, Upload, Edit, Loading, Refresh, CopyDocument, Check } from '@element-plus/icons-vue'
 import PipelineStepper from '@/components/creation/PipelineStepper.vue'
@@ -230,6 +231,7 @@ import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
 
+const router = useRouter()
 const progress = useAgentProgress()
 
 const inputModes = [
@@ -386,17 +388,32 @@ const handleGenerate = async () => {
   }
 
   try {
-    const res = await api.post('/standalone-title/generate', {
-      content: content,
+    // 创建选题候选
+    const sources = [{ type: 'text', content }]
+    const res = await api.post('/topic-candidates/create-adhoc', {
+      sources,
+      preference: preference.value,
     }, { timeout: 10000 })
 
-    const runId = res?.run_id || res?.data?.run_id
-    if (!runId) {
-      ElMessage.error('未能获取任务 ID')
+    const data = res?.data || res
+    const candidateId = data?.data?.candidate_id || data?.candidate_id
+    if (!candidateId) {
+      ElMessage.error('未能创建选题')
       return
     }
 
-    progress.start(`/api/v1/standalone-title/stream/${runId}`)
+    // 存储正文到 sessionStorage
+    sessionStorage.setItem('creation_title_content_text', content)
+
+    // 跳转到编辑器，只生成标题
+    router.push({
+      path: '/creation/new',
+      query: {
+        candidate_id: candidateId,
+        topic_title: data?.data?.title || data?.title || content.slice(0, 30),
+        auto_generate_title: 'true',
+      }
+    })
   } catch (err) {
     ElMessage.error(err?.response?.data?.detail || err.message || '请求失败')
   }

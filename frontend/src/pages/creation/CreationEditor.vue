@@ -88,7 +88,7 @@
         v-if="activeTab === 'title'"
         :candidate-id="candidateId"
         :outline-data="currentOutlineData"
-        :content-data="finalContent"
+        :content-data="contentDataForTitle"
         :initial-titles="selectedTitle"
         :step-status="titleStatus"
         :auto-generate="autoGenerateTitle"
@@ -123,6 +123,7 @@ const topicDirection = computed(() => route.query.topic_direction || '')
 const isEditing = computed(() => !!route.params.id)
 const autoGenerateOutline = computed(() => route.query.auto_generate === 'true')
 const autoGenerateContentFromQuery = computed(() => route.query.auto_generate_content === 'true')
+const autoGenerateTitleFromQuery = computed(() => route.query.auto_generate_title === 'true')
 
 // 从 sessionStorage 读取正文生成入口传来的大纲文本
 const outlineTextFromQuery = computed(() => {
@@ -135,18 +136,36 @@ const outlineTextFromQuery = computed(() => {
   return ''
 })
 
+// 从 sessionStorage 读取标题生成入口传来的正文文本
+const contentTextForTitle = computed(() => {
+  if (autoGenerateTitleFromQuery.value) {
+    const text = sessionStorage.getItem('creation_title_content_text') || ''
+    if (text) sessionStorage.removeItem('creation_title_content_text')
+    return text
+  }
+  return ''
+})
+
 // 状态：根据 query 参数决定初始步骤
-const initialStep = autoGenerateContentFromQuery.value ? 'content' : 'outline'
+const initialStep = autoGenerateTitleFromQuery.value ? 'title' : (autoGenerateContentFromQuery.value ? 'content' : 'outline')
 const activeTab = ref(initialStep)
 const activeWorkflowStep = ref(initialStep)
 const autoGenerateContent = ref(autoGenerateContentFromQuery.value)
-const autoGenerateTitle = ref(false)
+const autoGenerateTitle = ref(autoGenerateTitleFromQuery.value)
 const saving = ref(false)
 const publishing = ref(false)
 const currentOutlineId = ref(null)
 const currentOutlineData = ref(null)
 const selectedTitle = ref(null)
 const finalContent = ref(null)
+
+// 标题生成入口：将文本包装为 contentData 格式
+const contentDataForTitle = computed(() => {
+  if (autoGenerateTitleFromQuery.value && contentTextForTitle.value) {
+    return { final_text: contentTextForTitle.value }
+  }
+  return finalContent.value
+})
 
 // 未保存状态追踪
 const isDirty = ref(false)
@@ -157,6 +176,12 @@ const contentStatus = ref('idle')
 const titleStatus = ref('idle')
 
 const steps = computed(() => {
+  if (autoGenerateTitleFromQuery.value) {
+    // 从标题生成入口进来，只显示标题
+    return [
+      { key: 'title', label: '标题', status: titleStatus.value },
+    ]
+  }
   if (autoGenerateContentFromQuery.value) {
     // 从正文生成入口进来，跳过大纲，只显示正文和标题
     return [
@@ -180,7 +205,7 @@ const stepToTab = {
 const canOpenStep = (key) => {
   if (key === 'outline') return true
   if (key === 'content') return outlineStatus.value === 'completed' || autoGenerateContentFromQuery.value
-  if (key === 'title') return contentStatus.value === 'completed'
+  if (key === 'title') return contentStatus.value === 'completed' || autoGenerateTitleFromQuery.value
   return false
 }
 
