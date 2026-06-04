@@ -151,6 +151,7 @@ import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Document, Edit, Loading, Link, Upload } from '@element-plus/icons-vue'
 import { extractLinkContent, uploadFile, imitateContent } from '@/api/api'
+import generationRecordApi from '@/api/generationRecord'
 import RewriteResult from './RewriteResult.vue'
 
 const rewriteChips = ['更口语', '更精简', '更有网感', '加 emoji', '去 AI 味', '保留原意']
@@ -307,6 +308,26 @@ const handleGenerate = async () => {
       title: data.title || '',
       body: data.content || '',
       tags: data.tags || [],
+    }
+
+    // 自动保存记录
+    try {
+      await generationRecordApi.create({
+        type: 'content_imitate',
+        input_snapshot: {
+          content: content.slice(0, 500),
+          title: title,
+          extra_requirements: preference.value,
+        },
+        display_title: `内容仿写 · ${data.title || '未命名'}`,
+        output_snapshot: {
+          title: data.title,
+          content: data.content,
+          tags: data.tags,
+        },
+      })
+    } catch (saveError) {
+      console.error('保存记录失败:', saveError)
     }
   } catch (error) {
     console.error('仿写失败:', error)

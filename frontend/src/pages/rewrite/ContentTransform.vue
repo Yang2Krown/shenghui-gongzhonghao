@@ -233,6 +233,7 @@ import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Switch, Document, Edit, Loading, ArrowRight, Check, Link, Upload } from '@element-plus/icons-vue'
 import { extractLinkContent, uploadFile, transformContent } from '@/api/api'
+import generationRecordApi from '@/api/generationRecord'
 import RewriteResult from './RewriteResult.vue'
 
 const platforms = {
@@ -413,6 +414,37 @@ const handleGenerate = async () => {
       title: data.title || '',
       body: data.content || '',
       tags: data.tags || [],
+    }
+
+    // 自动保存记录
+    try {
+      const platformNames = {
+        wechat: '公众号',
+        xhs: '小红书',
+        douyin: '抖音',
+        zhihu: '知乎',
+      }
+      const sourceName = platformNames[from.value] || from.value
+      const targetName = platformNames[to.value] || to.value
+
+      await generationRecordApi.create({
+        type: 'content_transform',
+        input_snapshot: {
+          content: content.slice(0, 500),
+          source_platform: from.value,
+          target_platform: to.value,
+          original_title: originalTitle,
+          extra_requirements: preference.value,
+        },
+        display_title: `内容转写 · ${sourceName}→${targetName}：${data.title || '未命名'}`,
+        output_snapshot: {
+          title: data.title,
+          content: data.content,
+          tags: data.tags,
+        },
+      })
+    } catch (saveError) {
+      console.error('保存记录失败:', saveError)
     }
   } catch (error) {
     console.error('转写失败:', error)

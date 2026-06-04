@@ -16,6 +16,19 @@ export const generationRecordApi = {
   byCandidate(candidateId) {
     return api.get(`/generation-records/by-candidate/${candidateId}`)
   },
+
+  /**
+   * 创建生成记录
+   * @param {Object} data - 记录数据
+   * @param {string} data.type - 记录类型
+   * @param {Object} data.input_snapshot - 输入快照
+   * @param {string} [data.display_title] - 显示标题
+   * @param {Object} [data.output_snapshot] - 输出快照
+   * @param {Object} [data.resume_context] - 恢复上下文
+   */
+  create(data) {
+    return api.post('/generation-records', data)
+  },
 }
 
 export default generationRecordApi

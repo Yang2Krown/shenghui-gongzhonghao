@@ -20,6 +20,7 @@ async def create_record(
     creation_id: Optional[int] = None,
     candidate_id: Optional[int] = None,
     resume_context: Optional[dict] = None,
+    output_snapshot: Optional[dict] = None,
 ) -> GenerationRecord:
     record = GenerationRecord(
         user_id=user_id,
@@ -31,7 +32,8 @@ async def create_record(
         creation_id=creation_id,
         candidate_id=candidate_id,
         resume_context=resume_context or {},
-        status="pending",
+        output_snapshot=output_snapshot,
+        status="completed" if output_snapshot else "pending",
     )
     db.add(record)
     await db.commit()

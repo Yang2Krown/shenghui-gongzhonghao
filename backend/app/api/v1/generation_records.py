@@ -1,16 +1,58 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
 from app.models.generation_record import GenerationRecord
-from app.crud.generation_record import list_records, get_record
+from app.crud.generation_record import list_records, get_record, create_record
 from app.schemas.generation_record import GenerationRecordOut, GenerationRecordListOut
 
 router = APIRouter()
+
+
+class GenerationRecordCreateRequest(BaseModel):
+    """创建生成记录请求"""
+    type: str
+    input_snapshot: dict = {}
+    display_title: Optional[str] = None
+    output_snapshot: Optional[dict] = None
+    resume_context: dict = {}
+
+
+@router.post("", response_model=dict)
+async def create_generation_record(
+    req: GenerationRecordCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """创建生成记录"""
+    import uuid
+    run_id = f"manual_{uuid.uuid4().hex[:16]}"
+
+    record = await create_record(
+        db,
+        user_id=current_user.id,
+        type=req.type,
+        run_id=run_id,
+        input_snapshot=req.input_snapshot,
+        display_title=req.display_title,
+        output_snapshot=req.output_snapshot,
+        resume_context=req.resume_context,
+    )
+
+    # 如果有 output_snapshot，直接标记为完成
+    if req.output_snapshot:
+        from app.crud.generation_record import complete_record
+        await complete_record(db, run_id=run_id, output_snapshot=req.output_snapshot)
+
+    return {
+        "code": 200,
+        "data": GenerationRecordOut.model_validate(record).model_dump(),
+    }
 
 
 @router.get("", response_model=dict)
