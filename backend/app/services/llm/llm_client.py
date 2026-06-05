@@ -71,6 +71,9 @@ def get_llm_client(provider: Optional[str] = None) -> LLMClient:
     if name == "aigocode":
         from app.services.llm.aigocode_client import AIGoCodeClient
         return AIGoCodeClient()
+    if name == "moonshot":
+        from app.services.llm.moonshot_client import MoonshotClient
+        return MoonshotClient()
 
     raise ValueError(f"未知 LLM provider: {name}")
 

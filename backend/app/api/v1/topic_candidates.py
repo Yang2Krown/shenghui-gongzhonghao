@@ -24,8 +24,9 @@ from app.models.daily_topic_list import DailyTopicList
 from app.models.info_cluster import InfoCluster
 from app.services.ranking_service import generate_daily_list
 from app.services.topic_mining.agent_a_deriver import derive_candidates
+from app.services.topic_mining.agent_a2_feasibility import audit_feasibility
 from app.services.topic_mining.agent_b_scorer import score_candidates
-from app.services.topic_mining.schemas import InfoClusterInput, AgentBInput
+from app.services.topic_mining.schemas import InfoClusterInput, AgentA2Input, AgentBInput
 from app.services.preprocess.rules import is_ai_related
 
 logger = logging.getLogger(__name__)
@@ -183,10 +184,35 @@ async def trigger_adhoc_mining(
                     "data": {"step": 1, "agent": "沈知远 · 选题衍生员"},
                 })
 
+                # Agent A2: 可写性审计（联网搜索验证）
+                await _progress_cb({
+                    "event": "step_start",
+                    "data": {"step": 2, "agent": "叶知秋 · 可写性审计员", "action": "正在联网搜索验证选题可写性...", "avatar": "/agents/agent-a2.png"},
+                })
+                a2_input = AgentA2Input(
+                    cluster_id=bg_cluster.id,
+                    core_title=core_title,
+                    info_type="资讯型",
+                    freshness="today",
+                    summary=bg_cluster.summary or "",
+                    source_urls=[],
+                    candidates=candidates_a,
+                )
+                result_a2 = await audit_feasibility(a2_input)
+                feasibility_map = {c.candidate_id: c for c in result_a2.candidates}
+                # 过滤 fail 的选题
+                candidates_for_b = [c for c in candidates_a if feasibility_map.get(c.candidate_id, None) and feasibility_map[c.candidate_id].verdict != "fail"]
+                if not candidates_for_b:
+                    candidates_for_b = candidates_a  # 降级：全部通过
+                await _progress_cb({
+                    "event": "step_done",
+                    "data": {"step": 2, "agent": "叶知秋 · 可写性审计员"},
+                })
+
                 # Agent B: 评分
                 await _progress_cb({
                     "event": "step_start",
-                    "data": {"step": 2, "agent": "白景明 · 选题评分员", "action": "正在评分评估候选选题...", "avatar": "/agents/agent-b.png"},
+                    "data": {"step": 3, "agent": "白景明 · 选题评分员", "action": "正在评分评估候选选题...", "avatar": "/agents/agent-b.png"},
                 })
                 b_input = AgentBInput(
                     cluster_id=bg_cluster.id,
@@ -198,17 +224,18 @@ async def trigger_adhoc_mining(
                 result_b = await score_candidates(b_input)
                 await _progress_cb({
                     "event": "step_done",
-                    "data": {"step": 2, "agent": "白景明 · 选题评分员"},
+                    "data": {"step": 3, "agent": "白景明 · 选题评分员"},
                 })
 
                 # 写入数据库
                 total_candidates = 0
                 angles = []
                 for scored in result_b.candidates:
+                    fb = feasibility_map.get(scored.candidate_id)
                     tc = TopicCandidate(
                         info_cluster_id=bg_cluster.id,
                         title=scored.title,
-                        summary=scored.summary,
+                        summary=fb.enriched_summary if fb and fb.enriched_summary else scored.summary,
                         direction=scored.direction,
                         routine=scored.routine,
                         dimension_combo=scored.dimension_combo,
@@ -221,6 +248,13 @@ async def trigger_adhoc_mining(
                         business_sensitive=scored.business_sensitive,
                         weighted_score=scored.weighted_score,
                         verdict=scored.verdict,
+                        enriched_summary=fb.enriched_summary if fb else None,
+                        feasibility_score=fb.feasibility_score if fb else None,
+                        feasibility_passed=fb.feasibility_passed if fb else True,
+                        feasibility_verdict=fb.verdict if fb else None,
+                        feasibility_evidence=[e.model_dump() for e in fb.evidence] if fb else [],
+                        feasibility_reasoning=fb.reasoning if fb else None,
+                        feasibility_rewrite_suggestion=fb.rewrite_suggestion if fb else None,
                     )
                     bg_db.add(tc)
                     await bg_db.flush()
@@ -584,24 +618,43 @@ async def _mine_cluster_inner(
     candidates_a = await derive_candidates(info_input)
     await _emit({"event": "step_done", "data": {"step": 1, "agent": "沈知远 · 选题衍生员"}})
 
+    # Agent A2: 可写性审计
+    await _emit({"event": "step_start", "data": {"step": 2, "agent": "叶知秋 · 可写性审计员", "action": "正在联网搜索验证选题可写性...", "avatar": "/agents/agent-a2.png"}})
+    a2_input = AgentA2Input(
+        cluster_id=cluster.id,
+        core_title=cluster.core_title,
+        info_type=cluster.info_type or "资讯型",
+        freshness=cluster.freshness,
+        summary=cluster.summary_zh or cluster.summary,
+        source_urls=cluster.source_urls or [],
+        candidates=candidates_a,
+    )
+    result_a2 = await audit_feasibility(a2_input)
+    feasibility_map = {c.candidate_id: c for c in result_a2.candidates}
+    candidates_for_b = [c for c in candidates_a if feasibility_map.get(c.candidate_id) and feasibility_map[c.candidate_id].verdict != "fail"]
+    if not candidates_for_b:
+        candidates_for_b = candidates_a
+    await _emit({"event": "step_done", "data": {"step": 2, "agent": "叶知秋 · 可写性审计员"}})
+
     # Agent B
-    await _emit({"event": "step_start", "data": {"step": 2, "agent": "白景明 · 选题评分员", "action": "正在评分评估候选选题...", "avatar": "/agents/agent-b.png"}})
+    await _emit({"event": "step_start", "data": {"step": 3, "agent": "白景明 · 选题评分员", "action": "正在评分评估候选选题...", "avatar": "/agents/agent-b.png"}})
     b_input = AgentBInput(
         cluster_id=cluster.id,
         core_title=cluster.core_title,
         info_type=cluster.info_type or "资讯型",
         freshness=cluster.freshness,
-        candidates=candidates_a,
+        candidates=candidates_for_b,
     )
     result_b = await score_candidates(b_input)
-    await _emit({"event": "step_done", "data": {"step": 2, "agent": "Agent B"}})
+    await _emit({"event": "step_done", "data": {"step": 3, "agent": "白景明 · 选题评分员"}})
 
     total_candidates = 0
     for scored in result_b.candidates:
+        fb = feasibility_map.get(scored.candidate_id)
         tc = TopicCandidate(
             info_cluster_id=cluster.id,
             title=scored.title,
-            summary=scored.summary,
+            summary=fb.enriched_summary if fb and fb.enriched_summary else scored.summary,
             direction=scored.direction,
             routine=scored.routine,
             dimension_combo=scored.dimension_combo,
@@ -614,6 +667,13 @@ async def _mine_cluster_inner(
             business_sensitive=scored.business_sensitive,
             weighted_score=scored.weighted_score,
             verdict=scored.verdict,
+            enriched_summary=fb.enriched_summary if fb else None,
+            feasibility_score=fb.feasibility_score if fb else None,
+            feasibility_passed=fb.feasibility_passed if fb else True,
+            feasibility_verdict=fb.verdict if fb else None,
+            feasibility_evidence=[e.model_dump() for e in fb.evidence] if fb else [],
+            feasibility_reasoning=fb.reasoning if fb else None,
+            feasibility_rewrite_suggestion=fb.rewrite_suggestion if fb else None,
         )
         db.add(tc)
         await db.flush()   # ← 关键修复：必须 await，否则 tc.id 还是 None

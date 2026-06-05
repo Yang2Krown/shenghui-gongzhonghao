@@ -130,3 +130,47 @@ class AgentBOutput(BaseModel):
     """Agent B 的完整输出。"""
     candidates: List[CandidateScored]
     stats: dict = Field(default_factory=dict, description="{total, selected, backup, rejected, vetoed}")
+
+
+# ──────────────────────────────────────────────
+# Agent A2 输入（可写性审计）
+# ──────────────────────────────────────────────
+
+class AgentA2Input(BaseModel):
+    """Agent A2 的输入：Agent A 的候选列表 + 原始信息摘要。"""
+    cluster_id: int
+    core_title: str
+    info_type: str
+    freshness: Optional[str] = None
+    summary: Optional[str] = None
+    source_urls: List[str] = Field(default_factory=list)
+    candidates: List[CandidateFromA]
+
+
+# ──────────────────────────────────────────────
+# Agent A2 输出（可写性审计）
+# ──────────────────────────────────────────────
+
+class FeasibilityEvidence(BaseModel):
+    """单条搜索证据。"""
+    source: str = Field(description="证据来源，如搜索结果标题或URL")
+    snippet: str = Field(description="关键摘录，1-2句话")
+    supports: bool = Field(description="True=支持选题可写，False=反驳/削弱选题")
+
+class CandidateFeasibility(BaseModel):
+    """单个候选选题的可写性审计结果。"""
+    candidate_id: str
+    title: str
+    enriched_summary: str = Field(description="基于搜索结果充实后的选题简介，包含具体例子、数据、细节")
+    feasibility_score: float = Field(ge=0, le=10, description="可写性评分 0-10")
+    feasibility_passed: bool = Field(description="是否通过可写性门槛")
+    verdict: str = Field(description="pass / weak_pass / fail")
+    search_queries: List[str] = Field(default_factory=list, description="实际执行的搜索词")
+    evidence: List[FeasibilityEvidence] = Field(default_factory=list, description="搜索到的证据")
+    reasoning: str = Field(description="判断理由，1-3句话")
+    rewrite_suggestion: Optional[str] = Field(default=None, description="若 fail/weak_pass，给出改写建议")
+
+class AgentA2Output(BaseModel):
+    """Agent A2 的完整输出。"""
+    candidates: List[CandidateFeasibility]
+    stats: dict = Field(default_factory=dict, description="{total, passed, weak_pass, failed}")

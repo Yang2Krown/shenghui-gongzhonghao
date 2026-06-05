@@ -13,8 +13,9 @@ from app.db.session import SessionLocal
 from app.models.info_cluster import InfoCluster
 from app.models.topic_candidate import TopicCandidate, PersonaReview, CandidateScore
 from app.services.topic_mining.agent_a_deriver import derive_candidates
+from app.services.topic_mining.agent_a2_feasibility import audit_feasibility
 from app.services.topic_mining.agent_b_scorer import score_candidates
-from app.services.topic_mining.schemas import InfoClusterInput, AgentBInput
+from app.services.topic_mining.schemas import InfoClusterInput, AgentA2Input, AgentBInput
 
 logger = logging.getLogger(__name__)
 
@@ -70,22 +71,53 @@ def mine_cluster(self, cluster_id: int) -> dict:
         info_input = _cluster_to_input(cluster)
         candidates_a = asyncio.run(derive_candidates(info_input))
 
-        # Step 2: Agent B 评分
+        # Step 1.5: Agent A2 可写性审计（联网搜索验证）
+        a2_input = AgentA2Input(
+            cluster_id=cluster_id,
+            core_title=cluster.core_title,
+            info_type=cluster.info_type or "资讯型",
+            freshness=cluster.freshness,
+            summary=cluster.summary_zh or cluster.summary,
+            source_urls=cluster.source_urls or [],
+            candidates=candidates_a,
+        )
+        result_a2 = asyncio.run(audit_feasibility(a2_input))
+
+        # 过滤：fail 的选题不进入 Agent B，weak_pass 保留但标记
+        feasibility_map = {c.candidate_id: c for c in result_a2.candidates}
+        candidates_for_b = []
+        for cand in candidates_a:
+            fb = feasibility_map.get(cand.candidate_id)
+            if fb and fb.verdict == "fail":
+                logger.info(f"选题 {cand.candidate_id} [{cand.title}] 可写性审计不通过，跳过")
+                continue
+            candidates_for_b.append(cand)
+
+        if not candidates_for_b:
+            logger.warning(f"InfoCluster {cluster_id} 所有选题可写性审计均不通过，跳过评分")
+            cluster.mined = True
+            db.commit()
+            return {"cluster_id": cluster_id, "status": "all_feasibility_failed"}
+
+        # Step 2: Agent B 评分（只评通过可写性审计的选题）
         b_input = AgentBInput(
             cluster_id=cluster_id,
             core_title=cluster.core_title,
             info_type=cluster.info_type or "资讯型",
             freshness=cluster.freshness,
-            candidates=candidates_a,
+            candidates=candidates_for_b,
         )
         result_b = asyncio.run(score_candidates(b_input))
 
         # Step 3: 落库
         for scored in result_b.candidates:
+            # 查找对应的可写性审计结果
+            fb = feasibility_map.get(scored.candidate_id)
+
             candidate = TopicCandidate(
                 info_cluster_id=cluster_id,
                 title=scored.title,
-                summary=scored.summary,
+                summary=fb.enriched_summary if fb and fb.enriched_summary else scored.summary,
                 direction=scored.direction,
                 routine=scored.routine,
                 dimension_combo=scored.dimension_combo,
@@ -98,6 +130,14 @@ def mine_cluster(self, cluster_id: int) -> dict:
                 business_sensitive=scored.business_sensitive,
                 weighted_score=scored.weighted_score,
                 verdict=scored.verdict,
+                # Agent A2 可写性审计数据
+                enriched_summary=fb.enriched_summary if fb else None,
+                feasibility_score=fb.feasibility_score if fb else None,
+                feasibility_passed=fb.feasibility_passed if fb else True,
+                feasibility_verdict=fb.verdict if fb else None,
+                feasibility_evidence=[e.model_dump() for e in fb.evidence] if fb else [],
+                feasibility_reasoning=fb.reasoning if fb else None,
+                feasibility_rewrite_suggestion=fb.rewrite_suggestion if fb else None,
             )
             db.add(candidate)
             db.flush()
@@ -135,7 +175,11 @@ def mine_cluster(self, cluster_id: int) -> dict:
         db.commit()
 
         logger.info(f"InfoCluster {cluster_id} 挖掘完成: {result_b.stats}")
-        return {"cluster_id": cluster_id, **result_b.stats}
+        return {
+            "cluster_id": cluster_id,
+            "feasibility": result_a2.stats,
+            **result_b.stats,
+        }
 
     except Exception as exc:
         db.rollback()

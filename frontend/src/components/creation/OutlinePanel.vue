@@ -25,7 +25,7 @@
       <p class="text-ink-3 mb-6">基于选题信息，AI 将生成「引入 → 正文 → 总结」三段式、可直接落笔的大纲</p>
       <div class="flex items-center justify-center gap-2 mb-6">
         <span class="text-sm text-ink-3">目标总字数</span>
-        <el-input-number v-model="targetWords" :min="500" :max="8000" :step="100" controls-position="right" style="width: 140px;" />
+        <el-input-number v-model="targetWords" :min="500" :max="8000" :step="100" :controls="false" style="width: 120px;" />
         <span class="text-xs text-ink-4">字（可后续逐节微调）</span>
       </div>
       <el-button type="primary" size="large" @click="generateOutline" :loading="generating">
@@ -115,7 +115,7 @@
         </div>
 
         <!-- 编辑模式：一整个文本框，文字 + 字数一起改 -->
-        <div v-if="viewMode === 'edit'" class="card section-card">
+        <div v-if="viewMode === 'edit'" class="section-card">
           <p class="text-xs text-ink-4 mb-2">
             用「引入 / 正文 / 总结」分段；每个小节首行写「小标题（300字）」，下面写这节要写什么。改字数直接改括号里的数字。
           </p>
@@ -688,56 +688,43 @@ const agentFeedback = computed(() => {
 </script>
 
 <style scoped>
+/* ── 布局 ─────────────────────────────────────────── */
 .outline-result-split {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
   gap: 24px;
   align-items: flex-start;
 }
-
 @media (max-width: 1100px) {
-  .outline-result-split {
-    grid-template-columns: 1fr;
-  }
+  .outline-result-split { grid-template-columns: 1fr; }
 }
-
 .result-left,
-.result-right {
-  min-width: 0;
-}
+.result-right { min-width: 0; }
 
-.section-title-input :deep(.el-input__wrapper) {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  padding: 0;
-}
-
-.section-title-input :deep(.el-input__inner) {
+/* ── 空状态按钮 ───────────────────────────────────── */
+.outline-panel :deep(.el-button--large) {
+  padding: 12px 32px;
+  border-radius: var(--r-md);
   font-size: 15px;
   font-weight: 600;
-  color: var(--ink);
 }
 
-.section-title-input :deep(.el-input__inner:focus) {
-  border-bottom: 1px dashed var(--clay-soft);
+/* ── 字数输入 ─────────────────────────────────────── */
+.outline-panel :deep(.el-input-number) {
+  --el-input-number-step-button-border-color: var(--line);
 }
-
-.point-input :deep(.el-textarea__inner) {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  padding: 0;
-  font-size: 13px;
+.outline-panel :deep(.el-input-number .el-input-number__decrease),
+.outline-panel :deep(.el-input-number .el-input-number__increase) {
+  background: var(--bone);
+  border-color: var(--line);
   color: var(--ink-2);
-  line-height: 1.5;
+}
+.outline-panel :deep(.el-input-number .el-input-number__decrease:hover),
+.outline-panel :deep(.el-input-number .el-input-number__increase:hover) {
+  color: var(--clay);
 }
 
-.point-input :deep(.el-textarea__inner:focus) {
-  border-bottom: 1px dashed var(--clay-soft);
-}
-
-/* 视图切换 */
+/* ── 视图切换（pill toggle） ─────────────────────── */
 .view-toggle {
   display: inline-flex;
   background: var(--bone);
@@ -745,7 +732,6 @@ const agentFeedback = computed(() => {
   padding: 3px;
   flex-shrink: 0;
 }
-
 .toggle-btn {
   padding: 4px 14px;
   border: none;
@@ -758,21 +744,98 @@ const agentFeedback = computed(() => {
   transition: all 0.2s ease;
   line-height: 1.4;
 }
-
 .toggle-btn.active {
   background: var(--paper);
   color: var(--ink);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
-/* 预览模式：三块（引入/正文/总结） */
+/* ── 候选方案切换卡片 ────────────────────────────── */
+.candidate-chips {
+  margin-bottom: 16px;
+}
+.candidate-chips .flex.gap-3 {
+  gap: 12px;
+}
+
+.candidate-card {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 14px 16px;
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(.32, .72, 0, 1);
+}
+.candidate-card:hover {
+  border-color: var(--clay-soft);
+  box-shadow: var(--sh-2);
+  transform: translateY(-1px);
+}
+.candidate-card.active {
+  border-color: var(--clay);
+  background: var(--clay-tint);
+  box-shadow: var(--sh-clay);
+}
+.candidate-card.active:hover {
+  box-shadow: 0 10px 28px rgba(204, 120, 92, 0.22);
+}
+
+.candidate-number {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.candidate-card.active .candidate-number {
+  color: var(--clay-deep);
+}
+
+.candidate-hook {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--clay-deep);
+  background: var(--bone);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+}
+.candidate-card.active .candidate-hook {
+  background: rgba(204, 120, 92, 0.15);
+  color: var(--clay-deep);
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── 编辑模式：section-card ──────────────────────── */
+.section-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-1);
+  padding: 16px 20px;
+}
+
+.outline-editor :deep(.el-textarea__inner) {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--ink);
+  font-family: inherit;
+}
+
+/* ── 预览模式：三块（引入/正文/总结） ─────────── */
 .preview-part {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
+  box-shadow: var(--sh-1);
   overflow: hidden;
 }
-
 .preview-part-head {
   display: flex;
   align-items: center;
@@ -781,39 +844,24 @@ const agentFeedback = computed(() => {
   background: var(--bone);
   border-bottom: 1px solid var(--line);
 }
-
 .preview-part-name {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--clay-deep);
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
-
 .preview-part-body {
   padding: 8px 20px;
 }
-
 .preview-sub {
   padding: 12px 0;
 }
-
 .preview-sub + .preview-sub {
   border-top: 1px dashed var(--line);
 }
 
-.section-card {
-  padding: 16px 20px;
-}
-
-/* 编辑模式整段文本框 */
-.outline-editor :deep(.el-textarea__inner) {
-  font-size: 14px;
-  line-height: 1.8;
-  color: var(--ink);
-  font-family: inherit;
-}
-
-/* 固定底部操作栏 */
+/* ── 底部操作栏 ──────────────────────────────────── */
 .outline-bottom-bar {
   position: fixed;
   bottom: 0;
@@ -827,7 +875,6 @@ const agentFeedback = computed(() => {
   display: flex;
   align-items: center;
 }
-
 .bottom-bar-inner {
   display: flex;
   justify-content: flex-end;
@@ -836,71 +883,21 @@ const agentFeedback = computed(() => {
   width: 100%;
 }
 
-.badge-warning {
-  background: rgba(200, 145, 60, 0.12);
-  color: var(--sand);
+/* ── 通用 badge ──────────────────────────────────── */
+.badge-success {
+  background: rgba(92, 138, 92, 0.10);
+  color: var(--leaf);
   padding: 2px 10px;
   border-radius: var(--r-pill);
   font-size: 12px;
   font-weight: 600;
 }
-
-/* 候选切换 */
-.candidate-chips {
-  margin-bottom: 16px;
-}
-
-.candidate-card {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  padding: 12px 14px;
-  border: 1.5px solid var(--line);
-  border-radius: var(--r-lg);
-  background: var(--paper);
-  cursor: pointer;
-  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
-}
-
-.candidate-card:hover {
-  border-color: var(--clay-soft);
-  box-shadow: var(--sh-1);
-}
-
-.candidate-card.active {
-  border-color: var(--primary);
-  background: rgba(var(--primary-rgb, 79, 70, 229), 0.04);
-  box-shadow: 0 0 0 2px rgba(var(--primary-rgb, 79, 70, 229), 0.12);
-}
-
-.candidate-number {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--ink);
-}
-
-.candidate-card.active .candidate-number {
-  color: var(--primary);
-}
-
-.candidate-hook {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--clay-deep);
-  background: var(--bone);
-  padding: 1px 8px;
+.badge-warning {
+  background: var(--sand-soft);
+  color: var(--sand);
+  padding: 2px 10px;
   border-radius: var(--r-pill);
-}
-
-.candidate-card.active .candidate-hook {
-  background: rgba(var(--primary-rgb, 79, 70, 229), 0.1);
-  color: var(--primary);
-}
-
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
 }
 </style>

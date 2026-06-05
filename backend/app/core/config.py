@@ -124,6 +124,11 @@ class Settings(BaseSettings):
     # Exa API（微信公众号搜索，替代 mcporter CLI）
     EXA_API_KEY: Optional[str] = None
 
+    # Moonshot / Kimi（联网搜索专用，Agent A2 可写性审计）
+    MOONSHOT_API_KEY: Optional[str] = None
+    MOONSHOT_API_BASE: str = "https://api.moonshot.cn/v1"
+    MOONSHOT_MODEL: str = "moonshot-v1-32k"
+
     # Pixus AI 图像生成（公众号封面等）
     PIXUS_API_KEY: Optional[str] = None
     PIXUS_API_BASE: str = "https://pixus.dev"

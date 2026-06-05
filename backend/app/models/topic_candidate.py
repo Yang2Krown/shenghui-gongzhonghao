@@ -50,6 +50,15 @@ class TopicCandidate(BaseModel):
     weighted_score = Column(Float, nullable=True, index=True)          # 加权总分 0-10
     verdict = Column(String(20), nullable=True, index=True)            # 见 VERDICT_*
 
+    # Agent A2：可写性审计
+    enriched_summary = Column(Text, nullable=True)                     # 基于搜索结果充实后的选题简介
+    feasibility_score = Column(Float, nullable=True)                   # 可写性评分 0-10
+    feasibility_passed = Column(Boolean, default=True)                 # 是否通过可写性门槛
+    feasibility_verdict = Column(String(20), nullable=True)            # pass / weak_pass / fail
+    feasibility_evidence = Column(JSONField, default=list)             # [{source, snippet, supports}]
+    feasibility_reasoning = Column(Text, nullable=True)                # 判断理由
+    feasibility_rewrite_suggestion = Column(Text, nullable=True)       # 改写建议（fail/weak_pass时）
+
     info_cluster = relationship("InfoCluster", back_populates="candidates")
     persona_reviews = relationship("PersonaReview", back_populates="candidate", cascade="all, delete-orphan")
     score = relationship("CandidateScore", back_populates="candidate", uselist=False, cascade="all, delete-orphan")
