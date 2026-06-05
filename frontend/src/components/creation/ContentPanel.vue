@@ -383,8 +383,9 @@ const highlightFragments = computed(() => {
 /** 去掉 LLM 可能添加的装饰性前缀，返回核心句干 */
 function stripDecoration(s) {
   return s
-    .replace(/^[\s—–\-:=：·•>】\]）)]*(?:金句|去AI味|改写|rewrite|句子)[\s：:—–\-]*/i, '')
-    .replace(/[\s—–\-:=：·•<【\[(（]*$/i, '')
+    .replace(/^[\s—–\-:=：·•>】\]）)]*(?:金句|金句内容|金句文本|去AI味|改写|rewrite|句子|内容|文本)[\s：:—–\-]*/i, '')
+    .replace(/^[\s—–\-:=：·•<【\[（（]*(?:金句|金句内容|金句文本)[\s：:—–\-]*/i, '')
+    .replace(/[\s—–\-:=：·•<【\[（（]*$/i, '')
     .trim()
 }
 
@@ -405,6 +406,11 @@ function applyHighlights(html) {
     if (stripped !== f.text && stripped.length >= 4) {
       texts.push(stripped)                  // 去装饰版
     }
+    // 归一化版本（去标点空白）
+    const norm = normalize(f.text)
+    if (norm.length >= 6) {
+      texts.push(norm.slice(0, 16))         // 归一化前 16 字
+    }
     return { ...f, texts }
   })
 
@@ -419,6 +425,8 @@ function applyHighlights(html) {
 
     let matched = false
     for (const text of frag.texts) {
+      // 跳过归一化版本（不能直接在 html 中搜索）
+      if (text === normalize(frag.text)) continue
       const escaped = escapeHtml(text)
       if (!escaped || escaped.length < 4) continue
       const idx = html.indexOf(escaped)
@@ -432,8 +440,8 @@ function applyHighlights(html) {
     }
     if (matched) continue
 
-    // 兜底：取核心句干前 12 字做子串搜索
-    const seed = stripDecoration(frag.text).replace(/\s+/g, '').slice(0, 12)
+    // 兜底：取核心句干前 16 字做子串搜索（比之前 12 字更宽松）
+    const seed = stripDecoration(frag.text).replace(/\s+/g, '').slice(0, 16)
     if (seed.length < 4) continue
     const seedEsc = escapeHtml(seed)
     const idx = html.indexOf(seedEsc)
@@ -589,6 +597,20 @@ const agentFeedback = computed(() => {
   const highRewrites = rewrites.filter((r) =>
     String(r.priority || '').includes('🚫')
   )
+  const warnRewrites = rewrites.filter((r) =>
+    String(r.priority || '').includes('⚠️')
+  )
+  // 按类型统计
+  const typeCounts = {}
+  for (const r of rewrites) {
+    const t = r.ai_taste_type || '其他'
+    typeCounts[t] = (typeCounts[t] || 0) + 1
+  }
+  const typeSummary = Object.entries(typeCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, n]) => `${t}×${n}`)
+    .join('、')
+
   const agentC = {
     id: 'C',
     code: 'C',
@@ -596,14 +618,11 @@ const agentFeedback = computed(() => {
     role: '扫描 6 类 AI 味并按优先级改写',
     avatar: '/agents/content-c.png',
     summary: rewrites.length
-      ? `共改写 ${rewrites.length} 处${highRewrites.length ? `（${highRewrites.length} 处高优先级）` : ''}。`
+      ? `共改写 ${rewrites.length} 处${highRewrites.length ? `，其中 ${highRewrites.length} 处高优先级` : ''}${warnRewrites.length ? `，${warnRewrites.length} 处中优先级` : ''}。${typeSummary ? `涉及：${typeSummary}。` : ''}`
       : c.rewrite_count
         ? `共改写 ${c.rewrite_count} 处。`
-        : '',
-    issues: rewrites.slice(0, 20).map((r) => ({
-      location: `${r.location} · ${r.ai_taste_subtype || r.ai_taste_type}`,
-      text: `${r.priority ? r.priority + ' ' : ''}${r.reason || ''}`,
-    })),
+        : '无改写记录',
+    issues: [],
   }
 
   // Agent D 8 维度自检

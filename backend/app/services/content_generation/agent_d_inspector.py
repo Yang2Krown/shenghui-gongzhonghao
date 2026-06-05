@@ -342,6 +342,75 @@ async def integrate_and_inspect(
     raise last_error
 
 
+def _update_gold_sentences_for_rewritten_text(
+    gold_sentences: List[GoldSentence],
+    rewritten_text: str,
+) -> List[GoldSentence]:
+    """Agent C 改写后，金句文本可能已变化，用模糊匹配更新金句 content。"""
+    import re
+
+    def normalize(s: str) -> str:
+        """去空白+标点，用于模糊比对。"""
+        return re.sub(r'[\s　]+', '', re.sub(r'[，。！？；：（）【】、""''—–\-.,!?;:()\[\]{}"\']', '', s))
+
+    def strip_prefix(s: str) -> str:
+        """去掉 LLM 可能添加的装饰性前缀。"""
+        return re.sub(r'^[\s—–\-:=：·•>】\]）)]*(?:金句|金句内容|金句文本|去AI味|改写|rewrite|句子|内容|文本)[\s：:—–\-]*', '', s).strip()
+
+    def find_best_match(gold_text: str, text: str) -> str:
+        """在 text 中找与 gold_text 最匹配的子串，返回匹配到的原文。"""
+        # 先清理前缀
+        gold_text = strip_prefix(gold_text)
+        gold_norm = normalize(gold_text)
+        if not gold_norm or len(gold_norm) < 4:
+            return gold_text
+
+        # 策略 1：精确匹配
+        if gold_text in text:
+            return gold_text
+
+        # 策略 2：归一化后子串匹配（取前 16 字）
+        seed = gold_norm[:16]
+        if len(seed) >= 4:
+            text_norm = normalize(text)
+            idx = text_norm.find(seed)
+            if idx >= 0:
+                # 找到匹配，在原文中定位大致位置
+                norm_pos = 0
+                char_pos = 0
+                for i, ch in enumerate(text):
+                    if norm_pos >= idx:
+                        char_pos = i
+                        break
+                    if normalize(ch):
+                        norm_pos += 1
+                # 向后截取到标点边界
+                end = char_pos
+                target_len = len(gold_text)
+                while end < len(text) and end - char_pos < target_len * 1.5:
+                    if text[end] in '。！？\n':
+                        break
+                    end += 1
+                matched = text[char_pos:end].strip()
+                if len(matched) >= 4:
+                    return matched
+
+        # 匹配失败，返回清理后的原文
+        return gold_text
+
+    updated = []
+    for gs in gold_sentences:
+        new_content = find_best_match(gs.content, rewritten_text)
+        if new_content != gs.content:
+            updated.append(gs.model_copy(update={
+                'content': new_content,
+                'word_count': len(new_content),
+            }))
+        else:
+            updated.append(gs)
+    return updated
+
+
 def build_final_output(
     inp: ContentGenerationInput,
     agent_a_output: AgentAOutput,
@@ -350,12 +419,17 @@ def build_final_output(
     agent_d_output: AgentDOutput,
 ) -> ContentGenerationOutput:
     """汇总所有 Agent 输出为最终 ContentGenerationOutput。"""
+    # Agent C 改写后，金句文本可能已变化，更新匹配
+    updated_gold_sentences = _update_gold_sentences_for_rewritten_text(
+        agent_b_output.sentences,
+        agent_d_output.final_text,
+    )
     return ContentGenerationOutput(
         final_text=agent_d_output.final_text,
         final_word_count=agent_d_output.final_word_count,
         section_count=agent_a_output.section_count,
         section_word_counts=[s.word_count for s in agent_a_output.sections],
-        gold_sentences=agent_b_output.sentences,
+        gold_sentences=updated_gold_sentences,
         rewrite_table=agent_c_output.rewrite_table,
         diagnosis=agent_d_output,
         agent_a_word_count=agent_a_output.total_word_count,

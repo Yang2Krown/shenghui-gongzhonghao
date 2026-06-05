@@ -47,7 +47,7 @@ async def generate_content(
     # ──────────────────────────────────────────
     logger.info("[正文生成] Step 1/4: Agent A 生成正文骨干")
     if progress_callback:
-        await progress_callback({"event": "step_start", "data": {"step": 1, "agent": "温如言 · 正文创作员", "action": "正在按节撰写初稿（2500-3000 字）...", "avatar": "/agents/content-a.png"}})
+        await progress_callback({"event": "step_start", "data": {"step": 1, "agent": "温如言 · 正文创作员", "action": "正在按节撰写初稿...", "avatar": "/agents/content-a.png"}})
     try:
         agent_a_output = await generate_article(inp)
     except Exception as e:
