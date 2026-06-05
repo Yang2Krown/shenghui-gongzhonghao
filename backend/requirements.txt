@@ -34,3 +34,4 @@ alibabacloud-dysmsapi20170525>=2.0.0
 pypdf==4.3.1
 python-docx==1.1.2
 oss2==2.18.4
+Pillow>=10.0.0

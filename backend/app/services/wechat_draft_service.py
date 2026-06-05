@@ -4,49 +4,21 @@
 """
 import io
 import logging
-import socket
+import re
 from typing import Optional
 from dataclasses import dataclass
-from urllib.parse import urlparse, urlunparse
 
-import httpx
+from app.services.wechat_common import (
+    to_ipv4_url,
+    wechat_client,
+    WECHAT_HOST_HEADER,
+    generate_default_cover,
+    generate_ai_image,
+)
 
 logger = logging.getLogger(__name__)
 
 WECHAT_API_BASE = "https://api.weixin.qq.com/cgi-bin"
-
-# 缓存：域名 → IPv4 地址
-_ipv4_cache: dict[str, str] = {}
-
-
-def _resolve_ipv4(hostname: str) -> str:
-    """将域名强制解析为 IPv4 地址"""
-    if hostname in _ipv4_cache:
-        return _ipv4_cache[hostname]
-
-    infos = socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_STREAM)
-    if not infos:
-        raise OSError(f"无法将 {hostname} 解析为 IPv4 地址")
-
-    ip = infos[0][4][0]
-    _ipv4_cache[hostname] = ip
-    logger.info(f"[WeChatDraft] {hostname} → IPv4: {ip}")
-    return ip
-
-
-def _to_ipv4_url(url: str) -> str:
-    """将 URL 中的域名替换为预解析的 IPv4 地址"""
-    parsed = urlparse(url)
-    if parsed.hostname:
-        ipv4 = _resolve_ipv4(parsed.hostname)
-        new_netloc = parsed.netloc.replace(parsed.hostname, ipv4)
-        return urlunparse(parsed._replace(netloc=new_netloc))
-    return url
-
-
-def _wechat_client(timeout: int = 30) -> httpx.AsyncClient:
-    """创建 httpx 客户端，SSL 验证交给系统默认（使用 IPv4 URL 时仍需验证原始域名）"""
-    return httpx.AsyncClient(timeout=timeout, verify=False)
 
 
 @dataclass
@@ -57,14 +29,14 @@ class DraftResult:
 
 async def get_access_token(appid: str, secret: str) -> str:
     """获取微信公众号 access_token"""
-    url = _to_ipv4_url(f"{WECHAT_API_BASE}/token")
+    url = to_ipv4_url(f"{WECHAT_API_BASE}/token")
     params = {
         "grant_type": "client_credential",
         "appid": appid,
         "secret": secret,
     }
-    async with _wechat_client(timeout=15) as client:
-        resp = await client.get(url, params=params, headers={"Host": "api.weixin.qq.com"})
+    async with wechat_client(timeout=15) as client:
+        resp = await client.get(url, params=params, headers=WECHAT_HOST_HEADER)
         resp.raise_for_status()
         data = resp.json()
 
@@ -83,10 +55,9 @@ async def upload_permanent_image(
     filename: str = "cover.jpg",
 ) -> str:
     """上传封面图为永久素材，返回 media_id"""
-    url = _to_ipv4_url(f"{WECHAT_API_BASE}/material/add_material")
+    url = to_ipv4_url(f"{WECHAT_API_BASE}/material/add_material")
     params = {"access_token": access_token, "type": "image"}
 
-    # 检测 content_type
     content_type = "image/jpeg"
     if filename.lower().endswith(".png"):
         content_type = "image/png"
@@ -95,8 +66,8 @@ async def upload_permanent_image(
 
     files = {"media": (filename, io.BytesIO(image_data), content_type)}
 
-    async with _wechat_client(timeout=30) as client:
-        resp = await client.post(url, params=params, files=files, headers={"Host": "api.weixin.qq.com"})
+    async with wechat_client(timeout=30) as client:
+        resp = await client.post(url, params=params, files=files, headers=WECHAT_HOST_HEADER)
         resp.raise_for_status()
         data = resp.json()
 
@@ -115,7 +86,7 @@ async def upload_content_image(
     filename: str = "image.jpg",
 ) -> str:
     """上传正文内图片（临时素材），返回 URL"""
-    url = _to_ipv4_url(f"{WECHAT_API_BASE}/media/uploadimg")
+    url = to_ipv4_url(f"{WECHAT_API_BASE}/media/uploadimg")
     params = {"access_token": access_token}
 
     content_type = "image/jpeg"
@@ -124,8 +95,8 @@ async def upload_content_image(
 
     files = {"media": (filename, io.BytesIO(image_data), content_type)}
 
-    async with _wechat_client(timeout=30) as client:
-        resp = await client.post(url, params=params, files=files, headers={"Host": "api.weixin.qq.com"})
+    async with wechat_client(timeout=30) as client:
+        resp = await client.post(url, params=params, files=files, headers=WECHAT_HOST_HEADER)
         resp.raise_for_status()
         data = resp.json()
 
@@ -150,17 +121,37 @@ async def create_draft(
 ) -> DraftResult:
     """
     创建草稿
-    :param content: 正文 HTML 内容
+    :param content: 正文 HTML 内容（会自动确保是 HTML 格式）
     :return: DraftResult 包含 media_id
     """
-    url = _to_ipv4_url(f"{WECHAT_API_BASE}/draft/add")
+    url = to_ipv4_url(f"{WECHAT_API_BASE}/draft/add")
     params = {"access_token": access_token}
 
+    # 清理标题：去掉换行/制表符、emoji（微信对 emoji 计数不一致）
+    clean_title = re.sub(r'[\n\r\t]+', ' ', title).strip()
+    # 移除 emoji（Unicode 范围：补充平面 + 各类 emoji 组合）
+    clean_title = re.sub(
+        r'[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF'
+        r'\U0001F1E0-\U0001F1FF\U0001FA00-\U0001FA6F\U0001FA70-\U0001FAFF'
+        r'\U00002702-\U000027B0\U0000FE00-\U0000FE0F\U0000200D'
+        r'\U00002600-\U000026FF\U0000231A-\U0000231B\U00002934-\U00002935'
+        r'\U000025AA-\U000025AB\U000025FB-\U000025FE]+',
+        '', clean_title
+    ).strip()
+    if len(clean_title) > 64:
+        raise ValueError(f"标题超过微信限制（{len(clean_title)}/64 字符），请精简后重试")
+
+    clean_digest = re.sub(r'[\n\r\t]+', ' ', digest).strip()[:120] if digest else ""
+
+    # 确保 content 是 HTML 格式（兜底转换）
+    from app.services.wechat_common import ensure_html
+    html_content = ensure_html(content)
+
     article = {
-        "title": title[:64],  # 微信标题限制
+        "title": clean_title,
         "author": author[:32] if author else "",
-        "digest": digest[:120] if digest else "",
-        "content": content,
+        "digest": clean_digest,
+        "content": html_content,
         "content_source_url": content_source_url,
         "need_open_comment": need_open_comment,
         "only_fans_can_comment": only_fans_can_comment,
@@ -171,10 +162,15 @@ async def create_draft(
 
     payload = {"articles": [article]}
 
-    async with _wechat_client(timeout=30) as client:
-        resp = await client.post(url, params=params, json=payload, headers={"Host": "api.weixin.qq.com"})
-        resp.raise_for_status()
+    async with wechat_client(timeout=30) as client:
+        # 手动编码 JSON，ensure_ascii=False 保留中文原字符
+        # httpx 的 json= 默认 ensure_ascii=True，会把中文转义成 \uXXXX 导致微信解析异常
+        import json as _json
+        body = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers = {**WECHAT_HOST_HEADER, "Content-Type": "application/json"}
+        resp = await client.post(url, params=params, content=body, headers=headers)
         data = resp.json()
+        logger.info(f"[WeChatDraft] 微信API响应: {data}")
 
     if "media_id" not in data:
         errcode = data.get("errcode", "unknown")
@@ -185,3 +181,47 @@ async def create_draft(
     item_id = data.get("item_id")
     logger.info(f"[WeChatDraft] 草稿创建成功, media_id={media_id}")
     return DraftResult(media_id=media_id, item_id=item_id)
+
+
+# ==================== AI 封面生成（微信专用封装） ====================
+
+
+async def generate_ai_cover(title: str = "", content: str = "", style: str = "") -> str:
+    """
+    用 Pixus API 根据文章标题和正文生成公众号封面图
+    比例 21:9（横向长方形，接近微信公众号封面比例）
+    返回图片 URL
+    """
+    style_desc = f"，{style}风格" if style else ""
+    # 截取正文前 500 字作为参考，避免 prompt 过长
+    content_ref = content[:500].strip() if content else ""
+
+    if title and content_ref:
+        prompt = (
+            f"公众号文章封面图{style_desc}。"
+            f"标题：{title}。"
+            f"正文摘要：{content_ref}。"
+            f"根据标题和正文内容生成匹配的封面图，横向构图，宽屏比例，"
+            f"简洁大气，适合微信公众号文章封面，高质量，专业设计感，无文字"
+        )
+    elif title:
+        prompt = (
+            f"公众号文章封面图{style_desc}，主题：{title}。"
+            f"横向构图，宽屏比例，简洁大气，适合微信公众号文章封面，"
+            f"高质量，专业设计感，无文字"
+        )
+    elif content_ref:
+        prompt = (
+            f"公众号文章封面图{style_desc}。"
+            f"正文摘要：{content_ref}。"
+            f"根据正文内容生成匹配的封面图，横向构图，宽屏比例，"
+            f"简洁大气，适合微信公众号文章封面，高质量，专业设计感，无文字"
+        )
+    else:
+        prompt = (
+            f"公众号文章封面图{style_desc}，通用商务主题。"
+            f"横向构图，宽屏比例，简洁大气，适合微信公众号文章封面，"
+            f"高质量，专业设计感，无文字"
+        )
+
+    return await generate_ai_image(prompt, aspect_ratio="21:9")

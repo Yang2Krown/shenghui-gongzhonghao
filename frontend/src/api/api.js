@@ -181,6 +181,16 @@ export const testWechatConnection = (appid, appSecret) => {
   return api.post('/wechat-draft/test-connection', null, { params: { appid, app_secret: appSecret }, timeout: 15000 })
 }
 
+/**
+ * AI 生成封面图
+ * @param {string} title - 文章标题
+ * @param {string} [style] - 风格描述
+ * @returns {Promise<{url: string}>}
+ */
+export const generateWechatCover = (title, content, style) => {
+  return api.post('/wechat-draft/generate-cover', { title, content, style }, { timeout: 120000 })
+}
+
 // ==================== 小红书发布相关 API ====================
 
 /**

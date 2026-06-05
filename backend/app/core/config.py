@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     # Exa API（微信公众号搜索，替代 mcporter CLI）
     EXA_API_KEY: Optional[str] = None
 
+    # Pixus AI 图像生成（公众号封面等）
+    PIXUS_API_KEY: Optional[str] = None
+    PIXUS_API_BASE: str = "https://pixus.dev"
+
     # HTTP 代理（用于访问境外网站：HN / Reddit / V2EX / GitHub 等）
     HTTP_PROXY: Optional[str] = None
 
