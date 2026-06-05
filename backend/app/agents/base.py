@@ -20,22 +20,29 @@ logger = logging.getLogger(__name__)
 class BaseAgent(ABC):
     """
     Agent基类
-    
+
     提供AI模型调用的通用功能。
     """
-    
+
     def __init__(self):
         """初始化Agent"""
         self.anthropic_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY) if settings.ANTHROPIC_API_KEY else None
         self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
-        
+        self.aigocode_client = AsyncAnthropic(
+            api_key=settings.AIGOCODE_API_KEY,
+            base_url=settings.AIGOCODE_API_BASE,
+        ) if settings.AIGOCODE_API_KEY else None
+
         # 选择使用的模型
-        if settings.USE_PRIMARY_MODEL and self.anthropic_client:
-            self.model = settings.PRIMARY_MODEL
-            self.use_anthropic = True
+        if settings.LLM_PROVIDER == "aigocode" and self.aigocode_client:
+            self.model = settings.AIGOCODE_MODEL
+            self.use_provider = "aigocode"
+        elif self.anthropic_client:
+            self.model = settings.ANTHROPIC_MODEL
+            self.use_provider = "anthropic"
         elif self.openai_client:
-            self.model = settings.FALLBACK_MODEL
-            self.use_anthropic = False
+            self.model = settings.DEEPSEEK_MODEL
+            self.use_provider = "openai"
         else:
             raise ValueError("未配置任何AI模型API密钥")
     
@@ -48,21 +55,23 @@ class BaseAgent(ABC):
     ) -> str:
         """
         调用AI模型
-        
+
         Args:
             prompt: 用户提示词
             system_prompt: 系统提示词（可选）
             temperature: 温度参数（可选）
             max_tokens: 最大token数（可选）
-            
+
         Returns:
             模型响应文本
         """
         temperature = temperature or settings.MODEL_TEMPERATURE
         max_tokens = max_tokens or settings.MODEL_MAX_TOKENS
-        
+
         try:
-            if self.use_anthropic:
+            if self.use_provider == "aigocode":
+                return await self._call_aigocode(prompt, system_prompt, temperature, max_tokens)
+            elif self.use_provider == "anthropic":
                 return await self._call_anthropic(prompt, system_prompt, temperature, max_tokens)
             else:
                 return await self._call_openai(prompt, system_prompt, temperature, max_tokens)
@@ -79,23 +88,51 @@ class BaseAgent(ABC):
     ) -> str:
         """调用Anthropic Claude模型"""
         messages = [{"role": "user", "content": prompt}]
-        
+
         kwargs = {
             "model": self.model,
             "max_tokens": max_tokens,
             "temperature": temperature,
             "messages": messages,
         }
-        
+
         if system_prompt:
             kwargs["system"] = system_prompt
-        
+
         response = await self.anthropic_client.messages.create(**kwargs)
-        
+
         # 提取响应文本
         if response.content and len(response.content) > 0:
             return response.content[0].text
-        
+
+        return ""
+
+    async def _call_aigocode(
+        self,
+        prompt: str,
+        system_prompt: Optional[str],
+        temperature: float,
+        max_tokens: int,
+    ) -> str:
+        """调用AIGoCode Claude模型"""
+        messages = [{"role": "user", "content": prompt}]
+
+        kwargs = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": messages,
+        }
+
+        if system_prompt:
+            kwargs["system"] = system_prompt
+
+        response = await self.aigocode_client.messages.create(**kwargs)
+
+        # 提取响应文本
+        if response.content and len(response.content) > 0:
+            return response.content[0].text
+
         return ""
     
     async def _call_openai(

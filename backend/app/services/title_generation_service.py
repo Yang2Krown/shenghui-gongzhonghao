@@ -25,6 +25,7 @@ from app.services.title_generation import (
     TitleReviewerAgent,
     ClickPredictorAgent,
     FinalJudgeAgent,
+    MultiModelTitleCreatorAgent,
 )
 from app.core.config import settings
 
@@ -52,7 +53,55 @@ class TitleGenerationService:
         self.agent_b = TitleReviewerAgent()
         self.agent_c = ClickPredictorAgent()
         self.agent_d = FinalJudgeAgent()
-    
+        self.multi_model_creator = MultiModelTitleCreatorAgent()
+
+    async def execute_multi_model_comparison(
+        self,
+        request: TitleGenerationRequest,
+        providers: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        执行多模型对比生成
+
+        同时用多个模型生成标题，用于对比效果。
+
+        Args:
+            request: 标题生成请求
+            providers: 要使用的 provider 列表，默认 ["deepseek", "aigocode"]
+
+        Returns:
+            各模型的生成结果对比
+        """
+        logger.info(f"开始多模型对比生成，providers: {providers}")
+
+        # 创建多模型生成器
+        creator = MultiModelTitleCreatorAgent(providers=providers)
+
+        # 生成标题
+        results = await creator.generate_titles(
+            topic=request.topic,
+            outline=request.outline,
+        )
+
+        # 格式化返回结果
+        comparison = {
+            "topic": {
+                "title": request.topic.title,
+                "direction": request.topic.direction,
+            },
+            "models": {}
+        }
+
+        for provider, result in results.items():
+            comparison["models"][provider] = {
+                "success": result.get("success", False),
+                "count": result.get("count", 0),
+                "candidates": result.get("candidates", []),
+                "error": result.get("error"),
+            }
+
+        return comparison
+
     async def execute_title_generation(
         self,
         task_id: str,

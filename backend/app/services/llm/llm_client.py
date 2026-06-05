@@ -68,6 +68,9 @@ def get_llm_client(provider: Optional[str] = None) -> LLMClient:
     if name == "anthropic":
         from app.services.llm.anthropic_client import AnthropicClient
         return AnthropicClient()
+    if name == "aigocode":
+        from app.services.llm.aigocode_client import AIGoCodeClient
+        return AIGoCodeClient()
 
     raise ValueError(f"未知 LLM provider: {name}")
 

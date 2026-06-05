@@ -258,6 +258,46 @@ async def create_title_generation(
     )
 
 
+@router.post("/compare")
+async def compare_multi_model_titles(
+    request: TitleGenerationRequest,
+    providers: Optional[List[str]] = Query(default=["deepseek", "aigocode"], description="要对比的模型列表"),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    多模型对比生成标题
+
+    同时用多个模型生成标题，用于对比不同模型的效果。
+
+    ## 支持的模型
+    - `deepseek`: DeepSeek V4 Flash
+    - `aigocode`: AIGoCode Claude Opus 4.8
+    - `anthropic`: Anthropic Claude Sonnet 4.6
+
+    ## 返回
+    返回各模型生成的标题列表，方便对比效果。
+    """
+    from app.services.title_generation_service import TitleGenerationService
+
+    try:
+        # 创建 service（不传 db，因为这里不需要持久化）
+        service = TitleGenerationService(db=None)
+
+        # 执行多模型对比
+        comparison = await service.execute_multi_model_comparison(
+            request=request,
+            providers=providers,
+        )
+
+        return {
+            "success": True,
+            "comparison": comparison,
+        }
+    except Exception as e:
+        logger.error(f"多模型对比生成失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"多模型对比生成失败: {str(e)}")
+
+
 @router.get("/stream/{run_id}")
 async def stream_title_progress(
     run_id: str,

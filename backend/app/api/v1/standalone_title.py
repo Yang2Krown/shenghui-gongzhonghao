@@ -34,6 +34,18 @@ class StandaloneTitleResponse(BaseModel):
     message: str = Field(default="标题生成任务已创建")
 
 
+class MultiModelTitleRequest(BaseModel):
+    """多模型对比标题生成请求"""
+    content: str = Field(..., min_length=10, description="文章全文或内容摘要")
+    providers: list = Field(default=["deepseek", "aigocode"], description="要对比的模型列表")
+
+
+class MultiModelTitleResponse(BaseModel):
+    """多模型对比标题生成响应"""
+    success: bool = Field(default=True)
+    comparison: dict = Field(..., description="各模型的生成结果对比")
+
+
 async def _extract_topic_outline_from_content(content: str) -> dict:
     """
     从文章内容中提取选题信息和大纲信息，
@@ -325,6 +337,213 @@ async def stream_standalone_title_progress(
     token: str = Query(None, description="认证 token"),
 ) -> StreamingResponse:
     """SSE 端点：实时推送标题生成进度。"""
+    if token:
+        from app.core.security import decode_token
+        payload = decode_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="无效的 token")
+
+    if not progress_store.exists(run_id):
+        raise HTTPException(status_code=404, detail=f"run {run_id} 不存在或已过期")
+
+    return StreamingResponse(
+        progress_store.stream(run_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _run_multi_model_title_background(
+    content: str,
+    run_id: str,
+    providers: list,
+    user_id: int = None,
+):
+    """后台执行多模型对比标题生成任务"""
+    from app.db.session import AsyncSessionLocal
+    from app.services.title_generation_service import TitleGenerationService
+    from app.schemas.title_generation import TitleGenerationRequest, TopicInfo, OutlineInfo
+    from app.services.title_generation import TitleCreatorAgent
+    import uuid
+
+    try:
+        # Step 0: 从文章内容中提取 topic + outline
+        await progress_store.push(run_id, {
+            "event": "step_start",
+            "data": {
+                "step": 0,
+                "agent": "内容分析师",
+                "action": "正在分析文章内容，提取选题和大纲...",
+                "avatar": "/agents/title-a.png",
+            },
+        })
+
+        extracted = await _extract_topic_outline_from_content(content)
+        raw_topic = extracted.get("topic", {})
+        raw_outline = extracted.get("outline", {})
+
+        # 安全构造 TopicInfo
+        valid_directions = ["实践型", "解决问题型", "教程型", "观点型", "整活型", "资讯型"]
+        direction = raw_topic.get("direction", "实践型")
+        if direction not in valid_directions:
+            direction = "实践型"
+
+        topic = TopicInfo(
+            title=raw_topic.get("title", "未命名主题"),
+            direction=direction,
+            method=raw_topic.get("method", ""),
+            value_promise=raw_topic.get("value_promise", ""),
+        )
+
+        section_titles = raw_outline.get("section_titles", [])
+        key_points = raw_outline.get("key_points", [])
+        if not section_titles:
+            section_titles = [topic.title]
+        if not key_points:
+            key_points = [topic.value_promise or topic.title]
+
+        outline = OutlineInfo(
+            section_titles=section_titles,
+            key_points=key_points,
+            spread_tags=raw_outline.get("spread_tags", []),
+        )
+
+        await progress_store.push(run_id, {
+            "event": "step_done",
+            "data": {"step": 0, "agent": "内容分析师"},
+        })
+
+        # Step 1: 用多个模型并行生成标题
+        comparison = {
+            "topic": topic.dict(),
+            "outline": outline.dict(),
+            "models": {},
+        }
+
+        # 并行创建多个 agent 并生成标题
+        async def generate_with_provider(provider_name: str):
+            """用指定 provider 生成标题"""
+            try:
+                agent = TitleCreatorAgent(provider=provider_name)
+                result = await agent.generate_titles(
+                    topic=topic,
+                    outline=outline,
+                    min_candidates=8,
+                    max_candidates=8,
+                )
+                return provider_name, {
+                    "success": True,
+                    "candidates": result.get("candidates", []),
+                    "count": len(result.get("candidates", [])),
+                }
+            except Exception as e:
+                logger.error(f"Provider {provider_name} 生成失败: {e}")
+                return provider_name, {
+                    "success": False,
+                    "error": str(e),
+                    "candidates": [],
+                    "count": 0,
+                }
+
+        # 并行执行所有 provider
+        await progress_store.push(run_id, {
+            "event": "step_start",
+            "data": {
+                "step": 1,
+                "agent": "多模型创作",
+                "action": f"正在用 {len(providers)} 个模型并行生成标题...",
+                "avatar": "/agents/title-a.png",
+            },
+        })
+
+        tasks = [generate_with_provider(p) for p in providers]
+        results = await asyncio.gather(*tasks)
+
+        for provider_name, result in results:
+            comparison["models"][provider_name] = result
+
+        await progress_store.push(run_id, {
+            "event": "step_done",
+            "data": {"step": 1, "agent": "多模型创作"},
+        })
+
+        # 构造最终结果
+        result_data = {
+            "status": "completed",
+            "extracted_topic": topic.dict(),
+            "extracted_outline": outline.dict(),
+            "comparison": comparison,
+            "meta": {
+                "providers": providers,
+                "total_models": len(providers),
+            },
+        }
+
+        await progress_store.push(run_id, {
+            "event": "result",
+            "data": result_data,
+        })
+
+        await track_complete(run_id, result_data, display_title=f"多模型对比 · {topic.title[:30]}")
+
+    except Exception as e:
+        logger.error(f"多模型对比生成失败: {str(e)}", exc_info=True)
+        await progress_store.push(run_id, {
+            "event": "error",
+            "data": {"message": str(e)},
+        })
+        await track_fail(run_id, str(e))
+
+
+@router.post("/compare", response_model=MultiModelTitleResponse)
+async def compare_multi_model_titles(
+    request: MultiModelTitleRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    多模型对比生成标题
+
+    同时用多个模型生成标题，用于对比不同模型的效果。
+    """
+    run_id = progress_store.create_run()
+
+    await track_start(
+        user_id=current_user.id,
+        type="multi_model_title",
+        run_id=run_id,
+        input_snapshot={"content_length": len(request.content), "providers": request.providers},
+        display_title=f"多模型对比 · {request.content[:30]}...",
+        resume_context={
+            "route": "/standalone-title",
+            "query": {},
+        },
+    )
+
+    spawn(
+        _run_multi_model_title_background(
+            content=request.content,
+            run_id=run_id,
+            providers=request.providers,
+            user_id=current_user.id,
+        )
+    )
+
+    return MultiModelTitleResponse(
+        success=True,
+        comparison={"run_id": run_id, "message": "多模型对比生成任务已创建"},
+    )
+
+
+@router.get("/compare/stream/{run_id}")
+async def stream_multi_model_title_progress(
+    run_id: str,
+    token: str = Query(None, description="认证 token"),
+) -> StreamingResponse:
+    """SSE 端点：实时推送多模型对比生成进度。"""
     if token:
         from app.core.security import decode_token
         payload = decode_token(token)

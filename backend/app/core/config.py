@@ -50,13 +50,18 @@ class Settings(BaseSettings):
     DEEPSEEK_API_BASE: str = "https://api.deepseek.com/v1"
     ANTHROPIC_API_KEY: Optional[str] = None
     ANTHROPIC_API_BASE: str = "https://api.anthropic.com"
+    AIGOCODE_API_KEY: Optional[str] = None
+    AIGOCODE_API_BASE: str = "https://api.aigocode.com"
+    AIGOCODE_MODEL: str = "claude-opus-4-6"
     TONGYI_API_KEY: Optional[str] = None
     TONGYI_API_BASE: str = "https://dashscope.aliyuncs.com/api/v1"
 
-    # 默认 LLM provider 切换（deepseek / anthropic / openai）
+    # 默认 LLM provider 切换（deepseek / anthropic / openai / aigocode）
     LLM_PROVIDER: str = "deepseek"
     DEEPSEEK_MODEL: str = "deepseek-v4-flash"
     ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
+    MODEL_TEMPERATURE: float = 0.7
+    MODEL_MAX_TOKENS: int = 2048
 
     # ====== TopHub 榜眼数据 API ======
     TOPHUB_API_KEY: Optional[str] = None

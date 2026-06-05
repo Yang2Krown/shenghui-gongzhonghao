@@ -9,6 +9,7 @@ from app.services.title_generation.agent_b_reviewer import TitleReviewerAgent
 from app.services.title_generation.agent_c_predictor import ClickPredictorAgent
 from app.services.title_generation.agent_d_judge import FinalJudgeAgent
 from app.services.title_generation.base import BaseAgent
+from app.services.title_generation.multi_model_creator import MultiModelTitleCreatorAgent
 
 __all__ = [
     "BaseAgent",
@@ -16,4 +17,5 @@ __all__ = [
     "TitleReviewerAgent",
     "ClickPredictorAgent",
     "FinalJudgeAgent",
+    "MultiModelTitleCreatorAgent",
 ]

@@ -63,16 +63,29 @@ def _load_title_methods_library() -> str:
 class TitleCreatorAgent(BaseAgent):
     """
     Agent A - 标题创作员
-    
+
     角色: 百万粉 AI 公众号博主
     任务: 生成10-15个标题候选，覆盖至少6种套路
     """
-    
-    def __init__(self):
-        """初始化标题创作员"""
+
+    def __init__(self, provider: Optional[str] = None):
+        """
+        初始化标题创作员
+
+        Args:
+            provider: LLM provider 名称（可选，默认使用 settings.LLM_PROVIDER）
+                     支持: "deepseek", "anthropic", "aigocode"
+        """
+        self._provider = provider
         super().__init__()
         self.agent_name = "标题创作员"
         self.agent_role = "百万粉 AI 公众号博主"
+
+        # 如果指定了 provider，覆盖默认的 LLM client
+        if provider:
+            from app.services.llm import get_llm_client
+            self.llm_client = get_llm_client(provider)
+            logger.info(f"使用 {provider} 作为标题生成模型")
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """
@@ -100,6 +113,8 @@ class TitleCreatorAgent(BaseAgent):
         outline: OutlineInfo,
         feedback: Optional[str] = None,
         content: Optional[dict] = None,
+        min_candidates: Optional[int] = None,
+        max_candidates: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         生成标题候选
@@ -110,6 +125,9 @@ class TitleCreatorAgent(BaseAgent):
             topic: 选题信息
             outline: 大纲信息
             feedback: 重生反馈（可选）
+            content: 正文内容（可选）
+            min_candidates: 最小候选数量（可选，默认使用 settings.MIN_CANDIDATES）
+            max_candidates: 最大候选数量（可选，默认使用 settings.MAX_CANDIDATES）
 
         Returns:
             包含候选标题列表的字典
@@ -117,7 +135,7 @@ class TitleCreatorAgent(BaseAgent):
         MAX_RETRIES = 3
         logger.info(f"Agent A 开始生成标题，选题: {topic.title}")
 
-        prompt = self._build_prompt(topic, outline, feedback, content)
+        prompt = self._build_prompt(topic, outline, feedback, content, min_candidates, max_candidates)
         system_prompt = self._get_system_prompt()
 
         last_response = ""
@@ -181,6 +199,8 @@ class TitleCreatorAgent(BaseAgent):
         outline: OutlineInfo,
         feedback: Optional[str] = None,
         content: Optional[dict] = None,
+        min_candidates: Optional[int] = None,
+        max_candidates: Optional[int] = None,
     ) -> str:
         """
         构建提示词
@@ -190,10 +210,15 @@ class TitleCreatorAgent(BaseAgent):
             outline: 大纲信息
             feedback: 重生反馈
             content: 正文信息（可选）
+            min_candidates: 最小候选数量（可选）
+            max_candidates: 最大候选数量（可选）
 
         Returns:
             完整的提示词
         """
+        # 使用传入的参数或默认值
+        min_c = min_candidates or settings.MIN_CANDIDATES
+        max_c = max_candidates or settings.MAX_CANDIDATES
         # 加载完整的标题套路库
         title_library = _load_title_methods_library()
 
@@ -234,10 +259,10 @@ class TitleCreatorAgent(BaseAgent):
 {title_library}
 
 【你的任务】
-产出 {settings.MIN_CANDIDATES}-{settings.MAX_CANDIDATES} 个标题候选，每个候选必须标注使用的套路和修饰元素。
+产出 {min_c}-{max_c} 个标题候选，每个候选必须标注使用的套路和修饰元素。
 
 【硬约束】
-1. 候选数量 {settings.MIN_CANDIDATES}-{settings.MAX_CANDIDATES} 个
+1. 候选数量 {min_c}-{max_c} 个
 2. 必须覆盖至少 {settings.MIN_COVERAGE_METHODS} 种不同套路
 3. 单一套路不超过 {settings.MAX_SAME_METHOD} 个候选
 4. 优先使用该方向的优先套路（占比 ≥ {settings.PRIORITY_METHOD_RATIO * 100}%）
@@ -246,7 +271,7 @@ class TitleCreatorAgent(BaseAgent):
 7. 文字必须真实差异，不允许"换一个字"的伪候选
 
 【自检清单】
-□ 候选数量是否在 {settings.MIN_CANDIDATES}-{settings.MAX_CANDIDATES}？
+□ 候选数量是否在 {min_c}-{max_c}？
 □ 是否覆盖至少 {settings.MIN_COVERAGE_METHODS} 种套路？
 □ 单套路是否未超过 {settings.MAX_SAME_METHOD} 个？
 □ 优先套路占比是否 ≥ {settings.PRIORITY_METHOD_RATIO * 100}%？
@@ -262,7 +287,7 @@ class TitleCreatorAgent(BaseAgent):
 {feedback}
 
 【请针对性改进】
-针对上述问题重新生成 {settings.MIN_CANDIDATES}-{settings.MAX_CANDIDATES} 个候选，但仍要保持套路覆盖度。"""
+针对上述问题重新生成 {min_c}-{max_c} 个候选，但仍要保持套路覆盖度。"""
         
         prompt += """
 

@@ -66,6 +66,14 @@
           resize="none"
         />
       </div>
+      <div class="mb-4">
+        <el-switch
+          v-model="multiModelMode"
+          active-text="多模型对比"
+          inactive-text="单模型生成"
+        />
+        <span class="text-xs text-ink-3 ml-2">（开启后同时用 DeepSeek 和 Claude 生成，对比效果）</span>
+      </div>
       <el-button type="primary" size="large" @click="generate" :loading="generating">
         生成标题
       </el-button>
@@ -84,8 +92,8 @@
       <el-button @click="reset">重新输入</el-button>
     </div>
 
-    <!-- 结果展示 -->
-    <div v-if="result" class="result-area">
+    <!-- 单模型结果展示 -->
+    <div v-if="result && !multiModelMode" class="result-area">
       <!-- 提取的选题信息 -->
       <div v-if="result.extracted_topic" class="card p-6 mb-6">
         <h3 class="text-h4 font-sans text-ink mb-3">选题分析</h3>
@@ -207,6 +215,99 @@
         <el-button @click="reset">重新生成</el-button>
       </div>
     </div>
+
+    <!-- 多模型对比结果展示 -->
+    <div v-if="result && multiModelMode" class="result-area">
+      <!-- 选题分析 -->
+      <div v-if="result.extracted_topic" class="card p-6 mb-6">
+        <h3 class="text-h4 font-sans text-ink mb-3">选题分析</h3>
+        <div class="extracted-info">
+          <div class="info-row">
+            <span class="info-label">主题</span>
+            <span class="info-value">{{ result.extracted_topic.title }}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">方向</span>
+            <span class="badge-info">{{ result.extracted_topic.direction }}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">套路</span>
+            <span class="info-value">{{ result.extracted_topic.method }}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">价值承诺</span>
+            <span class="info-value">{{ result.extracted_topic.value_promise }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 方案对比 -->
+      <div class="card p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="text-h4 font-sans text-ink">对比结果</h3>
+            <p class="text-sm text-ink-3 mt-1">选择你更喜欢的标题风格</p>
+          </div>
+          <el-button text size="small" @click="reset">
+            <el-icon><Refresh /></el-icon> 换一批
+          </el-button>
+        </div>
+
+        <div class="comparison-container">
+          <div
+            v-for="(modelData, provider, index) in result.comparison?.models || {}"
+            :key="provider"
+            class="comparison-column"
+          >
+            <!-- 方案标题 -->
+            <div class="plan-header">
+              <div class="plan-badge">
+                {{ index === 0 ? 'A' : 'B' }}
+              </div>
+              <span v-if="modelData.success" class="text-xs text-ink-3">
+                {{ modelData.count }} 个标题
+              </span>
+              <span v-else class="text-xs text-crimson">生成失败</span>
+            </div>
+
+            <!-- 标题列表 -->
+            <div v-if="modelData.success && modelData.candidates.length" class="plan-titles">
+              <div
+                v-for="(c, i) in modelData.candidates"
+                :key="i"
+                class="plan-title-card"
+              >
+                <div class="flex items-start gap-3">
+                  <span class="plan-rank" :class="{ 'rank-first': i === 0 }">
+                    {{ i + 1 }}
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <p class="plan-title-text">{{ c.title }}</p>
+                    <div class="flex items-center gap-2 mt-2">
+                      <span v-if="c.method" class="badge-info text-xs">{{ c.method }}</span>
+                      <span class="text-xs text-ink-3">{{ c.word_count }} 字</span>
+                    </div>
+                    <p v-if="c.explanation" class="text-xs text-ink-3 mt-2 leading-relaxed">{{ c.explanation }}</p>
+                  </div>
+                  <el-button size="small" link @click.stop="copyTitle(c.title)" class="flex-shrink-0">
+                    <el-icon :size="14"><DocumentCopy /></el-icon>
+                  </el-button>
+                </div>
+              </div>
+            </div>
+
+            <div v-else-if="!modelData.success" class="plan-error">
+              <p class="text-sm text-crimson">{{ modelData.error }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部操作 -->
+      <div class="bottom-actions">
+        <el-button @click="reset">重新生成</el-button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -228,6 +329,7 @@ const generating = ref(false)
 const errorMessage = ref('')
 const result = ref(null)
 const showAllCandidates = ref(false)
+const multiModelMode = ref(true) // 默认开启多模型对比模式
 
 const progress = useAgentProgress()
 
@@ -330,12 +432,25 @@ const generate = async () => {
   result.value = null
 
   try {
-    const res = await post('/standalone-title/generate', { content: content.value }, { timeout: 300000 })
+    let endpoint, runEndpoint
+    if (multiModelMode.value) {
+      endpoint = '/standalone-title/compare'
+      runEndpoint = '/api/v1/standalone-title/compare/stream/'
+    } else {
+      endpoint = '/standalone-title/generate'
+      runEndpoint = '/api/v1/standalone-title/stream/'
+    }
+
+    const res = await post(endpoint, {
+      content: content.value,
+      ...(multiModelMode.value ? { providers: ['deepseek', 'aigocode'] } : {})
+    }, { timeout: 300000 })
+
     const data = res.data || res
-    const runId = data.run_id
+    const runId = data.run_id || data.comparison?.run_id
 
     if (runId) {
-      progress.start(`/api/v1/standalone-title/stream/${runId}`)
+      progress.start(`${runEndpoint}${runId}`)
     } else {
       status.value = 'failed'
       errorMessage.value = '未获取到任务 ID'
@@ -554,5 +669,111 @@ onUnmounted(() => window.removeEventListener('beforeunload', handleBeforeUnload)
   50% {
     opacity: 0.6;
   }
+}
+
+/* 方案对比样式 */
+.comparison-container {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 768px) {
+  .comparison-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+.comparison-column {
+  background: var(--bone);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.plan-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+
+.plan-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+
+.plan-titles {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plan-title-card {
+  padding: 14px 16px;
+  background: var(--paper);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  transition: all 0.2s;
+}
+
+.plan-title-card:hover {
+  border-color: var(--clay-soft);
+  box-shadow: var(--sh-1);
+}
+
+.plan-rank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bone);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+.plan-rank.rank-first {
+  background: var(--clay);
+  border-color: var(--clay);
+  color: white;
+}
+
+.plan-title-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.plan-error {
+  padding: 20px;
+  text-align: center;
+  background: rgba(184, 84, 80, 0.03);
+}
+
+.text-crimson {
+  color: var(--crimson);
+}
+
+.leading-relaxed {
+  line-height: 1.6;
 }
 </style>

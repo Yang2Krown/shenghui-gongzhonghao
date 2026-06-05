@@ -1,0 +1,88 @@
+"""AIGoCode Claude 客户端。
+
+使用 AIGoCode API（Anthropic 兼容格式）。
+"""
+
+import logging
+from typing import Any, Dict, List, Optional
+
+from app.core.config import settings
+from app.services.llm.llm_client import ChatMessage, ChatResult, LLMClient, parse_json_loose
+from app.services.llm.retry import with_retry
+
+logger = logging.getLogger(__name__)
+
+
+class AIGoCodeClient(LLMClient):
+    provider = "aigocode"
+    default_model = "claude-opus-4.8"
+
+    def __init__(self):
+        if not settings.AIGOCODE_API_KEY:
+            raise RuntimeError("AIGOCODE_API_KEY 未配置")
+        try:
+            from anthropic import AsyncAnthropic
+        except ImportError as e:
+            raise RuntimeError(
+                "要使用 AIGoCode provider，请先：pip install anthropic"
+            ) from e
+        self._client = AsyncAnthropic(
+            api_key=settings.AIGOCODE_API_KEY,
+            base_url=settings.AIGOCODE_API_BASE or "https://api.aigocode.com",
+        )
+        self.default_model = settings.AIGOCODE_MODEL or self.default_model
+
+    async def chat(
+        self,
+        messages: List[ChatMessage],
+        *,
+        model: Optional[str] = None,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        json_mode: bool = False,
+        json_schema: Optional[Dict[str, Any]] = None,
+    ) -> ChatResult:
+        # Anthropic 的 system 是单独参数，不在 messages 里
+        system_msgs = [m.content for m in messages if m.role == "system"]
+        chat_msgs = [
+            {"role": m.role, "content": m.content}
+            for m in messages
+            if m.role in ("user", "assistant")
+        ]
+
+        kwargs: Dict[str, Any] = {
+            "model": model or self.default_model,
+            "messages": chat_msgs,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if system_msgs:
+            kwargs["system"] = "\n\n".join(system_msgs)
+
+        # Anthropic 没有 response_format，json_mode 靠 system prompt 提示
+        if json_mode and "system" in kwargs:
+            kwargs["system"] += "\n\n请仅输出严格的 JSON，不要包含 markdown fence 或解释文字。"
+
+        resp = await with_retry(
+            lambda: self._client.messages.create(**kwargs),
+            max_attempts=3,
+            description=f"AIGoCode chat ({kwargs['model']})",
+        )
+        text = "".join(block.text for block in resp.content if hasattr(block, "text"))
+        parsed = parse_json_loose(text) if json_mode else None
+
+        usage = None
+        if resp.usage:
+            usage = {
+                "prompt_tokens": resp.usage.input_tokens,
+                "completion_tokens": resp.usage.output_tokens,
+                "total_tokens": resp.usage.input_tokens + resp.usage.output_tokens,
+            }
+
+        return ChatResult(
+            text=text,
+            parsed=parsed,
+            usage=usage,
+            model=resp.model,
+            finish_reason=resp.stop_reason,
+        )
