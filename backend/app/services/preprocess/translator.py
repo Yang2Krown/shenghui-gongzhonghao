@@ -116,7 +116,9 @@ async def translate_clusters(
             if title_zh:
                 c.core_title_zh = title_zh[:500]
                 total_translated += 1
-            if summary_zh:
+            # enricher 已为所有簇（含英文簇）生成中文事实摘要并写入 summary_zh，
+            # 翻译只在其为空时兜底，不覆盖更优的整合摘要
+            if summary_zh and not (c.summary_zh or "").strip():
                 c.summary_zh = summary_zh
 
     await db.flush()

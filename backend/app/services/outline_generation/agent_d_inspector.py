@@ -30,8 +30,8 @@ def _build_user_prompt(input_data: AgentDInput) -> str:
     for s in input_data.sections:
         tags_str = ", ".join(s.propagation_tags) if s.propagation_tags else "无"
         sections_str += f"""
-节{s.section_number}: {s.title}
-  核心信息点: {', '.join(s.core_points)}
+[{s.part}] 节{s.section_number}: {s.title}
+  要写什么: {s.description or '、'.join(s.core_points)}
   字数: {s.word_count}
   传播标签: {tags_str}
 """

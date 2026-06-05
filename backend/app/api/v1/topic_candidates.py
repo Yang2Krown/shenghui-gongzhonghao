@@ -568,7 +568,8 @@ async def _mine_cluster_inner(
     info_input = InfoClusterInput(
         cluster_id=cluster.id,
         core_title=cluster.core_title,
-        summary=cluster.summary,
+        # 优先用 enricher 基于正文生成的事实摘要，回退到原始种子摘要
+        summary=cluster.summary_zh or cluster.summary,
         info_type=cluster.info_type or "资讯型",
         direction=cluster.direction,
         elements=cluster.elements or {},

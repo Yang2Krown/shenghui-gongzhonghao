@@ -22,7 +22,12 @@
         <el-icon :size="48" style="color: var(--line);"><Document /></el-icon>
       </div>
       <h3 class="text-h4 font-sans text-ink mb-2">生成文章大纲</h3>
-      <p class="text-ink-3 mb-6">基于选题信息，AI 将生成层次清晰、可直接落笔的大纲</p>
+      <p class="text-ink-3 mb-6">基于选题信息，AI 将生成「引入 → 正文 → 总结」三段式、可直接落笔的大纲</p>
+      <div class="flex items-center justify-center gap-2 mb-6">
+        <span class="text-sm text-ink-3">目标总字数</span>
+        <el-input-number v-model="targetWords" :min="500" :max="8000" :step="100" controls-position="right" style="width: 140px;" />
+        <span class="text-xs text-ink-4">字（可后续逐节微调）</span>
+      </div>
       <el-button type="primary" size="large" @click="generateOutline" :loading="generating">
         <el-icon><MagicStick /></el-icon>
         生成大纲
@@ -86,81 +91,69 @@
           </div>
         </div>
 
-        <!-- 编辑模式 -->
-        <div v-if="viewMode === 'edit'" class="space-y-3">
-          <div
-            v-for="(section, idx) in outline.sections"
-            :key="section.section_number || idx"
-            class="card section-card"
-          >
-            <div class="flex items-start gap-3">
-              <span class="flex-shrink-0 w-7 h-7 rounded-full bg-clay-tint text-clay-deep flex items-center justify-center text-xs font-bold">
-                {{ section.section_number || idx + 1 }}
-              </span>
-              <div class="flex-1 min-w-0">
-                <el-input
-                  v-model="section.title"
-                  class="section-title-input"
-                  placeholder="小标题"
-                />
-                <ul v-if="section.core_points?.length" class="mt-2 space-y-1">
-                  <li
-                    v-for="(point, pi) in section.core_points"
-                    :key="pi"
-                    class="text-sm text-ink-3 flex items-start gap-2"
-                  >
-                    <span class="text-clay mt-1">·</span>
-                    <el-input
-                      v-model="section.core_points[pi]"
-                      class="point-input flex-1"
-                      :autosize="{ minRows: 1, maxRows: 3 }"
-                      type="textarea"
-                      resize="none"
-                    />
-                  </li>
-                </ul>
-                <p v-if="section.notes" class="text-xs text-ink-4 mt-2 italic">备注：{{ section.notes }}</p>
+        <!-- 3 个候选大纲切换（Agent A 生成，B 默认选中） -->
+        <div v-if="outline.candidates?.length > 1" class="candidate-chips">
+          <div class="text-xs text-ink-4 mb-2">选择大纲方案</div>
+          <div class="flex gap-3">
+            <button
+              v-for="c in outline.candidates"
+              :key="c.candidate_number"
+              class="candidate-card"
+              :class="{ active: selectedCandidate === c.candidate_number }"
+              @click="switchCandidate(c)"
+            >
+              <div class="flex items-baseline justify-between mb-1">
+                <span class="candidate-number">#{{ c.candidate_number }}</span>
+                <span class="candidate-hook">{{ c.hook_type }}</span>
               </div>
-              <div class="flex flex-col items-end gap-1 flex-shrink-0">
-                <span class="text-xs text-ink-4">{{ section.word_count || 0 }} 字</span>
-                <el-button link size="small" @click="copySection(section)">
-                  <el-icon><DocumentCopy /></el-icon>
-                </el-button>
-              </div>
-            </div>
+              <p class="text-xs text-ink-3 leading-relaxed line-clamp-2">
+                {{ c.skeleton_feature }}
+              </p>
+              <div class="text-xs text-ink-4 mt-1">{{ c.total_words }} 字 · {{ c.sections?.length }} 节</div>
+            </button>
           </div>
         </div>
 
-        <!-- 预览模式 -->
-        <div v-else class="space-y-3">
+        <!-- 编辑模式：一整个文本框，文字 + 字数一起改 -->
+        <div v-if="viewMode === 'edit'" class="card section-card">
+          <p class="text-xs text-ink-4 mb-2">
+            用「引入 / 正文 / 总结」分段；每个小节首行写「小标题（300字）」，下面写这节要写什么。改字数直接改括号里的数字。
+          </p>
+          <el-input
+            v-model="editText"
+            type="textarea"
+            class="outline-editor"
+            :autosize="{ minRows: 16, maxRows: 40 }"
+            resize="none"
+            placeholder="引入&#10;小标题（300字）&#10;这一节要写什么…&#10;&#10;正文&#10;小标题（500字）&#10;这一节要写什么…&#10;&#10;总结&#10;小标题（300字）&#10;怎么收尾升华…"
+          />
+          <p class="text-xs text-ink-4 mt-2">当前合计约 {{ editTextWordSum }} 字</p>
+        </div>
+
+        <!-- 预览模式：最多三块（引入 / 正文 / 总结） -->
+        <div v-else class="space-y-4">
           <div
-            v-for="(section, idx) in outline.sections"
-            :key="section.section_number || idx"
-            class="preview-section"
+            v-for="part in previewParts"
+            :key="part.key"
+            class="preview-part"
           >
-            <div class="flex items-start gap-3">
-              <span class="flex-shrink-0 w-7 h-7 rounded-full bg-clay-tint text-clay-deep flex items-center justify-center text-xs font-bold">
-                {{ section.section_number || idx + 1 }}
-              </span>
-              <div class="flex-1 min-w-0">
-                <h4 class="text-base font-semibold text-ink mb-1">{{ section.title || '未命名小节' }}</h4>
-                <ul v-if="section.core_points?.length" class="space-y-1">
-                  <li
-                    v-for="(point, pi) in section.core_points"
-                    :key="pi"
-                    class="text-sm text-ink-2 flex items-start gap-2"
-                  >
-                    <span class="text-clay mt-1">·</span>
-                    <span>{{ point }}</span>
-                  </li>
-                </ul>
-                <p v-if="section.notes" class="text-xs text-ink-4 mt-2 italic">备注：{{ section.notes }}</p>
-              </div>
-              <div class="flex flex-col items-end gap-1 flex-shrink-0">
-                <span class="text-xs text-ink-4">{{ section.word_count || 0 }} 字</span>
-                <el-button link size="small" @click="copySection(section)">
-                  <el-icon><DocumentCopy /></el-icon>
-                </el-button>
+            <div class="preview-part-head">
+              <span class="preview-part-name">{{ part.label }}</span>
+              <span class="text-xs text-ink-4">{{ part.words }} 字</span>
+            </div>
+            <div class="preview-part-body">
+              <div
+                v-for="(section, idx) in part.sections"
+                :key="idx"
+                class="preview-sub"
+              >
+                <div class="flex items-baseline justify-between gap-3">
+                  <h4 class="text-base font-semibold text-ink">{{ section.title || '未命名小节' }}</h4>
+                  <span class="text-xs text-ink-4 flex-shrink-0">{{ section.word_count || 0 }} 字</span>
+                </div>
+                <p class="text-sm text-ink-2 mt-1 leading-relaxed">
+                  {{ section.description || (section.core_points || []).join('；') || '（无说明）' }}
+                </p>
               </div>
             </div>
           </div>
@@ -227,6 +220,127 @@ const status = ref('idle') // idle | generating | completed | failed
 const generating = ref(false)
 const viewMode = ref('preview') // edit | preview
 const outline = ref(null)
+const targetWords = ref(2500)   // 生成大纲前的目标总字数
+const editText = ref('')        // 编辑态：整段大纲文本（文字+字数）
+const selectedCandidate = ref(1) // 当前选中的候选编号（1/2/3，B 推荐默认选中）
+
+const PART_LABELS = { intro: '引入', body: '正文', conclusion: '总结' }
+const PART_ORDER = ['intro', 'body', 'conclusion']
+
+// sections（结构化）→ 编辑文本
+const serializeSections = (sections) => {
+  if (!Array.isArray(sections)) return ''
+  const blocks = []
+  for (const key of PART_ORDER) {
+    const inPart = sections.filter((s) => (s.part || 'body') === key)
+    if (!inPart.length) continue
+    const lines = [PART_LABELS[key]]
+    for (const s of inPart) {
+      const desc = s.description || (s.core_points || []).join('；')
+      lines.push(`${s.title || ''}（${s.word_count || 0}字）`)
+      if (desc) lines.push(desc)
+      lines.push('')
+    }
+    blocks.push(lines.join('\n').trimEnd())
+  }
+  return blocks.join('\n\n')
+}
+
+// 编辑文本 → sections（结构化）
+const WORD_RE = /[（(]\s*(\d+)\s*字?\s*[）)]\s*$/
+const parseEditText = (text) => {
+  const sections = []
+  let curPart = 'body'
+  let cur = null
+  let n = 0
+  const flush = () => {
+    if (cur) {
+      cur.description = cur._desc.join(' ').trim()
+      delete cur._desc
+      sections.push(cur)
+      cur = null
+    }
+  }
+  for (const raw of (text || '').split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    if (line === '引入') { flush(); curPart = 'intro'; continue }
+    if (line === '正文') { flush(); curPart = 'body'; continue }
+    if (line === '总结') { flush(); curPart = 'conclusion'; continue }
+    const m = line.match(WORD_RE)
+    if (m) {
+      flush()
+      n += 1
+      cur = {
+        section_number: n,
+        part: curPart,
+        title: line.replace(WORD_RE, '').trim(),
+        word_count: parseInt(m[1], 10) || 0,
+        description: '',
+        core_points: [],
+        propagation_tags: [],
+        notes: null,
+        _desc: [],
+      }
+    } else if (cur) {
+      cur._desc.push(line)
+    } else {
+      // 段头后、首个带字数行之前的描述行：当作无标题小节
+      n += 1
+      cur = { section_number: n, part: curPart, title: '', word_count: 0, description: '', core_points: [], propagation_tags: [], notes: null, _desc: [line] }
+    }
+  }
+  flush()
+  return sections
+}
+
+// 编辑态合计字数（从文本里所有（N字）求和）
+const editTextWordSum = computed(() => {
+  let sum = 0
+  for (const raw of (editText.value || '').split('\n')) {
+    const m = raw.trim().match(WORD_RE)
+    if (m) sum += parseInt(m[1], 10) || 0
+  }
+  return sum
+})
+
+// 预览：按 intro/body/conclusion 分三块
+const previewParts = computed(() => {
+  const secs = outline.value?.sections || []
+  return PART_ORDER
+    .map((key) => {
+      const list = secs.filter((s) => (s.part || 'body') === key)
+      return {
+        key,
+        label: PART_LABELS[key],
+        sections: list,
+        words: list.reduce((a, s) => a + (s.word_count || 0), 0),
+      }
+    })
+    .filter((p) => p.sections.length)
+})
+
+// 把编辑文本解析回 outline.sections（用于预览/保存前同步）
+const syncEditToSections = () => {
+  if (!outline.value) return
+  const parsed = parseEditText(editText.value)
+  if (parsed.length) {
+    outline.value.sections = parsed
+    outline.value.section_count = parsed.length
+    outline.value.total_words = parsed.reduce((a, s) => a + (s.word_count || 0), 0)
+  }
+}
+
+// 切换候选大纲（选中即采用，用原始版）
+const switchCandidate = (c) => {
+  selectedCandidate.value = c.candidate_number
+  // 把选中候选的 sections 写入 outline.sections，作为编辑/预览的当前版本
+  outline.value.sections = c.sections
+  outline.value.section_count = c.sections.length
+  outline.value.total_words = c.sections.reduce((a, s) => a + (s.word_count || 0), 0)
+  // 重新序列化编辑文本
+  editText.value = serializeSections(c.sections)
+}
 const errorMessage = ref('')
 const saving = ref(false)
 const reevaluating = ref(false)
@@ -242,6 +356,16 @@ const stepPercent = progress.stepPercent
 watch(() => progress.result.value, (newResult) => {
   if (newResult) {
     outline.value = JSON.parse(JSON.stringify(newResult))
+    const bPick = newResult.selected_candidate || 1
+    selectedCandidate.value = bPick
+    // 默认用 B 选中的那个候选版本，统一展示体验
+    if (newResult.candidates?.length) {
+      const picked = newResult.candidates.find(c => c.candidate_number === bPick) || newResult.candidates[0]
+      outline.value.sections = picked.sections
+      outline.value.section_count = picked.sections.length
+      outline.value.total_words = picked.sections.reduce((a, s) => a + (s.word_count || 0), 0)
+    }
+    editText.value = serializeSections(outline.value.sections)
     status.value = 'completed'
     emit('pipeline-status', { outline: 'completed' })
     emit('complete', newResult)
@@ -274,6 +398,15 @@ onMounted(async () => {
     try {
       const res = await outlineApi.getOutline(props.outlineId)
       outline.value = JSON.parse(JSON.stringify(res.data))
+      const bPick = outline.value.selected_candidate || 1
+      selectedCandidate.value = bPick
+      if (outline.value.candidates?.length) {
+        const picked = outline.value.candidates.find(c => c.candidate_number === bPick) || outline.value.candidates[0]
+        outline.value.sections = picked.sections
+        outline.value.section_count = picked.sections.length
+        outline.value.total_words = picked.sections.reduce((a, s) => a + (s.word_count || 0), 0)
+      }
+      editText.value = serializeSections(outline.value.sections)
       status.value = 'completed'
       emit('pipeline-status', { outline: 'completed' })
     } catch (e) {
@@ -305,6 +438,7 @@ const generateOutline = async () => {
   try {
     const res = await outlineApi.generateOutline({
       candidate_id: props.candidateId,
+      target_words: targetWords.value || undefined,
     })
 
     const runId = res.data.run_id
@@ -336,10 +470,13 @@ const showOutlineResult = computed(() =>
 const copyAllOutline = async () => {
   if (!outline.value) return
   const lines = [outline.value.title || '', '']
+  let lastPart = null
   outline.value.sections?.forEach((s, i) => {
-    lines.push(`${s.section_number || i + 1}. ${s.title}`)
-    s.core_points?.forEach((p) => lines.push(`  · ${p}`))
-    if (s.notes) lines.push(`  备注：${s.notes}`)
+    const part = s.part || 'body'
+    if (part !== lastPart) { lines.push(`【${PART_LABELS[part] || '正文'}】`); lastPart = part }
+    lines.push(`${s.title || ''}（${s.word_count || 0}字）`)
+    const desc = s.description || (s.core_points || []).join('；')
+    if (desc) lines.push(`  ${desc}`)
     lines.push('')
   })
   try {
@@ -361,9 +498,20 @@ const copySection = async (section) => {
   }
 }
 
+// 编辑 → 预览 切换时，把编辑文本解析回结构化 sections
+watch(viewMode, (mode, prev) => {
+  if (prev === 'edit' && mode === 'preview') {
+    syncEditToSections()
+  } else if (mode === 'edit' && outline.value) {
+    // 进入编辑态时，用最新结构重新序列化（避免预览端改动丢失）
+    editText.value = serializeSections(outline.value.sections)
+  }
+})
+
 // 保存编辑后的大纲
 const saveOutline = async () => {
   if (!outline.value?.id) return
+  syncEditToSections()
   saving.value = true
   try {
     await outlineApi.updateOutline(outline.value.id, {
@@ -405,6 +553,7 @@ const reevaluateOutline = async () => {
 watch(() => reevaluateProgress.result.value, (newResult) => {
   if (newResult) {
     outline.value = JSON.parse(JSON.stringify(newResult))
+    editText.value = serializeSections(outline.value.sections)
     emit('complete', newResult)
     ElMessage.success('重新评估完成')
     reevaluating.value = false
@@ -616,21 +765,52 @@ const agentFeedback = computed(() => {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
-/* 预览模式 */
-.preview-section {
-  padding: 16px 20px;
+/* 预览模式：三块（引入/正文/总结） */
+.preview-part {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  transition: box-shadow 0.2s ease;
+  overflow: hidden;
+}
+
+.preview-part-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: var(--bone);
+  border-bottom: 1px solid var(--line);
+}
+
+.preview-part-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--clay-deep);
+  letter-spacing: 0.05em;
+}
+
+.preview-part-body {
+  padding: 8px 20px;
+}
+
+.preview-sub {
+  padding: 12px 0;
+}
+
+.preview-sub + .preview-sub {
+  border-top: 1px dashed var(--line);
 }
 
 .section-card {
   padding: 16px 20px;
 }
 
-.preview-section:hover {
-  box-shadow: var(--sh-1);
+/* 编辑模式整段文本框 */
+.outline-editor :deep(.el-textarea__inner) {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--ink);
+  font-family: inherit;
 }
 
 /* 固定底部操作栏 */
@@ -663,5 +843,64 @@ const agentFeedback = computed(() => {
   border-radius: var(--r-pill);
   font-size: 12px;
   font-weight: 600;
+}
+
+/* 候选切换 */
+.candidate-chips {
+  margin-bottom: 16px;
+}
+
+.candidate-card {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.candidate-card:hover {
+  border-color: var(--clay-soft);
+  box-shadow: var(--sh-1);
+}
+
+.candidate-card.active {
+  border-color: var(--primary);
+  background: rgba(var(--primary-rgb, 79, 70, 229), 0.04);
+  box-shadow: 0 0 0 2px rgba(var(--primary-rgb, 79, 70, 229), 0.12);
+}
+
+.candidate-number {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.candidate-card.active .candidate-number {
+  color: var(--primary);
+}
+
+.candidate-hook {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--clay-deep);
+  background: var(--bone);
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+}
+
+.candidate-card.active .candidate-hook {
+  background: rgba(var(--primary-rgb, 79, 70, 229), 0.1);
+  color: var(--primary);
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 </style>

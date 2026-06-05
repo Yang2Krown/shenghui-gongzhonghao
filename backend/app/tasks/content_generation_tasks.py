@@ -42,15 +42,26 @@ def _build_input_from_db(
     if not outline:
         raise ValueError(f"Outline {outline_id} 不存在")
 
+    # 查询信息簇的事实摘要（enricher 基于正文生成），作为正文写作的事实依据
+    source_summary = None
+    if candidate.info_cluster_id:
+        from app.models.info_cluster import InfoCluster
+        cluster = db.query(InfoCluster).filter(InfoCluster.id == candidate.info_cluster_id).first()
+        if cluster:
+            source_summary = cluster.summary_zh or cluster.summary
+
     # 构建大纲节列表
     sections = []
     for i, sec in enumerate(outline.sections or []):
         sections.append(SectionBrief(
             section_number=i + 1,
+            part=sec.get("part", "body"),
             subtitle=sec.get("subtitle", sec.get("title", f"第{i+1}节")),
+            description=sec.get("description"),
             core_points=sec.get("core_points", []),
             spread_role=sec.get("spread_role"),
-            word_estimate=sec.get("word_estimate", 500),
+            # 大纲各节存的是 word_count，正文据此作为每节目标字数
+            word_estimate=sec.get("word_count", sec.get("word_estimate", 500)),
             notes=sec.get("notes"),
         ))
 
@@ -69,6 +80,7 @@ def _build_input_from_db(
         topic_direction=candidate.direction,
         topic_routine=candidate.routine,
         value_promise=candidate.value_promise,
+        source_summary=source_summary,
         outline_id=outline_id,
         sections=sections,
         style_params=sp,

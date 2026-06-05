@@ -9,7 +9,7 @@ from datetime import datetime
 from app.core.timezone import utcnow
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.raw_info import RawInfo, RAW_STATE_PENDING
@@ -137,28 +137,34 @@ class ScrapingOrchestrator:
         new_count = 0
         dup_count = 0
         seen_hashes: set[str] = set()
+        seen_urls: set[str] = set()
         for item in items:
             url = (item.url or "").strip()
             if not url:
                 continue
+            url_trunc = url[:1000]
 
             h = item.dedup_hash()
             # 同批次去重：flush 在循环外，DB 查询看不到本批刚 add 的记录，
-            # 必须用内存 set 挡住同一批里的重复（否则同名文章会同时入库）
-            if h in seen_hashes:
+            # 必须用内存 set 挡住同一批里的重复（标题指纹 + URL 双重挡）
+            if h in seen_hashes or url_trunc in seen_urls:
                 dup_count += 1
                 continue
 
-            # 跨批次去重：按内容指纹（标题归一化）查，而非精确 URL，
-            # 这样同一篇文章换了 URL（跟踪参数等）也能识别为重复
+            # 跨批次去重：标题指纹 OR 精确 URL 命中即视为重复。
+            # URL 唯一约束（ix_raw_infos_url）独立于标题 hash——同一 URL 换了标题
+            # 也必须挡住，否则 flush 时触发 IntegrityError 导致整批回滚。
             existing = (await db.execute(
-                select(RawInfo.id).where(RawInfo.dedup_hash == h).limit(1)
+                select(RawInfo.id).where(
+                    or_(RawInfo.dedup_hash == h, RawInfo.url == url_trunc)
+                ).limit(1)
             )).first()
             if existing:
                 dup_count += 1
                 continue
 
             seen_hashes.add(h)
+            seen_urls.add(url_trunc)
             db.add(RawInfo(
                 source_registry_id=source.id,
                 source_account_id=item.source_account_id,

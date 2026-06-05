@@ -48,6 +48,7 @@ async def generate_outline(
     model: Optional[str] = None,
     progress_callback: Optional[Callable] = None,
     angle_report_data: Optional[dict] = None,
+    target_words: Optional[int] = None,
 ) -> FinalOutline:
     """大纲生成主入口。
     
@@ -69,6 +70,18 @@ async def generate_outline(
     candidate = result.scalar_one_or_none()
     if not candidate:
         raise ValueError(f"选题候选 {candidate_id} 不存在")
+
+    # 拉取信息簇的事实摘要（enricher 基于正文生成），作为大纲写作的事实依据
+    cluster_summary = None
+    cluster_core_title = None
+    if candidate.info_cluster_id:
+        from app.models.info_cluster import InfoCluster
+        cluster = (await db.execute(
+            select(InfoCluster).where(InfoCluster.id == candidate.info_cluster_id)
+        )).scalar_one_or_none()
+        if cluster:
+            cluster_summary = cluster.summary_zh or cluster.summary
+            cluster_core_title = cluster.core_title_zh or cluster.core_title
 
     if angle_report_data:
         angle_report = CreationAngleInspectionOutput(**angle_report_data)
@@ -98,6 +111,9 @@ async def generate_outline(
         value_promise=candidate.value_promise,
         angle_note=candidate.angle_note,
         info_cluster_id=candidate.info_cluster_id,
+        core_title=cluster_core_title,
+        summary=cluster_summary,
+        target_words=target_words,
         creation_guidance={
             **angle_report.creation_guidance,
             "overall_verdict": angle_report.overall_verdict,
@@ -248,19 +264,31 @@ async def generate_outline(
                     await progress_callback({"event": "step_done", "data": {"step": 4, "agent": "Agent D"}})
                     await progress_callback({"event": "complete", "data": {"step": 4, "agent": "Agent D"}})
                 logger.info(f"大纲生成成功: outline_id={outline.id}, 总分={inspection_result.total_score}")
+                _candidates_data = [
+                    {
+                        "candidate_number": c.candidate_number,
+                        "hook_type": c.hook_type,
+                        "skeleton_feature": c.skeleton_feature,
+                        "sections": [s.model_dump() for s in c.sections],
+                        "total_words": c.total_words,
+                    }
+                    for c in candidates
+                ]
                 return FinalOutline(
                     outline_id=outline.id,
                     title=outline.title,
                     direction=outline.direction,
                     routine=outline.routine,
                     value_promise=candidate.value_promise,
+                    candidates=_candidates_data,
+                    selected_candidate=review_result.selected_candidate,
                     sections=criticism_result.revised_sections,
                     total_words=outline.total_words,
                     section_count=outline.section_count,
                     generation_process=outline.generation_process,
                     inspection_score=outline.inspection_score,
-                    total_score=outline.total_score,
-                    passed=outline.passed,
+                    total_score=inspection_result.total_score,
+                    passed=inspection_result.verdict,
                 )
             
             # 如果不通过且还有重试次数，继续
@@ -275,6 +303,9 @@ async def generate_outline(
                     value_promise=candidate.value_promise,
                     angle_note=f"{candidate.angle_note or ''}\n\n【前次失败原因】\n{'; '.join(d.reason for d in inspection_result.deduction_reasons)}",
                     info_cluster_id=candidate.info_cluster_id,
+                    core_title=cluster_core_title,
+                    summary=cluster_summary,
+                    target_words=target_words,
                     creation_guidance={
                         **angle_report.creation_guidance,
                         "overall_verdict": angle_report.overall_verdict,

@@ -36,6 +36,11 @@ def _build_user_prompt(info: OutlineInput) -> str:
         if info.creation_guidance
         else "【创作角度体检】\n（无）"
     )
+    target_words_text = (
+        f"{info.target_words} 字（请把这个总字数合理分配到各节，各节 word_count 之和约等于它）"
+        if info.target_words
+        else "未指定（按内容需要自行决定，总字数 2000-3000）"
+    )
     return f"""【输入选题】
 选题ID: {info.candidate_id}
 标题: {info.title}
@@ -46,12 +51,12 @@ def _build_user_prompt(info: OutlineInput) -> str:
 信息簇ID: {info.info_cluster_id or '（无）'}
 核心标题: {info.core_title or '（无）'}
 原文摘要: {info.summary or '（无）'}
+目标总字数: {target_words_text}
 
 {angle_guidance_text}
 
 【模板参考】
-请根据选题的方向，从大纲模板库中找到对应的 2-3 个骨架模板作为参考。
-至少 1 个候选应基于模板改造，其余可自由发挥。
+请根据选题的方向，从大纲模板库中找到对应的骨架模板作为参考，但最终必须落到「引入 → 正文 → 总结」三段式。
 如果提供了【创作角度体检】，必须优先服从其中的确认角度、节奏蓝图、开头策略和结尾策略；不要退回第一直觉角度。
 
 【输出格式】
@@ -61,17 +66,18 @@ def _build_user_prompt(info: OutlineInput) -> str:
     {{
       "candidate_number": 1,
       "hook_type": "痛点共鸣",
-      "skeleton_feature": "痛点开场 → 替代方案对比 → 局限承认 → 行动指南 → 升华",
+      "skeleton_feature": "用一句话描述这个候选的整体叙事思路",
       "sections": [
         {{
           "section_number": 1,
+          "part": "intro",
           "title": "小标题",
-          "core_points": ["核心信息点1", "核心信息点2"],
-          "word_count": 350,
-          "notes": "备注"
+          "description": "这一节要写什么的人话说明，完整具体、看了就知道怎么落笔",
+          "word_count": 300,
+          "notes": "备注（可选）"
         }}
       ],
-      "total_words": 2050
+      "total_words": {info.target_words or 2500}
     }}
   ]
 }}"""

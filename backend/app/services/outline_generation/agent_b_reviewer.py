@@ -30,8 +30,8 @@ def _build_user_prompt(input_data: AgentBInput) -> str:
     candidates_str = ""
     for c in input_data.candidates:
         sections_str = "\n".join(
-            f"      节{s.section_number}: {s.title} ({s.word_count}字)\n"
-            f"        核心信息点: {', '.join(s.core_points)}"
+            f"      [{s.part}] 节{s.section_number}: {s.title} ({s.word_count}字)\n"
+            f"        要写什么: {s.description or '、'.join(s.core_points)}"
             for s in c.sections
         )
         candidates_str += f"""
@@ -61,14 +61,17 @@ def _build_user_prompt(input_data: AgentBInput) -> str:
   "sections": [
     {{
       "section_number": 1,
+      "part": "intro",
       "title": "小标题",
-      "core_points": ["核心信息点1", "核心信息点2"],
+      "description": "这一节要写什么的人话说明（保留并可润色 A 的内容，禁止标签式/箭头骨架）",
       "word_count": 350,
       "propagation_tags": ["开头钩子", "痛点共鸣"],
       "notes": "备注"
     }}
   ]
-}}"""
+}}
+
+【注意】必须保留每节的 part（intro/body/conclusion）和 description（人话），不要改写成标签式。"""
 
 
 MAX_RETRIES = 3

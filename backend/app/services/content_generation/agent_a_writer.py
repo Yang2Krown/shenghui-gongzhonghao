@@ -81,15 +81,25 @@ def _build_user_prompt(inp: ContentGenerationInput) -> str:
         lines.append(f"价值承诺: {inp.value_promise}")
     lines.append("")
 
-    # 大纲
-    lines.append("【大纲】")
+    # 事实素材（正文写作的事实依据，禁止编造）
+    if inp.source_summary and inp.source_summary.strip():
+        lines.append("【事实素材】")
+        lines.append("以下是本选题的事实依据。正文中的数字、数据、人名、机构、产品、时间、")
+        lines.append("引用等具体事实，只能基于此处内容，不得编造或篡改：")
+        lines.append(inp.source_summary.strip())
+        lines.append("")
+
+    # 大纲（按引入/正文/总结三段式，每节有目标字数）
+    _PART_LABEL = {"intro": "引入", "body": "正文", "conclusion": "总结"}
+    total_target = sum(int(s.word_estimate or 0) for s in inp.sections)
+    lines.append(f"【大纲】（目标总字数约 {total_target} 字，请严格按每节目标字数写）")
     for sec in inp.sections:
-        lines.append(f"第{sec.section_number}节: {sec.subtitle}")
-        if sec.core_points:
+        part_label = _PART_LABEL.get(sec.part or "body", "正文")
+        lines.append(f"第{sec.section_number}节 [{part_label}]: {sec.subtitle}（目标 {sec.word_estimate} 字）")
+        if sec.description:
+            lines.append(f"  要写什么: {sec.description}")
+        elif sec.core_points:
             lines.append(f"  核心信息点: {'; '.join(sec.core_points)}")
-        if sec.spread_role:
-            lines.append(f"  传播角色: {sec.spread_role}")
-        lines.append(f"  字数预估: {sec.word_estimate}")
         if sec.notes:
             lines.append(f"  备注: {sec.notes}")
     lines.append("")
@@ -129,7 +139,7 @@ def _build_user_prompt(inp: ContentGenerationInput) -> str:
     lines.append("注意：")
     lines.append("1. gold_seed 只在开头节末尾和结尾节开头各放1个，其他节 gold_seed 设为 null")
     lines.append("2. 每节 content 直接写正文，不要加小标题（小标题由 subtitle 字段单独提供）")
-    lines.append("3. 总字数必须 ≥ 2500")
+    lines.append(f"3. 每节字数尽量贴近其目标字数，全文总字数贴近约 {total_target} 字")
 
     return "\n".join(lines)
 

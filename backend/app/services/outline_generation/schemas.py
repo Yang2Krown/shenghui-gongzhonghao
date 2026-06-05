@@ -22,6 +22,10 @@ class OutlineInput(BaseModel):
     info_cluster_id: Optional[int] = None
     core_title: Optional[str] = None
     summary: Optional[str] = None
+    target_words: Optional[int] = Field(
+        default=None,
+        description="用户在生成大纲前指定的目标总字数；Agent A 据此把字数分配到各节",
+    )
     creation_guidance: Optional[dict] = Field(
         default=None,
         description="创作角度体检输出，供大纲 Agent A 消费",
@@ -35,8 +39,10 @@ class OutlineInput(BaseModel):
 class Section(BaseModel):
     """大纲中的单节。"""
     section_number: int = Field(description="节号 1/2/3/...")
+    part: str = Field(default="body", description="所属部分：intro 引入 / body 正文 / conclusion 总结")
     title: str = Field(description="小标题")
-    core_points: List[str] = Field(default_factory=list, description="核心信息点")
+    description: str = Field(default="", description="这一节要写什么的人话说明（完整、具体、看了就知道写啥）")
+    core_points: List[str] = Field(default_factory=list, description="（兼容旧字段，逐步弃用）核心信息点")
     word_count: int = Field(default=0, description="字数预估")
     notes: Optional[str] = Field(default=None, description="备注")
 
@@ -70,8 +76,10 @@ class AgentBInput(BaseModel):
 class SectionWithTags(BaseModel):
     """带传播标签的节。"""
     section_number: int
+    part: str = Field(default="body", description="所属部分：intro / body / conclusion")
     title: str
-    core_points: List[str]
+    description: str = Field(default="", description="这一节要写什么的人话说明")
+    core_points: List[str] = Field(default_factory=list)
     word_count: int
     propagation_tags: List[str] = Field(default_factory=list, description="传播角色标签")
     notes: Optional[str] = None
@@ -160,11 +168,15 @@ class FinalOutline(BaseModel):
     direction: str
     routine: Optional[str] = None
     value_promise: Optional[str] = None
-    
+
+    # 3 个原始候选（展示用，用户可切换）
+    candidates: List[dict] = Field(default_factory=list, description="Agent A 的 3 个原始候选（含 sections/hook_type/skeleton_feature/total_words）")
+    selected_candidate: int = Field(default=1, description="当前选中的候选编号（B 推荐的默认选中）")
+
     sections: List[SectionWithTags]
     total_words: int
     section_count: int
-    
+
     generation_process: dict = Field(default_factory=dict)
     inspection_score: dict = Field(default_factory=dict)
     total_score: float

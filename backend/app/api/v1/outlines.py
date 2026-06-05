@@ -139,13 +139,14 @@ async def trigger_outline_generation(
 
     model = body.get("model")
     angle_report = body.get("angle_report")
+    target_words = body.get("target_words")
     run_id = progress_store.create_run()
 
     await track_start(
         user_id=current_user.id,
         type="outline_generate",
         run_id=run_id,
-        input_snapshot={"candidate_id": candidate_id, "model": model, "angle_report": angle_report},
+        input_snapshot={"candidate_id": candidate_id, "model": model, "angle_report": angle_report, "target_words": target_words},
         display_title=f"大纲生成 · 选题#{candidate_id}",
         candidate_id=int(candidate_id),
         resume_context={
@@ -166,6 +167,7 @@ async def trigger_outline_generation(
                     candidate_id=int(candidate_id),
                     model=model,
                     angle_report_data=angle_report,
+                    target_words=int(target_words) if target_words else None,
                     progress_callback=_progress_cb,
                 )
                 await progress_store.push(run_id, {

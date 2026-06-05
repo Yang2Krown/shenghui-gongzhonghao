@@ -145,6 +145,16 @@ async def generate_content_async(
                 if not outline:
                     raise ValueError(f"大纲 {req.outline_id} 不存在")
 
+                # 信息簇事实摘要（enricher 基于正文生成），作为正文写作的事实依据
+                source_summary = None
+                if candidate.info_cluster_id:
+                    from app.models.info_cluster import InfoCluster
+                    cluster = (await bg_db.execute(
+                        select(InfoCluster).where(InfoCluster.id == candidate.info_cluster_id)
+                    )).scalar_one_or_none()
+                    if cluster:
+                        source_summary = cluster.summary_zh or cluster.summary
+
                 style_params = None
                 if req.style_params:
                     style_params = StyleParams(
@@ -160,7 +170,9 @@ async def generate_content_async(
                 for s in (outline.sections or []):
                     sections.append(SectionBrief(
                         section_number=s.get("section_number", 0),
+                        part=s.get("part", "body"),
                         subtitle=s.get("title", ""),
+                        description=s.get("description"),
                         core_points=s.get("core_points", []),
                         spread_role=s.get("spread_role"),
                         word_estimate=s.get("word_count", 500),
@@ -172,6 +184,7 @@ async def generate_content_async(
                     topic_direction=candidate.direction,
                     topic_routine=candidate.routine,
                     value_promise=candidate.value_promise,
+                    source_summary=source_summary,
                     sections=sections,
                     style_params=style_params,
                     user_id=current_user.id,

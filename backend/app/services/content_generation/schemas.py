@@ -23,10 +23,12 @@ class StyleParams(BaseModel):
 class SectionBrief(BaseModel):
     """大纲中的单节简述。"""
     section_number: int = Field(description="节号，从 1 开始")
+    part: Optional[str] = Field(default="body", description="所属部分：intro / body / conclusion")
     subtitle: str = Field(description="小标题")
+    description: Optional[str] = Field(default=None, description="这一节要写什么的人话说明")
     core_points: List[str] = Field(default_factory=list, description="核心信息点")
-    spread_role: Optional[str] = Field(default=None, description="传播角色：钩子/铺垫/高潮/升华/收尾")
-    word_estimate: int = Field(default=500, description="字数预估")
+    spread_role: Optional[str] = Field(default=None, description="传播角色：钩子/铺垫/高潮/收尾")
+    word_estimate: int = Field(default=500, description="该节目标字数")
     notes: Optional[str] = Field(default=None, description="备注")
 
 
@@ -37,6 +39,9 @@ class ContentGenerationInput(BaseModel):
     topic_direction: Optional[str] = Field(default=None, description="内容方向")
     topic_routine: Optional[str] = Field(default=None, description="套路")
     value_promise: Optional[str] = Field(default=None, description="价值承诺")
+
+    # 事实素材（来自信息簇的正文级摘要，正文写作的事实依据）
+    source_summary: Optional[str] = Field(default=None, description="信息簇事实摘要，正文不得偏离其中的事实/数据")
 
     # 大纲（已通过自检）
     outline_id: Optional[int] = Field(default=None, description="大纲ID，用于关联")

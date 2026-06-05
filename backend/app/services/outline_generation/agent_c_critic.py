@@ -29,8 +29,8 @@ def _build_user_prompt(input_data: AgentCInput) -> str:
     for s in input_data.sections:
         tags_str = ", ".join(s.propagation_tags) if s.propagation_tags else "无"
         sections_str += f"""
-节{s.section_number}: {s.title}
-  核心信息点: {', '.join(s.core_points)}
+[{s.part}] 节{s.section_number}: {s.title}
+  要写什么: {s.description or '、'.join(s.core_points)}
   字数: {s.word_count}
   传播标签: {tags_str}
   备注: {s.notes or '无'}
@@ -58,14 +58,17 @@ def _build_user_prompt(input_data: AgentCInput) -> str:
   "revised_sections": [
     {{
       "section_number": 1,
+      "part": "intro",
       "title": "小标题",
-      "core_points": ["核心信息点1", "核心信息点2"],
+      "description": "这一节要写什么的人话说明（保留 part 与 description，禁止标签式）",
       "word_count": 350,
       "propagation_tags": ["开头钩子", "痛点共鸣"],
       "notes": "备注"
     }}
   ]
-}}"""
+}}
+
+【注意】revised_sections 必须保留每节的 part（intro/body/conclusion）和 description（人话）。"""
 
 
 MAX_RETRIES = 3
@@ -131,7 +134,9 @@ async def criticize_outline(
             parsed["revised_sections"] = [
                 {
                     "section_number": s.section_number,
+                    "part": s.part,
                     "title": s.title,
+                    "description": s.description,
                     "core_points": s.core_points,
                     "word_count": s.word_count,
                     "propagation_tags": s.propagation_tags,

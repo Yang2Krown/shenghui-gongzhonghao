@@ -33,11 +33,10 @@
                 {{ cluster.core_title_zh || cluster.latest_title || cluster.core_title }}
               </h1>
 
-              <!-- 摘要 -->
+              <!-- 摘要（详情页完整展示正文级事实摘要） -->
               <p v-if="cluster.summary_zh || cluster.summary"
                  class="mt-4"
-                 style="color: #4A4641; font-size: 16px; line-height: 1.8;
-                        display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
+                 style="color: #4A4641; font-size: 16px; line-height: 1.8; white-space: pre-wrap;">
                 {{ cluster.summary_zh || cluster.summary }}
               </p>
 

@@ -30,7 +30,13 @@ class AgentReachClient:
     async def read_url(self, url: str) -> str:
         """通过 Jina Reader 读取任意网页，返回 Markdown 正文。"""
         target = f"{self.JINA_READER_BASE}{url}"
-        async with httpx.AsyncClient(timeout=self.request_timeout, proxy=self._get_proxy()) as client:
+        # 仅在配置了代理时才传；httpx>=0.26 用 proxy，更早版本用 proxies（传 None 也会报错）
+        client_kwargs: Dict[str, Any] = {"timeout": self.request_timeout}
+        proxy = self._get_proxy()
+        if proxy:
+            _ver = tuple(int(x) for x in httpx.__version__.split(".")[:2])
+            client_kwargs["proxy" if _ver >= (0, 26) else "proxies"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.get(target)
             resp.raise_for_status()
             return resp.text

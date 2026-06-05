@@ -47,8 +47,17 @@ SYSTEM_PROMPT = """你是一个内容信息抽取与整合助手。给你一组�
    - integrated_title：用中文重新概括这组资讯的共同主题，客观准确、信息量足，
      不超过 30 字。不要营销腔、不要书名号 / 感叹号堆砌、不要"开课啦""速看"这类口水词。
      如果多篇讲的是同一事件的不同侧面，标题要体现整体而非某一篇。
-   - integrated_summary：用中文整合多篇摘要，2-3 句、100-150 字，
-     覆盖这组资讯的核心信息（是什么、关键细节、为什么值得关注），客观陈述。
+   - integrated_summary：用中文整合全部来源正文，写一份 400-600 字的**事实摘要**。
+     要求：客观陈述，完整覆盖关键事实——是什么、关键细节、以及为什么值得关注。
+     【核心信息必须正确无误，这是最高优先级】以下几类信息**只能严格依据原文，逐字核对、
+     不得编造、混淆、张冠李戴或凭印象改写**：
+       · 时间：日期、发布时间、版本时间等，按原文准确写，不确定就不写
+       · 产品名 / 版本号：如 Claude Opus 4.5、GPT-5、Sora 2，名称和版本号一字不差
+       · 人物：人名、职位、所属机构，对应关系不能搞错
+       · 地点 / 组织 / 公司：机构名、公司名照原文
+       · 数字与数据：性能、价格、规模等**原文照抄，不得估算或四舍五入**
+     这份摘要会作为后续大纲和正文写作的**唯一事实依据**，因此信息必须准确、可追溯、
+     不遗漏重要数据；不要营销腔、不要堆砌形容词、不要写"小编""速看"这类口水词。
 
 **只输出严格 JSON**，格式：
 {
@@ -75,7 +84,11 @@ def _build_user_prompt(cluster: InfoCluster, raws: List[RawInfo]) -> str:
     sorted_raws = sorted(raws, key=lambda r: r.published_at or r.created_at or 0, reverse=True)
     for i, r in enumerate(sorted_raws[:5], 1):
         lines.append(f"\n[{i}] 标题：{r.title or ''}")
-        if r.summary:
+        # 优先用抓到的正文，没有正文再回退用短摘要片段
+        body = (r.content or "").strip()
+        if body:
+            lines.append(f"    正文：{body[:4000]}")
+        elif r.summary:
             lines.append(f"    摘要：{r.summary[:400]}")
         if r.author:
             lines.append(f"    作者：{r.author}")

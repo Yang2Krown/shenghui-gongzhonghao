@@ -124,6 +124,12 @@ class PreprocessPipeline:
 
         # 4. LLM 富集（只对"还没挖掘"的簇——新建的 / 新合并的）
         to_enrich = [c for c in clusters if not c.mined]
+
+        # 4.0 抓全文：给待富集簇内的 raw 补正文，让摘要基于正文而非短片段。
+        #     对用户无感，失败静默降级（enricher 回退用 summary）。
+        from app.services.preprocess.fulltext import fetch_fulltext_for_clusters
+        stats["fulltext_fetched"] = await fetch_fulltext_for_clusters(db, to_enrich)
+
         stats["enriched"] = await enrich_clusters(db, to_enrich)
 
         # 4.5 翻译：英文 cluster 自动翻成中文（只翻刚 enrich 过的新簇）
