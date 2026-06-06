@@ -30,7 +30,15 @@ x-backend-env: &backend-env
   SECRET_KEY: ${SECRET_KEY:?need SECRET_KEY}
   # LLM / Embedding keys
   DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+  DEEPSEEK_API_BASE: ${DEEPSEEK_API_BASE:-https://api.deepseek.com/v1}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_API_BASE: ${ANTHROPIC_API_BASE:-https://api.anthropic.com}
+  AIGOCODE_API_KEY: ${AIGOCODE_API_KEY:-}
+  AIGOCODE_API_BASE: ${AIGOCODE_API_BASE:-https://api.highwayapi.ai/anthropic}
+  AIGOCODE_MODEL: ${AIGOCODE_MODEL:-claude-opus-4-8-r}
+  MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+  MOONSHOT_API_BASE: ${MOONSHOT_API_BASE:-https://api.moonshot.cn/v1}
+  MOONSHOT_MODEL: ${MOONSHOT_MODEL:-moonshot-v1-32k}
   EMBEDDING_API_KEY: ${EMBEDDING_API_KEY}
   EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-dashscope}
   EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-https://dashscope.aliyuncs.com/compatible-mode/v1}

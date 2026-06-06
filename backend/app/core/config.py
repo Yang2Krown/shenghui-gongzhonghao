@@ -51,8 +51,8 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = None
     ANTHROPIC_API_BASE: str = "https://api.anthropic.com"
     AIGOCODE_API_KEY: Optional[str] = None
-    AIGOCODE_API_BASE: str = "https://api.aigocode.com"
-    AIGOCODE_MODEL: str = "claude-opus-4-6"
+    AIGOCODE_API_BASE: str = "https://api.highwayapi.ai/anthropic"
+    AIGOCODE_MODEL: str = "claude-opus-4-8-r"
     TONGYI_API_KEY: Optional[str] = None
     TONGYI_API_BASE: str = "https://dashscope.aliyuncs.com/api/v1"
 
@@ -106,9 +106,9 @@ class Settings(BaseSettings):
     MAX_SAME_METHOD: int = 3
     PRIORITY_METHOD_RATIO: float = 0.5
     MIN_TITLE_LENGTH: int = 8
-    MAX_TITLE_LENGTH: int = 40
+    MAX_TITLE_LENGTH: int = 30
     OPTIMAL_MIN_LENGTH: int = 14
-    OPTIMAL_MAX_LENGTH: int = 28
+    OPTIMAL_MAX_LENGTH: int = 25
     MAX_MODIFIERS_PER_TITLE: int = 5
     B_SCORE_WEIGHT: float = 0.6
     C_SCORE_WEIGHT: float = 0.4

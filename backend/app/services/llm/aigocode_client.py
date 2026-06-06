@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class AIGoCodeClient(LLMClient):
     provider = "aigocode"
-    default_model = "claude-opus-4.8"
+    default_model = "claude-opus-4-8-r"
 
     def __init__(self):
         if not settings.AIGOCODE_API_KEY:
@@ -26,9 +26,17 @@ class AIGoCodeClient(LLMClient):
             raise RuntimeError(
                 "要使用 AIGoCode provider，请先：pip install anthropic"
             ) from e
+        import httpx
         self._client = AsyncAnthropic(
             api_key=settings.AIGOCODE_API_KEY,
-            base_url=settings.AIGOCODE_API_BASE or "https://api.aigocode.com",
+            base_url=settings.AIGOCODE_API_BASE or "https://api.highwayapi.ai/anthropic",
+            timeout=httpx.Timeout(
+                connect=10.0,
+                read=120.0,
+                write=10.0,
+                pool=10.0,
+            ),
+            max_retries=0,  # 由我们自己的 retry 控制
         )
         self.default_model = settings.AIGOCODE_MODEL or self.default_model
 
@@ -68,7 +76,7 @@ class AIGoCodeClient(LLMClient):
             max_attempts=3,
             description=f"AIGoCode chat ({kwargs['model']})",
         )
-        text = "".join(block.text for block in resp.content if hasattr(block, "text"))
+        text = "".join(block.text for block in resp.content if getattr(block, "text", None))
         parsed = parse_json_loose(text) if json_mode else None
 
         usage = None
