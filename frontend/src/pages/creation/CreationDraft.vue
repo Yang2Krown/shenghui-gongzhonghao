@@ -224,7 +224,8 @@ const saveDraft = async () => {
       style_anchor: creation.value.style_anchor,
       gold_sentences: creation.value.gold_sentences,
       rewrite_table: creation.value.rewrite_table,
-      diagnosis: creation.value.diagnosis,
+      factual_summary: creation.value.factual_summary,
+      factual_corrections: creation.value.factual_corrections,
       section_count: creation.value.section_count,
       rewrite_count: creation.value.rewrite_count,
     }
@@ -280,7 +281,8 @@ const reevaluateContent = async () => {
 // 监听评估结果
 watch(() => progress.result.value, (newResult) => {
   if (newResult) {
-    creation.value.diagnosis = newResult
+    if (newResult.factual_summary) creation.value.factual_summary = newResult.factual_summary
+    if (newResult.factual_corrections) creation.value.factual_corrections = newResult.factual_corrections
     ElMessage.success('评估完成')
     reevaluating.value = false
   }
@@ -343,16 +345,6 @@ function escapeHtml(s) {
 }
 
 // ── Agent 反馈数据（从已保存的 content 重建） ────────────
-const D_DIM_LABELS = {
-  title_fulfillment: { label: '标题承诺兑现度', weight: 20 },
-  outline_alignment: { label: '大纲结构对应度', weight: 15 },
-  word_compliance: { label: '字数合规', weight: 10 },
-  style_consistency: { label: '风格统一性', weight: 15 },
-  deai_thoroughness: { label: '去 AI 味彻底度', weight: 15 },
-  gold_sentence_completeness: { label: '金句完整度', weight: 10 },
-  opening_quality: { label: '开头质量', weight: 10 },
-  ending_quality: { label: '结尾升华度', weight: 5 },
-}
 
 const agentFeedback = computed(() => {
   const c = creation.value
@@ -389,6 +381,46 @@ const agentFeedback = computed(() => {
       : [{ location: '记录', text: '此创作在存档时未包含金句数据' }],
   }
 
+  // Agent D · 事实总结员（存档快照）
+  const factualSummary = c.factual_summary || {}
+  const potentialErrors = factualSummary.potential_errors || []
+  const agentD = {
+    id: 'D',
+    code: 'D',
+    name: '韩知微 · 事实总结员',
+    role: '扫描事实性陈述，提取潜在错误',
+    avatar: '/agents/content-d.png',
+    summary: factualSummary.error_count !== undefined
+      ? `检查 ${factualSummary.total_claims_checked || 0} 条事实陈述，发现 ${factualSummary.error_count} 条潜在错误。${factualSummary.summary_text || ''}`
+      : '（存档中无事实总结数据）',
+    issues: potentialErrors.length
+      ? potentialErrors.map((e) => ({
+          location: `第${e.section_number}节 · ${e.error_type}`,
+          text: e.claim,
+        }))
+      : [{ location: '记录', text: '此创作在存档时未包含事实总结数据' }],
+  }
+
+  // Agent E · 联网纠错员（存档快照）
+  const factualCorrections = c.factual_corrections || {}
+  const corrections = factualCorrections.corrections || []
+  const agentE = {
+    id: 'E',
+    code: 'E',
+    name: '齐鉴真 · 联网纠错员',
+    role: 'Kimi 联网搜索验证并修正事实错误',
+    avatar: '/agents/content-e.png',
+    summary: factualCorrections.total_corrections !== undefined
+      ? `共纠错 ${factualCorrections.total_corrections} 处${factualCorrections.high_confidence_corrections ? `，其中 ${factualCorrections.high_confidence_corrections} 处高置信度` : ''}。`
+      : '（存档中无联网纠错数据）',
+    issues: corrections.length
+      ? corrections.slice(0, 20).map((cr) => ({
+          location: `第${cr.section_number}节 · ${cr.error_type} · ${cr.confidence}`,
+          text: `${cr.original_claim} → ${cr.corrected_claim}`,
+        }))
+      : [{ location: '记录', text: '此创作在存档时未包含联网纠错数据' }],
+  }
+
   // Agent C · 去 AI 味改写员（存档快照）
   const rewrites = c.rewrite_table || []
   const agentC = {
@@ -410,48 +442,7 @@ const agentFeedback = computed(() => {
       : [{ location: '记录', text: '此创作在存档时未包含改写明细' }],
   }
 
-  // Agent D · 8 维度自检诊断员（可能由存档提供或评估打分更新）
-  const diag = c.diagnosis || {}
-  const dims = diag.dimensions || {}
-  const hasDiagnosis = diag.total_score !== undefined && diag.total_score !== null
-  const agentD = {
-    id: 'D',
-    code: 'D',
-    name: '钟可期 · 正文诊断员',
-    role: '8 维度评分 + 三档修改建议',
-    avatar: '/agents/content-d.png',
-    score: diag.total_score,
-    verdict: diag.recommended_action,
-    verdictPassed: diag.recommended_action === '接受发布',
-    summary: hasDiagnosis
-      ? `建议处理路径：${diag.recommended_action}`
-      : '尚未评估 · 点击底部"评估打分"按钮运行 8 维度诊断',
-    dimensions: hasDiagnosis
-      ? Object.entries(D_DIM_LABELS)
-          .map(([key, conf]) => {
-            const d = dims[key]
-            if (!d) return null
-            return {
-              key,
-              label: conf.label,
-              weight: conf.weight,
-              score: d.score,
-              evaluation: d.evaluation,
-              suggestions: d.suggestions || [],
-            }
-          })
-          .filter(Boolean)
-      : [],
-    priorities: hasDiagnosis
-      ? {
-          high: diag.high_priority || [],
-          medium: diag.medium_priority || [],
-          low: diag.low_priority || [],
-        }
-      : { high: [], medium: [], low: [] },
-  }
-
-  return [agentA, agentB, agentC, agentD]
+  return [agentA, agentB, agentD, agentE, agentC]
 })
 
 // 工具函数

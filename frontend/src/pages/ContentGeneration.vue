@@ -99,15 +99,15 @@
 
       <!-- 结果展示区域 -->
       <div v-if="result" class="result-section">
-        <!-- 诊断报告 -->
+        <!-- 纠错报告 -->
         <div class="diagnosis-bar">
-          <div class="score-circle" :class="scoreClass">
-            <span class="score-num">{{ result.diagnosis.total_score.toFixed(1) }}</span>
-            <span class="score-label">总分</span>
+          <div class="score-circle" :class="result.factual_corrections?.total_corrections ? 'good' : 'neutral'">
+            <span class="score-num">{{ result.factual_corrections?.total_corrections ?? 0 }}</span>
+            <span class="score-label">纠错数</span>
           </div>
           <div class="score-action">
-            <span class="action-label">建议：</span>
-            <span class="action-value" :class="actionClass">{{ result.diagnosis.recommended_action }}</span>
+            <span class="action-label">高置信度：</span>
+            <span class="action-value">{{ result.factual_corrections?.high_confidence_corrections ?? 0 }}</span>
           </div>
           <div class="score-stats">
             <span>字数: {{ result.final_word_count }}</span>
@@ -116,19 +116,31 @@
           </div>
         </div>
 
-        <!-- 8 维度雷达 -->
-        <div class="dimensions-section">
-          <h3>8 维度评分</h3>
+        <!-- 事实纠错详情 -->
+        <div v-if="result.factual_corrections?.corrections?.length" class="dimensions-section">
+          <h3>联网纠错详情</h3>
           <div class="dimensions-grid">
-            <div v-for="(dim, key) in result.diagnosis.dimensions" :key="key" class="dim-item">
+            <div v-for="(cr, i) in result.factual_corrections.corrections" :key="i" class="dim-item">
               <div class="dim-header">
-                <span class="dim-name">{{ dimNameMap[key] || key }}</span>
-                <span class="dim-score" :class="dimScoreClass(dim.score)">{{ dim.score }}</span>
+                <span class="dim-name">{{ cr.error_type }} · 第{{ cr.section_number }}节</span>
+                <span class="dim-score" :class="cr.confidence === '高' ? 'text-leaf' : cr.confidence === '中' ? 'text-sand' : 'text-crimson'">{{ cr.confidence }}</span>
               </div>
-              <div class="dim-bar">
-                <div class="dim-bar-fill" :style="{ width: (dim.score * 10) + '%' }"></div>
+              <div class="dim-eval"><del>{{ cr.original_claim }}</del> → {{ cr.corrected_claim }}</div>
+              <div v-if="cr.search_result" class="dim-eval" style="color: var(--ink-3)">依据：{{ cr.search_result }}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 事实总结 -->
+        <div v-if="result.factual_summary?.potential_errors?.length" class="dimensions-section">
+          <h3>事实性扫描 ({{ result.factual_summary.error_count }} 条潜在错误)</h3>
+          <div class="dimensions-grid">
+            <div v-for="(err, i) in result.factual_summary.potential_errors" :key="i" class="dim-item">
+              <div class="dim-header">
+                <span class="dim-name">{{ err.error_type }} · 第{{ err.section_number }}节</span>
               </div>
-              <div class="dim-eval">{{ dim.evaluation }}</div>
+              <div class="dim-eval">{{ err.claim }}</div>
+              <div class="dim-eval" style="color: var(--ink-3)">原因：{{ err.reason }}</div>
             </div>
           </div>
         </div>
@@ -157,20 +169,12 @@
           <div class="article-content" v-html="renderMarkdown(result.final_text)"></div>
         </div>
 
-        <!-- 改进建议 -->
-        <div v-if="result.diagnosis.medium_priority.length || result.diagnosis.high_priority.length" class="suggestions-section">
-          <h3>改进建议</h3>
-          <div v-if="result.diagnosis.high_priority.length" class="suggestion-group high">
-            <h4>高优先级</h4>
-            <ul><li v-for="(s, i) in result.diagnosis.high_priority" :key="i">{{ s }}</li></ul>
-          </div>
-          <div v-if="result.diagnosis.medium_priority.length" class="suggestion-group medium">
-            <h4>中优先级</h4>
-            <ul><li v-for="(s, i) in result.diagnosis.medium_priority" :key="i">{{ s }}</li></ul>
-          </div>
-          <div v-if="result.diagnosis.low_priority.length" class="suggestion-group low">
-            <h4>低优先级</h4>
-            <ul><li v-for="(s, i) in result.diagnosis.low_priority" :key="i">{{ s }}</li></ul>
+        <!-- 纠错统计 -->
+        <div v-if="result.factual_corrections?.corrections?.length" class="suggestions-section">
+          <h3>纠错统计</h3>
+          <div class="suggestion-group">
+            <p>共纠错 {{ result.factual_corrections.total_corrections }} 处，高置信度 {{ result.factual_corrections.high_confidence_corrections }} 处。</p>
+            <p v-if="result.factual_summary">事实扫描：检查 {{ result.factual_summary.total_claims_checked }} 条陈述，发现 {{ result.factual_summary.error_count }} 条潜在错误。</p>
           </div>
         </div>
       </div>
@@ -238,17 +242,17 @@ const removeSection = (idx) => {
 
 const scoreClass = computed(() => {
   if (!result.value) return ''
-  const s = result.value.diagnosis.total_score
-  if (s >= 8) return 'score-good'
-  if (s >= 6) return 'score-ok'
+  const corrections = result.value.factual_corrections?.total_corrections ?? 0
+  if (corrections === 0) return 'score-good'
+  if (corrections <= 3) return 'score-ok'
   return 'score-bad'
 })
 
 const actionClass = computed(() => {
   if (!result.value) return ''
-  const a = result.value.diagnosis.recommended_action
-  if (a.includes('接受')) return 'action-good'
-  if (a.includes('局部')) return 'action-ok'
+  const high = result.value.factual_corrections?.high_confidence_corrections ?? 0
+  if (high === 0) return 'action-good'
+  if (high <= 2) return 'action-ok'
   return 'action-bad'
 })
 

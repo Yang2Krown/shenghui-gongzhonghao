@@ -1,11 +1,10 @@
-"""Agent D — 整合 + 自检诊断员。
+"""Agent D — 事实总结员。
 
-职责：把金句精准嵌入、做 8 维度自检评分、输出诊断报告。
-设计对齐：《正文生成 Agent 设计文档 v1.1》第 5 节。
+职责：扫描正文 + 金句中的事实性陈述，提取可能因 LLM 训练集截止而产生的错误。
+输出：潜在事实性错误清单 + 建议搜索关键词，供 Agent E (Kimi 联网纠错) 使用。
 """
 
 import logging
-from typing import List, Dict, Any
 from pathlib import Path
 
 from app.services.llm import get_llm_client
@@ -13,17 +12,13 @@ from app.services.llm.llm_client import ChatMessage, parse_json_loose
 from app.services.content_generation.schemas import (
     AgentAOutput,
     AgentBOutput,
-    AgentCOutput,
     AgentDOutput,
-    DimensionScore,
+    PotentialFactualError,
     ContentGenerationInput,
-    ContentGenerationOutput,
-    GoldSentence,
 )
 
 logger = logging.getLogger(__name__)
 
-# 获取当前文件所在目录
 CURRENT_DIR = Path(__file__).parent
 
 # ──────────────────────────────────────────────
@@ -37,42 +32,28 @@ def _load_system_prompt() -> str:
         return prompt_file.read_text(encoding="utf-8")
     # 回退到硬编码版本
     return """\
-你是正文生成的最后一道工序——整合 + 自检诊断员。
+你是一位事实核查专家。你的任务是扫描公众号正文和金句，找出所有可能因大模型训练集时间截止而产生错误的事实性陈述。
 
-【你的工作（3 步）】
+【你需要重点检查的错误类型】
 
-Step 1 - 金句嵌入复核
-检查去 AI 味后的正文中，所有金句是否在正确位置。如发现遗失或位置错误，补正。
+1. 时间/日期类：具体的发布日期、上线时间、事件发生时间（如"2024年3月发布"可能已过时）
+2. 产品名/版本号：软件版本、模型名称（如"GPT-4"可能已出新版、"Claude 3"可能已更名）
+3. 数据/统计：用户数、市场份额、价格、性能指标（这类数据变化很快）
+4. 人名/职位：公司高管、技术负责人（人事变动频繁）
+5. 机构/公司：公司名、产品线（可能已更名、合并、关闭）
+6. 价格信息：API 价格、订阅费用（调价频繁）
+7. 技术规格：参数量、上下文长度、支持的功能（迭代快）
 
-Step 2 - 8 维度自检评分
-对最终正文按以下 8 个维度打分（0-10）：
+【你不应该标记的内容】
+- 通用观点、评论、分析（不需要事实核查）
+- 修辞手法、比喻、金句中的夸张表达
+- 历史公认事实（如"iPhone 于 2007 年发布"）
+- 正文作者的主观判断
 
-| 维度 | 权重 | 评分依据 |
-|------|------|---------|
-| 标题承诺兑现度 | 20% | 标题说的事正文里都给到了吗 |
-| 大纲结构对应度 | 15% | 每节是否按大纲展开 |
-| 字数合规 | 10% | 总字数 + 单节字数是否合规 |
-| 风格统一性 | 15% | 全文语气是否一致 |
-| 去 AI 味彻底度 | 15% | 是否还有残留的 AI 味 |
-| 金句完整度 | 10% | 3-5 个金句是否到位、分布是否合理 |
-| 开头质量 | 10% | 前 200 字是否抓人 |
-| 结尾升华度 | 5% | 是否避免烂尾 |
-
-评分锚点：
-- 9-10：优秀，无明显问题
-- 7-8：良好，有小瑕疵
-- 4-6：一般，有明显问题
-- 1-3：差，严重问题
-
-Step 3 - 输出诊断报告
-- 各维度分数 + 评价
-- 每个扣分点的具体改进建议
-- 总结建议（高/中/低优先级修改）
-- 处理路径建议（接受发布 / 局部手改 / 整篇重写）
-
-【重要】
-- 不触发任何重生——决策权 100% 在人工
-- 评分要客观，不要因为是 AI 生成就放宽标准
+【输出要求】
+- 对每个潜在错误，给出一个精确的搜索关键词（用于联网验证）
+- 搜索关键词要具体，能直接搜到权威信息
+- 如果全文没有可疑事实，输出空列表（这是正常的，不要硬凑）
 """
 
 
@@ -80,21 +61,17 @@ def _build_user_prompt(
     inp: ContentGenerationInput,
     agent_a_output: AgentAOutput,
     agent_b_output: AgentBOutput,
-    agent_c_output: AgentCOutput,
 ) -> str:
     """构建用户提示词。"""
     lines = []
 
-    # 选题和标题
+    # 选题标题
     lines.append(f"【选题标题】{inp.topic_title}")
-    if inp.value_promise:
-        lines.append(f"【价值承诺】{inp.value_promise}")
     lines.append("")
 
-    # 大纲
-    lines.append("【大纲】")
-    for sec in inp.sections:
-        lines.append(f"第{sec.section_number}节: {sec.subtitle}（字数预估: {sec.word_estimate}）")
+    # 正文全文（Agent A 的原始输出）
+    lines.append("【正文】")
+    lines.append(agent_a_output.full_text)
     lines.append("")
 
     # 金句清单
@@ -103,190 +80,72 @@ def _build_user_prompt(
         lines.append(f"- [{s.sentence_type}] 第{s.section_number}节 {s.location}: \"{s.content}\"")
     lines.append("")
 
-    # 去 AI 味后的正文
-    lines.append("【去 AI 味后的正文】")
-    lines.append(agent_c_output.rewritten_text)
-    lines.append("")
-
-    # Agent A 的风格锚点
-    lines.append(f"【风格锚点】{agent_a_output.style_anchor}")
-    lines.append("")
-
-    # Agent C 的改写统计
-    lines.append(f"【去 AI 味统计】改写处数: {len(agent_c_output.rewrite_table)}，字数变化: {agent_c_output.word_change_pct}%")
-    lines.append("")
-
     # 输出格式
     lines.append("【输出格式】")
     lines.append("请严格按以下 JSON 格式输出：")
     lines.append("""```json
 {
-  "final_text": "最终正文（含金句嵌入的完整正文）",
-  "dimensions": {
-    "title_fulfillment": {
-      "score": 9,
-      "weight": 0.20,
-      "evaluation": "标题承诺的'3个能力'在正文第3节明确兑现",
-      "suggestions": []
-    },
-    "outline_alignment": {
-      "score": 8,
-      "weight": 0.15,
-      "evaluation": "5节大纲全部对应",
-      "suggestions": ["第4节偏短，建议补充案例"]
-    },
-    "word_compliance": {
-      "score": 8,
-      "weight": 0.10,
-      "evaluation": "2620字，达到目标",
-      "suggestions": []
-    },
-    "style_consistency": {
-      "score": 7,
-      "weight": 0.15,
-      "evaluation": "整体一致，但有1处书面体残留",
-      "suggestions": ["第4节第5段：'对于使用者来说' → '对用户来说'"]
-    },
-    "deai_thoroughness": {
-      "score": 8,
-      "weight": 0.15,
-      "evaluation": "Agent C净化效果好，残留2处⚪项",
-      "suggestions": ["第2节：'非常实用' → 改成具体说明"]
-    },
-    "gold_sentence_completeness": {
-      "score": 8,
-      "weight": 0.10,
-      "evaluation": "4个金句到位，分布合理",
-      "suggestions": []
-    },
-    "opening_quality": {
-      "score": 7,
-      "weight": 0.10,
-      "evaluation": "前200字进入具体场景，但少了数字冲击",
-      "suggestions": ["加入具体数字"]
-    },
-    "ending_quality": {
-      "score": 6,
-      "weight": 0.05,
-      "evaluation": "结尾偏总结性，缺少升华",
-      "suggestions": ["加1句开放问题或行业判断"]
+  "summary_text": "对正文中事实性内容的整体判断（1-3句话）",
+  "potential_errors": [
+    {
+      "claim": "正文中的一句事实性陈述（原文引用）",
+      "error_type": "产品名",
+      "section_number": 2,
+      "reason": "该产品可能已发布新版本或更名",
+      "search_query": "产品名 最新版本 2026"
     }
-  },
-  "high_priority": [],
-  "medium_priority": ["结尾升华", "第4节书面体残留"],
-  "low_priority": ["开头加数字", "第2节程度副词残留"],
-  "recommended_action": "局部手改"
+  ],
+  "total_claims_checked": 15,
+  "error_count": 3
 }
 ```""")
 
     return "\n".join(lines)
 
 
-def _calculate_weighted_score(dimensions: Dict[str, DimensionScore]) -> float:
-    """计算加权总分。"""
-    total = 0.0
-    for dim in dimensions.values():
-        total += dim.score * dim.weight
-    return round(total, 1)
-
-
-def _parse_llm_output(
-    raw: dict,
-    inp: ContentGenerationInput,
-    agent_a_output: AgentAOutput,
-    agent_b_output: AgentBOutput,
-    agent_c_output: AgentCOutput,
-) -> AgentDOutput:
+def _parse_llm_output(raw: dict) -> AgentDOutput:
     """解析 LLM 输出为 AgentDOutput。"""
-    dims = raw.get("dimensions", {})
-
-    def _parse_dim(key: str, default_weight: float) -> DimensionScore:
-        d = dims.get(key, {})
-        return DimensionScore(
-            score=d.get("score", 5),
-            weight=d.get("weight", default_weight),
-            evaluation=d.get("evaluation", ""),
-            suggestions=d.get("suggestions", []),
-        )
-
-    title_fulfillment = _parse_dim("title_fulfillment", 0.20)
-    outline_alignment = _parse_dim("outline_alignment", 0.15)
-    word_compliance = _parse_dim("word_compliance", 0.10)
-    style_consistency = _parse_dim("style_consistency", 0.15)
-    deai_thoroughness = _parse_dim("deai_thoroughness", 0.15)
-    gold_sentence_completeness = _parse_dim("gold_sentence_completeness", 0.10)
-    opening_quality = _parse_dim("opening_quality", 0.10)
-    ending_quality = _parse_dim("ending_quality", 0.05)
-
-    all_dims = {
-        "title_fulfillment": title_fulfillment,
-        "outline_alignment": outline_alignment,
-        "word_compliance": word_compliance,
-        "style_consistency": style_consistency,
-        "deai_thoroughness": deai_thoroughness,
-        "gold_sentence_completeness": gold_sentence_completeness,
-        "opening_quality": opening_quality,
-        "ending_quality": ending_quality,
-    }
-    total_score = _calculate_weighted_score(all_dims)
-
-    final_text = raw.get("final_text", agent_c_output.rewritten_text)
-    final_word_count = len(final_text)
+    errors = []
+    for item in raw.get("potential_errors", []):
+        errors.append(PotentialFactualError(
+            claim=item.get("claim", ""),
+            error_type=item.get("error_type", "其他"),
+            section_number=item.get("section_number", 0),
+            reason=item.get("reason", ""),
+            search_query=item.get("search_query", ""),
+        ))
 
     return AgentDOutput(
-        final_text=final_text,
-        final_word_count=final_word_count,
-        title_fulfillment=title_fulfillment,
-        outline_alignment=outline_alignment,
-        word_compliance=word_compliance,
-        style_consistency=style_consistency,
-        deai_thoroughness=deai_thoroughness,
-        gold_sentence_completeness=gold_sentence_completeness,
-        opening_quality=opening_quality,
-        ending_quality=ending_quality,
-        total_score=total_score,
-        high_priority=raw.get("high_priority", []),
-        medium_priority=raw.get("medium_priority", []),
-        low_priority=raw.get("low_priority", []),
-        recommended_action=raw.get("recommended_action", "局部手改"),
-        process_archive={
-            "agent_a_word_count": agent_a_output.total_word_count,
-            "agent_b_sentence_count": len(agent_b_output.sentences),
-            "agent_c_rewrite_count": len(agent_c_output.rewrite_table),
-            "agent_c_word_change_pct": agent_c_output.word_change_pct,
-            "agent_d_final_word_count": final_word_count,
-            "style_anchor": agent_a_output.style_anchor,
-        },
+        summary_text=raw.get("summary_text", ""),
+        potential_errors=errors,
+        total_claims_checked=raw.get("total_claims_checked", 0),
+        error_count=raw.get("error_count", len(errors)),
     )
 
 
 MAX_RETRIES = 3
 
 
-async def integrate_and_inspect(
+async def summarize_factual_errors(
     inp: ContentGenerationInput,
     agent_a_output: AgentAOutput,
     agent_b_output: AgentBOutput,
-    agent_c_output: AgentCOutput,
 ) -> AgentDOutput:
-    """Agent D 主入口：整合金句 + 8 维度自检诊断。
-
-    Schema 校验失败时自动重试，最多 3 次。
+    """Agent D 主入口：总结正文 + 金句中的潜在事实性错误。
 
     Args:
         inp: 正文生成总输入
-        agent_a_output: Agent A 输出
-        agent_b_output: Agent B 输出
-        agent_c_output: Agent C 输出
+        agent_a_output: Agent A 的输出（正文骨干）
+        agent_b_output: Agent B 的输出（金句清单）
 
     Returns:
-        AgentDOutput: 最终正文 + 诊断报告
+        AgentDOutput: 事实总结报告
     """
     client = get_llm_client()
-    user_prompt = _build_user_prompt(inp, agent_a_output, agent_b_output, agent_c_output)
+    user_prompt = _build_user_prompt(inp, agent_a_output, agent_b_output)
     system_prompt = _load_system_prompt()
 
-    logger.info("[Agent D] 开始整合 + 自检诊断")
+    logger.info("[Agent D] 开始事实性错误扫描")
 
     last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
@@ -294,10 +153,8 @@ async def integrate_and_inspect(
         if attempt > 1:
             extra_hint = (
                 "\n\n【重要】上一次输出格式不符合要求。"
-                "请严格输出 JSON，必须包含 final_text 和 dimensions 字段，"
-                "dimensions 包含 title_fulfillment、outline_alignment、word_compliance、"
-                "style_consistency、deai_thoroughness、gold_sentence_completeness、"
-                "opening_quality、ending_quality 共 8 个维度。"
+                "请严格输出 JSON，必须包含 summary_text、potential_errors 数组、"
+                "total_claims_checked、error_count 字段。"
                 "不要输出任何 markdown 标记或解释文字。"
             )
 
@@ -308,20 +165,20 @@ async def integrate_and_inspect(
 
         result = await client.chat(
             messages=messages,
-            temperature=0.3,
-            max_tokens=8000,
+            temperature=0.2,
+            max_tokens=4000,
             json_mode=True,
         )
 
         parsed = parse_json_loose(result.text)
-        if parsed and "dimensions" not in parsed:
-            for alias in ("evaluations", "scores", "维度", "评分", "评估"):
-                if alias in parsed:
-                    logger.warning(f"[Agent D] LLM 用了别名 key '{alias}'，已映射到 dimensions")
-                    parsed["dimensions"] = parsed[alias]
+        if parsed and "potential_errors" not in parsed:
+            for alias in ("errors", "issues", "claims", "问题", "错误"):
+                if alias in parsed and isinstance(parsed[alias], list):
+                    logger.warning(f"[Agent D] LLM 用了别名 key '{alias}'，已映射到 potential_errors")
+                    parsed["potential_errors"] = parsed[alias]
                     break
 
-        if not parsed or "dimensions" not in parsed:
+        if not parsed or "summary_text" not in parsed:
             last_error = ValueError("Agent D 输出格式不符合 schema")
             logger.warning(
                 f"[Agent D] 第 {attempt}/{MAX_RETRIES} 次输出解析失败 "
@@ -331,110 +188,13 @@ async def integrate_and_inspect(
             )
             continue
 
-        output = _parse_llm_output(parsed, inp, agent_a_output, agent_b_output, agent_c_output)
+        output = _parse_llm_output(parsed)
         logger.info(
-            f"[Agent D] 诊断完成（第 {attempt} 次），总分: {output.total_score}/10，"
-            f"建议: {output.recommended_action}"
+            f"[Agent D] 事实扫描完成（第 {attempt} 次），"
+            f"检查陈述: {output.total_claims_checked}，"
+            f"潜在错误: {output.error_count}"
         )
         return output
 
     logger.error(f"[Agent D] {MAX_RETRIES} 次尝试均失败")
     raise last_error
-
-
-def _update_gold_sentences_for_rewritten_text(
-    gold_sentences: List[GoldSentence],
-    rewritten_text: str,
-) -> List[GoldSentence]:
-    """Agent C 改写后，金句文本可能已变化，用模糊匹配更新金句 content。"""
-    import re
-
-    def normalize(s: str) -> str:
-        """去空白+标点，用于模糊比对。"""
-        return re.sub(r'[\s　]+', '', re.sub(r'[，。！？；：（）【】、""''—–\-.,!?;:()\[\]{}"\']', '', s))
-
-    def strip_prefix(s: str) -> str:
-        """去掉 LLM 可能添加的装饰性前缀。"""
-        return re.sub(r'^[\s—–\-:=：·•>】\]）)]*(?:金句|金句内容|金句文本|去AI味|改写|rewrite|句子|内容|文本)[\s：:—–\-]*', '', s).strip()
-
-    def find_best_match(gold_text: str, text: str) -> str:
-        """在 text 中找与 gold_text 最匹配的子串，返回匹配到的原文。"""
-        # 先清理前缀
-        gold_text = strip_prefix(gold_text)
-        gold_norm = normalize(gold_text)
-        if not gold_norm or len(gold_norm) < 4:
-            return gold_text
-
-        # 策略 1：精确匹配
-        if gold_text in text:
-            return gold_text
-
-        # 策略 2：归一化后子串匹配（取前 16 字）
-        seed = gold_norm[:16]
-        if len(seed) >= 4:
-            text_norm = normalize(text)
-            idx = text_norm.find(seed)
-            if idx >= 0:
-                # 找到匹配，在原文中定位大致位置
-                norm_pos = 0
-                char_pos = 0
-                for i, ch in enumerate(text):
-                    if norm_pos >= idx:
-                        char_pos = i
-                        break
-                    if normalize(ch):
-                        norm_pos += 1
-                # 向后截取到标点边界
-                end = char_pos
-                target_len = len(gold_text)
-                while end < len(text) and end - char_pos < target_len * 1.5:
-                    if text[end] in '。！？\n':
-                        break
-                    end += 1
-                matched = text[char_pos:end].strip()
-                if len(matched) >= 4:
-                    return matched
-
-        # 匹配失败，返回清理后的原文
-        return gold_text
-
-    updated = []
-    for gs in gold_sentences:
-        new_content = find_best_match(gs.content, rewritten_text)
-        if new_content != gs.content:
-            updated.append(gs.model_copy(update={
-                'content': new_content,
-                'word_count': len(new_content),
-            }))
-        else:
-            updated.append(gs)
-    return updated
-
-
-def build_final_output(
-    inp: ContentGenerationInput,
-    agent_a_output: AgentAOutput,
-    agent_b_output: AgentBOutput,
-    agent_c_output: AgentCOutput,
-    agent_d_output: AgentDOutput,
-) -> ContentGenerationOutput:
-    """汇总所有 Agent 输出为最终 ContentGenerationOutput。"""
-    # Agent C 改写后，金句文本可能已变化，更新匹配
-    updated_gold_sentences = _update_gold_sentences_for_rewritten_text(
-        agent_b_output.sentences,
-        agent_d_output.final_text,
-    )
-    return ContentGenerationOutput(
-        final_text=agent_d_output.final_text,
-        final_word_count=agent_d_output.final_word_count,
-        section_count=agent_a_output.section_count,
-        section_word_counts=[s.word_count for s in agent_a_output.sections],
-        gold_sentences=updated_gold_sentences,
-        rewrite_table=agent_c_output.rewrite_table,
-        diagnosis=agent_d_output,
-        agent_a_word_count=agent_a_output.total_word_count,
-        agent_b_sentence_count=len(agent_b_output.sentences),
-        agent_c_rewrite_count=len(agent_c_output.rewrite_table),
-        agent_d_final_word_count=agent_d_output.final_word_count,
-        style_anchor=agent_a_output.style_anchor,
-    )

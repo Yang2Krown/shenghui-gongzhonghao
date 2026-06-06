@@ -174,6 +174,10 @@ def _load_deai_checklist() -> str:
 识别信号：段落开头加 📌 🎯 💡 🚀 等 emoji。
 改写：整篇 emoji ≤ 3 个，只用在标题或关键转折处。
 
+### 6.5 不必要的标点符号 ⚠️
+识别信号：大量使用""《》——等标点符号。公众号排版中显得臃肿，影响观感。
+改写：双引号""删掉直接写内容；书名号《》改成直接写名称；破折号——删掉或改句号分段；省略号……最多1处。我们不是新闻报纸，公众号文章更重要的是排版美观、阅读流畅。
+
 ## 7. 一票否决项汇总（🚫）
 1. 首先 / 其次 / 最后（作为段落开头）
 2. 一方面 / 另一方面
@@ -187,6 +191,7 @@ def _load_deai_checklist() -> str:
 10. 通篇无具体时间 / 地点 / 人物 / 数字
 11. 段落开头 emoji（📌 🎯 💡 等）
 12. 每段都有加粗（导致加粗失效）
+13. 大量使用""《》——等不必要的标点符号
 """
 
 
@@ -325,6 +330,7 @@ MAX_RETRIES = 3
 async def deai_rewrite(
     agent_a_output: AgentAOutput,
     agent_b_output: AgentBOutput,
+    corrected_text: Optional[str] = None,
 ) -> AgentCOutput:
     """Agent C 主入口：去 AI 味改写。
 
@@ -333,12 +339,22 @@ async def deai_rewrite(
     Args:
         agent_a_output: Agent A 的输出（正文骨干）
         agent_b_output: Agent B 的输出（金句清单，用于识别不可改段落）
+        corrected_text: Agent E 纠错后的正文（如有）。如果提供，用此文本替代 agent_a_output.full_text
 
     Returns:
         AgentCOutput: 改写后正文 + 改写对照表
     """
     client = get_llm_client()
-    user_prompt = _build_user_prompt(agent_a_output, agent_b_output)
+
+    # 如果有纠错后的文本，创建一个临时的 agent_a_output 副本
+    if corrected_text:
+        import copy
+        a_copy = copy.deepcopy(agent_a_output)
+        a_copy.full_text = corrected_text
+        a_copy.total_word_count = len(corrected_text)
+        user_prompt = _build_user_prompt(a_copy, agent_b_output)
+    else:
+        user_prompt = _build_user_prompt(agent_a_output, agent_b_output)
     system_prompt = _load_system_prompt()
 
     logger.info(f"[Agent C] 开始去 AI 味改写，原文字数: {agent_a_output.total_word_count}")

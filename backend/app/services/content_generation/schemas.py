@@ -1,7 +1,6 @@
 """正文生成 Agent 的 I/O 契约（Pydantic schemas）。
 
-对齐《正文生成 Agent 设计文档 v1.1》的输入输出格式。
-4 Agent 协作：A（正文创作）→ B（金句催化）→ C（去AI味）→ D（整合自检）
+5 Agent 协作：A（正文创作）→ B（金句催化）→ D（事实总结）→ E（联网纠错）→ C（去AI味）
 """
 
 from typing import List, Optional, Dict, Any
@@ -138,42 +137,49 @@ class AgentCOutput(BaseModel):
 
 
 # ──────────────────────────────────────────────
-# Agent D 输出：整合 + 自检诊断
+# Agent D 输出：事实性总结（潜在错误提取）
 # ──────────────────────────────────────────────
 
-class DimensionScore(BaseModel):
-    """单维度评分。"""
-    score: float = Field(ge=0, le=10)
-    weight: float = Field(description="权重百分比")
-    evaluation: str = Field(description="评价")
-    suggestions: List[str] = Field(default_factory=list, description="改进建议")
+class PotentialFactualError(BaseModel):
+    """单条潜在事实性错误。"""
+    claim: str = Field(description="原文中的事实性陈述")
+    error_type: str = Field(description="错误类型：时间/产品名/版本号/数据/人名/机构/价格/其他")
+    section_number: int = Field(description="所在节号")
+    reason: str = Field(description="为什么可能出错（如：训练集截止日期、信息过时等）")
+    search_query: str = Field(description="建议的联网搜索验证关键词")
 
 
 class AgentDOutput(BaseModel):
-    """Agent D（整合+自检诊断员）的完整输出。对齐设计文档 5.6 节。"""
-    final_text: str = Field(description="最终正文（含金句嵌入）")
-    final_word_count: int = Field(description="最终字数")
+    """Agent D（事实总结员）的完整输出。"""
+    summary_text: str = Field(description="对正文 + 金句中事实性内容的总结摘要")
+    potential_errors: List[PotentialFactualError] = Field(default_factory=list, description="潜在事实性错误列表")
+    total_claims_checked: int = Field(description="检查的事实性陈述总数")
+    error_count: int = Field(description="潜在错误数")
 
-    # 8维度评分
-    title_fulfillment: DimensionScore = Field(description="标题承诺兑现度 (20%)")
-    outline_alignment: DimensionScore = Field(description="大纲结构对应度 (15%)")
-    word_compliance: DimensionScore = Field(description="字数合规 (10%)")
-    style_consistency: DimensionScore = Field(description="风格统一性 (15%)")
-    deai_thoroughness: DimensionScore = Field(description="去AI味彻底度 (15%)")
-    gold_sentence_completeness: DimensionScore = Field(description="金句完整度 (10%)")
-    opening_quality: DimensionScore = Field(description="开头质量 (10%)")
-    ending_quality: DimensionScore = Field(description="结尾升华度 (5%)")
 
-    total_score: float = Field(description="加权总分，0-10")
+# ──────────────────────────────────────────────
+# Agent E 输出：Kimi 联网纠错
+# ──────────────────────────────────────────────
 
-    # 建议
-    high_priority: List[str] = Field(default_factory=list, description="高优先级修改")
-    medium_priority: List[str] = Field(default_factory=list, description="中优先级修改")
-    low_priority: List[str] = Field(default_factory=list, description="低优先级修改")
-    recommended_action: str = Field(description="建议处理路径：接受发布/局部手改/整篇重写")
+class FactualCorrection(BaseModel):
+    """单条事实性纠错。"""
+    original_claim: str = Field(description="原文中的错误陈述")
+    corrected_claim: str = Field(description="纠正后的陈述")
+    error_type: str = Field(description="错误类型")
+    section_number: int = Field(description="所在节号")
+    search_result: str = Field(description="联网搜索找到的依据（简述）")
+    confidence: str = Field(description="置信度：高/中/低")
 
-    # 过程归档
-    process_archive: Dict[str, Any] = Field(default_factory=dict, description="生成过程归档")
+
+class AgentEOutput(BaseModel):
+    """Agent E（Kimi 联网纠错员）的完整输出。"""
+    corrected_text: str = Field(description="纠错后的完整正文")
+    corrected_word_count: int = Field(description="纠错后字数")
+    corrections: List[FactualCorrection] = Field(default_factory=list, description="纠错对照表")
+    search_queries_used: List[str] = Field(default_factory=list, description="实际使用的搜索关键词")
+    total_corrections: int = Field(description="纠错总数")
+    high_confidence_corrections: int = Field(description="高置信度纠错数")
+    stats: Dict[str, Any] = Field(default_factory=dict, description="统计信息")
 
 
 # ──────────────────────────────────────────────
@@ -181,7 +187,7 @@ class AgentDOutput(BaseModel):
 # ──────────────────────────────────────────────
 
 class ContentGenerationOutput(BaseModel):
-    """正文生成的总输出。对齐设计文档 6.2 节。"""
+    """正文生成的总输出。"""
     # 最终正文
     final_text: str
     final_word_count: int
@@ -194,12 +200,16 @@ class ContentGenerationOutput(BaseModel):
     # 去AI味改写对照表
     rewrite_table: List[AITasteIssue] = Field(default_factory=list)
 
-    # 自检诊断报告
-    diagnosis: AgentDOutput
+    # Agent D 事实总结
+    factual_summary: Optional[AgentDOutput] = Field(default=None, description="事实性总结报告")
+
+    # Agent E 联网纠错
+    factual_corrections: Optional[AgentEOutput] = Field(default=None, description="联网纠错报告")
 
     # 过程归档
     agent_a_word_count: int = 0
     agent_b_sentence_count: int = 0
     agent_c_rewrite_count: int = 0
-    agent_d_final_word_count: int = 0
+    agent_d_error_count: int = 0
+    agent_e_correction_count: int = 0
     style_anchor: str = ""

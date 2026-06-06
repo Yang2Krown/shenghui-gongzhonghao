@@ -69,14 +69,20 @@ class GoldSentenceResponse(BaseModel):
     word_count: int
 
 
-class DiagnosisResponse(BaseModel):
-    """诊断报告响应。"""
-    total_score: float
-    recommended_action: str
-    high_priority: list[str]
-    medium_priority: list[str]
-    low_priority: list[str]
-    dimensions: dict
+class FactualSummaryResponse(BaseModel):
+    """事实总结响应。"""
+    summary_text: str
+    potential_errors: list[dict]
+    total_claims_checked: int
+    error_count: int
+
+
+class FactualCorrectionResponse(BaseModel):
+    """联网纠错响应。"""
+    corrected_word_count: int
+    corrections: list[dict]
+    total_corrections: int
+    high_confidence_corrections: int
 
 
 class ContentGenerationResponse(BaseModel):
@@ -85,7 +91,8 @@ class ContentGenerationResponse(BaseModel):
     final_word_count: int
     section_count: int
     gold_sentences: list[GoldSentenceResponse]
-    diagnosis: DiagnosisResponse
+    factual_summary: Optional[FactualSummaryResponse] = None
+    factual_corrections: Optional[FactualCorrectionResponse] = None
     rewrite_count: int
     style_anchor: str
 
@@ -196,15 +203,26 @@ async def generate_content_async(
                 output = await cg_generate(inp, progress_callback=_progress_cb)
 
                 # 发送结果数据
-                def _dim(d):
-                    return {
-                        "score": d.score,
-                        "weight": d.weight,
-                        "evaluation": d.evaluation,
-                        "suggestions": d.suggestions,
+                factual_summary_data = None
+                if output.factual_summary:
+                    fs = output.factual_summary
+                    factual_summary_data = {
+                        "summary_text": fs.summary_text,
+                        "potential_errors": [{"claim": e.claim, "error_type": e.error_type, "section_number": e.section_number, "reason": e.reason, "search_query": e.search_query} for e in fs.potential_errors],
+                        "total_claims_checked": fs.total_claims_checked,
+                        "error_count": fs.error_count,
                     }
 
-                diag = output.diagnosis
+                factual_corrections_data = None
+                if output.factual_corrections:
+                    fc = output.factual_corrections
+                    factual_corrections_data = {
+                        "corrected_word_count": fc.corrected_word_count,
+                        "corrections": [{"original_claim": c.original_claim, "corrected_claim": c.corrected_claim, "error_type": c.error_type, "section_number": c.section_number, "search_result": c.search_result, "confidence": c.confidence} for c in fc.corrections],
+                        "total_corrections": fc.total_corrections,
+                        "high_confidence_corrections": fc.high_confidence_corrections,
+                    }
+
                 await progress_store.push(run_id, {
                     "event": "result",
                     "data": {
@@ -238,23 +256,8 @@ async def generate_content_async(
                             }
                             for it in (output.rewrite_table or [])
                         ],
-                        "diagnosis": {
-                            "total_score": diag.total_score,
-                            "recommended_action": diag.recommended_action,
-                            "high_priority": diag.high_priority,
-                            "medium_priority": diag.medium_priority,
-                            "low_priority": diag.low_priority,
-                            "dimensions": {
-                                "title_fulfillment": _dim(diag.title_fulfillment),
-                                "outline_alignment": _dim(diag.outline_alignment),
-                                "word_compliance": _dim(diag.word_compliance),
-                                "style_consistency": _dim(diag.style_consistency),
-                                "deai_thoroughness": _dim(diag.deai_thoroughness),
-                                "gold_sentence_completeness": _dim(diag.gold_sentence_completeness),
-                                "opening_quality": _dim(diag.opening_quality),
-                                "ending_quality": _dim(diag.ending_quality),
-                            },
-                        },
+                        "factual_summary": factual_summary_data,
+                        "factual_corrections": factual_corrections_data,
                     },
                 })
                 await track_complete(run_id, {
@@ -267,13 +270,8 @@ async def generate_content_async(
                         {"sentence_id": s.sentence_id, "sentence_type": s.sentence_type, "location": s.location, "content": s.content, "word_count": s.word_count}
                         for s in output.gold_sentences
                     ],
-                    "diagnosis": {
-                        "total_score": diag.total_score,
-                        "recommended_action": diag.recommended_action,
-                        "high_priority": diag.high_priority,
-                        "medium_priority": diag.medium_priority,
-                        "low_priority": diag.low_priority,
-                    },
+                    "factual_summary": factual_summary_data,
+                    "factual_corrections": factual_corrections_data,
                 })
             except Exception as e:
                 await progress_store.push(run_id, {
@@ -433,15 +431,26 @@ async def generate_content_adhoc(
                 output = await cg_generate(inp, progress_callback=_progress_cb)
 
                 # 格式化结果
-                def _dim(d):
-                    return {
-                        "score": d.score,
-                        "weight": d.weight,
-                        "evaluation": d.evaluation,
-                        "suggestions": d.suggestions,
+                factual_summary_data = None
+                if output.factual_summary:
+                    fs = output.factual_summary
+                    factual_summary_data = {
+                        "summary_text": fs.summary_text,
+                        "potential_errors": [{"claim": e.claim, "error_type": e.error_type, "section_number": e.section_number, "reason": e.reason, "search_query": e.search_query} for e in fs.potential_errors],
+                        "total_claims_checked": fs.total_claims_checked,
+                        "error_count": fs.error_count,
                     }
 
-                diag = output.diagnosis
+                factual_corrections_data = None
+                if output.factual_corrections:
+                    fc = output.factual_corrections
+                    factual_corrections_data = {
+                        "corrected_word_count": fc.corrected_word_count,
+                        "corrections": [{"original_claim": c.original_claim, "corrected_claim": c.corrected_claim, "error_type": c.error_type, "section_number": c.section_number, "search_result": c.search_result, "confidence": c.confidence} for c in fc.corrections],
+                        "total_corrections": fc.total_corrections,
+                        "high_confidence_corrections": fc.high_confidence_corrections,
+                    }
+
                 result_data = {
                     "final_text": output.final_text,
                     "final_word_count": output.final_word_count,
@@ -471,23 +480,8 @@ async def generate_content_adhoc(
                         }
                         for it in (output.rewrite_table or [])
                     ],
-                    "diagnosis": {
-                        "total_score": diag.total_score,
-                        "recommended_action": diag.recommended_action,
-                        "high_priority": diag.high_priority,
-                        "medium_priority": diag.medium_priority,
-                        "low_priority": diag.low_priority,
-                        "dimensions": {
-                            "title_fulfillment": _dim(diag.title_fulfillment),
-                            "outline_alignment": _dim(diag.outline_alignment),
-                            "word_compliance": _dim(diag.word_compliance),
-                            "style_consistency": _dim(diag.style_consistency),
-                            "deai_thoroughness": _dim(diag.deai_thoroughness),
-                            "gold_sentence_completeness": _dim(diag.gold_sentence_completeness),
-                            "opening_quality": _dim(diag.opening_quality),
-                            "ending_quality": _dim(diag.ending_quality),
-                        },
-                    },
+                    "factual_summary": factual_summary_data,
+                    "factual_corrections": factual_corrections_data,
                 }
 
                 await progress_store.push(run_id, {
@@ -504,13 +498,8 @@ async def generate_content_adhoc(
                         {"sentence_id": s.sentence_id, "sentence_type": s.sentence_type, "location": s.location, "content": s.content, "word_count": s.word_count}
                         for s in output.gold_sentences
                     ],
-                    "diagnosis": {
-                        "total_score": diag.total_score,
-                        "recommended_action": diag.recommended_action,
-                        "high_priority": diag.high_priority,
-                        "medium_priority": diag.medium_priority,
-                        "low_priority": diag.low_priority,
-                    },
+                    "factual_summary": factual_summary_data,
+                    "factual_corrections": factual_corrections_data,
                 })
             except Exception as e:
                 await progress_store.push(run_id, {
@@ -633,23 +622,18 @@ async def generate_content_sync(
                 )
                 for s in output.gold_sentences
             ],
-            diagnosis=DiagnosisResponse(
-                total_score=output.diagnosis.total_score,
-                recommended_action=output.diagnosis.recommended_action,
-                high_priority=output.diagnosis.high_priority,
-                medium_priority=output.diagnosis.medium_priority,
-                low_priority=output.diagnosis.low_priority,
-                dimensions={
-                    "title_fulfillment": output.diagnosis.title_fulfillment.dict(),
-                    "outline_alignment": output.diagnosis.outline_alignment.dict(),
-                    "word_compliance": output.diagnosis.word_compliance.dict(),
-                    "style_consistency": output.diagnosis.style_consistency.dict(),
-                    "deai_thoroughness": output.diagnosis.deai_thoroughness.dict(),
-                    "gold_sentence_completeness": output.diagnosis.gold_sentence_completeness.dict(),
-                    "opening_quality": output.diagnosis.opening_quality.dict(),
-                    "ending_quality": output.diagnosis.ending_quality.dict(),
-                },
-            ),
+            factual_summary=FactualSummaryResponse(
+                summary_text=output.factual_summary.summary_text,
+                potential_errors=[{"claim": e.claim, "error_type": e.error_type, "section_number": e.section_number, "reason": e.reason, "search_query": e.search_query} for e in output.factual_summary.potential_errors] if output.factual_summary else [],
+                total_claims_checked=output.factual_summary.total_claims_checked if output.factual_summary else 0,
+                error_count=output.factual_summary.error_count if output.factual_summary else 0,
+            ) if output.factual_summary else None,
+            factual_corrections=FactualCorrectionResponse(
+                corrected_word_count=output.factual_corrections.corrected_word_count,
+                corrections=[{"original_claim": c.original_claim, "corrected_claim": c.corrected_claim, "error_type": c.error_type, "section_number": c.section_number, "search_result": c.search_result, "confidence": c.confidence} for c in output.factual_corrections.corrections] if output.factual_corrections else [],
+                total_corrections=output.factual_corrections.total_corrections if output.factual_corrections else 0,
+                high_confidence_corrections=output.factual_corrections.high_confidence_corrections if output.factual_corrections else 0,
+            ) if output.factual_corrections else None,
             rewrite_count=output.agent_c_rewrite_count,
             style_anchor=output.style_anchor,
         ).dict(),
