@@ -34,7 +34,13 @@ _BIZ_RE = re.compile(r'var\s+biz\s*=\s*"([^"]+)"')
 _MID_RE = re.compile(r'var\s+mid\s*=\s*"([^"]+)"')
 _IDX_RE = re.compile(r'var\s+idx\s*=\s*"([^"]+)"')
 _SN_RE = re.compile(r'var\s+sn\s*=\s*"([^"]+)"')
-_BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+# 用微信客户端 UA：普通浏览器 UA 常被微信拦成"请在客户端打开"页（提取不到永久链接），
+# MicroMessenger UA 会让微信返回真正的文章页（含 og:url / biz·mid·idx·sn），解析成功率高很多。
+_BROWSER_UA = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.5(0x18000528) "
+    "NetType/WIFI Language/zh_CN"
+)
 
 
 def _is_permanent_wechat_url(url: str) -> bool:

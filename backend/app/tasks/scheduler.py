@@ -23,11 +23,14 @@ CELERY_BEAT_SCHEDULE = {
         "kwargs": {"gap_seconds": 90},
     },
 
-    # ── 预处理：每 2 小时一趟（:30），raw_info → InfoCluster ──
+    # ── 预处理：每 30 分钟一小批，滚动消化 pending ──
+    # 不再每 2 小时一次 limit=500 硬啃——那样配合全文抓取容易撑爆 25 分钟软超时直接崩溃，
+    # 导致整批数据进不了话题。改成小批量高频：每批 120 条，积压多时分多趟跑完，
+    # 单趟稳稳在超时内，前端也能更快看到新话题。
     "preprocess-cycle": {
         "task": "preprocess.run_batch",
-        "schedule": crontab(minute=30, hour="*/2"),
-        "kwargs": {"limit": 500},
+        "schedule": crontab(minute="*/30"),
+        "kwargs": {"limit": 120},
     },
 
     # ── 重算热度 + 回填低粉爆款标记：中午 + 深夜 ──
