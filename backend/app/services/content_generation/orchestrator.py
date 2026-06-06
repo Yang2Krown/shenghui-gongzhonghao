@@ -23,6 +23,18 @@ from app.services.content_generation.agent_c_deai import deai_rewrite
 logger = logging.getLogger(__name__)
 
 
+def _clean_punctuation(text: str) -> str:
+    """清理金句/正文中不必要的标点符号。
+
+    公众号文章不需要新闻报纸式的排版符号，保持排版美观、阅读流畅。
+    """
+    text = text.replace('\u201c', '').replace('\u201d', '')
+    text = text.replace('\u2018', '').replace('\u2019', '')
+    text = text.replace('《', '').replace('》', '')
+    text = text.replace('——', '，')
+    return text.strip()
+
+
 def _update_gold_sentences_for_rewritten_text(
     gold_sentences: List[GoldSentence],
     rewritten_text: str,
@@ -140,6 +152,10 @@ async def generate_content(
     except Exception as e:
         logger.error(f"[正文生成] Agent B 失败: {e}")
         raise RuntimeError(f"正文生成失败（Agent B）: {e}") from e
+
+    # 清理金句中的不必要标点符号
+    for gs in agent_b_output.sentences:
+        gs.content = _clean_punctuation(gs.content)
 
     if progress_callback:
         await progress_callback({"event": "step_done", "data": {"step": 2, "agent": "Agent B"}})

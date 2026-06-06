@@ -94,6 +94,12 @@ const routes = [
         component: () => import('@/pages/tools/CreationContinuation.vue'),
         meta: { title: '正文续写' }
       },
+      {
+        path: 'creation/polish',
+        name: 'CreationPolish',
+        component: () => import('@/pages/tools/CreationPolish.vue'),
+        meta: { title: '文案润色' }
+      },
       // ===== 我的创作（保留旧入口） =====
       {
         path: 'creation',
