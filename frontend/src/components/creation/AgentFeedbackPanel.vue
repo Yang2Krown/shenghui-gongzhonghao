@@ -473,6 +473,11 @@ function shortLabel(label) {
   box-shadow: 0 2px 8px rgba(92, 138, 92, 0.3), 0 0 0 4px var(--paper);
 }
 
+.dot-e {
+  background: linear-gradient(135deg, #A0785C, #8B6548);
+  box-shadow: 0 2px 8px rgba(160, 120, 92, 0.3), 0 0 0 4px var(--paper);
+}
+
 .dot-x {
   background: var(--ink-4);
   box-shadow: 0 0 0 4px var(--paper);
@@ -510,6 +515,7 @@ function shortLabel(label) {
 .card-b { border-left: 3px solid var(--sand); }
 .card-c { border-left: 3px solid var(--pine); }
 .card-d { border-left: 3px solid var(--leaf); }
+.card-e { border-left: 3px solid #A0785C; }
 
 /* ── 卡片头部 ── */
 .card-header {

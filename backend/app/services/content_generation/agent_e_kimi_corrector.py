@@ -191,6 +191,7 @@ async def kimi_correct_facts(
     )
 
     last_error = None
+    current_max_tokens = 32000
     for attempt in range(1, MAX_RETRIES + 1):
         extra_hint = ""
         if attempt > 1:
@@ -212,7 +213,7 @@ async def kimi_correct_facts(
             result = await client.chat(
                 messages=messages,
                 temperature=0.2,
-                max_tokens=8000,
+                max_tokens=current_max_tokens,
                 json_mode=False,
                 web_search=True,  # type: ignore[call-arg]
             )
@@ -220,9 +221,16 @@ async def kimi_correct_facts(
             result = await client.chat(
                 messages=messages,
                 temperature=0.2,
-                max_tokens=8000,
+                max_tokens=current_max_tokens,
                 json_mode=True,
             )
+
+        # 检测截断，自动增大 max_tokens
+        if getattr(result, 'finish_reason', None) == "length":
+            logger.warning(f"[Agent E] 输出被截断 (max_tokens={current_max_tokens})，增大重试")
+            current_max_tokens = min(current_max_tokens * 2, 65536)
+            last_error = ValueError("Agent E 输出被 max_tokens 截断")
+            continue
 
         parsed = parse_json_loose(result.text)
         if parsed and "corrected_text" not in parsed:

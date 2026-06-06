@@ -1,7 +1,6 @@
 """Agent A - 大纲创作员。
 
 职责：接收 1 条选题，生成 3 个差异化的中粒度大纲候选。
-调用《大纲模板库》作为提示词资产。
 """
 
 import logging
@@ -26,8 +25,9 @@ def _load_system_prompt() -> str:
     return (PROMPTS_DIR / "agent_a_system.txt").read_text(encoding="utf-8")
 
 
-def _load_template_library() -> str:
-    return (ASSETS_DIR / "大纲模板库.md").read_text(encoding="utf-8")
+# def _load_template_library() -> str:
+#     """已禁用：不再依赖模板库，由提示词直接指导 AI 生成。"""
+#     return (ASSETS_DIR / "大纲模板库.md").read_text(encoding="utf-8")
 
 
 def _build_user_prompt(info: OutlineInput) -> str:
@@ -54,10 +54,6 @@ def _build_user_prompt(info: OutlineInput) -> str:
 目标总字数: {target_words_text}
 
 {angle_guidance_text}
-
-【模板参考】
-请根据选题的方向，从大纲模板库中找到对应的骨架模板作为参考，但最终必须落到「引入 → 正文 → 总结」三段式。
-如果提供了【创作角度体检】，必须优先服从其中的确认角度、节奏蓝图、开头策略和结尾策略；不要退回第一直觉角度。
 
 【输出格式】
 严格输出 JSON，格式如下：
@@ -99,7 +95,6 @@ async def create_outline_candidates(
     client = llm_client or get_llm_client()
 
     system_prompt = _load_system_prompt()
-    template_lib = _load_template_library()
     user_prompt = _build_user_prompt(info)
 
     logger.info(f"Agent A 开始处理: candidate_id={info.candidate_id}, direction={info.direction}")
@@ -116,7 +111,7 @@ async def create_outline_candidates(
             )
 
         messages = [
-            ChatMessage(role="system", content=system_prompt + "\n\n【参考资产】\n《大纲模板库》完整内容：\n" + template_lib + extra_hint),
+            ChatMessage(role="system", content=system_prompt + extra_hint),
             ChatMessage(role="user", content=user_prompt),
         ]
 

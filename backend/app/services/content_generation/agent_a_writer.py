@@ -95,7 +95,7 @@ def _build_user_prompt(inp: ContentGenerationInput) -> str:
     lines.append(f"【大纲】（目标总字数约 {total_target} 字，请严格按每节目标字数写）")
     for sec in inp.sections:
         part_label = _PART_LABEL.get(sec.part or "body", "正文")
-        lines.append(f"第{sec.section_number}节 [{part_label}]: {sec.subtitle}（目标 {sec.word_estimate} 字）")
+        lines.append(f"{sec.subtitle}（目标 {sec.word_estimate} 字）[{part_label}]")
         if sec.description:
             lines.append(f"  要写什么: {sec.description}")
         elif sec.core_points:
@@ -139,7 +139,8 @@ def _build_user_prompt(inp: ContentGenerationInput) -> str:
     lines.append("注意：")
     lines.append("1. gold_seed 只在开头节末尾和结尾节开头各放1个，其他节 gold_seed 设为 null")
     lines.append("2. 每节 content 直接写正文，不要加小标题（小标题由 subtitle 字段单独提供）")
-    lines.append(f"3. 每节字数尽量贴近其目标字数，全文总字数贴近约 {total_target} 字")
+    lines.append("3. content 里禁止出现「第X节」「[引入]」「[正文]」「[总结]」这类节号或标签前缀，直接写内容即可")
+    lines.append(f"4. 每节字数尽量贴近其目标字数，全文总字数贴近约 {total_target} 字")
 
     return "\n".join(lines)
 
@@ -176,9 +177,13 @@ def _parse_llm_output(raw: dict, inp: ContentGenerationInput) -> AgentAOutput:
             gold_seed=seed,
         ))
 
-    # 拼接全文
+    # 拼接全文（清理 AI 可能残留的节号前缀）
+    import re
+    def _clean_content(text: str) -> str:
+        """去掉 AI 在正文里可能加的 '第X节 [引入]:' 类前缀。"""
+        return re.sub(r'^第\d+节\s*\[.*?\]\s*[:：]\s*', '', text.strip())
     full_text = "\n\n".join(
-        f"## {sec.subtitle}\n\n{sec.content}" for sec in sections
+        f"## {sec.subtitle}\n\n{_clean_content(sec.content)}" for sec in sections
     )
 
     return AgentAOutput(
