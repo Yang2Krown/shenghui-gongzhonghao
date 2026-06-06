@@ -5,7 +5,7 @@
 """
 
 import logging
-from typing import List
+from typing import List, Optional
 from pathlib import Path
 
 from app.services.llm import get_llm_client
@@ -146,6 +146,7 @@ MAX_RETRIES = 3
 async def catalyze_gold_sentences(
     agent_a_output: AgentAOutput,
     topic_title: str,
+    provider: Optional[str] = None,
 ) -> AgentBOutput:
     """Agent B 主入口：催化 3-5 个金句。
 
@@ -154,11 +155,12 @@ async def catalyze_gold_sentences(
     Args:
         agent_a_output: Agent A 的输出
         topic_title: 选题标题
+        provider: LLM provider 名称（可选，默认使用 settings.LLM_PROVIDER）
 
     Returns:
         AgentBOutput: 金句清单
     """
-    client = get_llm_client()
+    client = get_llm_client(provider)
     user_prompt = _build_user_prompt(agent_a_output, topic_title)
     system_prompt = _load_system_prompt()
 

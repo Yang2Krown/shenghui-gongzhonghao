@@ -331,6 +331,7 @@ async def deai_rewrite(
     agent_a_output: AgentAOutput,
     agent_b_output: AgentBOutput,
     corrected_text: Optional[str] = None,
+    provider: Optional[str] = None,
 ) -> AgentCOutput:
     """Agent C 主入口：去 AI 味改写。
 
@@ -340,11 +341,12 @@ async def deai_rewrite(
         agent_a_output: Agent A 的输出（正文骨干）
         agent_b_output: Agent B 的输出（金句清单，用于识别不可改段落）
         corrected_text: Agent E 纠错后的正文（如有）。如果提供，用此文本替代 agent_a_output.full_text
+        provider: LLM provider 名称（可选，默认使用 settings.LLM_PROVIDER）
 
     Returns:
         AgentCOutput: 改写后正文 + 改写对照表
     """
-    client = get_llm_client()
+    client = get_llm_client(provider)
 
     # 如果有纠错后的文本，创建一个临时的 agent_a_output 副本
     if corrected_text:

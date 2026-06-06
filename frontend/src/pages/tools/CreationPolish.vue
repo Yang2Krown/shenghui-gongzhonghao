@@ -135,12 +135,21 @@
       </div>
     </div>
 
-    <button class="cta-bar" :disabled="!canGenerate || progress.isRunning.value" @click="handleGenerate" style="margin-bottom: 16px;">
-      <template v-if="progress.isRunning.value">
-        <el-icon class="spin"><Loading /></el-icon> 正在润色文案…
-      </template>
-      <template v-else>开始润色</template>
-    </button>
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+      <button class="cta-bar" :disabled="!canGenerate || progress.isRunning.value" @click="handleGenerate" style="flex: 1;">
+        <template v-if="progress.isRunning.value">
+          <el-icon class="spin"><Loading /></el-icon> 正在润色文案…
+        </template>
+        <template v-else>开始润色</template>
+      </button>
+      <div class="multi-model-toggle">
+        <label class="toggle-label">
+          <input type="checkbox" v-model="multiModelMode" class="toggle-checkbox" />
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="text-sm text-ink-3">多模型对比</span>
+      </div>
+    </div>
 
     <!-- Agent 进度 -->
     <div v-if="progress.isRunning.value" style="margin-top: 24px;" class="fade-in">
@@ -162,7 +171,7 @@
     </div>
 
     <!-- 结果 -->
-    <div v-if="result && !progress.isRunning.value" class="fade-in" style="margin-top: 32px;">
+    <div v-if="result && !progress.isRunning.value && !multiModelResult" class="fade-in" style="margin-top: 32px;">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
         <div style="display: flex; align-items: baseline; gap: 10px;">
           <h2 class="font-serif text-ink" style="font-size: 22px; font-weight: 600;">润色结果</h2>
@@ -243,6 +252,76 @@
         </div>
       </div>
     </div>
+
+    <!-- 多模型对比结果 -->
+    <div v-if="multiModelResult && !progress.isRunning.value" class="fade-in" style="margin-top: 32px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+        <div style="display: flex; align-items: baseline; gap: 10px;">
+          <h2 class="font-serif text-ink" style="font-size: 22px; font-weight: 600;">对比结果</h2>
+          <span class="text-sm text-ink-4">选择你更喜欢的润色效果</span>
+        </div>
+        <button class="btn-ghost btn-sm" @click="handleGenerate">
+          <el-icon :size="15"><Refresh /></el-icon> 换一批
+        </button>
+      </div>
+
+      <!-- 方案对比 -->
+      <div class="comparison-container">
+        <div
+          v-for="(modelData, provider, index) in multiModelResult.comparison?.models || {}"
+          :key="provider"
+          class="comparison-column"
+        >
+          <!-- 方案标题 -->
+          <div class="plan-header">
+            <div class="plan-badge">
+              {{ index === 0 ? 'A' : 'B' }}
+            </div>
+            <span v-if="modelData.success" class="text-xs text-ink-4">
+              {{ modelData.final_word_count }} 字
+            </span>
+            <span v-else class="text-xs" style="color: var(--crimson);">润色失败</span>
+          </div>
+
+          <!-- 统计信息 -->
+          <div v-if="modelData.success" style="padding: 14px 16px; border-bottom: 1px solid var(--line);">
+            <div style="display: flex; flex-wrap: wrap; gap: 12px;" class="text-xs">
+              <div v-if="modelData.agent_b_sentence_count">
+                <span class="text-ink-4">金句</span>
+                <span class="font-medium text-ink" style="margin-left: 2px;">{{ modelData.agent_b_sentence_count }} 句</span>
+              </div>
+              <div v-if="modelData.agent_e_correction_count">
+                <span class="text-ink-4">纠错</span>
+                <span class="font-medium text-ink" style="margin-left: 2px;">{{ modelData.agent_e_correction_count }} 处</span>
+              </div>
+              <div v-if="modelData.agent_c_rewrite_count">
+                <span class="text-ink-4">去AI味</span>
+                <span class="font-medium text-ink" style="margin-left: 2px;">{{ modelData.agent_c_rewrite_count }} 处</span>
+              </div>
+              <div v-if="modelData.word_change_pct">
+                <span class="text-ink-4">变化</span>
+                <span class="font-medium text-ink" style="margin-left: 2px;">{{ modelData.word_change_pct }}%</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 润色全文 -->
+          <div v-if="modelData.success" style="padding: 16px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+              <span class="text-xs font-semibold text-ink-3">润色全文</span>
+              <button class="btn-text btn-sm" @click="copyText(modelData.final_text)" style="padding: 2px 6px;">
+                <el-icon :size="13"><CopyDocument /></el-icon> 复制
+              </button>
+            </div>
+            <div style="max-height: 400px; overflow-y: auto; padding: 14px; background: var(--bone); border-radius: var(--r-md); font-size: 14px; line-height: 1.8; color: var(--ink); white-space: pre-wrap;">{{ modelData.final_text }}</div>
+          </div>
+
+          <div v-else-if="!modelData.success" class="plan-error">
+            <p class="text-sm" style="color: var(--crimson);">{{ modelData.error }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -272,6 +351,8 @@ const selectedChips = ref([])
 const result = ref(null)
 const editableText = ref('')
 const viewMode = ref('preview')
+const multiModelMode = ref(false)
+const multiModelResult = ref(null)
 
 // 文件上传
 const fileName = ref('')
@@ -380,10 +461,15 @@ const toggleChip = (chip) => {
 
 // 监听进度结果
 watch(() => progress.result.value, (data) => {
-  if (data) {
+  if (data?.final_text) {
     result.value = data
     editableText.value = data.final_text || ''
     ElMessage.success('润色完成')
+  }
+  // 多模型对比结果
+  if (data?.comparison) {
+    multiModelResult.value = data
+    ElMessage.success('对比完成')
   }
 })
 
@@ -402,8 +488,33 @@ const handleGenerate = async () => {
 
   result.value = null
   editableText.value = ''
+  multiModelResult.value = null
   progress.stop()
 
+  // 多模型对比模式
+  if (multiModelMode.value) {
+    try {
+      progress.start('multi-model')
+      const body = { text }
+      if (title.value.trim()) body.title = title.value.trim()
+      body.providers = ['deepseek', 'aigocode']
+
+      const res = await api.post('/content-polish/compare', body, { timeout: 300000 })
+      const data = res?.data || res
+      const runId = data?.comparison?.run_id
+
+      if (runId) {
+        progress.start(`/api/v1/content-polish/compare/stream/${runId}`)
+      } else {
+        progress.error.value = '未获取到任务 ID'
+      }
+    } catch (err) {
+      progress.error.value = err?.response?.data?.detail || err.message || '请求失败'
+    }
+    return
+  }
+
+  // 单模型模式
   try {
     const body = { text }
     if (title.value.trim()) body.title = title.value.trim()
@@ -427,6 +538,11 @@ const copyFullText = () => {
   const text = editableText.value || result.value?.final_text || ''
   navigator.clipboard?.writeText(text).catch(() => {})
   ElMessage.success('已复制润色全文')
+}
+
+const copyText = (text) => {
+  navigator.clipboard?.writeText(text).catch(() => {})
+  ElMessage.success('已复制')
 }
 
 // 简易 markdown 渲染
@@ -640,5 +756,110 @@ onUnmounted(() => {
   background: var(--paper);
   color: var(--clay-deep);
   box-shadow: var(--sh-1);
+}
+
+/* 多模型对比开关 */
+.multi-model-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bone);
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+
+.multi-model-toggle .toggle-label {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.multi-model-toggle .toggle-checkbox {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.multi-model-toggle .toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--line);
+  transition: .3s;
+  border-radius: 20px;
+}
+
+.multi-model-toggle .toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+
+.multi-model-toggle .toggle-checkbox:checked + .toggle-slider {
+  background-color: var(--clay);
+}
+
+.multi-model-toggle .toggle-checkbox:checked + .toggle-slider:before {
+  transform: translateX(16px);
+}
+
+/* 方案对比样式 */
+.comparison-container {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 768px) {
+  .comparison-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+.comparison-column {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.plan-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  background: var(--bone);
+  border-bottom: 1px solid var(--line);
+}
+
+.plan-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--bone);
+  border: 1px solid var(--line);
+}
+
+.plan-error {
+  padding: 20px;
+  text-align: center;
+  background: rgba(184, 84, 80, 0.03);
 }
 </style>

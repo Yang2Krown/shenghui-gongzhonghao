@@ -23,7 +23,7 @@ SYSTEM_PROMPT = """你是一位资深的公众号内容编辑，擅长分析文�
 - 用模板化的语言收尾"""
 
 
-async def analyze_and_continue(content: str, preference: str = "") -> dict:
+async def analyze_and_continue(content: str, preference: str = "", provider: Optional[str] = None) -> dict:
     """
     分析文章内容脉络，生成多个自然收尾的续写方案。
     
@@ -47,7 +47,7 @@ async def analyze_and_continue(content: str, preference: str = "") -> dict:
             ]
         }
     """
-    client = get_llm_client()
+    client = get_llm_client(provider)
 
     preference_block = ""
     if preference.strip():

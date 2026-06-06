@@ -1,6 +1,8 @@
 """正文续写端点 - 分析已写内容，生成自然收尾的续写方案。"""
 
+import asyncio
 import logging
+from typing import Optional
 from pydantic import BaseModel, Field
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -122,6 +124,183 @@ async def stream_continuation_progress(
     token: str = Query(None, description="认证 token"),
 ) -> StreamingResponse:
     """SSE 端点：实时推送续写进度。"""
+    if token:
+        from app.core.security import decode_token
+        payload = decode_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="无效的 token")
+
+    if not progress_store.exists(run_id):
+        raise HTTPException(status_code=404, detail=f"run {run_id} 不存在或已过期")
+
+    return StreamingResponse(
+        progress_store.stream(run_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ──────────────────────────────────────────────
+# 多模型对比
+# ──────────────────────────────────────────────
+
+class MultiModelContinuationRequest(BaseModel):
+    """多模型对比续写请求"""
+    content: str = Field(..., min_length=50, description="已写好的文章正文")
+    preference: str = Field(default="", description="续写偏好（选填）")
+    providers: list = Field(default=["deepseek", "aigocode"], description="要对比的模型列表")
+
+
+class MultiModelContinuationResponse(BaseModel):
+    """多模型对比续写响应"""
+    success: bool = Field(default=True)
+    comparison: dict = Field(..., description="各模型的生成结果对比")
+
+
+async def _run_continuation_compare_background(
+    content: str,
+    preference: str,
+    run_id: str,
+    providers: list,
+    user_id: int = None,
+):
+    """后台执行多模型对比续写任务"""
+    from app.services.content_continuation import analyze_and_continue
+
+    try:
+        await progress_store.push(run_id, {
+            "event": "step_start",
+            "data": {
+                "step": 0,
+                "agent": "内容分析师",
+                "action": "正在分析文章脉络和情感走向...",
+                "avatar": "/agents/title-a.png",
+            },
+        })
+
+        # 分析只需做一次（用默认 provider）
+        # 实际分析在每个 provider 的生成中都会做，这里只做进度展示
+        await progress_store.push(run_id, {
+            "event": "step_done",
+            "data": {"step": 0, "agent": "内容分析师"},
+        })
+
+        # Step 1: 用多个模型并行生成续写方案
+        await progress_store.push(run_id, {
+            "event": "step_start",
+            "data": {
+                "step": 1,
+                "agent": "多模型创作",
+                "action": f"正在用 {len(providers)} 个模型并行生成续写方案...",
+                "avatar": "/agents/title-a.png",
+            },
+        })
+
+        async def generate_with_provider(provider_name: str):
+            """用指定 provider 生成续写方案"""
+            try:
+                result = await analyze_and_continue(content, preference, provider=provider_name)
+                return provider_name, {
+                    "success": True,
+                    "analysis": result.get("analysis", {}),
+                    "plans": result.get("plans", []),
+                    "count": len(result.get("plans", [])),
+                }
+            except Exception as e:
+                logger.error(f"Provider {provider_name} 续写生成失败: {e}")
+                return provider_name, {
+                    "success": False,
+                    "error": str(e),
+                    "analysis": {},
+                    "plans": [],
+                    "count": 0,
+                }
+
+        tasks = [generate_with_provider(p) for p in providers]
+        results = await asyncio.gather(*tasks)
+
+        comparison = {"models": {}}
+        for provider_name, result in results:
+            comparison["models"][provider_name] = result
+
+        await progress_store.push(run_id, {
+            "event": "step_done",
+            "data": {"step": 1, "agent": "多模型创作"},
+        })
+
+        result_data = {
+            "status": "completed",
+            "comparison": comparison,
+            "meta": {
+                "providers": providers,
+                "total_models": len(providers),
+            },
+        }
+
+        await progress_store.push(run_id, {
+            "event": "result",
+            "data": result_data,
+        })
+        await track_complete(run_id, result_data, display_title=f"多模型对比续写")
+
+    except Exception as e:
+        logger.error(f"多模型对比续写失败: {str(e)}", exc_info=True)
+        await progress_store.push(run_id, {
+            "event": "error",
+            "data": {"message": str(e)},
+        })
+        await track_fail(run_id, str(e))
+
+
+@router.post("/compare", response_model=MultiModelContinuationResponse)
+async def compare_multi_model_continuation(
+    request: MultiModelContinuationRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """多模型对比续写
+
+    同时用多个模型生成续写方案，用于对比不同模型的效果。
+    """
+    run_id = progress_store.create_run()
+
+    await track_start(
+        user_id=current_user.id,
+        type="multi_model_continuation",
+        run_id=run_id,
+        input_snapshot={"content_length": len(request.content), "providers": request.providers},
+        display_title=f"多模型对比续写",
+        resume_context={
+            "route": "/creation/continuation",
+            "query": {},
+        },
+    )
+
+    spawn(
+        _run_continuation_compare_background(
+            content=request.content,
+            preference=request.preference,
+            run_id=run_id,
+            providers=request.providers,
+            user_id=current_user.id,
+        )
+    )
+
+    return MultiModelContinuationResponse(
+        success=True,
+        comparison={"run_id": run_id, "message": "多模型对比续写任务已创建"},
+    )
+
+
+@router.get("/compare/stream/{run_id}")
+async def stream_continuation_compare_progress(
+    run_id: str,
+    token: str = Query(None, description="认证 token"),
+) -> StreamingResponse:
+    """SSE 端点：实时推送多模型对比续写进度。"""
     if token:
         from app.core.security import decode_token
         payload = decode_token(token)

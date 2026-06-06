@@ -178,6 +178,7 @@ def _update_gold_sentences_for_rewritten_text(
 async def polish_content(
     inp: PolishInput,
     progress_callback: Optional[Callable] = None,
+    provider: Optional[str] = None,
 ) -> PolishOutput:
     """文案润色主流程：Agent B → D → E → C。
 
@@ -217,6 +218,7 @@ async def polish_content(
         agent_b_output = await catalyze_gold_sentences(
             agent_a_output=agent_a_output,
             topic_title=title,
+            provider=provider,
         )
     except Exception as e:
         logger.error(f"[文案润色] Agent B 失败: {e}")
@@ -248,6 +250,7 @@ async def polish_content(
             inp=cg_input,
             agent_a_output=agent_a_output,
             agent_b_output=agent_b_output,
+            provider=provider,
         )
     except Exception as e:
         logger.error(f"[文案润色] Agent D 失败: {e}")
@@ -303,6 +306,7 @@ async def polish_content(
             agent_a_output=agent_a_output,
             agent_b_output=agent_b_output,
             corrected_text=agent_e_output.corrected_text,
+            provider=provider,
         )
     except Exception as e:
         logger.error(f"[文案润色] Agent C 失败: {e}")

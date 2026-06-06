@@ -5,6 +5,7 @@
 """
 
 import logging
+from typing import Optional
 from pathlib import Path
 
 from app.services.llm import get_llm_client
@@ -130,6 +131,7 @@ async def summarize_factual_errors(
     inp: ContentGenerationInput,
     agent_a_output: AgentAOutput,
     agent_b_output: AgentBOutput,
+    provider: Optional[str] = None,
 ) -> AgentDOutput:
     """Agent D 主入口：总结正文 + 金句中的潜在事实性错误。
 
@@ -137,11 +139,12 @@ async def summarize_factual_errors(
         inp: 正文生成总输入
         agent_a_output: Agent A 的输出（正文骨干）
         agent_b_output: Agent B 的输出（金句清单）
+        provider: LLM provider 名称（可选，默认使用 settings.LLM_PROVIDER）
 
     Returns:
         AgentDOutput: 事实总结报告
     """
-    client = get_llm_client()
+    client = get_llm_client(provider)
     user_prompt = _build_user_prompt(inp, agent_a_output, agent_b_output)
     system_prompt = _load_system_prompt()
 
