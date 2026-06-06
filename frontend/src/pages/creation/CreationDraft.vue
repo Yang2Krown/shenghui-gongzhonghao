@@ -323,8 +323,23 @@ const renderedHtml = computed(() => {
     .join('\n')
 })
 
+// 允许保留的安全 HTML 标签（后端可能直接输出）
+const SAFE_TAGS = 'strong|em|b|i|u|s|sup|sub|br'
+const SAFE_TAG_RE = new RegExp(`<(${SAFE_TAGS})(\\s[^>]*)?>`, 'gi')
+const SAFE_CLOSE_RE = new RegExp(`</(${SAFE_TAGS})>`, 'gi')
+
 function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  const placeholders = []
+  let i = 0
+  const protected_ = s
+    .replace(SAFE_TAG_RE, (m) => { placeholders.push(m); return `\x00PH${i++}\x00` })
+    .replace(SAFE_CLOSE_RE, (m) => { placeholders.push(m); return `\x00PH${i++}\x00` })
+  const escaped = protected_
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+  return escaped.replace(/\x00PH(\d+)\x00/g, (_, idx) => placeholders[+idx])
 }
 
 // ── Agent 反馈数据（从已保存的 content 重建） ────────────

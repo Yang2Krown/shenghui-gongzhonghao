@@ -88,6 +88,12 @@ const routes = [
         component: () => import('@/pages/tools/CreationTitle.vue'),
         meta: { title: '标题生成' }
       },
+      {
+        path: 'creation/continuation',
+        name: 'CreationContinuation',
+        component: () => import('@/pages/tools/CreationContinuation.vue'),
+        meta: { title: '正文续写' }
+      },
       // ===== 我的创作（保留旧入口） =====
       {
         path: 'creation',

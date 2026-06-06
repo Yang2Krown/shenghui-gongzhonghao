@@ -482,12 +482,26 @@ const renderedHtml = computed(() => {
   return applyHighlights(raw)
 })
 
+// 允许保留的安全 HTML 标签（后端可能直接输出）
+const SAFE_TAGS = 'strong|em|b|i|u|s|sup|sub|br'
+const SAFE_TAG_RE = new RegExp(`<(${SAFE_TAGS})(\\s[^>]*)?>`, 'gi')
+const SAFE_CLOSE_RE = new RegExp(`</(${SAFE_TAGS})>`, 'gi')
+
 function escapeHtml(s) {
-  return s
+  // 先把安全标签用占位符保护起来
+  const placeholders = []
+  let i = 0
+  const protected_ = s
+    .replace(SAFE_TAG_RE, (m) => { placeholders.push(m); return `\x00PH${i++}\x00` })
+    .replace(SAFE_CLOSE_RE, (m) => { placeholders.push(m); return `\x00PH${i++}\x00` })
+  // 转义其余内容
+  const escaped = protected_
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+  // 还原安全标签
+  return escaped.replace(/\x00PH(\d+)\x00/g, (_, idx) => placeholders[+idx])
 }
 
 // 行内 Markdown：**加粗**、*斜体*、`代码`

@@ -156,6 +156,7 @@ const navItems = [
       { id: 'creation-outline', label: '大纲生成' },
       { id: 'creation-body', label: '正文生成' },
       { id: 'creation-title', label: '标题生成' },
+      { id: 'creation-continuation', label: '正文续写' },
     ],
   },
   {
@@ -187,6 +188,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/creation/outline')) return 'creation-outline'
   if (path.startsWith('/creation/body')) return 'creation-body'
   if (path.startsWith('/creation/title')) return 'creation-title'
+  if (path.startsWith('/creation/continuation')) return 'creation-continuation'
   if (path.startsWith('/creation')) {
     // 检查是否是旧的创作列表页面
     if (path === '/creation' || path === '/creation/') return 'creation'
@@ -239,6 +241,7 @@ const routeMap = {
   'creation-outline': '/creation/outline',
   'creation-body': '/creation/body',
   'creation-title': '/creation/title',
+  'creation-continuation': '/creation/continuation',
   'content-transform': '/content-transform',
   'content-imitate': '/content-imitate',
   'creation-history': '/creation-history',
