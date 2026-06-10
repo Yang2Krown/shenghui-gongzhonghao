@@ -71,8 +71,14 @@ class AIGoCodeClient(LLMClient):
         if json_mode and "system" in kwargs:
             kwargs["system"] += "\n\n请仅输出严格的 JSON，不要包含 markdown fence 或解释文字。"
 
+        # 用流式接收：长文本改写（如 Agent C）非流式请求容易被中转站网关
+        # 判定为「长时间无响应」而返回 504，流式下字节持续流动可避免超时。
+        async def _create():
+            async with self._client.messages.stream(**kwargs) as stream:
+                return await stream.get_final_message()
+
         resp = await with_retry(
-            lambda: self._client.messages.create(**kwargs),
+            _create,
             max_attempts=3,
             description=f"AIGoCode chat ({kwargs['model']})",
         )
@@ -87,10 +93,15 @@ class AIGoCodeClient(LLMClient):
                 "total_tokens": resp.usage.input_tokens + resp.usage.output_tokens,
             }
 
+        # 统一截断标志：Anthropic 用 "max_tokens"，下游 Agent 按 "length" 判断
+        finish_reason = resp.stop_reason
+        if finish_reason == "max_tokens":
+            finish_reason = "length"
+
         return ChatResult(
             text=text,
             parsed=parsed,
             usage=usage,
             model=resp.model,
-            finish_reason=resp.stop_reason,
+            finish_reason=finish_reason,
         )

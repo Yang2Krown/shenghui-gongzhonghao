@@ -146,8 +146,21 @@
           评估打分
           <el-icon class="el-icon--right"><Refresh /></el-icon>
         </el-button>
+        <div style="flex: 1;"></div>
+        <el-button type="primary" @click="showWechatDraft = true">
+          <el-icon><Promotion /></el-icon>
+          发布到公众号草稿箱
+        </el-button>
       </div>
     </div>
+
+    <!-- 公众号草稿箱弹窗 -->
+    <WechatDraftDialog
+      v-model="showWechatDraft"
+      :title="creation.title || ''"
+      :content="editableText"
+      :content-html="editableText"
+    />
   </div>
 </template>
 
@@ -157,10 +170,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   ArrowLeft, ArrowRight, Document, DocumentCopy, Edit,
-  Connection, Tickets, Loading, Refresh, Aim, Clock
+  Connection, Tickets, Loading, Refresh, Aim, Clock, Promotion
 } from '@element-plus/icons-vue'
 import AgentFeedbackPanel from '@/components/creation/AgentFeedbackPanel.vue'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
+import WechatDraftDialog from '@/components/WechatDraftDialog.vue'
 import { useCreationStore } from '@/stores/creation'
 import { useAgentProgress } from '@/composables/useAgentProgress'
 import { reevaluateContent as reevaluateContentApi } from '@/api/creation'
@@ -176,6 +190,7 @@ const reevaluating = ref(false)
 const creation = ref({})
 const editableText = ref('')
 const viewMode = ref('preview')
+const showWechatDraft = ref(false)
 
 // Agent 进度（SSE 驱动）
 const progress = useAgentProgress()

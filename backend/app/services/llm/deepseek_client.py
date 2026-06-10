@@ -22,6 +22,10 @@ class DeepSeekClient(LLMClient):
         self._client = AsyncOpenAI(
             api_key=settings.DEEPSEEK_API_KEY,
             base_url=settings.DEEPSEEK_API_BASE,
+            # OpenAI SDK 默认 timeout=600s + 自动重试 2 次，会导致卡住时长时间无响应。
+            # 这里收紧为单次请求 180s，重试交给我们自己的 with_retry 控制。
+            timeout=180.0,
+            max_retries=0,
         )
         self.default_model = settings.DEEPSEEK_MODEL or self.default_model
 

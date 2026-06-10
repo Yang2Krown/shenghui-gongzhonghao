@@ -100,6 +100,12 @@ const routes = [
         component: () => import('@/pages/tools/CreationPolish.vue'),
         meta: { title: '文案润色' }
       },
+      {
+        path: 'creation/wechat-editor',
+        name: 'WechatEditor',
+        component: () => import('@/pages/tools/WechatEditor.vue'),
+        meta: { title: '公众号编辑器' }
+      },
       // ===== 我的创作（保留旧入口） =====
       {
         path: 'creation',

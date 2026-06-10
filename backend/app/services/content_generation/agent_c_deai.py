@@ -239,8 +239,14 @@ Step 4 - 质量自检
 def _build_user_prompt(
     agent_a_output: AgentAOutput,
     agent_b_output: AgentBOutput,
+    weave_gold_sentences: bool = False,
 ) -> str:
-    """构建用户提示词。"""
+    """构建用户提示词。
+
+    Args:
+        weave_gold_sentences: True 时，金句尚未在正文中，要求把金句融入正文对应位置
+            （用于文案润色流程）；False 时金句已在正文中，仅作不可改保护（用于正文生成流程）。
+    """
     lines = []
 
     # 正文
@@ -248,11 +254,23 @@ def _build_user_prompt(
     lines.append(agent_a_output.full_text)
     lines.append("")
 
-    # 金句清单（不可改）
-    lines.append("【金句清单（不可改段落）】")
-    for s in agent_b_output.sentences:
-        lines.append(f"- 第{s.section_number}节 {s.location}: \"{s.content}\"")
-    lines.append("")
+    if weave_gold_sentences:
+        # 金句尚未在正文中，需要插入
+        lines.append("【待融入金句（请插入正文对应位置）】")
+        lines.append(
+            "以下金句目前【不在】上面的正文里，请把它们自然地融入正文 location 指定的位置"
+            "（例如\"第1节末尾\"就放在第1节结尾，\"开头\"就放在段落开头），"
+            "衔接要顺，不要生硬堆砌。融入后这些句子视为不可改。"
+        )
+        for s in agent_b_output.sentences:
+            lines.append(f"- 第{s.section_number}节 {s.location}（{s.sentence_type}）: \"{s.content}\"")
+        lines.append("")
+    else:
+        # 金句清单（已在正文中，不可改）
+        lines.append("【金句清单（不可改段落）】")
+        for s in agent_b_output.sentences:
+            lines.append(f"- 第{s.section_number}节 {s.location}: \"{s.content}\"")
+        lines.append("")
 
     # 输出格式
     lines.append("【输出格式】")
@@ -332,6 +350,7 @@ async def deai_rewrite(
     agent_b_output: AgentBOutput,
     corrected_text: Optional[str] = None,
     provider: Optional[str] = None,
+    weave_gold_sentences: bool = False,
 ) -> AgentCOutput:
     """Agent C 主入口：去 AI 味改写。
 
@@ -354,10 +373,20 @@ async def deai_rewrite(
         a_copy = copy.deepcopy(agent_a_output)
         a_copy.full_text = corrected_text
         a_copy.total_word_count = len(corrected_text)
-        user_prompt = _build_user_prompt(a_copy, agent_b_output)
+        user_prompt = _build_user_prompt(a_copy, agent_b_output, weave_gold_sentences)
     else:
-        user_prompt = _build_user_prompt(agent_a_output, agent_b_output)
+        user_prompt = _build_user_prompt(agent_a_output, agent_b_output, weave_gold_sentences)
     system_prompt = _load_system_prompt()
+    if weave_gold_sentences:
+        # 润色流程：金句需要插入正文，放宽字数限制（插入金句会增加字数）
+        system_prompt += (
+            "\n\n【本次特别说明】"
+            "\n本次任务的金句【尚未】出现在正文中，属于「待融入金句」。"
+            "请务必把它们逐条插入到正文 location 指定的位置，并让前后文衔接自然。"
+            "因插入金句导致的字数增加是允许的，不受 ±10% 字数变化限制约束；"
+            "其余去 AI 味改写仍需遵守原有规则。"
+            "rewritten_text 必须是【已经包含全部金句】的完整正文。"
+        )
 
     logger.info(f"[Agent C] 开始去 AI 味改写，原文字数: {agent_a_output.total_word_count}")
 

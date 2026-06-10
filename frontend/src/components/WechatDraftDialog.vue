@@ -301,7 +301,7 @@ const handlePublish = async () => {
   publishing.value = true
 
   try {
-    // 确定正文内容 — 优先 HTML，兜底纯文本由后端 ensure_html 转换
+    // 确定正文内容 —— 优先 HTML，兜底纯文本由后端 ensure_html 转换
     let content = props.contentHtml || props.content || ''
 
     // 标题校验：微信限制 64 字符，超长则阻止发布

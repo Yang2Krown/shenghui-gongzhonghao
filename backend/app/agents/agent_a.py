@@ -272,16 +272,14 @@ class TitleCreatorAgent(BaseAgent):
 2. 必须覆盖至少 {settings.MIN_COVERAGE_METHODS} 种不同套路
 3. 单一套路不超过 {settings.MAX_SAME_METHOD} 个候选
 4. 优先使用该方向的优先套路（占比 ≥ {settings.PRIORITY_METHOD_RATIO * 100}%）
-5. 每个标题字数 {settings.OPTIMAL_MIN_LENGTH}-{settings.OPTIMAL_MAX_LENGTH} 为最佳（{settings.MIN_TITLE_LENGTH}-{settings.OPTIMAL_MIN_LENGTH - 1} 或 {settings.OPTIMAL_MAX_LENGTH + 1}-{settings.MAX_TITLE_LENGTH} 允许但减分）
-6. 不允许标题党词、敏感内容、虚假承诺
-7. 文字必须真实差异，不允许"换一个字"的伪候选
+5. 不允许标题党词、敏感内容、虚假承诺
+6. 文字必须真实差异，不允许"换一个字"的伪候选
 
 【自检清单】
 □ 候选数量是否在 {settings.MIN_CANDIDATES}-{settings.MAX_CANDIDATES}？
 □ 是否覆盖至少 {settings.MIN_COVERAGE_METHODS} 种套路？
 □ 单套路是否未超过 {settings.MAX_SAME_METHOD} 个？
 □ 优先套路占比是否 ≥ {settings.PRIORITY_METHOD_RATIO * 100}%？
-□ 字数是否都在 {settings.MIN_TITLE_LENGTH}-{settings.MAX_TITLE_LENGTH}？
 □ 是否避免了一票否决词？
 □ 每个候选是否真实差异？"""
         
@@ -362,12 +360,9 @@ class TitleCreatorAgent(BaseAgent):
         
         for candidate in candidates:
             title = candidate.get("title", "")
-            
-            # 检查字数
+
+            # 记录字数（不限制）
             word_count = len(title)
-            if word_count < settings.MIN_TITLE_LENGTH or word_count > settings.MAX_TITLE_LENGTH:
-                logger.warning(f"标题字数不符合要求: {title} ({word_count}字)")
-                continue
             
             # 检查一票否决词
             if self._contains_anti_pattern(title):

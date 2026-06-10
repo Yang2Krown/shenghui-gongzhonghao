@@ -10,13 +10,16 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix",
-    "format": "prettier --write src/"
+    "format": "prettier --write src/",
+    "postinstall": "sed -i '' 's/text:\"H2\"/text:\"二级标题\"/g' node_modules/@wangeditor/editor/dist/index.esm.js 2>/dev/null; sed -i '' 's/t\\.title=\"H2\"/t.title=\"二级标题\"/g' node_modules/@wangeditor/editor/dist/index.esm.js 2>/dev/null; sed -i '' 's/text:\"H2\"/text:\"二级标题\"/g' node_modules/@wangeditor/editor/dist/index.js 2>/dev/null; sed -i '' 's/t\\.title=\"H2\"/t.title=\"二级标题\"/g' node_modules/@wangeditor/editor/dist/index.js 2>/dev/null; true"
   },
   "dependencies": {
     "@tiptap/extension-character-count": "^2.1.12",
     "@tiptap/extension-placeholder": "^2.1.12",
     "@tiptap/starter-kit": "^2.1.12",
     "@tiptap/vue-3": "^2.1.12",
+    "@wangeditor/editor": "^5.1.23",
+    "@wangeditor/editor-for-vue": "^5.1.12",
     "autoprefixer": "^10.4.16",
     "axios": "^1.6.2",
     "element-plus": "^2.14.0",

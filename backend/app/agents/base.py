@@ -101,9 +101,10 @@ class BaseAgent(ABC):
 
         response = await self.anthropic_client.messages.create(**kwargs)
 
-        # 提取响应文本
-        if response.content and len(response.content) > 0:
-            return response.content[0].text
+        # 提取响应文本，跳过 thinking 块
+        for block in response.content or []:
+            if getattr(block, "text", None):
+                return block.text
 
         return ""
 
@@ -129,9 +130,10 @@ class BaseAgent(ABC):
 
         response = await self.aigocode_client.messages.create(**kwargs)
 
-        # 提取响应文本
-        if response.content and len(response.content) > 0:
-            return response.content[0].text
+        # 提取响应文本，跳过 thinking 块
+        for block in response.content or []:
+            if getattr(block, "text", None):
+                return block.text
 
         return ""
     

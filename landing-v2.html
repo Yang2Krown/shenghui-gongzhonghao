@@ -1,0 +1,1035 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>公众号智能体 — AI 驱动的公众号内容创作平台</title>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+/* ── Claude Design System Tokens ─────────────────────────────── */
+:root {
+  --bg: #f5f4ed;
+  --surface: #faf9f5;
+  --surface-warm: #e8e6dc;
+  --fg: #141413;
+  --fg-2: #3d3d3a;
+  --muted: #5e5d59;
+  --meta: #87867f;
+  --border: #f0eee6;
+  --border-soft: #e8e6dc;
+  --accent: #c96442;
+  --accent-on: #faf9f5;
+  --accent-hover: #b55a3a;
+  --success: #17a34a;
+  --warn: #eab308;
+  --danger: #b53333;
+  --font-display: Georgia, "Times New Roman", serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  --text-xs: 10px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 20px;
+  --text-xl: 25px;
+  --text-2xl: 32px;
+  --text-3xl: 52px;
+  --text-4xl: 64px;
+  --leading-body: 1.6;
+  --leading-tight: 1.1;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --container-max: 1200px;
+  --section-y: 96px;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --text-4xl: 36px;
+    --text-3xl: 32px;
+    --text-2xl: 25px;
+    --section-y: 56px;
+  }
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 16px; -webkit-font-smoothing: antialiased; scroll-behavior: smooth; }
+body { font-family: var(--font-body); color: var(--fg); background: var(--bg); line-height: var(--leading-body); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); }
+img { max-width: 100%; display: block; }
+
+.container { max-width: var(--container-max); margin: 0 auto; padding: 0 24px; }
+@media (max-width: 768px) { .container { padding: 0 16px; } }
+
+/* ── Navigation ──────────────────────────────────────────────── */
+.nav {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(245, 244, 237, 0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.nav-inner {
+  max-width: var(--container-max); margin: 0 auto; padding: 0 24px;
+  height: 56px; display: flex; align-items: center; justify-content: space-between;
+}
+.nav-brand { font-family: var(--font-display); font-size: 20px; font-weight: 500; color: var(--fg); letter-spacing: -0.01em; }
+.nav-links { display: flex; align-items: center; gap: 32px; list-style: none; }
+.nav-links a { font-size: 15px; color: var(--muted); transition: color 150ms; }
+.nav-links a:hover { color: var(--fg); }
+.nav-cta {
+  font-size: 14px; font-weight: 500; color: var(--accent-on) !important;
+  background: var(--accent); padding: 8px 20px; border-radius: var(--radius-md); transition: background 150ms;
+}
+.nav-cta:hover { background: var(--accent-hover); color: var(--accent-on) !important; }
+@media (max-width: 768px) { .nav-links .nav-link-text { display: none; } .nav-links { gap: 16px; } }
+
+/* ── Sections ────────────────────────────────────────────────── */
+.section { padding: var(--section-y) 0; }
+.section-dark { background: var(--fg); color: var(--surface); }
+.section-dark .section-label { color: var(--meta); }
+.section-dark h2, .section-dark h3 { color: var(--surface); }
+.section-dark p { color: #b0aea5; }
+.section-dark .muted { color: #87867f; }
+.section-alt { background: var(--surface); }
+
+/* ── Typography ──────────────────────────────────────────────── */
+h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 500; line-height: var(--leading-tight); color: var(--fg); }
+h1 { font-size: var(--text-4xl); letter-spacing: -0.02em; line-height: 1.08; }
+h2 { font-size: var(--text-3xl); letter-spacing: -0.01em; }
+h3 { font-size: var(--text-2xl); }
+.section-label { font-family: var(--font-mono); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; color: var(--meta); margin-bottom: 16px; }
+.lead { font-size: var(--text-lg); color: var(--muted); line-height: 1.6; max-width: 640px; }
+.muted { color: var(--muted); font-size: var(--text-base); }
+
+/* ── Hero ────────────────────────────────────────────────────── */
+.hero { padding: 140px 0 100px; text-align: center; position: relative; overflow: hidden; }
+.hero h1 { max-width: 800px; margin: 0 auto 24px; }
+.hero .lead { margin: 0 auto 48px; max-width: 560px; text-align: center; }
+.hero-cta-row { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+.hero-subtle { margin-top: 24px; font-size: var(--text-sm); color: var(--meta); }
+@media (max-width: 768px) { .hero { padding: 80px 0 64px; } }
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+.btn { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-body); font-size: 16px; font-weight: 500; padding: 12px 28px; border-radius: var(--radius-md); border: none; cursor: pointer; transition: all 150ms; text-decoration: none; }
+.btn-primary { background: var(--accent); color: var(--accent-on); box-shadow: 0 0 0 1px var(--accent); }
+.btn-primary:hover { background: var(--accent-hover); color: var(--accent-on); }
+.btn-secondary { background: var(--surface-warm); color: var(--fg-2); box-shadow: 0 0 0 1px var(--border-soft); }
+.btn-secondary:hover { background: #ddd9cc; }
+
+/* ── Pain Points ─────────────────────────────────────────────── */
+.pain-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+  margin-top: 48px;
+}
+@media (max-width: 900px) { .pain-grid { grid-template-columns: 1fr; } }
+
+.pain-card {
+  padding: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color 200ms;
+}
+.pain-card:hover { border-color: var(--border-soft); }
+
+.pain-icon {
+  font-size: 28px;
+  margin-bottom: 16px;
+  display: block;
+}
+
+.pain-card h3 {
+  font-size: 22px;
+  margin-bottom: 12px;
+  color: var(--fg);
+}
+
+.pain-card p {
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.pain-vs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.pain-before {
+  font-size: 14px;
+  color: #87867f;
+  text-decoration: line-through;
+  flex: 1;
+}
+
+.pain-after {
+  font-size: 14px;
+  color: var(--accent);
+  font-weight: 500;
+  flex: 1;
+}
+
+/* ── Pipeline Cards ─────────────────────────────────────────── */
+.pipeline-cards {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 12px;
+  margin-top: 48px;
+}
+
+@media (max-width: 1100px) {
+  .pipeline-cards { grid-template-columns: repeat(4, 1fr); }
+}
+@media (max-width: 640px) {
+  .pipeline-cards { grid-template-columns: repeat(2, 1fr); }
+}
+
+.pipeline-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 24px 16px;
+  text-align: center;
+  transition: border-color 200ms, box-shadow 200ms;
+  position: relative;
+}
+
+.pipeline-card:hover {
+  border-color: var(--border-soft);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+}
+
+.pipeline-card-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 14px;
+  background: rgba(201, 100, 66, 0.08);
+}
+
+.pipeline-card-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  fill: none;
+}
+
+.pipeline-card-step {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--meta);
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.pipeline-card h4 {
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.pipeline-card p {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* connecting line */
+.pipeline-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: -8px;
+  margin-bottom: -8px;
+  padding: 0 4px;
+}
+
+.pipeline-connector span {
+  display: block;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border), var(--border-soft), var(--border));
+}
+
+/* ── Feature Grid ────────────────────────────────────────────── */
+.feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 48px; }
+@media (max-width: 900px) { .feature-grid { grid-template-columns: 1fr; } }
+.feature-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 28px; transition: box-shadow 200ms, border-color 200ms; }
+.feature-card:hover { box-shadow: 0 0 0 1px var(--border-soft), rgba(0,0,0,0.04) 0 4px 20px; border-color: var(--border-soft); }
+.feature-card h4 { font-family: var(--font-display); font-size: 20px; font-weight: 500; margin-bottom: 8px; }
+.feature-card p { font-size: 15px; color: var(--muted); line-height: 1.55; }
+.feature-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; margin-bottom: 16px; background: var(--surface-warm); color: var(--accent); }
+
+/* ── Split Section ───────────────────────────────────────────── */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
+.split-reverse { direction: rtl; }
+.split-reverse > * { direction: ltr; }
+@media (max-width: 900px) { .split { grid-template-columns: 1fr; gap: 40px; } .split-reverse { direction: ltr; } }
+.split-content h2 { margin-bottom: 20px; }
+.split-content .lead { margin-bottom: 32px; }
+
+/* ── Agent Cards ─────────────────────────────────────────────── */
+.agent-list { display: flex; flex-direction: column; gap: 16px; margin-top: 32px; }
+.agent-item { display: flex; align-items: flex-start; gap: 16px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); transition: border-color 150ms; }
+.agent-item:hover { border-color: var(--border-soft); }
+.agent-badge { font-family: var(--font-mono); font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 6px; white-space: nowrap; flex-shrink: 0; }
+.agent-badge-a { background: #f0e6df; color: #9c5a3a; }
+.agent-badge-b { background: #e6eadf; color: #4a6b3a; }
+.agent-badge-c { background: #dfe6ea; color: #3a5a6b; }
+.agent-badge-d { background: #eadfdf; color: #6b3a3a; }
+.agent-badge-e { background: #eae6df; color: #6b5a3a; }
+.agent-item-text h4 { font-family: var(--font-body); font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.agent-item-text p { font-size: 14px; color: var(--muted); line-height: 1.5; }
+
+/* ── Dark Feature Grid ───────────────────────────────────────── */
+.dark-features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 32px; margin-top: 48px; }
+@media (max-width: 768px) { .dark-features { grid-template-columns: 1fr; } }
+.dark-feature { padding: 32px; border: 1px solid #30302e; border-radius: var(--radius-sm); transition: border-color 200ms; }
+.dark-feature:hover { border-color: #5e5d59; }
+.dark-feature h3 { font-size: 22px; margin-bottom: 12px; color: var(--surface); }
+.dark-feature p { font-size: 15px; line-height: 1.6; }
+.dark-feature-num { font-family: var(--font-display); font-size: 48px; font-weight: 500; color: var(--accent); line-height: 1; margin-bottom: 8px; }
+
+/* ── Persona Grid ────────────────────────────────────────────── */
+.persona-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 32px; }
+@media (max-width: 768px) { .persona-grid { grid-template-columns: repeat(2, 1fr); } }
+.persona-card { text-align: center; padding: 24px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.persona-emoji { font-size: 32px; margin-bottom: 12px; display: block; }
+.persona-card h4 { font-family: var(--font-body); font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.persona-card p { font-size: 13px; color: var(--meta); }
+
+/* ── Score Bar ───────────────────────────────────────────────── */
+.scores { display: flex; flex-direction: column; gap: 12px; margin-top: 24px; }
+.score-row { display: flex; align-items: center; gap: 12px; }
+.score-label { font-size: 14px; color: var(--muted); width: 100px; flex-shrink: 0; text-align: right; }
+.score-track { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.score-fill { height: 100%; border-radius: 4px; background: var(--accent); transition: width 600ms cubic-bezier(0.2, 0, 0, 1); }
+.score-value { font-family: var(--font-mono); font-size: 13px; color: var(--meta); width: 36px; }
+
+/* ── Stats Row ───────────────────────────────────────────────── */
+.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 32px; margin-top: 64px; padding-top: 48px; border-top: 1px solid var(--border); }
+@media (max-width: 768px) { .stats-row { grid-template-columns: repeat(2, 1fr); gap: 24px; } }
+.stat-item { text-align: center; }
+.stat-num { font-family: var(--font-display); font-size: 48px; font-weight: 500; color: var(--accent); line-height: 1; }
+.stat-label { font-size: 14px; color: var(--meta); margin-top: 8px; }
+
+/* ── CTA Section ─────────────────────────────────────────────── */
+.cta-section { text-align: center; padding: 120px 0; }
+.cta-section h2 { max-width: 700px; margin: 0 auto 20px; }
+.cta-section .lead { margin: 0 auto 40px; text-align: center; }
+
+/* ── Footer ──────────────────────────────────────────────────── */
+.footer { padding: 40px 0; border-top: 1px solid var(--border); text-align: center; }
+.footer p { font-size: 13px; color: var(--meta); }
+
+/* ── Tool Tags ───────────────────────────────────────────────── */
+.tool-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.tool-tag { font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border-soft); color: var(--muted); background: var(--surface); transition: all 150ms; }
+.tool-tag:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Code-style label ───────────────────────────────────────── */
+.code-label { font-family: var(--font-mono); font-size: 13px; color: var(--accent); background: rgba(201, 100, 66, 0.08); padding: 4px 12px; border-radius: 6px; display: inline-block; margin-bottom: 20px; }
+
+/* ══════════════════════════════════════════════════════════════
+   ANIMATION EFFECTS (inspired by react-bits)
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── BlurText: 逐词模糊淡入 ─────────────────────────────────── */
+.blur-word {
+  display: inline-block;
+  filter: blur(10px);
+  opacity: 0;
+  transform: translateY(20px);
+  transition: filter 0.6s cubic-bezier(0.2, 0, 0, 1),
+              opacity 0.6s cubic-bezier(0.2, 0, 0, 1),
+              transform 0.6s cubic-bezier(0.2, 0, 0, 1);
+  will-change: filter, opacity, transform;
+}
+.blur-word.visible {
+  filter: blur(0px);
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── ShinyText: 光泽扫过效果 ────────────────────────────────── */
+.shiny-text {
+  background: linear-gradient(
+    120deg,
+    var(--fg) 0%,
+    var(--fg) 35%,
+    var(--accent) 50%,
+    var(--fg) 65%,
+    var(--fg) 100%
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shiny-sweep 4s ease-in-out infinite;
+}
+@keyframes shiny-sweep {
+  0% { background-position: 200% center; }
+  40%, 100% { background-position: -100% center; }
+}
+
+/* ── StarBorder: CTA 流光边框 ───────────────────────────────── */
+.star-border {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+}
+.star-border::before,
+.star-border::after {
+  content: '';
+  position: absolute;
+  width: 300%;
+  height: 50%;
+  border-radius: 50%;
+  opacity: 0.5;
+  pointer-events: none;
+}
+.star-border::before {
+  bottom: -12px;
+  right: -250%;
+  background: radial-gradient(circle, var(--accent) 0%, transparent 10%);
+  animation: star-bottom 6s linear infinite alternate;
+}
+.star-border::after {
+  top: -12px;
+  left: -250%;
+  background: radial-gradient(circle, var(--accent) 0%, transparent 10%);
+  animation: star-top 6s linear infinite alternate;
+}
+.star-border-inner {
+  position: relative;
+  z-index: 1;
+  background: var(--accent);
+  color: var(--accent-on);
+  padding: 12px 28px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 500;
+  text-decoration: none;
+  display: inline-block;
+  transition: background 150ms;
+  cursor: pointer;
+}
+.star-border-inner:hover {
+  background: var(--accent-hover);
+  color: var(--accent-on);
+}
+@keyframes star-bottom {
+  0% { transform: translate(0%, 0%); opacity: 0.6; }
+  100% { transform: translate(-66%, 0%); opacity: 0; }
+}
+@keyframes star-top {
+  0% { transform: translate(0%, 0%); opacity: 0.6; }
+  100% { transform: translate(66%, 0%); opacity: 0; }
+}
+
+/* ── Silk-like: 柔光流动背景 ──────────────────────────────── */
+.silk-hero {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+}
+.silk-hero::before {
+  content: '';
+  position: absolute;
+  inset: -50%;
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(201, 100, 66, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(201, 100, 66, 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 80%, rgba(232, 230, 220, 0.3) 0%, transparent 50%);
+  animation: silk-drift 20s ease-in-out infinite alternate;
+}
+.silk-hero::after {
+  content: '';
+  position: absolute;
+  inset: -50%;
+  background:
+    radial-gradient(ellipse at 70% 60%, rgba(201, 100, 66, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 30% 30%, rgba(240, 238, 230, 0.4) 0%, transparent 50%);
+  animation: silk-drift 25s ease-in-out infinite alternate-reverse;
+}
+@keyframes silk-drift {
+  0% { transform: translate(0%, 0%) rotate(0deg) scale(1); }
+  33% { transform: translate(3%, -2%) rotate(1deg) scale(1.02); }
+  66% { transform: translate(-2%, 3%) rotate(-0.5deg) scale(0.98); }
+  100% { transform: translate(1%, -1%) rotate(0.5deg) scale(1.01); }
+}
+
+/* ── Fade-up (enhanced with stagger) ────────────────────────── */
+.fade-up {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.6s cubic-bezier(0.2, 0, 0, 1), transform 0.6s cubic-bezier(0.2, 0, 0, 1);
+}
+.fade-up.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Pipeline card stagger animation ──────────────────────── */
+.pipeline-card {
+  opacity: 0;
+  transform: translateY(16px);
+  animation: pipe-in 0.5s cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+.pipeline-card:nth-child(1) { animation-delay: 0.05s; }
+.pipeline-card:nth-child(2) { animation-delay: 0.1s; }
+.pipeline-card:nth-child(3) { animation-delay: 0.15s; }
+.pipeline-card:nth-child(4) { animation-delay: 0.2s; }
+.pipeline-card:nth-child(5) { animation-delay: 0.25s; }
+.pipeline-card:nth-child(6) { animation-delay: 0.3s; }
+.pipeline-card:nth-child(7) { animation-delay: 0.35s; }
+@keyframes pipe-in {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Score bar animate-in ───────────────────────────────────── */
+.score-fill {
+  width: 0 !important;
+  transition: width 0.8s cubic-bezier(0.2, 0, 0, 1);
+}
+.scores-animated .score-fill { width: var(--target-width) !important; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ══════════════════════════════════════════════════════════════
+   ANIMATION COMPONENTS (inspired by react-bits)
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── BlurText: 逐词模糊淡入 ─────────────────────────────────── */
+const BlurText = ({ text, delay = 80, className = '', as: Tag = 'span' }) => {
+  const ref = useRef(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const io = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setInView(true); io.disconnect(); } },
+      { threshold: 0.2 }
+    );
+    io.observe(ref.current);
+    return () => io.disconnect();
+  }, []);
+
+  const chars = text.split('');
+
+  return (
+    <Tag ref={ref} className={className} style={{ display: 'inline' }}>
+      {chars.map((char, i) => (
+        <span
+          key={i}
+          className={`blur-word${inView ? ' visible' : ''}`}
+          style={{ transitionDelay: `${i * delay}ms` }}
+        >
+          {char === ' ' ? '\u00A0' : char}
+        </span>
+      ))}
+    </Tag>
+  );
+};
+
+/* ── ShinyText: 光泽扫过 ────────────────────────────────────── */
+const ShinyText = ({ text, className = '' }) => (
+  <span className={`shiny-text ${className}`}>{text}</span>
+);
+
+/* ── StarBorder: 流光边框 CTA ───────────────────────────────── */
+const StarBorder = ({ href = '#', children, className = '' }) => (
+  <span className={`star-border ${className}`}>
+    <a href={href} className="star-border-inner">{children}</a>
+  </span>
+);
+
+/* ══════════════════════════════════════════════════════════════
+   SCROLL ANIMATION HOOK
+   ══════════════════════════════════════════════════════════════ */
+const useFadeUp = () => {
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const els = document.querySelectorAll('.fade-up');
+    const io = new IntersectionObserver(
+      entries => entries.forEach(e => {
+        if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); }
+      }),
+      { threshold: 0.15 }
+    );
+    els.forEach(el => io.observe(el));
+    return () => io.disconnect();
+  }, []);
+};
+
+const useScoreAnimation = () => {
+  useEffect(() => {
+    const scores = document.querySelector('.scores');
+    if (!scores) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          scores.classList.add('scores-animated');
+          io.disconnect();
+        }
+      },
+      { threshold: 0.3 }
+    );
+    io.observe(scores);
+    return () => io.disconnect();
+  }, []);
+};
+
+/* ══════════════════════════════════════════════════════════════
+   PAGE COMPONENTS
+   ══════════════════════════════════════════════════════════════ */
+
+const Nav = () => (
+  <nav className="nav">
+    <div className="nav-inner">
+      <a href="#" className="nav-brand">
+        <ShinyText text="公众号智能体" />
+      </a>
+      <ul className="nav-links">
+        <li><a href="#pain" className="nav-link-text">痛点</a></li>
+        <li><a href="#pipeline" className="nav-link-text">工作流</a></li>
+        <li><a href="#topics" className="nav-link-text">选题挖掘</a></li>
+        <li><a href="#content" className="nav-link-text">正文生成</a></li>
+        <li><a href="#tools" className="nav-link-text">创作工具</a></li>
+        <li><a href="#cta" className="nav-cta">开始使用</a></li>
+      </ul>
+    </div>
+  </nav>
+);
+
+const Hero = () => (
+  <section className="section hero">
+    <div className="silk-hero"></div>
+    <div className="container">
+      <span className="code-label">AI · 自动化 · 公众号</span>
+      <h1>
+        <BlurText text="从选题到发布，AI 全程帮你搞定公众号" delay={40} />
+      </h1>
+      <p className="lead">
+        你只负责审稿和发布——信息采集、选题策划、大纲撰写、正文创作、标题打磨，全部由 AI 自动完成。
+      </p>
+      <div className="hero-cta-row">
+        <StarBorder href="#cta">开始使用 →</StarBorder>
+        <a href="#pipeline" className="btn btn-secondary">了解工作流</a>
+      </div>
+      <p className="hero-subtle">DeepSeek / Kimi / Claude 多模型驱动</p>
+    </div>
+  </section>
+);
+
+/* ── Pain Points (NEW) ──────────────────────────────────────── */
+const PainPoints = () => (
+  <section className="section section-alt" id="pain">
+    <div className="container">
+      <div style={{ textAlign: 'center', maxWidth: 700, margin: '0 auto' }}>
+        <div className="section-label">你是否也遇到这些问题</div>
+        <h2>做公众号，<br />最难的不是写，而是坚持</h2>
+      </div>
+      <div className="pain-grid">
+        {[
+          ['😩', '选题靠灵感', '每天刷 2 小时热点，还是想不出写什么。好不容易选了个题，写到一半发现别人已经写烂了。', 'AI 从海量信息中自动发现好选题', '从 100 条信息中过滤 90 条', '从 1 条信息中衍生 5 个好选题'],
+          ['😩', '写作太耗时', '一篇 2000 字的文章，从构思到完稿要 3-4 小时。写完还要反复修改，去 AI 味、加金句、查事实。', '5 步 AI 流水线 20 分钟出稿', '一篇稿子磨 4 小时', 'AI 出初稿 + 你审稿 20 分钟'],
+          ['😩', '标题想破头', '花 1 小时想 10 个标题，最后还是选了第一个。不知道哪个标题点击率高，全凭感觉。', 'AI 生成 + 多维评分 + 自动优化', '凭感觉选标题', 'AI 评分预测 + 推荐 Top 3'],
+        ].map(([icon, title, desc, solution, before, after], i) => (
+          <div className="pain-card fade-up" key={i}>
+            <span className="pain-icon">{icon}</span>
+            <h3>{title}</h3>
+            <p>{desc}</p>
+            <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 14, color: 'var(--accent)', fontWeight: 500, marginBottom: 8 }}>
+                ✓ {solution}
+              </div>
+              <div className="pain-vs">
+                <span className="pain-before">{before}</span>
+                <span style={{ color: '#5e5d59', flexShrink: 0 }}>→</span>
+                <span className="pain-after">{after}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+);
+
+const PipelineStep = ({ num, title, desc, icon }) => (
+  <div className="pipeline-card fade-up">
+    <div className="pipeline-card-icon">{icon}</div>
+    <div className="pipeline-card-step">STEP {num}</div>
+    <h4>{title}</h4>
+    <p>{desc}</p>
+  </div>
+);
+
+const Pipeline = () => (
+  <section className="section section-alt" id="pipeline">
+    <div className="container">
+      <div className="section-label">全流程自动化</div>
+      <h2><BlurText text="七步流水线，从信息到成品" delay={50} /></h2>
+      <p className="lead" style={{ marginBottom: 0 }}>
+        不是简单的 AI 写作工具，而是一套完整的内容生产流水线。
+      </p>
+      <div className="pipeline-cards">
+        <PipelineStep num="01" title="信息采集" desc="自动从 20+ 渠道采集热点信息"
+          icon={<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M4 9h16"/><path d="M9 4v16"/></svg>} />
+        <PipelineStep num="02" title="智能归类" desc="AI 识别相似信息，自动归并整理"
+          icon={<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 6.5l3 3.5"/><path d="M17 6.5l-3 3.5"/><path d="M7 17.5l3-3.5"/><path d="M17 17.5l-3-3.5"/></svg>} />
+        <PipelineStep num="03" title="选题挖掘" desc="从每条信息衍生多个好选题并评分"
+          icon={<svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01z"/></svg>} />
+        <PipelineStep num="04" title="大纲生成" desc="多个 AI 角色协作打磨文章框架"
+          icon={<svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 10h16"/><path d="M4 14h10"/><path d="M4 18h6"/></svg>} />
+        <PipelineStep num="05" title="标题优化" desc="多轮预测评分，推荐最佳标题"
+          icon={<svg viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>} />
+        <PipelineStep num="06" title="正文创作" desc="5 步写作流水线，自动去 AI 味"
+          icon={<svg viewBox="0 0 24 24"><path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5z"/></svg>} />
+        <PipelineStep num="07" title="编辑发布" desc="富文本编辑器 + 一键发布公众号"
+          icon={<svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>} />
+      </div>
+    </div>
+  </section>
+);
+
+const ScoreRow = ({ label, pct, weight }) => (
+  <div className="score-row">
+    <span className="score-label">{label}</span>
+    <div className="score-track">
+      <div className="score-fill" style={{ '--target-width': pct + '%' }}></div>
+    </div>
+    <span className="score-value">{weight}</span>
+  </div>
+);
+
+const TopicMining = () => {
+  useScoreAnimation();
+
+  return (
+    <section className="section" id="topics">
+      <div className="container">
+        <div className="split">
+          <div className="split-content fade-up">
+            <div className="section-label">选题挖掘</div>
+            <h2>不是过滤选题，<br />而是创造选题</h2>
+            <p className="lead">
+              传统做法从 100 条信息里过滤掉 90 条，我们从 1 条信息衍生出 5 个好选题。创意引擎负责发散，评分系统负责筛选。
+            </p>
+            <div className="agent-list">
+              <div className="agent-item">
+                <span className="agent-badge agent-badge-a">创意</span>
+                <div className="agent-item-text">
+                  <h4>选题创意引擎</h4>
+                  <p>基于多种爆款套路，从单条信息衍生 3-8 个候选选题</p>
+                </div>
+              </div>
+              <div className="agent-item">
+                <span className="agent-badge agent-badge-b">评分</span>
+                <div className="agent-item-text">
+                  <h4>智能评分系统</h4>
+                  <p>严格筛选 + 多维度加权评分，确保每个推荐选题都有数据支撑</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="fade-up">
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 32 }}>
+              <div className="section-label" style={{ marginBottom: 20 }}>多维评分体系</div>
+              <div className="scores">
+                <ScoreRow label="痛点直击度" pct="85%" weight="20%" />
+                <ScoreRow label="价值密度" pct="85%" weight="20%" />
+                <ScoreRow label="受众适配度" pct="80%" weight="20%" />
+                <ScoreRow label="传播触发器" pct="60%" weight="15%" />
+                <ScoreRow label="差异化" pct="60%" weight="15%" />
+                <ScoreRow label="新鲜度" pct="40%" weight="10%" />
+              </div>
+              <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
+                <div className="section-label">多视角独立评审</div>
+                <div className="persona-grid" style={{ marginTop: 12 }}>
+                  {[
+                    ['🔬', '技术专家', '技术深度'],
+                    ['📱', '传播达人', '传播敏感度'],
+                    ['🎯', '产品经理', '用户价值'],
+                    ['📊', '运营专家', '数据表现']
+                  ].map(([emoji, name, desc], i) => (
+                    <div className="persona-card" key={i}>
+                      <span className="persona-emoji">{emoji}</span>
+                      <h4>{name}</h4>
+                      <p>{desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};
+
+const ContentGeneration = () => (
+  <section className="section section-dark" id="content">
+    <div className="container">
+      <div className="section-label">正文生成</div>
+      <h2><BlurText text="五步打磨，写出不像 AI 的文章" delay={35} /></h2>
+      <p className="lead" style={{ color: '#b0aea5' }}>
+        每篇文章经过 5 个专业模块逐层打磨——从初稿到金句，从事实核查到去除 AI 痕迹，最终输出可直接发布的公众号正文。
+      </p>
+      <div className="dark-features">
+        {[
+          ['1', '正文创作', '一次性生成 2500-3000 字正文，风格锁定确保全文语气统一，严格按大纲展开。'],
+          ['2', '金句催化', '识别文章中的关键位置，生成 3-5 个可独立传播的金句，分布在开头、中段和结尾。'],
+          ['3', '事实整理', '提取文章中的关键数据和事实，为后续核实做准备，保护重要数据不被篡改。'],
+          ['4', '联网核实', '自动联网搜索验证文章中的事实，发现错误自动修正，确保内容真实可靠。']
+        ].map(([num, title, desc], i) => (
+          <div className="dark-feature fade-up" key={i}>
+            <div className="dark-feature-num">{num}</div>
+            <h3>{title}</h3>
+            <p>{desc}</p>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 32, padding: 32, border: '1px solid #30302e', borderRadius: 'var(--radius-sm)' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24, flexWrap: 'wrap' }}>
+          <div className="dark-feature-num" style={{ marginBottom: 0 }}>5</div>
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <h3 style={{ marginBottom: 12 }}>去除 AI 痕迹</h3>
+            <p style={{ maxWidth: 640 }}>
+              按照严格检查清单全文扫描——去除套话、消除机器人口吻、补充真实情感、优化自然表达。改写后字数变化控制在 ±10% 以内，确保文章读起来像人写的。
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            {[
+              ['🚫 一票否决', '#b53333', '#e87070'],
+              ['⚠️ 重点关注', '#eab308', '#f0d060'],
+              ['⚪ 一般优化', '#5e5d59', '#b0aea5'],
+              ['🔵 细节打磨', '#30302e', '#87867f']
+            ].map(([text, border, color], i) => (
+              <span key={i} style={{ fontSize: 13, padding: '6px 14px', borderRadius: 999, border: `1px solid ${border}`, color }}>{text}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+);
+
+const TitleGeneration = () => (
+  <section className="section section-alt" id="titles">
+    <div className="container">
+      <div className="split split-reverse">
+        <div className="split-content fade-up">
+          <div className="section-label">标题生成</div>
+          <h2>四个角色协作，<br />只为一个好标题</h2>
+          <p className="lead">
+            多种标题风格 × 多维评分 × 点击预测 × 智能自检。评分不达标自动优化，直到产出满意的标题。
+          </p>
+          <div className="agent-list">
+            {[
+              ['agent-badge-a', '创', '标题创作', '生成 10-15 个候选标题，覆盖多种爆款风格'],
+              ['agent-badge-b', '筛', '标题筛选', '多维度评分，严格筛选出 Top 5 候选'],
+              ['agent-badge-c', '测', '点击预测', '模拟读者视角，预测哪个标题更吸引点击'],
+              ['agent-badge-d', '定', '最终推荐', '综合评分输出 Top 3，附推荐理由和改进方向']
+            ].map(([badge, letter, name, desc], i) => (
+              <div className="agent-item" key={i}>
+                <span className={`agent-badge ${badge}`}>{letter}</span>
+                <div className="agent-item-text">
+                  <h4>{name}</h4>
+                  <p>{desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="fade-up">
+          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 32 }}>
+            <div className="section-label">智能自检机制</div>
+            <div style={{ marginTop: 20 }}>
+              {[
+                ['1', '首轮生成', '创作 → 筛选 → 预测 → 推荐，四步完成', 'var(--accent)', 'var(--accent-on)'],
+                ['2', '自检评估', 'Top 3 综合评分达标才通过', 'var(--surface-warm)', 'var(--fg-2)'],
+                ['3', '智能优化', '未达标则携带改进方向重新生成', 'var(--surface-warm)', 'var(--fg-2)'],
+                ['✓', '输出 Top 3', '附评分、预测、推荐理由', '#17a34a20', 'var(--success)']
+              ].map(([num, title, desc, bg, fg], i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: i < 3 ? 20 : 0 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: bg, color: fg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 600, flexShrink: 0 }}>{num}</div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{title}</div>
+                    <div style={{ fontSize: 14, color: 'var(--muted)' }}>{desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+);
+
+const Architecture = () => (
+  <section className="section">
+    <div className="container">
+      <div style={{ textAlign: 'center', maxWidth: 700, margin: '0 auto' }}>
+        <div className="section-label">智能架构</div>
+        <h2>每个模块只做一件事，<br />做到最好</h2>
+        <p className="lead" style={{ margin: '0 auto' }}>
+          15 个专业 AI 模块分工协作，各司其职。模块独立可测、可替换、可升级，确保每个环节都达到最佳效果。
+        </p>
+      </div>
+      <div className="stats-row">
+        {[
+          ['15+', '专业模块'],
+          ['5', '核心流水线'],
+          ['4', 'AI 模型'],
+          ['∞', '可扩展']
+        ].map(([num, label], i) => (
+          <div className="stat-item" key={i}>
+            <div className="stat-num">{num}</div>
+            <div className="stat-label">{label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+);
+
+const Tools = () => (
+  <section className="section" id="tools">
+    <div className="container">
+      <div style={{ textAlign: 'center', maxWidth: 700, margin: '0 auto 48px' }}>
+        <div className="section-label">创作工具箱</div>
+        <h2><BlurText text="不止于生成，更要打磨到可发布" delay={40} /></h2>
+        <p className="lead" style={{ margin: '0 auto' }}>
+          从文案润色到跨平台适配，从富文本编辑器到一键发布——完整的内容后期工具链。
+        </p>
+      </div>
+      <div className="feature-grid">
+        {[
+          ['✏️', '公众号编辑器', '专为微信排版设计的编辑器，自动适配 16px 正文、标题样式、红字高亮等公众号排版规范。'],
+          ['🔄', '文案润色', '对已有文章进行金句补充、事实核查和去除 AI 痕迹改写，让旧内容焕发新生。'],
+          ['📝', '正文续写', '从已有内容无缝续写，保持风格一致性。适合长文分批创作或补充遗漏内容。'],
+          ['🔀', '内容转写', '将公众号长文转化为不同平台的格式和风格，适配不同受众的阅读习惯。'],
+          ['📋', '内容仿写', '分析参考文章的结构、风格和套路，生成同类型但原创的新内容。'],
+          ['📕', '公众号转小红书', '自动将公众号长文拆解为小红书图文格式，含标签提取和封面建议，支持一键发布。']
+        ].map(([icon, title, desc], i) => (
+          <div className="feature-card fade-up" key={i}>
+            <div className="feature-icon">{icon}</div>
+            <h4>{title}</h4>
+            <p>{desc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+);
+
+const Sources = () => (
+  <section className="section section-dark">
+    <div className="container">
+      <div style={{ textAlign: 'center', maxWidth: 700, margin: '0 auto 48px' }}>
+        <div className="section-label">信息源</div>
+        <h2>全网信息，<br />一个入口采集</h2>
+        <p className="lead" style={{ color: '#b0aea5', margin: '0 auto' }}>
+          支持 10+ 种平台信息源，从 RSS 订阅到微信搜索，从 GitHub 热榜到抖音热搜——自动抓取、智能归类、去重合并。
+        </p>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center' }}>
+        {['RSS 订阅', '微信搜索', 'GitHub 热榜', 'Hacker News', '知乎', '抖音', '小红书', 'Reddit', 'V2EX', '今日热榜', '网页采集', '公众号爆文'].map(tag => (
+          <span className="tool-tag" key={tag} style={{ borderColor: '#5e5d59', color: '#b0aea5' }}>{tag}</span>
+        ))}
+      </div>
+      <div style={{ marginTop: 48, paddingTop: 32, borderTop: '1px solid #30302e' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 32, textAlign: 'center' }}>
+          {[
+            ['智能去重', '相似内容自动合并'],
+            ['自动归类', '同类信息智能聚组'],
+            ['AI 提炼', '关键信息自动提取']
+          ].map(([num, label], i) => (
+            <div key={i}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 500, color: 'var(--accent)', marginBottom: 4 }}>{num}</div>
+              <div style={{ fontSize: 14, color: '#87867f' }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </section>
+);
+
+const CTA = () => (
+  <section className="section section-alt cta-section" id="cta">
+    <div className="container">
+      <h2>让 AI 处理繁琐流程，<br />你专注于内容本身</h2>
+      <p className="lead">
+        从海量信息中提炼选题，到打磨出可发布的公众号文章——全流程自动化，你只做最终审核。
+      </p>
+      <div className="hero-cta-row">
+        <StarBorder href="#">免费试用 →</StarBorder>
+        <a href="#" className="btn btn-secondary">查看文档</a>
+      </div>
+    </div>
+  </section>
+);
+
+const Footer = () => (
+  <footer className="footer">
+    <div className="container">
+      <p>公众号智能体 · AI 驱动的公众号内容创作平台</p>
+    </div>
+  </footer>
+);
+
+/* ══════════════════════════════════════════════════════════════
+   APP
+   ══════════════════════════════════════════════════════════════ */
+const App = () => {
+  useFadeUp();
+
+  return (
+    <>
+      <Nav />
+      <Hero />
+      <PainPoints />
+      <Pipeline />
+      <TopicMining />
+      <ContentGeneration />
+      <TitleGeneration />
+      <Architecture />
+      <Tools />
+      <Sources />
+      <CTA />
+      <Footer />
+    </>
+  );
+};
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+
+</body>
+</html>

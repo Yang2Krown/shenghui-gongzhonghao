@@ -181,25 +181,67 @@ async def _run_polish_compare_background(
 ):
     """后台执行多模型对比润色任务"""
     try:
-        from app.services.content_polish.orchestrator import polish_content
+        from app.services.content_polish.orchestrator import (
+            run_polish_factcheck,
+            run_gold_sentences,
+            finalize_polish,
+        )
         from app.services.content_polish.schemas import PolishInput
 
         inp = PolishInput(text=text, title=title or None)
+
+        # ── 共享前置：仅事实核查 D + 联网纠错 E 只跑一次 ──
+        # 金句不共享：各方案各自催化金句 + 改写；只有事实核查/联网纠错复用同一份结果。
+        await progress_store.push(run_id, {
+            "event": "step_start",
+            "data": {
+                "step": 0,
+                "agent": "多模型润色",
+                "action": "正在核查事实、联网纠错（共享）...",
+                "avatar": "/agents/content-d.png",
+            },
+        })
+        try:
+            # 共享前置固定用快的 deepseek 跑事实核查（E 始终用 Kimi），不受全局默认变动影响
+            agent_a_output, cg_input, agent_d_output, agent_e_output = await asyncio.wait_for(
+                run_polish_factcheck(inp, provider="deepseek"), timeout=300
+            )
+        except Exception as e:
+            logger.error(f"多模型对比前置流水线失败: {e}", exc_info=True)
+            await progress_store.push(run_id, {
+                "event": "error",
+                "data": {"message": f"前置处理失败：{e}"},
+            })
+            await track_fail(run_id, str(e))
+            return
 
         await progress_store.push(run_id, {
             "event": "step_start",
             "data": {
                 "step": 0,
                 "agent": "多模型润色",
-                "action": f"正在用 {len(providers)} 个模型并行润色...",
-                "avatar": "/agents/content-b.png",
+                "action": f"正在用 {len(providers)} 个方案分别催化金句并改写...",
+                "avatar": "/agents/content-c.png",
             },
         })
 
+        # 单个方案（金句 B + 改写 C）的硬超时上限（秒），防止某个 provider 卡死拖垮整个任务
+        PER_PROVIDER_TIMEOUT = 300
+
         async def polish_with_provider(provider_name: str):
-            """用指定 provider 运行润色流水线"""
+            """用指定 provider 各自催化金句 + 改写（事实核查已共享，带硬超时）"""
             try:
-                output = await polish_content(inp, provider=provider_name)
+                async def _b_then_c():
+                    # 各方案各自催化金句，再用共享的事实核查结果做改写
+                    agent_b_output = await run_gold_sentences(
+                        inp, agent_a_output, provider=provider_name
+                    )
+                    return await finalize_polish(
+                        (agent_a_output, cg_input, agent_b_output, agent_d_output, agent_e_output),
+                        provider=provider_name,
+                    )
+
+                output = await asyncio.wait_for(_b_then_c(), timeout=PER_PROVIDER_TIMEOUT)
                 return provider_name, {
                     "success": True,
                     "final_text": output.polished_text,
@@ -215,6 +257,12 @@ async def _run_polish_compare_background(
                     "agent_d_error_count": output.agent_d_error_count,
                     "agent_e_correction_count": output.agent_e_correction_count,
                 }
+            except asyncio.TimeoutError:
+                logger.error(f"Provider {provider_name} 润色超时（>{PER_PROVIDER_TIMEOUT}s）")
+                return provider_name, {
+                    "success": False,
+                    "error": f"润色超时（超过 {PER_PROVIDER_TIMEOUT} 秒），该模型响应过慢，请稍后重试",
+                }
             except Exception as e:
                 logger.error(f"Provider {provider_name} 润色失败: {e}")
                 return provider_name, {
@@ -222,12 +270,24 @@ async def _run_polish_compare_background(
                     "error": str(e),
                 }
 
-        tasks = [polish_with_provider(p) for p in providers]
-        results = await asyncio.gather(*tasks)
-
+        # 用 as_completed：哪个模型先跑完就先推进度，避免被最慢的拖着干等
         comparison = {"models": {}}
-        for provider_name, result in results:
+        tasks = [asyncio.create_task(polish_with_provider(p)) for p in providers]
+        done_count = 0
+        for coro in asyncio.as_completed(tasks):
+            provider_name, result = await coro
             comparison["models"][provider_name] = result
+            done_count += 1
+            ok = "✓" if result.get("success") else "✗"
+            await progress_store.push(run_id, {
+                "event": "step_start",
+                "data": {
+                    "step": 0,
+                    "agent": "多模型润色",
+                    "action": f"已完成 {done_count}/{len(providers)} 个模型（{provider_name} {ok}）...",
+                    "avatar": "/agents/content-b.png",
+                },
+            })
 
         await progress_store.push(run_id, {
             "event": "step_done",

@@ -725,8 +725,25 @@ const startCreation = (candidate) => {
 .source-scroll {
   flex: 1;
   min-height: 0;
+  /* 默认只显示约 2.5 条，更多原文滚动查看 */
+  max-height: 166px;
   overflow-y: auto;
   padding-right: 4px;
+}
+
+/* 原文来源滚动条：细窄、低调 */
+.source-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.source-scroll::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 3px;
+}
+.source-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-4);
+}
+.source-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* ===== 挖掘进度（内联） ===== */

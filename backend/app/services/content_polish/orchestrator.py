@@ -175,34 +175,26 @@ def _update_gold_sentences_for_rewritten_text(
     return updated
 
 
-async def polish_content(
+# 前置流水线产物（B/D/E 的结果），供单模型和多模型对比共享
+PolishPrefix = tuple  # (agent_a_output, cg_input, agent_b_output, agent_d_output, agent_e_output)
+
+
+async def run_polish_prefix(
     inp: PolishInput,
-    progress_callback: Optional[Callable] = None,
     provider: Optional[str] = None,
-) -> PolishOutput:
-    """文案润色主流程：Agent B → D → E → C。
+    progress_callback: Optional[Callable] = None,
+) -> PolishPrefix:
+    """运行润色前置流水线：构造虚拟 A → Agent B → D → E。
 
-    从用户文本构造虚拟 AgentAOutput，然后依次运行 4 个 Agent。
-
-    Args:
-        inp: 润色输入（用户文本 + 可选标题）
-        progress_callback: 进度回调
-
-    Returns:
-        PolishOutput: 润色后文本 + 金句 + 纠错报告 + 改写报告
+    这部分与「用哪个模型改写」无关（Agent E 始终用 Kimi），
+    多模型对比时只需跑一次共享，避免把最慢的联网纠错重复跑多遍。
     """
-    start_time = time.time()
     title = inp.title or "文案润色"
-    logger.info(f"[文案润色] 开始，标题: {title}，原始字数: {len(inp.text)}")
+    logger.info(f"[文案润色] 前置流水线开始，标题: {title}，原始字数: {len(inp.text)}")
 
-    # ──────────────────────────────────────────
-    # 构造虚拟 AgentAOutput + ContentGenerationInput
-    # ──────────────────────────────────────────
     agent_a_output, cg_input = _build_virtual_agent_a_output(inp.text, inp.title)
 
-    # ──────────────────────────────────────────
     # Step 1: Agent B — 金句催化员
-    # ──────────────────────────────────────────
     logger.info("[文案润色] Step 1/4: Agent B 金句催化")
     if progress_callback:
         await progress_callback({
@@ -224,16 +216,13 @@ async def polish_content(
         logger.error(f"[文案润色] Agent B 失败: {e}")
         raise RuntimeError(f"文案润色失败（Agent B 金句催化）: {e}") from e
 
-    # 清理金句中的不必要标点符号
     for gs in agent_b_output.sentences:
         gs.content = _clean_punctuation(gs.content)
 
     if progress_callback:
         await progress_callback({"event": "step_done", "data": {"step": 1, "agent": "Agent B"}})
 
-    # ──────────────────────────────────────────
     # Step 2: Agent D — 事实总结员
-    # ──────────────────────────────────────────
     logger.info("[文案润色] Step 2/4: Agent D 事实性错误扫描")
     if progress_callback:
         await progress_callback({
@@ -259,9 +248,7 @@ async def polish_content(
     if progress_callback:
         await progress_callback({"event": "step_done", "data": {"step": 2, "agent": "Agent D"}})
 
-    # ──────────────────────────────────────────
     # Step 3: Agent E — Kimi 联网纠错员
-    # ──────────────────────────────────────────
     logger.info("[文案润色] Step 3/4: Agent E 联网纠错")
     if progress_callback:
         await progress_callback({
@@ -287,9 +274,113 @@ async def polish_content(
     if progress_callback:
         await progress_callback({"event": "step_done", "data": {"step": 3, "agent": "Agent E"}})
 
-    # ──────────────────────────────────────────
+    return (agent_a_output, cg_input, agent_b_output, agent_d_output, agent_e_output)
+
+
+async def run_polish_factcheck(
+    inp: PolishInput,
+    provider: Optional[str] = None,
+    progress_callback: Optional[Callable] = None,
+) -> tuple:
+    """共享前置（仅事实核查 D + 联网纠错 E）。
+
+    金句不参与这一步（用空清单），因此可在多模型对比时只跑一次共享：
+    各方案的金句各自催化，但事实核查 / 联网纠错的结果是同一份。
+
+    Returns:
+        (agent_a_output, cg_input, agent_d_output, agent_e_output)
+    """
+    agent_a_output, cg_input = _build_virtual_agent_a_output(inp.text, inp.title)
+    # 空金句清单（绕过 min_length=3 校验），D/E 只核查原文事实
+    empty_b = AgentBOutput.model_construct(sentences=[], stats={})
+
+    # Step: Agent D — 事实总结员
+    logger.info("[文案润色] 共享前置 D 事实性错误扫描")
+    if progress_callback:
+        await progress_callback({
+            "event": "step_start",
+            "data": {
+                "step": 2,
+                "agent": "韩知微 · 事实总结员",
+                "action": "正在扫描事实性陈述...",
+                "avatar": "/agents/content-d.png",
+            },
+        })
+    try:
+        agent_d_output = await summarize_factual_errors(
+            inp=cg_input,
+            agent_a_output=agent_a_output,
+            agent_b_output=empty_b,
+            provider=provider,
+        )
+    except Exception as e:
+        logger.error(f"[文案润色] Agent D 失败: {e}")
+        raise RuntimeError(f"文案润色失败（Agent D 事实扫描）: {e}") from e
+    if progress_callback:
+        await progress_callback({"event": "step_done", "data": {"step": 2, "agent": "Agent D"}})
+
+    # Step: Agent E — Kimi 联网纠错员
+    logger.info("[文案润色] 共享前置 E 联网纠错")
+    if progress_callback:
+        await progress_callback({
+            "event": "step_start",
+            "data": {
+                "step": 3,
+                "agent": "齐鉴真 · 联网纠错员",
+                "action": "正在联网验证事实...",
+                "avatar": "/agents/content-e.png",
+            },
+        })
+    try:
+        agent_e_output = await kimi_correct_facts(
+            inp=cg_input,
+            agent_a_output=agent_a_output,
+            agent_b_output=empty_b,
+            agent_d_output=agent_d_output,
+        )
+    except Exception as e:
+        logger.error(f"[文案润色] Agent E 失败: {e}")
+        raise RuntimeError(f"文案润色失败（Agent E 联网纠错）: {e}") from e
+    if progress_callback:
+        await progress_callback({"event": "step_done", "data": {"step": 3, "agent": "Agent E"}})
+
+    return (agent_a_output, cg_input, agent_d_output, agent_e_output)
+
+
+async def run_gold_sentences(
+    inp: PolishInput,
+    agent_a_output: AgentAOutput,
+    provider: Optional[str] = None,
+) -> AgentBOutput:
+    """单独催化金句（Agent B）。多模型对比时各方案各跑各的，金句不共享。"""
+    title = inp.title or "文案润色"
+    try:
+        agent_b_output = await catalyze_gold_sentences(
+            agent_a_output=agent_a_output,
+            topic_title=title,
+            provider=provider,
+        )
+    except Exception as e:
+        logger.error(f"[文案润色] Agent B 失败: {e}")
+        raise RuntimeError(f"文案润色失败（Agent B 金句催化）: {e}") from e
+    for gs in agent_b_output.sentences:
+        gs.content = _clean_punctuation(gs.content)
+    return agent_b_output
+
+
+async def finalize_polish(
+    prefix: PolishPrefix,
+    provider: Optional[str] = None,
+    progress_callback: Optional[Callable] = None,
+) -> PolishOutput:
+    """用指定 provider 跑 Agent C 去 AI 味改写，并汇总成 PolishOutput。
+
+    prefix 为 run_polish_prefix 的产物，可被多个 provider 共享（只读）。
+    """
+    start_time = time.time()
+    agent_a_output, cg_input, agent_b_output, agent_d_output, agent_e_output = prefix
+
     # Step 4: Agent C — 去 AI 味改写员
-    # ──────────────────────────────────────────
     logger.info("[文案润色] Step 4/4: Agent C 去 AI 味改写")
     if progress_callback:
         await progress_callback({
@@ -307,6 +398,7 @@ async def polish_content(
             agent_b_output=agent_b_output,
             corrected_text=agent_e_output.corrected_text,
             provider=provider,
+            weave_gold_sentences=True,
         )
     except Exception as e:
         logger.error(f"[文案润色] Agent C 失败: {e}")
@@ -424,3 +516,16 @@ async def polish_content(
         await progress_callback({"event": "complete", "data": {"step": 4, "agent": "Agent C"}})
 
     return output
+
+
+async def polish_content(
+    inp: PolishInput,
+    progress_callback: Optional[Callable] = None,
+    provider: Optional[str] = None,
+) -> PolishOutput:
+    """文案润色主流程：Agent B → D → E → C。
+
+    单模型路径：前置流水线 + 用同一 provider 跑改写。
+    """
+    prefix = await run_polish_prefix(inp, provider=provider, progress_callback=progress_callback)
+    return await finalize_polish(prefix, provider=provider, progress_callback=progress_callback)

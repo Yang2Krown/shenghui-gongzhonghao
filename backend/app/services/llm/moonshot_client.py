@@ -35,6 +35,9 @@ class MoonshotClient(LLMClient):
         self._client = AsyncOpenAI(
             api_key=settings.MOONSHOT_API_KEY,
             base_url=settings.MOONSHOT_API_BASE,
+            # 收紧默认超时（SDK 默认 600s + 重试 2 次），重试交给 with_retry 控制
+            timeout=180.0,
+            max_retries=0,
         )
         self.default_model = settings.MOONSHOT_MODEL or self.default_model
 

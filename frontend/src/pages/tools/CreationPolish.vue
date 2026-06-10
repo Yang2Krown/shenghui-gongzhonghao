@@ -204,15 +204,16 @@
         </div>
       </div>
 
-      <!-- 左右分栏 -->
-      <div class="result-split">
+      <!-- 左右分栏（对比模式下全宽，隐藏右侧 Agent 评价） -->
+      <div :class="viewMode === 'diff' ? 'result-full' : 'result-split'">
         <!-- 左侧：润色后全文 -->
         <div class="result-left">
           <div class="card" style="padding: 18px 22px; margin-bottom: 16px;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
-              <h3 class="text-h4 font-sans text-ink">润色全文</h3>
+              <h3 class="text-h4 font-sans text-ink">{{ viewMode === 'diff' ? '原文 / 润色对比' : '润色全文' }}</h3>
               <div style="display: flex; align-items: center; gap: 8px;">
                 <div class="view-toggle">
+                  <button class="toggle-btn" :class="{ active: viewMode === 'diff' }" @click="viewMode = 'diff'">对比</button>
                   <button class="toggle-btn" :class="{ active: viewMode === 'edit' }" @click="viewMode = 'edit'">编辑</button>
                   <button class="toggle-btn" :class="{ active: viewMode === 'preview' }" @click="viewMode = 'preview'">预览</button>
                 </div>
@@ -222,8 +223,28 @@
               </div>
             </div>
 
+            <template v-if="viewMode === 'diff'">
+              <div class="diff-legend">
+                <span class="diff-legend-item"><span class="diff-chip diff-chip-del"></span>原文删除 / 改写
+                  <em v-if="diffStats">−{{ diffStats.removed }} 字</em>
+                </span>
+                <span class="diff-legend-item"><span class="diff-chip diff-chip-ins"></span>润色新增
+                  <em v-if="diffStats">+{{ diffStats.added }} 字</em>
+                </span>
+              </div>
+              <div class="diff-pane">
+                <div class="diff-col">
+                  <div class="diff-col-head">原文</div>
+                  <div class="content-preview diff-view" v-html="diffOriginalHtml" />
+                </div>
+                <div class="diff-col">
+                  <div class="diff-col-head">润色后</div>
+                  <div class="content-preview diff-view" v-html="diffPolishedHtml" />
+                </div>
+              </div>
+            </template>
             <el-input
-              v-if="viewMode === 'edit'"
+              v-else-if="viewMode === 'edit'"
               v-model="editableText"
               type="textarea"
               :autosize="{ minRows: 16, maxRows: 60 }"
@@ -233,8 +254,8 @@
           </div>
         </div>
 
-        <!-- 右侧：Agent 反馈面板 -->
-        <div class="result-right">
+        <!-- 右侧：Agent 反馈面板（对比模式下隐藏） -->
+        <div v-if="viewMode !== 'diff'" class="result-right">
           <AgentFeedbackPanel
             :agents="agentFeedback"
             subtitle="润色流水线：B 金句加持 → D 事实核查 → E 联网纠错 → C 去 AI 味"
@@ -265,60 +286,81 @@
         </button>
       </div>
 
-      <!-- 方案对比 -->
-      <div class="comparison-container">
-        <div
-          v-for="(modelData, provider, index) in multiModelResult.comparison?.models || {}"
+      <!-- 模型选择按钮 -->
+      <div class="model-switch">
+        <button
+          v-for="(modelData, provider) in multiModelResult.comparison?.models || {}"
           :key="provider"
-          class="comparison-column"
+          class="model-tab"
+          :class="{ active: selectedProvider === provider, failed: !modelData.success }"
+          @click="selectedProvider = provider"
         >
-          <!-- 方案标题 -->
-          <div class="plan-header">
-            <div class="plan-badge">
-              {{ index === 0 ? 'A' : 'B' }}
-            </div>
-            <span v-if="modelData.success" class="text-xs text-ink-4">
-              {{ modelData.final_word_count }} 字
-            </span>
-            <span v-else class="text-xs" style="color: var(--crimson);">润色失败</span>
-          </div>
+          <span class="model-tab-name">{{ providerLabel(provider) }}</span>
+          <span v-if="modelData.success" class="model-tab-meta">{{ modelData.final_word_count }} 字</span>
+          <span v-else class="model-tab-meta failed">失败</span>
+        </button>
+      </div>
 
+      <!-- 选中模型的结果 -->
+      <div v-if="selectedModelData" class="card" style="padding: 18px 22px;">
+        <template v-if="selectedModelData.success">
           <!-- 统计信息 -->
-          <div v-if="modelData.success" style="padding: 14px 16px; border-bottom: 1px solid var(--line);">
-            <div style="display: flex; flex-wrap: wrap; gap: 12px;" class="text-xs">
-              <div v-if="modelData.agent_b_sentence_count">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 14px;">
+            <div style="display: flex; flex-wrap: wrap; gap: 16px;" class="text-sm">
+              <div v-if="selectedModelData.agent_b_sentence_count">
                 <span class="text-ink-4">金句</span>
-                <span class="font-medium text-ink" style="margin-left: 2px;">{{ modelData.agent_b_sentence_count }} 句</span>
+                <span class="font-medium text-ink" style="margin-left: 4px;">{{ selectedModelData.agent_b_sentence_count }} 句</span>
               </div>
-              <div v-if="modelData.agent_e_correction_count">
+              <div v-if="selectedModelData.agent_e_correction_count">
                 <span class="text-ink-4">纠错</span>
-                <span class="font-medium text-ink" style="margin-left: 2px;">{{ modelData.agent_e_correction_count }} 处</span>
+                <span class="font-medium text-ink" style="margin-left: 4px;">{{ selectedModelData.agent_e_correction_count }} 处</span>
               </div>
-              <div v-if="modelData.agent_c_rewrite_count">
+              <div v-if="selectedModelData.agent_c_rewrite_count">
                 <span class="text-ink-4">去AI味</span>
-                <span class="font-medium text-ink" style="margin-left: 2px;">{{ modelData.agent_c_rewrite_count }} 处</span>
+                <span class="font-medium text-ink" style="margin-left: 4px;">{{ selectedModelData.agent_c_rewrite_count }} 处</span>
               </div>
-              <div v-if="modelData.word_change_pct">
+              <div v-if="selectedModelData.word_change_pct">
                 <span class="text-ink-4">变化</span>
-                <span class="font-medium text-ink" style="margin-left: 2px;">{{ modelData.word_change_pct }}%</span>
+                <span class="font-medium text-ink" style="margin-left: 4px;">{{ selectedModelData.word_change_pct }}%</span>
               </div>
             </div>
-          </div>
-
-          <!-- 润色全文 -->
-          <div v-if="modelData.success" style="padding: 16px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-              <span class="text-xs font-semibold text-ink-3">润色全文</span>
-              <button class="btn-text btn-sm" @click="copyText(modelData.final_text)" style="padding: 2px 6px;">
-                <el-icon :size="13"><CopyDocument /></el-icon> 复制
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div class="view-toggle">
+                <button class="toggle-btn" :class="{ active: mmViewMode === 'diff' }" @click="mmViewMode = 'diff'">对比</button>
+                <button class="toggle-btn" :class="{ active: mmViewMode === 'full' }" @click="mmViewMode = 'full'">全文</button>
+              </div>
+              <button class="btn-text btn-sm" @click="copyText(selectedModelData.final_text)">
+                <el-icon :size="15"><CopyDocument /></el-icon> 复制全文
               </button>
             </div>
-            <div style="max-height: 400px; overflow-y: auto; padding: 14px; background: var(--bone); border-radius: var(--r-md); font-size: 14px; line-height: 1.8; color: var(--ink); white-space: pre-wrap;">{{ modelData.final_text }}</div>
           </div>
 
-          <div v-else-if="!modelData.success" class="plan-error">
-            <p class="text-sm" style="color: var(--crimson);">{{ modelData.error }}</p>
-          </div>
+          <!-- 对比视图：原文 / 润色左右铺开 -->
+          <template v-if="mmViewMode === 'diff'">
+            <div class="diff-legend">
+              <span class="diff-legend-item"><span class="diff-chip diff-chip-del"></span>原文删除 / 改写
+                <em v-if="mmDiffStats">−{{ mmDiffStats.removed }} 字</em>
+              </span>
+              <span class="diff-legend-item"><span class="diff-chip diff-chip-ins"></span>润色新增
+                <em v-if="mmDiffStats">+{{ mmDiffStats.added }} 字</em>
+              </span>
+            </div>
+            <div class="diff-pane">
+              <div class="diff-col">
+                <div class="diff-col-head">原文</div>
+                <div class="content-preview diff-view" v-html="mmDiffOriginalHtml" />
+              </div>
+              <div class="diff-col">
+                <div class="diff-col-head">{{ providerLabel(selectedProvider) }} 润色后</div>
+                <div class="content-preview diff-view" v-html="mmDiffPolishedHtml" />
+              </div>
+            </div>
+          </template>
+          <div v-else class="content-preview" style="white-space: pre-wrap;">{{ selectedModelData.final_text }}</div>
+        </template>
+
+        <div v-else class="plan-error">
+          <p class="text-sm" style="color: var(--crimson);">{{ selectedModelData.error || '润色失败' }}</p>
         </div>
       </div>
     </div>
@@ -332,6 +374,7 @@ import { MagicStick, Document, Edit, Loading, Refresh, CopyDocument, Link, Uploa
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import AgentFeedbackPanel from '@/components/creation/AgentFeedbackPanel.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
+import { diffText } from '@/utils/textDiff'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
 
 const progress = useAgentProgress()
@@ -350,9 +393,25 @@ const preference = ref('')
 const selectedChips = ref([])
 const result = ref(null)
 const editableText = ref('')
-const viewMode = ref('preview')
+const originalText = ref('')
+const viewMode = ref('diff')
 const multiModelMode = ref(false)
 const multiModelResult = ref(null)
+const selectedProvider = ref('')
+const mmViewMode = ref('diff')
+
+// 模型标签：对外只显示方案 A / B，不暴露具体模型名（DeepSeek=A，中转站=B）
+const providerLabels = {
+  deepseek: '方案 A',
+  aigocode: '方案 B',
+}
+const providerLabel = (p) => {
+  if (providerLabels[p]) return providerLabels[p]
+  // 兜底：按出现顺序映射成方案 A / B / C…
+  const keys = Object.keys(multiModelResult.value?.comparison?.models || {})
+  const idx = keys.indexOf(p)
+  return idx >= 0 ? `方案 ${String.fromCharCode(65 + idx)}` : p
+}
 
 // 文件上传
 const fileName = ref('')
@@ -469,6 +528,11 @@ watch(() => progress.result.value, (data) => {
   // 多模型对比结果
   if (data?.comparison) {
     multiModelResult.value = data
+    const models = data.comparison?.models || {}
+    const keys = Object.keys(models)
+    // 默认选中第一个成功的模型，没有则选第一个
+    selectedProvider.value = keys.find(k => models[k]?.success) || keys[0] || ''
+    mmViewMode.value = 'diff'
     ElMessage.success('对比完成')
   }
 })
@@ -488,6 +552,7 @@ const handleGenerate = async () => {
 
   result.value = null
   editableText.value = ''
+  originalText.value = text
   multiModelResult.value = null
   progress.stop()
 
@@ -564,6 +629,57 @@ const renderedHtml = computed(() => {
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
+
+// 双栏对比：把 diff 操作序列分别渲染成「原文侧」和「润色侧」
+// 原文侧 = equal + delete（标红删除线），润色侧 = equal + insert（标绿）
+function opsToSideHtml(ops, side) {
+  return ops
+    .map((op) => {
+      if (side === 'original' && op.type === 'insert') return ''
+      if (side === 'polished' && op.type === 'delete') return ''
+      const html = escapeHtml(op.text).replace(/\n/g, '<br>')
+      if (op.type === 'insert') return `<ins class="diff-ins">${html}</ins>`
+      if (op.type === 'delete') return `<del class="diff-del">${html}</del>`
+      return html
+    })
+    .join('')
+}
+
+function opsStats(ops) {
+  let added = 0
+  let removed = 0
+  for (const op of ops) {
+    if (op.type === 'insert') added += op.text.replace(/\s/g, '').length
+    else if (op.type === 'delete') removed += op.text.replace(/\s/g, '').length
+  }
+  return { added, removed }
+}
+
+// 单模型对比
+const diffOps = computed(() => {
+  const o = originalText.value
+  const p = editableText.value
+  if (!o || !p) return []
+  return diffText(o, p)
+})
+const diffOriginalHtml = computed(() => opsToSideHtml(diffOps.value, 'original'))
+const diffPolishedHtml = computed(() => opsToSideHtml(diffOps.value, 'polished'))
+const diffStats = computed(() => opsStats(diffOps.value))
+
+// 多模型：当前选中模型的数据 / diff
+const selectedModelData = computed(() => {
+  const models = multiModelResult.value?.comparison?.models || {}
+  return models[selectedProvider.value] || null
+})
+const mmDiffOps = computed(() => {
+  const m = selectedModelData.value
+  const o = originalText.value
+  if (!m?.success || !o || !m.final_text) return []
+  return diffText(o, m.final_text)
+})
+const mmDiffOriginalHtml = computed(() => opsToSideHtml(mmDiffOps.value, 'original'))
+const mmDiffPolishedHtml = computed(() => opsToSideHtml(mmDiffOps.value, 'polished'))
+const mmDiffStats = computed(() => opsStats(mmDiffOps.value))
 
 // Agent 反馈面板数据
 const agentFeedback = computed(() => {
@@ -708,6 +824,37 @@ onUnmounted(() => {
     grid-template-columns: 1fr;
   }
 }
+.result-full { display: block; }
+
+/* 双栏对比：原文 | 润色后 */
+.diff-pane {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .diff-pane { grid-template-columns: 1fr; }
+}
+.diff-col {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--paper);
+}
+.diff-col-head {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  background: var(--bone);
+  border-bottom: 1px solid var(--line);
+}
+.diff-col .diff-view {
+  padding: 14px 16px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
 
 /* 预览区 */
 .content-preview {
@@ -727,6 +874,44 @@ onUnmounted(() => {
   font-size: 17px;
   font-weight: 600;
   margin: 16px 0 8px;
+}
+
+/* 对比视图 */
+.diff-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 9px 14px;
+  margin-bottom: 12px;
+  background: var(--bone);
+  border-radius: var(--r-md);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.diff-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.diff-legend-item em { font-style: normal; font-weight: 600; color: var(--ink-2); }
+.diff-chip { width: 12px; height: 12px; border-radius: 3px; }
+.diff-chip-ins { background: rgba(70, 145, 90, 0.28); }
+.diff-chip-del { background: rgba(184, 84, 80, 0.22); }
+.diff-view {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diff-view :deep(ins.diff-ins) {
+  text-decoration: none;
+  background: rgba(70, 145, 90, 0.16);
+  color: #2f7a45;
+  border-radius: 2px;
+  padding: 0 1px;
+  box-shadow: inset 0 -2px 0 rgba(70, 145, 90, 0.45);
+}
+.diff-view :deep(del.diff-del) {
+  text-decoration: line-through;
+  text-decoration-color: rgba(184, 84, 80, 0.7);
+  background: rgba(184, 84, 80, 0.10);
+  color: #b85450;
+  border-radius: 2px;
+  padding: 0 1px;
 }
 
 /* 编辑/预览切换 */
@@ -814,52 +999,41 @@ onUnmounted(() => {
   transform: translateX(16px);
 }
 
-/* 方案对比样式 */
-.comparison-container {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
-}
-
-@media (max-width: 768px) {
-  .comparison-container {
-    grid-template-columns: 1fr;
-  }
-}
-
-.comparison-column {
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  overflow: hidden;
-}
-
-.plan-header {
+/* 多模型：模型选择按钮 */
+.model-switch {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
-  padding: 16px 20px;
-  background: var(--bone);
-  border-bottom: 1px solid var(--line);
+  margin-bottom: 16px;
 }
-
-.plan-badge {
+.model-tab {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--ink);
-  background: var(--bone);
+  gap: 8px;
+  padding: 9px 18px;
   border: 1px solid var(--line);
+  background: var(--paper);
+  border-radius: var(--r-pill);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all .16s;
 }
+.model-tab:hover { border-color: var(--clay-soft); }
+.model-tab.active {
+  border-color: var(--clay);
+  background: var(--clay-tint);
+  box-shadow: 0 4px 14px rgba(204,120,92,.18);
+}
+.model-tab-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.model-tab.active .model-tab-name { color: var(--clay-deep); }
+.model-tab-meta { font-size: 12px; color: var(--ink-4); }
+.model-tab-meta.failed { color: var(--crimson); }
+.model-tab.failed { opacity: .75; }
 
 .plan-error {
   padding: 20px;
   text-align: center;
   background: rgba(184, 84, 80, 0.03);
+  border-radius: var(--r-md);
 }
 </style>

@@ -1,0 +1,1153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>公众号智能体 — AI 驱动的公众号内容创作平台</title>
+<style>
+/* ── Claude Design System Tokens ─────────────────────────────── */
+:root {
+  --bg: #f5f4ed;
+  --surface: #faf9f5;
+  --surface-warm: #e8e6dc;
+  --fg: #141413;
+  --fg-2: #3d3d3a;
+  --muted: #5e5d59;
+  --meta: #87867f;
+  --border: #f0eee6;
+  --border-soft: #e8e6dc;
+  --accent: #c96442;
+  --accent-on: #faf9f5;
+  --accent-hover: #b55a3a;
+  --success: #17a34a;
+  --warn: #eab308;
+  --danger: #b53333;
+  --font-display: Georgia, "Times New Roman", serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  --text-xs: 10px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 20px;
+  --text-xl: 25px;
+  --text-2xl: 32px;
+  --text-3xl: 52px;
+  --text-4xl: 64px;
+  --leading-body: 1.6;
+  --leading-tight: 1.1;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --container-max: 1200px;
+  --section-y: 96px;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --text-4xl: 36px;
+    --text-3xl: 32px;
+    --text-2xl: 25px;
+    --section-y: 56px;
+  }
+}
+
+/* ── Reset & Base ────────────────────────────────────────────── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--fg);
+  background: var(--bg);
+  line-height: var(--leading-body);
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); }
+
+img { max-width: 100%; display: block; }
+
+/* ── Container ───────────────────────────────────────────────── */
+.container {
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+@media (max-width: 768px) {
+  .container { padding: 0 16px; }
+}
+
+/* ── Navigation ──────────────────────────────────────────────── */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(245, 244, 237, 0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-inner {
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding: 0 24px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nav-brand {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  list-style: none;
+}
+
+.nav-links a {
+  font-size: 15px;
+  color: var(--muted);
+  transition: color 150ms;
+}
+
+.nav-links a:hover { color: var(--fg); }
+
+.nav-cta {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent-on) !important;
+  background: var(--accent);
+  padding: 8px 20px;
+  border-radius: var(--radius-md);
+  transition: background 150ms;
+}
+
+.nav-cta:hover {
+  background: var(--accent-hover);
+  color: var(--accent-on) !important;
+}
+
+@media (max-width: 768px) {
+  .nav-links .nav-link-text { display: none; }
+  .nav-links { gap: 16px; }
+}
+
+/* ── Sections ────────────────────────────────────────────────── */
+.section {
+  padding: var(--section-y) 0;
+}
+
+.section-dark {
+  background: var(--fg);
+  color: var(--surface);
+}
+
+.section-dark .section-label { color: var(--meta); }
+.section-dark h2, .section-dark h3 { color: var(--surface); }
+.section-dark p { color: #b0aea5; }
+.section-dark .muted { color: #87867f; }
+
+.section-alt {
+  background: var(--surface);
+}
+
+/* ── Typography ──────────────────────────────────────────────── */
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  line-height: var(--leading-tight);
+  color: var(--fg);
+}
+
+h1 {
+  font-size: var(--text-4xl);
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+}
+
+h2 {
+  font-size: var(--text-3xl);
+  letter-spacing: -0.01em;
+}
+
+h3 {
+  font-size: var(--text-2xl);
+}
+
+.section-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--meta);
+  margin-bottom: 16px;
+}
+
+.lead {
+  font-size: var(--text-lg);
+  color: var(--muted);
+  line-height: 1.6;
+  max-width: 640px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: var(--text-base);
+}
+
+/* ── Hero ────────────────────────────────────────────────────── */
+.hero {
+  padding: 140px 0 100px;
+  text-align: center;
+}
+
+.hero h1 {
+  max-width: 800px;
+  margin: 0 auto 24px;
+}
+
+.hero .lead {
+  margin: 0 auto 48px;
+  max-width: 560px;
+  text-align: center;
+}
+
+.hero-cta-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.hero-subtle {
+  margin-top: 24px;
+  font-size: var(--text-sm);
+  color: var(--meta);
+}
+
+@media (max-width: 768px) {
+  .hero { padding: 80px 0 64px; }
+}
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 500;
+  padding: 12px 28px;
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  transition: all 150ms;
+  text-decoration: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-on);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+  color: var(--accent-on);
+}
+
+.btn-secondary {
+  background: var(--surface-warm);
+  color: var(--fg-2);
+  box-shadow: 0 0 0 1px var(--border-soft);
+}
+
+.btn-secondary:hover {
+  background: #ddd9cc;
+}
+
+/* ── Pipeline Flow ───────────────────────────────────────────── */
+.pipeline {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow-x: auto;
+  padding: 32px 0;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.pipeline-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 100px;
+}
+
+.pipeline-dot {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--accent-on);
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.pipeline-step-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.pipeline-arrow {
+  font-size: 20px;
+  color: var(--border-soft);
+  margin: 0 8px;
+  flex-shrink: 0;
+  padding-bottom: 24px;
+}
+
+@media (max-width: 768px) {
+  .pipeline { gap: 0; justify-content: flex-start; }
+  .pipeline-arrow { margin: 0 4px; }
+  .pipeline-step { min-width: 72px; }
+  .pipeline-step-label { font-size: 11px; }
+  .pipeline-dot { width: 36px; height: 36px; font-size: 16px; }
+}
+
+/* ── Feature Grid ────────────────────────────────────────────── */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin-top: 48px;
+}
+
+@media (max-width: 900px) {
+  .feature-grid { grid-template-columns: 1fr; }
+}
+
+.feature-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 28px;
+  transition: box-shadow 200ms, border-color 200ms;
+}
+
+.feature-card:hover {
+  box-shadow: 0 0 0 1px var(--border-soft), rgba(0,0,0,0.04) 0 4px 20px;
+  border-color: var(--border-soft);
+}
+
+.feature-card h4 {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.feature-card p {
+  font-size: 15px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.feature-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  margin-bottom: 16px;
+  background: var(--surface-warm);
+  color: var(--accent);
+}
+
+/* ── Split Section (text + visual) ───────────────────────────── */
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  align-items: center;
+}
+
+.split-reverse { direction: rtl; }
+.split-reverse > * { direction: ltr; }
+
+@media (max-width: 900px) {
+  .split { grid-template-columns: 1fr; gap: 40px; }
+  .split-reverse { direction: ltr; }
+}
+
+.split-content h2 { margin-bottom: 20px; }
+.split-content .lead { margin-bottom: 32px; }
+
+/* ── Agent Cards ─────────────────────────────────────────────── */
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 32px;
+}
+
+.agent-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color 150ms;
+}
+
+.agent-item:hover { border-color: var(--border-soft); }
+
+.agent-badge {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.agent-badge-a { background: #f0e6df; color: #9c5a3a; }
+.agent-badge-b { background: #e6eadf; color: #4a6b3a; }
+.agent-badge-c { background: #dfe6ea; color: #3a5a6b; }
+.agent-badge-d { background: #eadfdf; color: #6b3a3a; }
+.agent-badge-e { background: #eae6df; color: #6b5a3a; }
+
+.agent-item-text h4 {
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.agent-item-text p {
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ── Dark Feature Grid ───────────────────────────────────────── */
+.dark-features {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 32px;
+  margin-top: 48px;
+}
+
+@media (max-width: 768px) {
+  .dark-features { grid-template-columns: 1fr; }
+}
+
+.dark-feature {
+  padding: 32px;
+  border: 1px solid #30302e;
+  border-radius: var(--radius-sm);
+  transition: border-color 200ms;
+}
+
+.dark-feature:hover { border-color: #5e5d59; }
+
+.dark-feature h3 {
+  font-size: 22px;
+  margin-bottom: 12px;
+  color: var(--surface);
+}
+
+.dark-feature p {
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.dark-feature-num {
+  font-family: var(--font-display);
+  font-size: 48px;
+  font-weight: 500;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+/* ── Persona Grid ────────────────────────────────────────────── */
+.persona-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-top: 32px;
+}
+
+@media (max-width: 768px) {
+  .persona-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.persona-card {
+  text-align: center;
+  padding: 24px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.persona-emoji {
+  font-size: 32px;
+  margin-bottom: 12px;
+  display: block;
+}
+
+.persona-card h4 {
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.persona-card p {
+  font-size: 13px;
+  color: var(--meta);
+}
+
+/* ── Score Bar ───────────────────────────────────────────────── */
+.scores {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.score-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.score-label {
+  font-size: 14px;
+  color: var(--muted);
+  width: 100px;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.score-track {
+  flex: 1;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.score-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent);
+  transition: width 600ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.score-value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--meta);
+  width: 36px;
+}
+
+/* ── Stats Row ───────────────────────────────────────────────── */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 32px;
+  margin-top: 64px;
+  padding-top: 48px;
+  border-top: 1px solid #30302e;
+}
+
+@media (max-width: 768px) {
+  .stats-row { grid-template-columns: repeat(2, 1fr); gap: 24px; }
+}
+
+.stat-item { text-align: center; }
+
+.stat-num {
+  font-family: var(--font-display);
+  font-size: 48px;
+  font-weight: 500;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: #87867f;
+  margin-top: 8px;
+}
+
+/* ── CTA Section ─────────────────────────────────────────────── */
+.cta-section {
+  text-align: center;
+  padding: 120px 0;
+}
+
+.cta-section h2 {
+  max-width: 700px;
+  margin: 0 auto 20px;
+}
+
+.cta-section .lead {
+  margin: 0 auto 40px;
+  text-align: center;
+}
+
+/* ── Footer ──────────────────────────────────────────────────── */
+.footer {
+  padding: 40px 0;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.footer p {
+  font-size: 13px;
+  color: var(--meta);
+}
+
+/* ── Tool Tags ───────────────────────────────────────────────── */
+.tool-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.tool-tag {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  color: var(--muted);
+  background: var(--surface);
+  transition: all 150ms;
+}
+
+.tool-tag:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Animations ──────────────────────────────────────────────── */
+@media (prefers-reduced-motion: no-preference) {
+  .fade-up {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity 0.6s cubic-bezier(0.2, 0, 0, 1), transform 0.6s cubic-bezier(0.2, 0, 0, 1);
+  }
+  .fade-up.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Code-style label ───────────────────────────────────────── */
+.code-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+  background: rgba(201, 100, 66, 0.08);
+  padding: 4px 12px;
+  border-radius: 6px;
+  display: inline-block;
+  margin-bottom: 20px;
+}
+</style>
+</head>
+<body>
+
+<!-- ── Navigation ──────────────────────────────────────────── -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#" class="nav-brand">公众号智能体</a>
+    <ul class="nav-links">
+      <li><a href="#pipeline" class="nav-link-text">工作流</a></li>
+      <li><a href="#topics" class="nav-link-text">选题挖掘</a></li>
+      <li><a href="#content" class="nav-link-text">正文生成</a></li>
+      <li><a href="#tools" class="nav-link-text">创作工具</a></li>
+      <li><a href="#cta" class="nav-cta">开始使用</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ── Hero ────────────────────────────────────────────────── -->
+<section class="section hero">
+  <div class="container">
+    <span class="code-label">AI · Multi-Agent · 公众号</span>
+    <h1>从选题到发布，<br>AI 全链路接管公众号创作</h1>
+    <p class="lead">
+      多 Agent 协作平台，自动完成信息采集、选题挖掘、大纲生成、正文创作、标题优化——你只需要审稿和发布。
+    </p>
+    <div class="hero-cta-row">
+      <a href="#cta" class="btn btn-primary">开始使用 →</a>
+      <a href="#pipeline" class="btn btn-secondary">了解工作流</a>
+    </div>
+    <p class="hero-subtle">DeepSeek / Kimi / Claude 多模型驱动 · Celery 异步任务 · PostgreSQL 向量检索</p>
+  </div>
+</section>
+
+<!-- ── Pipeline Overview ───────────────────────────────────── -->
+<section class="section section-alt" id="pipeline">
+  <div class="container">
+    <div class="section-label">全流程自动化</div>
+    <h2>七步流水线，从信息到成品</h2>
+    <p class="lead" style="margin-bottom: 16px;">
+      不是简单的 AI 写作工具，而是一套完整的多 Agent 内容生产流水线。
+    </p>
+    <div class="pipeline">
+      <div class="pipeline-step">
+        <div class="pipeline-dot">采</div>
+        <span class="pipeline-step-label">信息采集</span>
+      </div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-step">
+        <div class="pipeline-dot">聚</div>
+        <span class="pipeline-step-label">向量聚类</span>
+      </div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-step">
+        <div class="pipeline-dot">选</div>
+        <span class="pipeline-step-label">选题挖掘</span>
+      </div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-step">
+        <div class="pipeline-dot">纲</div>
+        <span class="pipeline-step-label">大纲生成</span>
+      </div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-step">
+        <div class="pipeline-dot">题</div>
+        <span class="pipeline-step-label">标题优化</span>
+      </div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-step">
+        <div class="pipeline-dot">写</div>
+        <span class="pipeline-step-label">正文创作</span>
+      </div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-step">
+        <div class="pipeline-dot">发</div>
+        <span class="pipeline-step-label">编辑发布</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Topic Mining ────────────────────────────────────────── -->
+<section class="section" id="topics">
+  <div class="container">
+    <div class="split">
+      <div class="split-content fade-up">
+        <div class="section-label">选题挖掘</div>
+        <h2>不是过滤选题，<br>而是创造选题</h2>
+        <p class="lead">
+          传统做法从 100 条信息里过滤掉 90 条，我们从 1 条信息衍生出 5 个好选题。Agent A 负责创意衍生，Agent B 负责独立评分。
+        </p>
+        <div class="agent-list">
+          <div class="agent-item">
+            <span class="agent-badge agent-badge-a">Agent A</span>
+            <div class="agent-item-text">
+              <h4>选题衍生员</h4>
+              <p>基于套路库和 8 维度组合创新，从单条信息衍生 3-8 个候选选题</p>
+            </div>
+          </div>
+          <div class="agent-item">
+            <span class="agent-badge agent-badge-b">Agent B</span>
+            <div class="agent-item-text">
+              <h4>选题评分员</h4>
+              <p>一票否决 + 6 维度加权评分，程序化计算而非 LLM 算术</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="fade-up">
+        <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 32px;">
+          <div class="section-label" style="margin-bottom: 20px;">6 维度评分体系</div>
+          <div class="scores">
+            <div class="score-row">
+              <span class="score-label">痛点直击度</span>
+              <div class="score-track"><div class="score-fill" style="width:85%"></div></div>
+              <span class="score-value">20%</span>
+            </div>
+            <div class="score-row">
+              <span class="score-label">价值密度</span>
+              <div class="score-track"><div class="score-fill" style="width:85%"></div></div>
+              <span class="score-value">20%</span>
+            </div>
+            <div class="score-row">
+              <span class="score-label">受众适配度</span>
+              <div class="score-track"><div class="score-fill" style="width:80%"></div></div>
+              <span class="score-value">20%</span>
+            </div>
+            <div class="score-row">
+              <span class="score-label">传播触发器</span>
+              <div class="score-track"><div class="score-fill" style="width:60%"></div></div>
+              <span class="score-value">15%</span>
+            </div>
+            <div class="score-row">
+              <span class="score-label">差异化</span>
+              <div class="score-track"><div class="score-fill" style="width:60%"></div></div>
+              <span class="score-value">15%</span>
+            </div>
+            <div class="score-row">
+              <span class="score-label">新鲜度</span>
+              <div class="score-track"><div class="score-fill" style="width:40%"></div></div>
+              <span class="score-value">10%</span>
+            </div>
+          </div>
+          <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border);">
+            <div class="section-label">4 Persona 独立评议</div>
+            <div class="persona-grid" style="margin-top: 12px;">
+              <div class="persona-card">
+                <span class="persona-emoji">🔬</span>
+                <h4>AI 专家</h4>
+                <p>技术深度</p>
+              </div>
+              <div class="persona-card">
+                <span class="persona-emoji">📱</span>
+                <h4>百万粉博主</h4>
+                <p>传播敏感度</p>
+              </div>
+              <div class="persona-card">
+                <span class="persona-emoji">🎯</span>
+                <h4>产品经理</h4>
+                <p>用户价值</p>
+              </div>
+              <div class="persona-card">
+                <span class="persona-emoji">📊</span>
+                <h4>运营专家</h4>
+                <p>数据表现</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Content Generation (Dark) ───────────────────────────── -->
+<section class="section section-dark" id="content">
+  <div class="container">
+    <div class="section-label">正文生成</div>
+    <h2>五步流水线，<br>写出不像 AI 的 AI 文章</h2>
+    <p class="lead" style="color: #b0aea5;">
+      每篇文章经过 5 个专业 Agent 逐层打磨——从初稿到金句催化，从事实核查到去 AI 味改写，最终输出可直接发布的公众号正文。
+    </p>
+    <div class="dark-features">
+      <div class="dark-feature">
+        <div class="dark-feature-num">A</div>
+        <h3>正文创作员</h3>
+        <p>一次性生成 2500-3000 字正文骨干。风格锚点机制确保全文语气统一，严格按大纲展开，兑现标题承诺。</p>
+      </div>
+      <div class="dark-feature">
+        <div class="dark-feature-num">B</div>
+        <h3>金句催化员</h3>
+        <p>识别正文中的「准金句」位置，催化生成 3-5 个可独立成立的金句。开头钩子、中段共鸣、结尾升华，分布精准。</p>
+      </div>
+      <div class="dark-feature">
+        <div class="dark-feature-num">D</div>
+        <h3>事实总结员</h3>
+        <p>提取文章中的关键事实声明，为后续联网核查做准备。保护数据、人名、工具名等不可改内容。</p>
+      </div>
+      <div class="dark-feature">
+        <div class="dark-feature-num">E</div>
+        <h3>联网纠错员</h3>
+        <p>调用 Kimi 联网搜索能力，验证文章中的事实声明。发现错误自动修正，确保内容的真实性和可靠性。</p>
+      </div>
+    </div>
+    <!-- De-AI full-width feature -->
+    <div style="margin-top: 32px; padding: 32px; border: 1px solid #30302e; border-radius: var(--radius-sm);">
+      <div style="display: flex; align-items: flex-start; gap: 24px; flex-wrap: wrap;">
+        <div class="dark-feature-num" style="margin-bottom: 0;">C</div>
+        <div style="flex: 1; min-width: 280px;">
+          <h3 style="margin-bottom: 12px;">去 AI 味改写员</h3>
+          <p style="max-width: 640px;">
+            按 6 大类 AI 味检查清单全文扫描——结构性套话、学院体词汇、对仗句式、情感缺失、思维平均化、排版痕迹。按优先级改写，跳过金句标注段落，字数变化控制在 ±10% 以内。
+          </p>
+        </div>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+          <span style="font-size: 13px; padding: 6px 14px; border-radius: 999px; border: 1px solid #b53333; color: #e87070;">🚫 一票否决</span>
+          <span style="font-size: 13px; padding: 6px 14px; border-radius: 999px; border: 1px solid #eab308; color: #f0d060;">⚠️ 高优先</span>
+          <span style="font-size: 13px; padding: 6px 14px; border-radius: 999px; border: 1px solid #5e5d59; color: #b0aea5;">⚪ 中优先</span>
+          <span style="font-size: 13px; padding: 6px 14px; border-radius: 999px; border: 1px solid #30302e; color: #87867f;">🔵 低优先</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Title Generation ────────────────────────────────────── -->
+<section class="section section-alt" id="titles">
+  <div class="container">
+    <div class="split split-reverse">
+      <div class="split-content fade-up">
+        <div class="section-label">标题生成</div>
+        <h2>四个 Agent，<br>只为一个好标题</h2>
+        <p class="lead">
+          12 种标题套路 × 6 维度评分 × 点击预测 × 自检重生。综合评分不达标自动重来，最多重生 2 次。
+        </p>
+        <div class="agent-list">
+          <div class="agent-item">
+            <span class="agent-badge agent-badge-a">A</span>
+            <div class="agent-item-text">
+              <h4>标题创作员</h4>
+              <p>生成 10-15 个候选标题，覆盖多种套路</p>
+            </div>
+          </div>
+          <div class="agent-item">
+            <span class="agent-badge agent-badge-b">B</span>
+            <div class="agent-item-text">
+              <h4>标题评审员</h4>
+              <p>一票否决 + 6 维度加权评分，筛选 Top 5</p>
+            </div>
+          </div>
+          <div class="agent-item">
+            <span class="agent-badge agent-badge-c">C</span>
+            <div class="agent-item-text">
+              <h4>点击预测员</h4>
+              <p>模拟读者视角，预测点击意图和改进方向</p>
+            </div>
+          </div>
+          <div class="agent-item">
+            <span class="agent-badge agent-badge-d">D</span>
+            <div class="agent-item-text">
+              <h4>最终判定员</h4>
+              <p>综合评分 0.6×B + 0.4×C，输出 Top 3 推荐</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="fade-up">
+        <div style="background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 32px;">
+          <div class="section-label">自检重生机制</div>
+          <div style="margin-top: 20px;">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+              <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--accent-on); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; flex-shrink: 0;">1</div>
+              <div>
+                <div style="font-weight: 600; font-size: 15px;">首轮生成</div>
+                <div style="font-size: 14px; color: var(--muted);">A → B → C → D 四步流水线</div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+              <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--surface-warm); color: var(--fg-2); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; flex-shrink: 0;">2</div>
+              <div>
+                <div style="font-weight: 600; font-size: 15px;">自检评估</div>
+                <div style="font-size: 14px; color: var(--muted);">Top 3 综合分 ≥ 7.0 才通过</div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+              <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--surface-warm); color: var(--fg-2); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; flex-shrink: 0;">3</div>
+              <div>
+                <div style="font-weight: 600; font-size: 15px;">重生优化</div>
+                <div style="font-size: 14px; color: var(--muted);">未达标则携带扣分理由重新生成</div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <div style="width: 32px; height: 32px; border-radius: 50%; background: #17a34a20; color: var(--success); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; flex-shrink: 0;">✓</div>
+              <div>
+                <div style="font-weight: 600; font-size: 15px;">输出 Top 3</div>
+                <div style="font-size: 14px; color: var(--muted);">附评分、预测、推荐理由</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Architecture (Dark) ─────────────────────────────────── -->
+<section class="section section-dark">
+  <div class="container">
+    <div style="text-align: center; max-width: 700px; margin: 0 auto;">
+      <div class="section-label">多 Agent 架构</div>
+      <h2>每个 Agent 只做一件事，<br>做到最好</h2>
+      <p class="lead" style="color: #b0aea5; margin: 0 auto;">
+        流水线模式（Pipeline Pattern），Agent 间通过结构化 JSON 契约传递数据。每个 Agent 独立可测、可替换、可升级。
+      </p>
+    </div>
+    <div class="stats-row">
+      <div class="stat-item">
+        <div class="stat-num">15+</div>
+        <div class="stat-label">专业 Agent</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">5</div>
+        <div class="stat-label">条核心流水线</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">4</div>
+        <div class="stat-label">LLM 提供商</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">∞</div>
+        <div class="stat-label">可扩展 Agent</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Tools ───────────────────────────────────────────────── -->
+<section class="section" id="tools">
+  <div class="container">
+    <div style="text-align: center; max-width: 700px; margin: 0 auto 48px;">
+      <div class="section-label">创作工具箱</div>
+      <h2>不止于生成，<br>更要打磨到可发布</h2>
+      <p class="lead" style="margin: 0 auto;">
+        从文案润色到跨平台适配，从富文本编辑器到一键发布——完整的内容后期工具链。
+      </p>
+    </div>
+    <div class="feature-grid">
+      <div class="feature-card fade-up">
+        <div class="feature-icon">✏️</div>
+        <h4>公众号编辑器</h4>
+        <p>基于 wangEditor 的富文本编辑器，支持微信排版规范——16px 正文、大标题黑底白字、红字高亮段落。</p>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon">🔄</div>
+        <h4>文案润色</h4>
+        <p>复用正文生成的 Agent B/D/E/C 流水线，对已有文章进行金句补充、事实核查和去 AI 味改写。</p>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon">📝</div>
+        <h4>正文续写</h4>
+        <p>从已有内容无缝续写，保持风格一致性。适合长文分批创作或补充遗漏内容。</p>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon">🔀</div>
+        <h4>内容转写</h4>
+        <p>将公众号长文转化为不同平台的格式和风格，适配不同受众的阅读习惯。</p>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon">📋</div>
+        <h4>内容仿写</h4>
+        <p>分析参考文章的结构、风格和套路，生成同类型但原创的新内容。</p>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon">📕</div>
+        <h4>公众号转小红书</h4>
+        <p>自动将公众号长文拆解为小红书图文格式，含标签提取和封面建议。支持 Chrome 插件一键发布。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Multi-source (Dark) ─────────────────────────────────── -->
+<section class="section section-dark">
+  <div class="container">
+    <div style="text-align: center; max-width: 700px; margin: 0 auto 48px;">
+      <div class="section-label">信息源</div>
+      <h2>全网信息，<br>一个入口采集</h2>
+      <p class="lead" style="color: #b0aea5; margin: 0 auto;">
+        支持 10+ 种信息源适配器，从 RSS 订阅到微信搜索，从 GitHub Trending 到抖音热榜——自动抓取、向量化、聚类。
+      </p>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;">
+      <span class="tool-tag" style="border-color: #5e5d59; color: #b0aea5;">RSS 订阅</span>
+      <span class="tool-tag" style="border-color: #5e5d59; color: #b0aea5;">微信搜索</span>
+      <span class="tool-tag" style="border-color: #5e5d59; color: #b0aea5;">GitHub Trending</span>
+      <span class="tool-tag" style="border-color: #5e5d59; color: #b0aea5;">Hacker News</span>
+      <span class="tool-tag" style="border-color: #5e5d59; color: #b0aea5;">知乎</span>
+      <span class="tool-tag" style="border-color: #5e5d59; color: #b0aea5;">抖音</span>
+      <span class="tool-tag" style="border-color: #5e5d59; color: #b0aea5;">小红书</span>
+      <span class="tool-tag" style="border-color: #5e5d59; color: #b0aea5;">Reddit</span>
+      <span class="tool-tag" style="border-color: #5e5d59; color: #b0aea5;">V2EX</span>
+      <span class="tool-tag" style="border-color: #5e5d59; color: #b0aea5;">今日热榜</span>
+      <span class="tool-tag" style="border-color: #5e5d59; color: #b0aea5;">网页爬虫</span>
+      <span class="tool-tag" style="border-color: #5e5d59; color: #b0aea5;">公众号爆文</span>
+    </div>
+    <div style="margin-top: 48px; padding-top: 32px; border-top: 1px solid #30302e;">
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; text-align: center;">
+        <div>
+          <div style="font-family: var(--font-display); font-size: 36px; font-weight: 500; color: var(--accent); margin-bottom: 4px;">pgvector</div>
+          <div style="font-size: 14px; color: #87867f;">向量相似度聚类</div>
+        </div>
+        <div>
+          <div style="font-family: var(--font-display); font-size: 36px; font-weight: 500; color: var(--accent); margin-bottom: 4px;">0.85</div>
+          <div style="font-size: 14px; color: #87867f;">余弦相似度阈值</div>
+        </div>
+        <div>
+          <div style="font-family: var(--font-display); font-size: 36px; font-weight: 500; color: var(--accent); margin-bottom: 4px;">LLM</div>
+          <div style="font-size: 14px; color: #87867f;">富化提取 + 标注</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA ─────────────────────────────────────────────────── -->
+<section class="section section-alt cta-section" id="cta">
+  <div class="container">
+    <h2>让 AI 处理流水线，<br>你专注于内容本身</h2>
+    <p class="lead">
+      从海量信息中提炼选题，到打磨出可发布的公众号文章——全流程自动化，人工只做最终审核。
+    </p>
+    <div class="hero-cta-row">
+      <a href="#" class="btn btn-primary">免费试用 →</a>
+      <a href="#" class="btn btn-secondary">查看文档</a>
+    </div>
+  </div>
+</section>
+
+<!-- ── Footer ──────────────────────────────────────────────── -->
+<footer class="footer">
+  <div class="container">
+    <p>公众号智能体 · AI 驱动的公众号内容创作平台</p>
+  </div>
+</footer>
+
+<!-- ── Scroll Animation ────────────────────────────────────── -->
+<script>
+(function() {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const els = document.querySelectorAll('.fade-up');
+  const io = new IntersectionObserver(function(entries) {
+    entries.forEach(function(e) {
+      if (e.isIntersecting) {
+        e.target.classList.add('visible');
+        io.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.15 });
+  els.forEach(function(el) { io.observe(el); });
+})();
+</script>
+
+</body>
+</html>

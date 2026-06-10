@@ -95,6 +95,14 @@
         @complete="onTitleComplete"
       />
     </div>
+
+    <!-- 标题确认后操作选择弹窗 -->
+    <PublishChoiceDialog
+      v-model="showPublishChoice"
+      :title="selectedTitle?.title || ''"
+      @save-draft="handleSaveDraftAfterTitle"
+      @publish="handlePublishAfterTitle"
+    />
   </div>
 </template>
 
@@ -107,6 +115,7 @@ import { useCreationStore } from '@/stores/creation'
 import OutlinePanel from '@/components/creation/OutlinePanel.vue'
 import TitlePanel from '@/components/creation/TitlePanel.vue'
 import ContentPanel from '@/components/creation/ContentPanel.vue'
+import PublishChoiceDialog from '@/components/PublishChoiceDialog.vue'
 import outlineApi from '@/api/outline'
 import generationRecordApi from '@/api/generationRecord'
 import { get } from '@/api/api'
@@ -154,6 +163,7 @@ const autoGenerateContent = ref(autoGenerateContentFromQuery.value)
 const autoGenerateTitle = ref(autoGenerateTitleFromQuery.value)
 const saving = ref(false)
 const publishing = ref(false)
+const showPublishChoice = ref(false)
 const currentOutlineId = ref(null)
 const currentOutlineData = ref(null)
 const selectedTitle = ref(null)

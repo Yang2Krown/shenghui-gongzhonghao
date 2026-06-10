@@ -43,6 +43,28 @@
       </div>
     </div>
 
+    <!-- 公众号凭证配置 -->
+    <div class="profile-card" style="margin-top: 20px;">
+      <div style="padding: 24px;">
+        <h3 style="font-size: 17px; font-weight: 600; color: var(--ink); margin-bottom: 4px;">公众号凭证</h3>
+        <p style="font-size: 13px; color: var(--ink-4); margin-bottom: 18px;">配置后可直接发布文章到公众号草稿箱</p>
+        <el-form label-position="top" style="max-width: 480px;">
+          <el-form-item label="AppID">
+            <el-input v-model="wechatForm.appid" placeholder="公众号 AppID" />
+          </el-form-item>
+          <el-form-item label="AppSecret">
+            <el-input v-model="wechatForm.app_secret" placeholder="公众号 AppSecret" show-password />
+          </el-form-item>
+          <el-form-item label="默认作者（选填）">
+            <el-input v-model="wechatForm.author" placeholder="文章作者名" maxlength="32" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="saveWechatConfig">保存凭证</el-button>
+          </el-form-item>
+        </el-form>
+      </div>
+    </div>
+
     <!-- 风格训练区 -->
     <div class="style-section">
       <!-- Hero Section -->
@@ -222,6 +244,35 @@ const profileRules = {
     { min: 2, max: 20, message: '昵称长度在 2 到 20 个字符', trigger: 'blur' },
   ],
 }
+
+// 公众号凭证（存 localStorage）
+const WECHAT_STORAGE_KEY = 'wechat_draft_credentials'
+const wechatForm = reactive({
+  appid: '',
+  app_secret: '',
+  author: '',
+})
+
+// 加载已保存的凭证
+const loadWechatConfig = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(WECHAT_STORAGE_KEY) || '{}')
+    wechatForm.appid = saved.appid || ''
+    wechatForm.app_secret = saved.app_secret || ''
+    wechatForm.author = saved.author || ''
+  } catch { /* ignore */ }
+}
+
+const saveWechatConfig = () => {
+  localStorage.setItem(WECHAT_STORAGE_KEY, JSON.stringify({
+    appid: wechatForm.appid,
+    app_secret: wechatForm.app_secret,
+    author: wechatForm.author,
+  }))
+  ElMessage.success('公众号凭证已保存')
+}
+
+loadWechatConfig()
 
 const loadUserProfile = () => {
   if (user.value) {
