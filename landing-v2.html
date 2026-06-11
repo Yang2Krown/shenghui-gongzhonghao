@@ -3,571 +3,1104 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>公众号智能体 — AI 驱动的公众号内容创作平台</title>
+<title>公众号智能体 — 从选题到发布，AI 全程帮你搞定</title>
+<meta name="description" content="AI 驱动的公众号内容创作平台。自动采集信息、挖掘选题、生成大纲、撰写正文、优化标题，你只需审稿和发布。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 <style>
-/* ── Claude Design System Tokens ─────────────────────────────── */
+/* =========================================================
+   Design Tokens — 编辑式暖色调
+   ========================================================= */
 :root {
-  --bg: #f5f4ed;
-  --surface: #faf9f5;
-  --surface-warm: #e8e6dc;
-  --fg: #141413;
-  --fg-2: #3d3d3a;
-  --muted: #5e5d59;
-  --meta: #87867f;
-  --border: #f0eee6;
-  --border-soft: #e8e6dc;
-  --accent: #c96442;
-  --accent-on: #faf9f5;
-  --accent-hover: #b55a3a;
-  --success: #17a34a;
-  --warn: #eab308;
-  --danger: #b53333;
-  --font-display: Georgia, "Times New Roman", serif;
-  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
-  --text-xs: 10px;
-  --text-sm: 14px;
-  --text-base: 16px;
-  --text-lg: 20px;
-  --text-xl: 25px;
-  --text-2xl: 32px;
-  --text-3xl: 52px;
-  --text-4xl: 64px;
-  --leading-body: 1.6;
-  --leading-tight: 1.1;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --container-max: 1200px;
-  --section-y: 96px;
+  --clay: #CC785C; --clay-deep: #A85A40; --clay-soft: #E9B79E; --clay-tint: #F5E2D5;
+  --pine: #3F5C52; --pine-soft: #C9D4CD;
+  --sand: #C49B5C; --sand-soft: #ECDCBF;
+  --paper: #FAF9F5; --ivory: #F5F1EB; --bone: #EFEAE0;
+  --line: #E4DDCE; --line-2: #D9D0BE;
+  --ink-3: #6B6862; --ink-2: #3A3935; --ink: #1F1F1E;
+  --leaf: #5C8A5C; --crimson: #B85450;
+  --serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', ui-serif, Georgia, serif;
+  --serif-en: 'Fraunces', 'Noto Serif SC', ui-serif, Georgia, serif;
+  --sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sh-1: 0 1px 2px rgba(31,31,30,.04), 0 2px 6px rgba(31,31,30,.04);
+  --sh-2: 0 4px 12px rgba(31,31,30,.06), 0 8px 24px rgba(31,31,30,.05);
+  --sh-3: 0 12px 32px rgba(31,31,30,.10), 0 24px 60px rgba(31,31,30,.08);
+  --sh-clay: 0 6px 18px rgba(204,120,92,.30);
+  --r-xs: 4px; --r-sm: 6px; --r-md: 10px; --r-lg: 16px; --r-xl: 24px;
+  --container: 1180px;
 }
 
-@media (max-width: 768px) {
-  :root {
-    --text-4xl: 36px;
-    --text-3xl: 32px;
-    --text-2xl: 25px;
-    --section-y: 56px;
-  }
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+html { font-size: 16px; scroll-behavior: smooth; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+body {
+  background: var(--ivory); color: var(--ink); font-family: var(--sans);
+  font-size: 15px; line-height: 1.65;
+  background-image:
+    radial-gradient(rgba(204,120,92,.022) 1px, transparent 1px),
+    radial-gradient(rgba(63,92,82,.018) 1px, transparent 1px);
+  background-size: 28px 28px, 44px 44px;
+  background-position: 0 0, 14px 22px;
 }
+::selection { background: var(--clay-tint); color: var(--clay-deep); }
+a { color: inherit; text-decoration: none; }
+img, svg { display: block; max-width: 100%; }
+button { font-family: inherit; cursor: pointer; }
+h1, h2, h3, h4, h5 {
+  font-family: var(--serif); font-weight: 600; letter-spacing: -.01em;
+  color: var(--ink); line-height: 1.25; margin: 0;
+}
+.container { width: 100%; max-width: var(--container); margin: 0 auto; padding: 0 32px; }
 
-*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-html { font-size: 16px; -webkit-font-smoothing: antialiased; scroll-behavior: smooth; }
-body { font-family: var(--font-body); color: var(--fg); background: var(--bg); line-height: var(--leading-body); }
-a { color: var(--accent); text-decoration: none; }
-a:hover { color: var(--accent-hover); }
-img { max-width: 100%; display: block; }
-
-.container { max-width: var(--container-max); margin: 0 auto; padding: 0 24px; }
-@media (max-width: 768px) { .container { padding: 0 16px; } }
-
-/* ── Navigation ──────────────────────────────────────────────── */
+/* =========================================================
+   Top Nav
+   ========================================================= */
 .nav {
-  position: sticky; top: 0; z-index: 100;
-  background: rgba(245, 244, 237, 0.92);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border);
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+  height: 68px; display: flex; align-items: center;
+  background: rgba(245,241,235,.72);
+  backdrop-filter: saturate(150%) blur(14px);
+  -webkit-backdrop-filter: saturate(150%) blur(14px);
+  border-bottom: 1px solid transparent;
+  transition: all .25s ease;
 }
+.nav.scrolled { background: rgba(245,241,235,.94); border-bottom-color: var(--line); }
 .nav-inner {
-  max-width: var(--container-max); margin: 0 auto; padding: 0 24px;
-  height: 56px; display: flex; align-items: center; justify-content: space-between;
+  width: 100%; max-width: var(--container); margin: 0 auto; padding: 0 32px;
+  display: flex; align-items: center; gap: 32px;
 }
-.nav-brand { font-family: var(--font-display); font-size: 20px; font-weight: 500; color: var(--fg); letter-spacing: -0.01em; }
-.nav-links { display: flex; align-items: center; gap: 32px; list-style: none; }
-.nav-links a { font-size: 15px; color: var(--muted); transition: color 150ms; }
-.nav-links a:hover { color: var(--fg); }
-.nav-cta {
-  font-size: 14px; font-weight: 500; color: var(--accent-on) !important;
-  background: var(--accent); padding: 8px 20px; border-radius: var(--radius-md); transition: background 150ms;
+.brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-weight: 700; font-size: 18px; color: var(--ink); letter-spacing: .02em; }
+.brand-mark { width: 28px; height: 28px; flex-shrink: 0; }
+.brand-suffix { color: var(--ink-3); font-weight: 500; font-family: var(--sans); font-size: 11.5px; margin-left: 4px; letter-spacing: .08em; }
+.nav-links { display: flex; gap: 28px; margin-left: 24px; }
+.nav-links a { font-size: 14px; color: var(--ink-2); font-weight: 500; transition: color .15s; }
+.nav-links a:hover { color: var(--clay-deep); }
+.nav-cta { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+
+/* =========================================================
+   Buttons
+   ========================================================= */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 0 18px; height: 40px; border-radius: var(--r-md);
+  font-size: 14px; font-weight: 500; font-family: inherit;
+  border: 1px solid transparent; cursor: pointer;
+  transition: all .15s ease; white-space: nowrap; letter-spacing: .01em;
 }
-.nav-cta:hover { background: var(--accent-hover); color: var(--accent-on) !important; }
-@media (max-width: 768px) { .nav-links .nav-link-text { display: none; } .nav-links { gap: 16px; } }
+.btn-primary { background: var(--clay); color: #fff; box-shadow: var(--sh-clay); }
+.btn-primary:hover { background: var(--clay-deep); transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+.btn-secondary { background: var(--ink); color: var(--paper); }
+.btn-secondary:hover { background: #000; }
+.btn-ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+.btn-ghost:hover { background: var(--bone); border-color: var(--line-2); }
+.btn-text { background: transparent; color: var(--ink-2); padding: 0 12px; }
+.btn-text:hover { color: var(--clay-deep); }
+.btn-lg { height: 48px; padding: 0 26px; font-size: 15px; }
+.btn-arrow { display: inline-block; transition: transform .2s; }
+.btn:hover .btn-arrow { transform: translateX(3px); }
 
-/* ── Sections ────────────────────────────────────────────────── */
-.section { padding: var(--section-y) 0; }
-.section-dark { background: var(--fg); color: var(--surface); }
-.section-dark .section-label { color: var(--meta); }
-.section-dark h2, .section-dark h3 { color: var(--surface); }
-.section-dark p { color: #b0aea5; }
-.section-dark .muted { color: #87867f; }
-.section-alt { background: var(--surface); }
+/* =========================================================
+   Hero
+   ========================================================= */
+.hero { position: relative; padding: 144px 0 110px; overflow: hidden; }
+.hero-decor { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+.hero .container { position: relative; z-index: 1; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 6px 14px; background: var(--paper);
+  border: 1px solid var(--line); border-radius: 999px;
+  font-size: 12.5px; color: var(--ink-2);
+  margin-bottom: 28px; letter-spacing: .02em;
+}
+.eyebrow .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--clay);
+  box-shadow: 0 0 0 4px rgba(204,120,92,.18);
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 4px rgba(204,120,92,.18); } 50% { box-shadow: 0 0 0 7px rgba(204,120,92,.06); } }
+.hero-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center; }
+.hero-title {
+  font-size: clamp(44px, 6.4vw, 80px); line-height: 1.05;
+  font-weight: 600; letter-spacing: -.02em;
+  margin-bottom: 28px; max-width: 14ch;
+}
+.hero-title em { font-style: normal; color: var(--clay-deep); position: relative; font-family: var(--serif); }
+.hero-title em::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: .05em;
+  height: .18em; background: var(--clay-tint); z-index: -1; border-radius: 2px;
+}
+.hero-sub { font-size: 17px; color: var(--ink-2); line-height: 1.78; max-width: 560px; margin-bottom: 40px; }
+.hero-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 36px; }
+.hero-meta { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--ink-3); }
+.hero-meta .ck { color: var(--leaf); margin-right: 6px; font-weight: 600; }
 
-/* ── Typography ──────────────────────────────────────────────── */
-h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 500; line-height: var(--leading-tight); color: var(--fg); }
-h1 { font-size: var(--text-4xl); letter-spacing: -0.02em; line-height: 1.08; }
-h2 { font-size: var(--text-3xl); letter-spacing: -0.01em; }
-h3 { font-size: var(--text-2xl); }
-.section-label { font-family: var(--font-mono); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; color: var(--meta); margin-bottom: 16px; }
-.lead { font-size: var(--text-lg); color: var(--muted); line-height: 1.6; max-width: 640px; }
-.muted { color: var(--muted); font-size: var(--text-base); }
+/* Hero Visual — Floating Mockup Cards */
+.hero-visual { position: relative; aspect-ratio: 1/1.05; }
+.float-card {
+  position: absolute; background: var(--paper);
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--sh-2); padding: 18px; z-index: 2;
+}
+.fc-bar { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-3); margin-bottom: 12px; font-weight: 500; }
+.fc-bar .d { width: 6px; height: 6px; border-radius: 50%; background: var(--clay); }
+.fc-1 { top: 2%; left: -2%; width: 66%; animation: floatA 6s ease-in-out infinite; }
+.fc-2 { top: 36%; right: -6%; width: 62%; animation: floatB 7s ease-in-out infinite; }
+.fc-3 { bottom: 2%; left: 10%; width: 60%; animation: floatA 6.5s ease-in-out infinite reverse; animation-delay: -1s; }
 
-/* ── Hero ────────────────────────────────────────────────────── */
-.hero { padding: 140px 0 100px; text-align: center; position: relative; overflow: hidden; }
-.hero h1 { max-width: 800px; margin: 0 auto 24px; }
-.hero .lead { margin: 0 auto 48px; max-width: 560px; text-align: center; }
-.hero-cta-row { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
-.hero-subtle { margin-top: 24px; font-size: var(--text-sm); color: var(--meta); }
-@media (max-width: 768px) { .hero { padding: 80px 0 64px; } }
+.topic-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); font-size: 13px; color: var(--ink-2); }
+.topic-row + .topic-row { margin-top: 2px; }
+.topic-row .num { font-family: var(--mono); font-size: 11px; color: var(--ink-3); width: 18px; }
+.topic-row .score { margin-left: auto; font-size: 11px; color: var(--clay-deep); font-weight: 600; background: var(--clay-tint); padding: 2px 6px; border-radius: 4px; }
 
-/* ── Buttons ─────────────────────────────────────────────────── */
-.btn { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-body); font-size: 16px; font-weight: 500; padding: 12px 28px; border-radius: var(--radius-md); border: none; cursor: pointer; transition: all 150ms; text-decoration: none; }
-.btn-primary { background: var(--accent); color: var(--accent-on); box-shadow: 0 0 0 1px var(--accent); }
-.btn-primary:hover { background: var(--accent-hover); color: var(--accent-on); }
-.btn-secondary { background: var(--surface-warm); color: var(--fg-2); box-shadow: 0 0 0 1px var(--border-soft); }
-.btn-secondary:hover { background: #ddd9cc; }
+.gen { font-family: var(--serif); font-size: 14px; color: var(--ink); line-height: 1.7; position: relative; }
+.gen::after {
+  content: ''; display: inline-block; width: 7px; height: 14px;
+  background: var(--clay); vertical-align: -2px; margin-left: 2px;
+  animation: blink 1.1s steps(2) infinite;
+}
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
 
-/* ── Pain Points ─────────────────────────────────────────────── */
+.title-option { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--ivory); border-radius: var(--r-sm); margin-bottom: 6px; font-size: 13px; }
+.title-option .rank { font-family: var(--serif); font-weight: 700; font-size: 16px; color: var(--clay); width: 22px; }
+.title-option .text { flex: 1; color: var(--ink); font-weight: 500; }
+.title-option .s { font-family: var(--mono); font-size: 11px; color: var(--leaf); font-weight: 600; background: rgba(92,138,92,.1); padding: 2px 6px; border-radius: 4px; }
+
+@keyframes floatA { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes floatB { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+
+/* =========================================================
+   Section 通用
+   ========================================================= */
+.section { padding: 110px 0; position: relative; }
+.section-head { margin-bottom: 64px; max-width: 760px; }
+.section-head.center { text-align: center; margin-left: auto; margin-right: auto; }
+.section-tag {
+  display: inline-block; font-family: var(--serif-en); font-size: 13px;
+  font-style: italic; color: var(--clay-deep); letter-spacing: .04em; margin-bottom: 14px;
+}
+.section-title { font-size: clamp(30px, 4vw, 48px); line-height: 1.18; margin-bottom: 18px; letter-spacing: -.015em; }
+.section-sub { font-size: 16px; color: var(--ink-2); line-height: 1.78; max-width: 620px; }
+.section-head.center .section-sub { margin-left: auto; margin-right: auto; }
+
+/* =========================================================
+   痛点 Section — 引用式卡片
+   ========================================================= */
+.pain { background: var(--paper); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .pain-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 32px;
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px;
+  background: var(--line); border: 1px solid var(--line);
+  border-radius: var(--r-lg); overflow: hidden;
+}
+.pain-cell {
+  background: var(--paper); padding: 36px 32px;
+  display: flex; gap: 18px; transition: background .2s;
+}
+.pain-cell:hover { background: var(--ivory); }
+.pain-q { font-family: var(--serif); font-size: 48px; line-height: .8; color: var(--clay-soft); flex-shrink: 0; width: 38px; font-weight: 600; }
+.pain-text h4 { font-size: 18px; margin-bottom: 6px; }
+.pain-text p { font-size: 14px; color: var(--ink-3); margin: 0; line-height: 1.7; }
+.pain-answer { margin-top: 64px; text-align: center; }
+.pain-answer-text {
+  font-family: var(--serif); font-size: clamp(24px, 3vw, 36px);
+  color: var(--ink); line-height: 1.45; letter-spacing: -.01em;
+}
+.pain-answer-text em { font-style: normal; color: var(--clay-deep); position: relative; }
+.pain-answer-text em::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: .04em;
+  height: .16em; background: var(--clay-tint); z-index: -1;
+}
+
+/* =========================================================
+   核心功能 — Feature Blocks
+   ========================================================= */
+.features { position: relative; }
+.feature-block {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 80px;
+  align-items: center; padding: 72px 0;
+  border-top: 1px dashed var(--line-2);
+}
+.feature-block:first-of-type { border-top: none; padding-top: 24px; }
+.feature-block.reverse .fb-text { order: 2; }
+.feature-block.reverse .fb-visual { order: 1; }
+.fb-step {
+  font-family: var(--serif-en); font-style: italic;
+  font-size: 14px; color: var(--clay-deep); letter-spacing: .04em;
+  margin-bottom: 14px; font-weight: 500;
+}
+.fb-step .num {
+  display: inline-block; font-style: normal; font-weight: 600;
+  font-family: var(--serif); color: var(--ink);
+  background: var(--clay-tint); padding: 2px 10px;
+  border-radius: 999px; margin-right: 10px; font-size: 12px;
+}
+.fb-text h3 { font-size: clamp(28px, 3.2vw, 38px); line-height: 1.2; margin-bottom: 18px; letter-spacing: -.015em; }
+.fb-text > p { font-size: 16px; color: var(--ink-2); line-height: 1.78; margin-bottom: 28px; }
+.fb-list { list-style: none; padding: 0; margin: 0; }
+.fb-list li {
+  padding: 14px 0; border-top: 1px dashed var(--line-2);
+  display: flex; gap: 14px; align-items: flex-start;
+}
+.fb-list li:last-child { border-bottom: 1px dashed var(--line-2); }
+.fb-list .li-marker {
+  flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--clay-tint); color: var(--clay-deep);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; font-family: var(--serif-en); margin-top: 2px;
+}
+.fb-list .li-content strong { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); margin-bottom: 3px; }
+.fb-list .li-content span { font-size: 13.5px; color: var(--ink-3); line-height: 1.65; }
+
+/* Mockup container */
+.fb-visual {
+  position: relative; aspect-ratio: 1/1;
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--r-xl); padding: 28px;
+  box-shadow: var(--sh-1); overflow: hidden;
+}
+.mk-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 18px;
+}
+.mk-head .t { font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--ink); }
+.mk-head .tag { font-size: 11px; color: var(--ink-3); background: var(--bone); padding: 3px 8px; border-radius: 4px; }
+
+/* Mockup: 选题列表 */
+.mk-topics { display: flex; flex-direction: column; gap: 8px; }
+.trend-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; background: var(--ivory); border-radius: var(--r-sm); position: relative;
+}
+.trend-row .heat-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 3px 0 0 3px; }
+.trend-row .rank { font-family: var(--serif-en); font-style: italic; font-weight: 500; font-size: 18px; color: var(--clay); width: 24px; }
+.trend-row .text { flex: 1; font-size: 13px; color: var(--ink); font-weight: 500; line-height: 1.4; }
+.trend-row .meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-3); }
+.trend-row .platform-chip { padding: 2px 7px; border-radius: 3px; font-weight: 600; letter-spacing: .02em; color: #fff; font-size: 10.5px; }
+.platform-chip.gzh { background: #07C160; }
+.platform-chip.zhihu { background: #0066FF; }
+.platform-chip.gh { background: #1F1F1E; }
+
+/* Mockup: 正文编辑 */
+.mk-doc { font-family: var(--serif); line-height: 1.85; font-size: 13.5px; color: var(--ink); }
+.mk-doc h5 { font-size: 18px; font-weight: 700; margin: 0 0 10px; color: var(--ink); }
+.mk-doc p { margin: 0 0 8px; }
+.mk-doc .hi { background: var(--clay-tint); padding: 1px 4px; border-radius: 2px; color: var(--clay-deep); font-weight: 500; }
+.mk-doc .cite {
+  font-size: 11.5px; color: var(--ink-3); font-family: var(--sans);
+  margin-top: 14px; padding: 8px 10px; background: var(--bone);
+  border-left: 2px solid var(--pine); border-radius: 0 4px 4px 0;
+}
+
+/* Mockup: Agent 进度 */
+.mk-agents { display: flex; flex-direction: column; gap: 10px; }
+.agent-row {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  background: var(--ivory); border-radius: var(--r-md);
+  border: 1px solid var(--line);
+}
+.agent-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.agent-dot.done { background: var(--leaf); }
+.agent-dot.active { background: var(--clay); animation: pulse 2s infinite; }
+.agent-name { flex: 1; font-size: 13px; font-weight: 500; color: var(--ink); }
+.agent-status { font-size: 11px; color: var(--leaf); font-weight: 600; }
+
+/* Mockup: 标题推荐 */
+.mk-titles { display: flex; flex-direction: column; gap: 8px; }
+.mk-title-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px; background: var(--ivory);
+  border-radius: var(--r-md); border: 1px solid var(--line);
+}
+.mk-title-row.top { border-left: 3px solid var(--clay); background: #FFF7F2; }
+.mk-title-rank { font-family: var(--serif-en); font-weight: 600; font-size: 20px; color: var(--clay); width: 28px; text-align: center; }
+.mk-title-text { flex: 1; font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--ink); line-height: 1.4; }
+.mk-title-score { text-align: center; }
+.mk-title-score b { display: block; font-family: var(--serif-en); font-size: 18px; color: var(--clay-deep); line-height: 1; }
+.mk-title-score span { font-size: 9px; color: var(--ink-3); letter-spacing: .05em; text-transform: uppercase; }
+
+/* Mockup: 富文本编辑器 */
+.mk-editor {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--r-md); overflow: hidden; height: 100%;
+  display: flex; flex-direction: column;
+}
+.mk-toolbar {
+  display: flex; align-items: center; gap: 6px; padding: 10px 14px;
+  background: var(--bone); border-bottom: 1px solid var(--line);
+  font-size: 12px; color: var(--ink-3);
+}
+.mk-toolbar-btn {
+  width: 28px; height: 28px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 13px; color: var(--ink-2);
+  background: var(--paper); border: 1px solid var(--line);
+}
+.mk-toolbar-btn.active { background: var(--clay-tint); border-color: var(--clay-soft); color: var(--clay-deep); }
+.mk-body { flex: 1; padding: 16px 18px; font-family: var(--serif); font-size: 14px; line-height: 1.85; color: var(--ink); overflow: hidden; }
+.mk-body h5 { font-size: 20px; font-weight: 700; margin: 0 0 12px; color: var(--ink); text-align: center; }
+.mk-body p { margin: 0 0 10px; }
+.mk-body .red-hi { color: var(--crimson); font-weight: 600; }
+
+/* =========================================================
+   工具箱
+   ========================================================= */
+.tools-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
   margin-top: 48px;
 }
-@media (max-width: 900px) { .pain-grid { grid-template-columns: 1fr; } }
-
-.pain-card {
-  padding: 32px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  transition: border-color 200ms;
+@media (max-width: 900px) { .tools-grid { grid-template-columns: 1fr; } }
+.tool-card {
+  padding: 32px 28px; background: var(--ivory);
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  transition: all .2s ease;
 }
-.pain-card:hover { border-color: var(--border-soft); }
-
-.pain-icon {
-  font-size: 28px;
-  margin-bottom: 16px;
-  display: block;
+.tool-card:hover { transform: translateY(-3px); box-shadow: var(--sh-2); border-color: var(--line-2); }
+.tool-card .tk-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 18px; font-size: 22px;
+  background: var(--clay-tint); color: var(--clay-deep);
 }
+.tool-card h4 { font-size: 18px; margin-bottom: 6px; }
+.tool-card .tk-desc { font-size: 13px; color: var(--ink-3); line-height: 1.65; }
 
-.pain-card h3 {
-  font-size: 22px;
-  margin-bottom: 12px;
-  color: var(--fg);
+/* =========================================================
+   CTA
+   ========================================================= */
+.cta-section {
+  background: var(--paper); border-top: 1px solid var(--line);
+  text-align: center; padding: 120px 0;
 }
-
-.pain-card p {
-  font-size: 15px;
-  line-height: 1.6;
-}
-
-.pain-vs {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-
-.pain-before {
-  font-size: 14px;
-  color: #87867f;
-  text-decoration: line-through;
-  flex: 1;
-}
-
-.pain-after {
-  font-size: 14px;
-  color: var(--accent);
-  font-weight: 500;
-  flex: 1;
-}
-
-/* ── Pipeline Cards ─────────────────────────────────────────── */
-.pipeline-cards {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 12px;
-  margin-top: 48px;
-}
-
-@media (max-width: 1100px) {
-  .pipeline-cards { grid-template-columns: repeat(4, 1fr); }
-}
-@media (max-width: 640px) {
-  .pipeline-cards { grid-template-columns: repeat(2, 1fr); }
-}
-
-.pipeline-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 24px 16px;
-  text-align: center;
-  transition: border-color 200ms, box-shadow 200ms;
-  position: relative;
-}
-
-.pipeline-card:hover {
-  border-color: var(--border-soft);
-  box-shadow: 0 2px 12px rgba(0,0,0,0.04);
-}
-
-.pipeline-card-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 14px;
-  background: rgba(201, 100, 66, 0.08);
-}
-
-.pipeline-card-icon svg {
-  width: 22px;
-  height: 22px;
-  stroke: var(--accent);
-  stroke-width: 1.8;
-  fill: none;
-}
-
-.pipeline-card-step {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--meta);
-  letter-spacing: 0.5px;
-  margin-bottom: 6px;
-}
-
-.pipeline-card h4 {
-  font-family: var(--font-body);
-  font-size: 15px;
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-
-.pipeline-card p {
-  font-size: 12.5px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-/* connecting line */
-.pipeline-connector {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: -8px;
-  margin-bottom: -8px;
-  padding: 0 4px;
-}
-
-.pipeline-connector span {
-  display: block;
-  width: 100%;
-  height: 1px;
-  background: linear-gradient(90deg, var(--border), var(--border-soft), var(--border));
-}
-
-/* ── Feature Grid ────────────────────────────────────────────── */
-.feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 48px; }
-@media (max-width: 900px) { .feature-grid { grid-template-columns: 1fr; } }
-.feature-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 28px; transition: box-shadow 200ms, border-color 200ms; }
-.feature-card:hover { box-shadow: 0 0 0 1px var(--border-soft), rgba(0,0,0,0.04) 0 4px 20px; border-color: var(--border-soft); }
-.feature-card h4 { font-family: var(--font-display); font-size: 20px; font-weight: 500; margin-bottom: 8px; }
-.feature-card p { font-size: 15px; color: var(--muted); line-height: 1.55; }
-.feature-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; margin-bottom: 16px; background: var(--surface-warm); color: var(--accent); }
-
-/* ── Split Section ───────────────────────────────────────────── */
-.split { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
-.split-reverse { direction: rtl; }
-.split-reverse > * { direction: ltr; }
-@media (max-width: 900px) { .split { grid-template-columns: 1fr; gap: 40px; } .split-reverse { direction: ltr; } }
-.split-content h2 { margin-bottom: 20px; }
-.split-content .lead { margin-bottom: 32px; }
-
-/* ── Agent Cards ─────────────────────────────────────────────── */
-.agent-list { display: flex; flex-direction: column; gap: 16px; margin-top: 32px; }
-.agent-item { display: flex; align-items: flex-start; gap: 16px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); transition: border-color 150ms; }
-.agent-item:hover { border-color: var(--border-soft); }
-.agent-badge { font-family: var(--font-mono); font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 6px; white-space: nowrap; flex-shrink: 0; }
-.agent-badge-a { background: #f0e6df; color: #9c5a3a; }
-.agent-badge-b { background: #e6eadf; color: #4a6b3a; }
-.agent-badge-c { background: #dfe6ea; color: #3a5a6b; }
-.agent-badge-d { background: #eadfdf; color: #6b3a3a; }
-.agent-badge-e { background: #eae6df; color: #6b5a3a; }
-.agent-item-text h4 { font-family: var(--font-body); font-size: 15px; font-weight: 600; margin-bottom: 4px; }
-.agent-item-text p { font-size: 14px; color: var(--muted); line-height: 1.5; }
-
-/* ── Dark Feature Grid ───────────────────────────────────────── */
-.dark-features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 32px; margin-top: 48px; }
-@media (max-width: 768px) { .dark-features { grid-template-columns: 1fr; } }
-.dark-feature { padding: 32px; border: 1px solid #30302e; border-radius: var(--radius-sm); transition: border-color 200ms; }
-.dark-feature:hover { border-color: #5e5d59; }
-.dark-feature h3 { font-size: 22px; margin-bottom: 12px; color: var(--surface); }
-.dark-feature p { font-size: 15px; line-height: 1.6; }
-.dark-feature-num { font-family: var(--font-display); font-size: 48px; font-weight: 500; color: var(--accent); line-height: 1; margin-bottom: 8px; }
-
-/* ── Persona Grid ────────────────────────────────────────────── */
-.persona-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 32px; }
-@media (max-width: 768px) { .persona-grid { grid-template-columns: repeat(2, 1fr); } }
-.persona-card { text-align: center; padding: 24px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.persona-emoji { font-size: 32px; margin-bottom: 12px; display: block; }
-.persona-card h4 { font-family: var(--font-body); font-size: 15px; font-weight: 600; margin-bottom: 4px; }
-.persona-card p { font-size: 13px; color: var(--meta); }
-
-/* ── Score Bar ───────────────────────────────────────────────── */
-.scores { display: flex; flex-direction: column; gap: 12px; margin-top: 24px; }
-.score-row { display: flex; align-items: center; gap: 12px; }
-.score-label { font-size: 14px; color: var(--muted); width: 100px; flex-shrink: 0; text-align: right; }
-.score-track { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
-.score-fill { height: 100%; border-radius: 4px; background: var(--accent); transition: width 600ms cubic-bezier(0.2, 0, 0, 1); }
-.score-value { font-family: var(--font-mono); font-size: 13px; color: var(--meta); width: 36px; }
-
-/* ── Stats Row ───────────────────────────────────────────────── */
-.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 32px; margin-top: 64px; padding-top: 48px; border-top: 1px solid var(--border); }
-@media (max-width: 768px) { .stats-row { grid-template-columns: repeat(2, 1fr); gap: 24px; } }
-.stat-item { text-align: center; }
-.stat-num { font-family: var(--font-display); font-size: 48px; font-weight: 500; color: var(--accent); line-height: 1; }
-.stat-label { font-size: 14px; color: var(--meta); margin-top: 8px; }
-
-/* ── CTA Section ─────────────────────────────────────────────── */
-.cta-section { text-align: center; padding: 120px 0; }
 .cta-section h2 { max-width: 700px; margin: 0 auto 20px; }
-.cta-section .lead { margin: 0 auto 40px; text-align: center; }
+.cta-section .section-sub { margin: 0 auto 40px; text-align: center; }
 
-/* ── Footer ──────────────────────────────────────────────────── */
-.footer { padding: 40px 0; border-top: 1px solid var(--border); text-align: center; }
-.footer p { font-size: 13px; color: var(--meta); }
+/* =========================================================
+   Footer
+   ========================================================= */
+.footer {
+  padding: 48px 0 36px; border-top: 1px solid var(--line);
+  background: var(--ivory); color: var(--ink-3); font-size: 13px;
+}
+.footer-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 18px;
+}
+.footer .brand { font-size: 15px; }
+.footer-meta { display: flex; gap: 20px; flex-wrap: wrap; font-size: 12.5px; }
 
-/* ── Tool Tags ───────────────────────────────────────────────── */
-.tool-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
-.tool-tag { font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border-soft); color: var(--muted); background: var(--surface); transition: all 150ms; }
-.tool-tag:hover { border-color: var(--accent); color: var(--accent); }
+/* =========================================================
+   Modal — 登录 / 注册
+   ========================================================= */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(31,31,30,.55);
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  z-index: 100; display: none;
+  align-items: center; justify-content: center; padding: 24px;
+}
+.modal-backdrop.active { display: flex; animation: fadeIn .2s ease; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  background: var(--paper); border-radius: var(--r-xl);
+  padding: 40px; max-width: 440px; width: 100%; position: relative;
+  box-shadow: var(--sh-3);
+  animation: slideUp .25s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.modal-close {
+  position: absolute; top: 16px; right: 16px;
+  width: 32px; height: 32px; border: none; background: transparent;
+  color: var(--ink-3); font-size: 22px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .15s; line-height: 1;
+}
+.modal-close:hover { background: var(--bone); color: var(--ink); }
+.modal h3 { font-size: 24px; margin-bottom: 8px; }
+.modal-sub { font-size: 13.5px; color: var(--ink-3); margin-bottom: 28px; line-height: 1.65; }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 12.5px; color: var(--ink-2); margin-bottom: 6px; font-weight: 500; }
+.field-row { display: flex; gap: 8px; }
+.field input {
+  width: 100%; height: 44px; padding: 0 14px;
+  background: var(--ivory); border: 1px solid var(--line);
+  border-radius: var(--r-sm); font-size: 14px; font-family: inherit;
+  color: var(--ink); transition: all .15s;
+}
+.field input:focus { outline: none; border-color: var(--clay); box-shadow: 0 0 0 3px rgba(204,120,92,.15); }
+.field-row .btn { flex-shrink: 0; height: 44px; padding: 0 16px; min-width: 108px; }
+.field-row .btn:disabled { opacity: .6; cursor: not-allowed; }
+.modal .btn-submit { width: 100%; height: 44px; margin-top: 8px; font-size: 14.5px; }
+.modal-foot {
+  text-align: center; margin-top: 20px; padding-top: 20px;
+  border-top: 1px dashed var(--line-2); font-size: 12.5px; color: var(--ink-3); line-height: 1.65;
+}
+.modal-foot a { color: var(--clay-deep); border-bottom: 1px solid var(--clay-soft); }
+.modal-error {
+  display: none; margin-bottom: 18px; padding: 14px 16px;
+  background: #FFF4F0; border: 1px solid var(--clay-soft);
+  border-left: 3px solid var(--clay); border-radius: var(--r-sm);
+  font-size: 13px; line-height: 1.65; color: var(--ink);
+}
+.modal-error.active { display: block; }
+.modal-error strong { display: block; color: var(--clay-deep); margin-bottom: 4px; font-size: 14px; }
+.modal-success { display: none; text-align: center; padding: 8px 0 16px; }
+.modal-success.active { display: block; }
+.modal-success .icon {
+  width: 56px; height: 56px; border-radius: 50%;
+  background: var(--leaf); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; font-weight: 700; margin: 0 auto 18px;
+}
+.modal-success h4 { font-size: 20px; margin-bottom: 8px; }
+.modal-success p { font-size: 13.5px; color: var(--ink-3); margin: 0 0 24px; line-height: 1.65; }
 
-/* ── Code-style label ───────────────────────────────────────── */
-.code-label { font-family: var(--font-mono); font-size: 13px; color: var(--accent); background: rgba(201, 100, 66, 0.08); padding: 4px 12px; border-radius: 6px; display: inline-block; margin-bottom: 20px; }
-
-/* ══════════════════════════════════════════════════════════════
-   ANIMATION EFFECTS (inspired by react-bits)
-   ══════════════════════════════════════════════════════════════ */
-
-/* ── BlurText: 逐词模糊淡入 ─────────────────────────────────── */
+/* =========================================================
+   BlurText 动效
+   ========================================================= */
 .blur-word {
   display: inline-block;
-  filter: blur(10px);
-  opacity: 0;
-  transform: translateY(20px);
-  transition: filter 0.6s cubic-bezier(0.2, 0, 0, 1),
-              opacity 0.6s cubic-bezier(0.2, 0, 0, 1),
-              transform 0.6s cubic-bezier(0.2, 0, 0, 1);
+  filter: blur(10px); opacity: 0; transform: translateY(20px);
+  transition: filter 0.6s cubic-bezier(0.2,0,0,1), opacity 0.6s cubic-bezier(0.2,0,0,1), transform 0.6s cubic-bezier(0.2,0,0,1);
   will-change: filter, opacity, transform;
 }
-.blur-word.visible {
-  filter: blur(0px);
-  opacity: 1;
-  transform: translateY(0);
-}
+.blur-word.visible { filter: blur(0); opacity: 1; transform: translateY(0); }
 
-/* ── ShinyText: 光泽扫过效果 ────────────────────────────────── */
+/* ShinyText 光泽 */
 .shiny-text {
-  background: linear-gradient(
-    120deg,
-    var(--fg) 0%,
-    var(--fg) 35%,
-    var(--accent) 50%,
-    var(--fg) 65%,
-    var(--fg) 100%
-  );
+  background: linear-gradient(120deg, var(--ink) 0%, var(--ink) 35%, var(--clay) 50%, var(--ink) 65%, var(--ink) 100%);
   background-size: 300% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
+  -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent;
   animation: shiny-sweep 4s ease-in-out infinite;
 }
-@keyframes shiny-sweep {
-  0% { background-position: 200% center; }
-  40%, 100% { background-position: -100% center; }
-}
+@keyframes shiny-sweep { 0% { background-position: 200% center; } 40%,100% { background-position: -100% center; } }
 
-/* ── StarBorder: CTA 流光边框 ───────────────────────────────── */
-.star-border {
-  position: relative;
-  display: inline-block;
-  overflow: hidden;
-  border-radius: var(--radius-md);
+/* StarBorder 流光边框 */
+.star-btn {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  height: 48px; padding: 0 28px; border-radius: var(--r-md);
+  background: var(--clay); color: #fff; font-size: 15px; font-weight: 500;
+  font-family: inherit; border: none; cursor: pointer;
+  overflow: hidden; transition: background .15s;
+  box-shadow: var(--sh-clay);
 }
-.star-border::before,
-.star-border::after {
-  content: '';
-  position: absolute;
-  width: 300%;
-  height: 50%;
-  border-radius: 50%;
-  opacity: 0.5;
-  pointer-events: none;
+.star-btn:hover { background: var(--clay-deep); transform: translateY(-1px); }
+.star-btn::before, .star-btn::after {
+  content: ''; position: absolute; width: 300%; height: 50%;
+  border-radius: 50%; opacity: 0.5; pointer-events: none;
 }
-.star-border::before {
-  bottom: -12px;
-  right: -250%;
-  background: radial-gradient(circle, var(--accent) 0%, transparent 10%);
+.star-btn::before {
+  bottom: -12px; right: -250%;
+  background: radial-gradient(circle, rgba(255,255,255,.4) 0%, transparent 10%);
   animation: star-bottom 6s linear infinite alternate;
 }
-.star-border::after {
-  top: -12px;
-  left: -250%;
-  background: radial-gradient(circle, var(--accent) 0%, transparent 10%);
+.star-btn::after {
+  top: -12px; left: -250%;
+  background: radial-gradient(circle, rgba(255,255,255,.4) 0%, transparent 10%);
   animation: star-top 6s linear infinite alternate;
 }
-.star-border-inner {
-  position: relative;
-  z-index: 1;
-  background: var(--accent);
-  color: var(--accent-on);
-  padding: 12px 28px;
-  border-radius: var(--radius-md);
-  font-family: var(--font-body);
-  font-size: 16px;
-  font-weight: 500;
-  text-decoration: none;
-  display: inline-block;
-  transition: background 150ms;
-  cursor: pointer;
-}
-.star-border-inner:hover {
-  background: var(--accent-hover);
-  color: var(--accent-on);
-}
-@keyframes star-bottom {
-  0% { transform: translate(0%, 0%); opacity: 0.6; }
-  100% { transform: translate(-66%, 0%); opacity: 0; }
-}
-@keyframes star-top {
-  0% { transform: translate(0%, 0%); opacity: 0.6; }
-  100% { transform: translate(66%, 0%); opacity: 0; }
-}
+.star-btn > span { position: relative; z-index: 1; }
+@keyframes star-bottom { 0% { transform: translate(0,0); opacity: .6; } 100% { transform: translate(-66%,0); opacity: 0; } }
+@keyframes star-top { 0% { transform: translate(0,0); opacity: .6; } 100% { transform: translate(66%,0); opacity: 0; } }
 
-/* ── Silk-like: 柔光流动背景 ──────────────────────────────── */
-.silk-hero {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  overflow: hidden;
+/* =========================================================
+   响应式
+   ========================================================= */
+@media (max-width: 980px) {
+  .hero { padding: 110px 0 80px; }
+  .hero-grid { grid-template-columns: 1fr; gap: 32px; }
+  .hero-visual { aspect-ratio: 1/.85; max-width: 520px; margin: 0 auto; }
+  .nav-links { display: none; }
+  .pain-grid { grid-template-columns: 1fr; }
+  .feature-block, .feature-block.reverse { grid-template-columns: 1fr; gap: 40px; }
+  .feature-block.reverse .fb-text, .feature-block.reverse .fb-visual { order: initial; }
+  .tools-grid { grid-template-columns: repeat(2, 1fr); }
+  .section { padding: 80px 0; }
+  .section-head { margin-bottom: 48px; }
 }
-.silk-hero::before {
-  content: '';
-  position: absolute;
-  inset: -50%;
-  background:
-    radial-gradient(ellipse at 20% 50%, rgba(201, 100, 66, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 20%, rgba(201, 100, 66, 0.04) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 80%, rgba(232, 230, 220, 0.3) 0%, transparent 50%);
-  animation: silk-drift 20s ease-in-out infinite alternate;
+@media (max-width: 540px) {
+  .container { padding: 0 20px; }
+  .nav-inner { padding: 0 20px; }
+  .hero { padding: 96px 0 60px; }
+  .hero-title { font-size: 38px; }
+  .hero-actions { flex-direction: column; align-items: stretch; }
+  .hero-actions .btn { width: 100%; }
+  .tools-grid { grid-template-columns: 1fr; }
+  .modal { padding: 32px 24px; }
 }
-.silk-hero::after {
-  content: '';
-  position: absolute;
-  inset: -50%;
-  background:
-    radial-gradient(ellipse at 70% 60%, rgba(201, 100, 66, 0.05) 0%, transparent 50%),
-    radial-gradient(ellipse at 30% 30%, rgba(240, 238, 230, 0.4) 0%, transparent 50%);
-  animation: silk-drift 25s ease-in-out infinite alternate-reverse;
-}
-@keyframes silk-drift {
-  0% { transform: translate(0%, 0%) rotate(0deg) scale(1); }
-  33% { transform: translate(3%, -2%) rotate(1deg) scale(1.02); }
-  66% { transform: translate(-2%, 3%) rotate(-0.5deg) scale(0.98); }
-  100% { transform: translate(1%, -1%) rotate(0.5deg) scale(1.01); }
-}
-
-/* ── Fade-up (enhanced with stagger) ────────────────────────── */
-.fade-up {
-  opacity: 0;
-  transform: translateY(24px);
-  transition: opacity 0.6s cubic-bezier(0.2, 0, 0, 1), transform 0.6s cubic-bezier(0.2, 0, 0, 1);
-}
-.fade-up.visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-/* ── Pipeline card stagger animation ──────────────────────── */
-.pipeline-card {
-  opacity: 0;
-  transform: translateY(16px);
-  animation: pipe-in 0.5s cubic-bezier(0.2, 0, 0, 1) forwards;
-}
-.pipeline-card:nth-child(1) { animation-delay: 0.05s; }
-.pipeline-card:nth-child(2) { animation-delay: 0.1s; }
-.pipeline-card:nth-child(3) { animation-delay: 0.15s; }
-.pipeline-card:nth-child(4) { animation-delay: 0.2s; }
-.pipeline-card:nth-child(5) { animation-delay: 0.25s; }
-.pipeline-card:nth-child(6) { animation-delay: 0.3s; }
-.pipeline-card:nth-child(7) { animation-delay: 0.35s; }
-@keyframes pipe-in {
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* ── Score bar animate-in ───────────────────────────────────── */
-.score-fill {
-  width: 0 !important;
-  transition: width 0.8s cubic-bezier(0.2, 0, 0, 1);
-}
-.scores-animated .score-fill { width: var(--target-width) !important; }
 </style>
 </head>
 <body>
 <div id="root"></div>
 
 <script type="text/babel">
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef } = React;
 
 /* ══════════════════════════════════════════════════════════════
-   ANIMATION COMPONENTS (inspired by react-bits)
+   ANIMATION COMPONENTS
    ══════════════════════════════════════════════════════════════ */
 
-/* ── BlurText: 逐词模糊淡入 ─────────────────────────────────── */
-const BlurText = ({ text, delay = 80, className = '', as: Tag = 'span' }) => {
+const BlurText = ({ text, delay = 80, as: Tag = 'span', className = '' }) => {
   const ref = useRef(null);
   const [inView, setInView] = useState(false);
-
   useEffect(() => {
     if (!ref.current) return;
     const io = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) { setInView(true); io.disconnect(); } },
+      ([e]) => { if (e.isIntersecting) { setInView(true); io.disconnect(); } },
       { threshold: 0.2 }
     );
     io.observe(ref.current);
     return () => io.disconnect();
   }, []);
-
-  const chars = text.split('');
-
   return (
     <Tag ref={ref} className={className} style={{ display: 'inline' }}>
-      {chars.map((char, i) => (
-        <span
-          key={i}
-          className={`blur-word${inView ? ' visible' : ''}`}
-          style={{ transitionDelay: `${i * delay}ms` }}
-        >
-          {char === ' ' ? '\u00A0' : char}
+      {text.split('').map((ch, i) => (
+        <span key={i} className={`blur-word${inView ? ' visible' : ''}`}
+          style={{ transitionDelay: `${i * delay}ms` }}>
+          {ch === ' ' ? '\u00A0' : ch}
         </span>
       ))}
     </Tag>
   );
 };
 
-/* ── ShinyText: 光泽扫过 ────────────────────────────────────── */
-const ShinyText = ({ text, className = '' }) => (
-  <span className={`shiny-text ${className}`}>{text}</span>
+const ShinyText = ({ text }) => <span className="shiny-text">{text}</span>;
+
+/* ══════════════════════════════════════════════════════════════
+   LOGIN MODAL
+   ══════════════════════════════════════════════════════════════ */
+
+const LoginModal = ({ open, onClose }) => {
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [countdown, setCountdown] = useState(0);
+  const [step, setStep] = useState('form'); // form | success
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    if (countdown <= 0) { if (timerRef.current) clearInterval(timerRef.current); return; }
+    timerRef.current = setInterval(() => setCountdown(c => c - 1), 1000);
+    return () => clearInterval(timerRef.current);
+  }, [countdown]);
+
+  useEffect(() => {
+    if (open) { setStep('form'); setPhone(''); setCode(''); setError(''); setCountdown(0); }
+  }, [open]);
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape' && open) onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const isValidPhone = /^1[3-9]\d{9}$/.test(phone);
+
+  const sendCode = () => {
+    if (!isValidPhone) { setError('请输入 11 位有效手机号'); return; }
+    setError('');
+    setCountdown(60);
+    setError('验证码已发送（演示环境请输入任意 6 位数字）');
+  };
+
+  const submit = () => {
+    if (!isValidPhone) { setError('请输入 11 位有效手机号'); return; }
+    if (!/^\d{6}$/.test(code)) { setError('请输入 6 位验证码'); return; }
+    if (timerRef.current) clearInterval(timerRef.current);
+    setStep('success');
+  };
+
+  return (
+    <div className="modal-backdrop active" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" role="dialog" aria-modal="true">
+        <button className="modal-close" onClick={onClose} aria-label="关闭">×</button>
+
+        {step === 'form' && (
+          <div>
+            <h3>登录 / 注册</h3>
+            <p className="modal-sub">输入手机号即可一步完成登录或注册。还没有账号？自动创建。</p>
+
+            {error && <div className="modal-error active"><strong>提示</strong>{error}</div>}
+
+            <div className="field">
+              <label>手机号</label>
+              <input type="tel" placeholder="请输入 11 位手机号" maxLength={11} autoComplete="tel"
+                value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 11))} />
+            </div>
+            <div className="field">
+              <label>验证码</label>
+              <div className="field-row">
+                <input type="text" placeholder="6 位验证码" maxLength={6} inputMode="numeric"
+                  value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+                <button className="btn btn-ghost" disabled={countdown > 0} onClick={sendCode}>
+                  {countdown > 0 ? `重新发送 ${countdown}s` : '获取验证码'}
+                </button>
+              </div>
+            </div>
+
+            <button className="btn btn-primary btn-submit" onClick={submit}>登录 / 注册</button>
+
+            <div className="modal-foot">
+              提交即表示同意 <a href="#">《用户协议》</a> 和 <a href="#">《隐私政策》</a>
+            </div>
+          </div>
+        )}
+
+        {step === 'success' && (
+          <div className="modal-success active">
+            <div className="icon" style={{ background: 'var(--clay)' }}>✓</div>
+            <h4>登录成功</h4>
+            <p>
+              手机号 <strong style={{ color: 'var(--ink)' }}>{phone.slice(0,3)} **** {phone.slice(7)}</strong> 已验证通过。<br />
+              即将进入工作台…
+            </p>
+            <button className="btn btn-primary btn-submit" onClick={onClose}>
+              进入工作台 <span className="btn-arrow">→</span>
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════
+   PAGE SECTIONS
+   ══════════════════════════════════════════════════════════════ */
+
+const Nav = ({ onLogin }) => {
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const handler = () => setScrolled(window.scrollY > 12);
+    window.addEventListener('scroll', handler, { passive: true });
+    handler();
+    return () => window.removeEventListener('scroll', handler);
+  }, []);
+
+  return (
+    <nav className={`nav${scrolled ? ' scrolled' : ''}`}>
+      <div className="nav-inner">
+        <a href="#" className="brand">
+          <span className="brand-mark">
+            <svg viewBox="0 0 28 28" fill="none">
+              <circle cx="14" cy="14" r="13" stroke="#1F1F1E" strokeWidth="1.4"/>
+              <circle cx="14" cy="9" r="2.2" fill="#CC785C"/>
+              <circle cx="9" cy="17" r="2.2" fill="#3F5C52"/>
+              <circle cx="19" cy="17" r="2.2" fill="#1F1F1E"/>
+              <path d="M14 11.2 L9.8 15.6 M14 11.2 L18.2 15.6 M11 17.5 L17 17.5" stroke="#1F1F1E" strokeWidth="1.1" strokeLinecap="round"/>
+            </svg>
+          </span>
+          <span><ShinyText text="公众号智能体" /><span className="brand-suffix">GZH AGENT</span></span>
+        </a>
+        <div className="nav-links">
+          <a href="#features">产品功能</a>
+          <a href="#tools">创作工具</a>
+          <a href="#cta">联系我们</a>
+        </div>
+        <div className="nav-cta">
+          <button className="btn btn-text" onClick={onLogin}>登录 / 注册</button>
+          <button className="btn btn-primary" onClick={onLogin}>立即开始 <span className="btn-arrow">→</span></button>
+        </div>
+      </div>
+    </nav>
+  );
+};
+
+const Hero = ({ onLogin }) => (
+  <section className="hero">
+    <div className="hero-decor" aria-hidden="true">
+      <svg viewBox="0 0 1400 800" preserveAspectRatio="xMidYMid slice" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: .5 }}>
+        <g stroke="#E4DDCE" strokeWidth="1" fill="none">
+          <path d="M120 180 L240 240 L180 360" strokeDasharray="3 4"/>
+          <path d="M1200 120 L1280 220 L1180 320" strokeDasharray="3 4"/>
+          <path d="M1100 600 L1240 540 L1300 660" strokeDasharray="3 4"/>
+        </g>
+        <g fill="#E9B79E">
+          <circle cx="120" cy="180" r="3"/><circle cx="240" cy="240" r="2"/><circle cx="180" cy="360" r="2.5"/>
+          <circle cx="1200" cy="120" r="2.5"/><circle cx="1280" cy="220" r="2"/><circle cx="1180" cy="320" r="3"/>
+        </g>
+      </svg>
+    </div>
+
+    <div className="container">
+      <div className="hero-grid">
+        <div>
+          <div className="eyebrow"><span className="dot" /><span>AI 全链路 · 公众号内容创作平台</span></div>
+          <h1 className="hero-title">
+            <BlurText text="点击生成，" delay={60} as="span" /><br />
+            等<em>文章出炉</em>。
+          </h1>
+          <p className="hero-sub">
+            从海量信息里挖选题，AI 写出不像 AI 的公众号文章——你只需审稿和点击发布。每天省下 3 小时，把时间留给更重要的事。
+          </p>
+          <div className="hero-actions">
+            <button className="star-btn" onClick={onLogin}><span>立即开始使用 <span className="btn-arrow">→</span></span></button>
+            <a href="#features" className="btn btn-ghost btn-lg">看产品怎么跑</a>
+          </div>
+          <div className="hero-meta">
+            <span><span className="ck">✓</span>全链路自动化</span>
+            <span><span className="ck">✓</span>多模型驱动</span>
+            <span><span className="ck">✓</span>一次开通全功能</span>
+          </div>
+        </div>
+
+        {/* Hero Visual: 浮动产品 Mockup */}
+        <div className="hero-visual" aria-hidden="true">
+          {/* Card 1: 今日选题 */}
+          <div className="float-card fc-1">
+            <div className="fc-bar"><span className="d" /><span>今日推荐选题 · Top 5</span></div>
+            <div className="topic-row"><span className="num">01</span><span style={{flex:1}}>为什么 90% 的公众号活不过半年</span><span className="score">🔥 9.6</span></div>
+            <div className="topic-row"><span className="num">02</span><span style={{flex:1}}>用 AI 写文章，读者看不出来的方法</span><span className="score">🔥 9.3</span></div>
+            <div className="topic-row"><span className="num">03</span><span style={{flex:1}}>2026 年公众号还能赚钱吗</span><span className="score">🔥 9.1</span></div>
+          </div>
+
+          {/* Card 2: AI 写作 */}
+          <div className="float-card fc-2">
+            <div className="fc-bar"><span className="d" /><span>AI 正在创作中…</span></div>
+            <p className="gen">很多人觉得做公众号就是写文章。错了。真正消耗时间的不是写，而是选题、查资料、改标题、排版、发布这一整套流程</p>
+          </div>
+
+          {/* Card 3: 标题推荐 */}
+          <div className="float-card fc-3">
+            <div className="fc-bar"><span className="d" /><span>标题推荐 · Top 3</span></div>
+            <div className="title-option"><span className="rank">1</span><span className="text">为什么你的公众号一直做不起来</span><span className="s">9.4</span></div>
+            <div className="title-option"><span className="rank">2</span><span className="text">公众号运营的 3 个致命误区</span><span className="s">9.1</span></div>
+            <div className="title-option"><span className="rank">3</span><span className="text">做了 2 年公众号，我终于想通了</span><span className="s">8.8</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 );
 
-/* ── StarBorder: 流光边框 CTA ───────────────────────────────── */
-const StarBorder = ({ href = '#', children, className = '' }) => (
-  <span className={`star-border ${className}`}>
-    <a href={href} className="star-border-inner">{children}</a>
-  </span>
+/* ── 痛点 ──────────────────────────────────────────────────── */
+const PainPoints = () => (
+  <section className="section pain" id="pain">
+    <div className="container">
+      <div className="section-head center">
+        <div className="section-tag">— 为什么做公众号这么累 —</div>
+        <h2 className="section-title">你不是不努力，<br />是被无效的内容劳动耗光了时间。</h2>
+        <p className="section-sub">
+          做公众号最难的不是写，而是坚持。选题、写稿、改标题、排版、发布——每一步都在消耗你的热情。
+        </p>
+      </div>
+
+      <div className="pain-grid">
+        {[
+          ['每天想选题想得头大，发出去又没人看', '选题靠拍脑袋，一周才憋出一个。蹭热点怕跑偏，写专业又没共鸣，写完心累内容还冷场。'],
+          ['一篇稿子磨 4 小时，时间全耗在打字上', '构思、查资料、写初稿、改措辞、去 AI 味、排版——一天的精力就这么被一篇文章榨干了。'],
+          ['标题想破头，最后还是选了第一个', '花 1 小时想 10 个标题，不知道哪个点击率高，全凭感觉选，阅读量一直上不去。'],
+          ['写完不知道好不好，发了才知道没人看', '没有反馈机制，不知道文章哪里有问题。写了 100 篇，还是在原地踏步。'],
+        ].map(([title, desc], i) => (
+          <div className="pain-cell" key={i}>
+            <div className="pain-q">"</div>
+            <div className="pain-text">
+              <h4>{title}</h4>
+              <p>{desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="pain-answer">
+        <p className="pain-answer-text">
+          所以我们做了一件事：把<em>整条内容流水线</em>，<br />装进一套懂公众号的 AI 系统。
+        </p>
+      </div>
+    </div>
+  </section>
+);
+
+/* ── 核心功能 5 步 Feature Blocks ──────────────────────────── */
+const Features = () => (
+  <section className="section features" id="features">
+    <div className="container">
+      <div className="section-head">
+        <div className="section-tag">— Core Pipeline · 内容流水线 —</div>
+        <h2 className="section-title">5 步流水线，<br />把你从内容劳动里解放出来</h2>
+        <p className="section-sub">
+          你只需要做两件事：挑选题，审终稿。中间所有的"挖、写、改、核、优化"，AI 替你做完。
+        </p>
+      </div>
+
+      {/* Step 01: 选题挖掘 */}
+      <div className="feature-block">
+        <div className="fb-text">
+          <div className="fb-step"><span className="num">Step 01</span>选题挖掘 · Discover</div>
+          <h3>每天给你 10 个<br />已经验证过的好选题</h3>
+          <p>AI 实时扫描全网 20+ 渠道的热点信息，按匹配度和潜力评分，挑出当日最值得做的选题。不是过滤选题，而是创造选题。</p>
+          <ul className="fb-list">
+            <li><span className="li-marker">A</span><div className="li-content"><strong>从 1 条信息衍生 5 个选题</strong><span>不是过滤 100 条留 10 条，而是从每条信息里挖出新角度</span></div></li>
+            <li><span className="li-marker">B</span><div className="li-content"><strong>6 维度加权评分</strong><span>痛点直击度、价值密度、传播力、差异化——数据说话，不靠感觉</span></div></li>
+            <li><span className="li-marker">C</span><div className="li-content"><strong>4 视角独立评审</strong><span>技术专家、传播达人、产品经理、运营专家各自打分，避免单一偏见</span></div></li>
+          </ul>
+        </div>
+        <div className="fb-visual">
+          <div className="mk-head">
+            <div className="t">今日推荐选题 · 2026-06-11</div>
+            <div className="tag">为你的账号筛选</div>
+          </div>
+          <div className="mk-topics">
+            {[
+              ['#CC785C', '01', '为什么 90% 的公众号活不过半年', '9.6'],
+              ['#C49B5C', '02', '用 AI 写文章，读者看不出来的方法', '9.3'],
+              ['#3F5C52', '03', '2026 年公众号还能赚钱吗', '9.1'],
+              ['#6B6862', '04', '新手做公众号最容易犯的 5 个错', '8.7'],
+            ].map(([color, rank, text, score], i) => (
+              <div className="trend-row" key={i} style={i === 3 ? { opacity: .55 } : {}}>
+                <div className="heat-bar" style={{ background: color }} />
+                <span className="rank">{rank}</span>
+                <div className="text">{text}</div>
+                <div className="meta"><span style={{ color: 'var(--clay-deep)', fontWeight: 600, fontSize: 11 }}>🔥 {score}</span></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Step 02: 正文创作 */}
+      <div className="feature-block reverse">
+        <div className="fb-text">
+          <div className="fb-step"><span className="num">Step 02</span>正文创作 · Write</div>
+          <h3>5 步打磨，<br />写出不像 AI 的文章</h3>
+          <p>选好选题，AI 自动生成 2500 字正文。不是一次出稿，而是经过 5 个专业模块逐层打磨——初稿、金句、事实核查、联网验证、去除 AI 痕迹。</p>
+          <ul className="fb-list">
+            <li><span className="li-marker">A</span><div className="li-content"><strong>风格锁定</strong><span>学习你的写作风格，确保全文语气统一，读起来就像你自己写的</span></div></li>
+            <li><span className="li-marker">B</span><div className="li-content"><strong>金句催化</strong><span>在开头、中段、结尾自动植入可独立传播的金句</span></div></li>
+            <li><span className="li-marker">C</span><div className="li-content"><strong>联网核实</strong><span>自动搜索验证文章中的事实和数据，发现错误自动修正</span></div></li>
+          </ul>
+        </div>
+        <div className="fb-visual">
+          <div className="mk-head">
+            <div className="t">AI 写作进度</div>
+            <div className="tag">5 步流水线</div>
+          </div>
+          <div className="mk-agents">
+            {[
+              ['done', '正文创作', '✓ 已完成 · 2,847 字'],
+              ['done', '金句催化', '✓ 已完成 · 植入 4 处金句'],
+              ['done', '事实整理', '✓ 已完成 · 提取 8 条数据'],
+              ['done', '联网核实', '✓ 已完成 · 修正 2 处'],
+              ['active', '去除 AI 痕迹', '打磨中…'],
+            ].map(([status, name, desc], i) => (
+              <div className="agent-row" key={i}>
+                <div className={`agent-dot ${status}`} />
+                <div className="agent-name">{name}</div>
+                <div className="agent-status" style={status === 'active' ? { color: 'var(--clay-deep)' } : {}}>{desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Step 03: 标题优化 */}
+      <div className="feature-block">
+        <div className="fb-text">
+          <div className="fb-step"><span className="num">Step 03</span>标题优化 · Title</div>
+          <h3>四个角色协作，<br />只为一个好标题</h3>
+          <p>多种标题风格 × 多维评分 × 点击预测 × 智能自检。评分不达标自动优化，直到产出满意的标题。</p>
+          <ul className="fb-list">
+            <li><span className="li-marker">A</span><div className="li-content"><strong>12 种爆款风格</strong><span>悬念式、数字式、对比式、痛点式——覆盖主流标题套路</span></div></li>
+            <li><span className="li-marker">B</span><div className="li-content"><strong>点击率预测</strong><span>模拟读者视角，预测哪个标题更吸引点击</span></div></li>
+            <li><span className="li-marker">C</span><div className="li-content"><strong>智能自检</strong><span>评分不达标自动重新生成，直到 Top 3 综合评分通过</span></div></li>
+          </ul>
+        </div>
+        <div className="fb-visual">
+          <div className="mk-head">
+            <div className="t">标题推荐</div>
+            <div className="tag">Top 3 · 已通过自检</div>
+          </div>
+          <div className="mk-titles">
+            {[
+              [true, '1', '为什么你的公众号一直做不起来', '9.4'],
+              [false, '2', '公众号运营的 3 个致命误区', '9.1'],
+              [false, '3', '做了 2 年公众号，我终于想通了', '8.8'],
+            ].map(([top, rank, text, score], i) => (
+              <div className={`mk-title-row${top ? ' top' : ''}`} key={i}>
+                <div className="mk-title-rank">{rank}</div>
+                <div className="mk-title-text">{text}</div>
+                <div className="mk-title-score"><b>{score}</b><span>SCORE</span></div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 16, padding: '12px 14px', background: 'var(--ivory)', borderRadius: 'var(--r-sm)', fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.6 }}>
+            <strong style={{ color: 'var(--clay-deep)', fontSize: 12 }}>💡 推荐理由：</strong>
+            标题 1 使用「为什么」句式制造好奇心缺口，预计点击率最高。标题 3 使用个人叙事，适合建立信任感。
+          </div>
+        </div>
+      </div>
+
+      {/* Step 04: 富文本编辑 */}
+      <div className="feature-block reverse">
+        <div className="fb-text">
+          <div className="fb-step"><span className="num">Step 04</span>编辑润色 · Edit</div>
+          <h3>专为公众号设计的<br />富文本编辑器</h3>
+          <p>不是通用编辑器，而是专为微信公众号排版规范设计。16px 正文、20px 黑底白字标题、红字高亮——所有排版规范自动处理。</p>
+          <ul className="fb-list">
+            <li><span className="li-marker">A</span><div className="li-content"><strong>公众号排版规范</strong><span>自动适配微信排版规则，不用手动调格式</span></div></li>
+            <li><span className="li-marker">B</span><div className="li-content"><strong>一键润色</strong><span>对已有文章进行金句补充、事实核查和去 AI 痕迹改写</span></div></li>
+            <li><span className="li-marker">C</span><div className="li-content"><strong>一键发布</strong><span>编辑完成后直接发布到公众号，不用切换工具</span></div></li>
+          </ul>
+        </div>
+        <div className="fb-visual" style={{ padding: 0 }}>
+          <div className="mk-editor">
+            <div className="mk-toolbar">
+              <div className="mk-toolbar-btn" style={{ fontWeight: 900 }}>B</div>
+              <div className="mk-toolbar-btn"><i>I</i></div>
+              <div className="mk-toolbar-btn" style={{ textDecoration: 'underline' }}>U</div>
+              <div style={{ width: 1, height: 18, background: 'var(--line)', margin: '0 4px' }} />
+              <div className="mk-toolbar-btn active">H1</div>
+              <div className="mk-toolbar-btn">H2</div>
+              <div style={{ width: 1, height: 18, background: 'var(--line)', margin: '0 4px' }} />
+              <div className="mk-toolbar-btn" style={{ color: 'var(--crimson)' }}>红</div>
+              <div className="mk-toolbar-btn" style={{ fontSize: 11 }}>引用</div>
+              <div style={{ flex: 1 }} />
+              <div style={{ fontSize: 11, color: 'var(--leaf)', fontWeight: 600 }}>✓ 已保存</div>
+            </div>
+            <div className="mk-body">
+              <h5>为什么你的公众号一直做不起来</h5>
+              <p>很多人觉得做公众号就是写文章。错了。真正消耗时间的不是写，而是选题、查资料、改标题、排版、发布这一整套流程。</p>
+              <p>我见过太多人，<span className="red-hi">写了 100 篇文章，阅读量还是个位数</span>。不是他们写得不好，而是从第一步就做错了——选题没选对。</p>
+              <p>选题决定了 80% 的阅读量。一个好的选题，哪怕文笔一般，也能获得不错的传播。但一个差的选题…</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Step 05: 多平台 */}
+      <div className="feature-block">
+        <div className="fb-text">
+          <div className="fb-step"><span className="num">Step 05</span>跨平台 · Adapt</div>
+          <h3>一篇文章，<br />适配多个内容平台</h3>
+          <p>公众号长文自动转化为小红书图文、抖音文案等不同平台的格式。一键发布，不用手动改格式。</p>
+          <ul className="fb-list">
+            <li><span className="li-marker">A</span><div className="li-content"><strong>公众号转小红书</strong><span>自动拆解为小红书图文格式，含标签提取和封面建议</span></div></li>
+            <li><span className="li-marker">B</span><div className="li-content"><strong>内容仿写</strong><span>分析参考文章的结构和风格，生成同类型但原创的新内容</span></div></li>
+            <li><span className="li-marker">C</span><div className="li-content"><strong>风格迁移</strong><span>将内容从一种风格转换为另一种风格，适配不同受众</span></div></li>
+          </ul>
+        </div>
+        <div className="fb-visual">
+          <div className="mk-head">
+            <div className="t">跨平台发布</div>
+            <div className="tag">2 个平台就绪</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {[
+              ['#07C160', '公', '公众号 · 长文版', '2,847 字 + 排版完成', true],
+              ['#FF2442', '小', '小红书 · 图文版', '9 张图 + 清单体正文', true],
+            ].map(([color, icon, name, desc, ready], i) => (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 14, padding: 14,
+                background: 'var(--ivory)', borderRadius: 'var(--r-md)', border: '1px solid var(--line)'
+              }}>
+                <div style={{ width: 36, height: 36, borderRadius: 8, background: color, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--serif)', fontWeight: 700, fontSize: 14, flexShrink: 0 }}>{icon}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--ink)', marginBottom: 2 }}>{name}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{desc}</div>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--leaf)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--leaf)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700 }}>✓</span>就绪
+                </div>
+              </div>
+            ))}
+            <div style={{
+              marginTop: 4, width: '100%', background: 'var(--clay)', color: '#fff',
+              textAlign: 'center', padding: 12, borderRadius: 'var(--r-md)', fontWeight: 600, fontSize: 14,
+              letterSpacing: '.04em', boxShadow: 'var(--sh-clay)',
+            }}>
+              同时发布到 2 个平台
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+);
+
+/* ── 创作工具箱 ────────────────────────────────────────────── */
+const Tools = () => (
+  <section className="section" id="tools">
+    <div className="container">
+      <div className="section-head center">
+        <div className="section-tag">— Tools · 创作工具箱 —</div>
+        <h2 className="section-title">不止于生成，<br />更要打磨到可发布</h2>
+        <p className="section-sub">从文案润色到跨平台适配，从富文本编辑器到一键发布——完整的内容后期工具链。</p>
+      </div>
+      <div className="tools-grid">
+        {[
+          ['✏️', '公众号编辑器', '专为微信排版设计的编辑器，自动适配排版规范，红字高亮、标题样式一键搞定。'],
+          ['🔄', '文案润色', '对已有文章进行金句补充、事实核查和去除 AI 痕迹改写，让旧内容焕发新生。'],
+          ['📝', '正文续写', '从已有内容无缝续写，保持风格一致性。适合长文分批创作或补充遗漏内容。'],
+          ['🔀', '内容转写', '将公众号长文转化为不同平台的格式和风格，适配不同受众的阅读习惯。'],
+          ['📋', '内容仿写', '分析参考文章的结构、风格和套路，生成同类型但原创的新内容。'],
+          ['📕', '公众号转小红书', '自动将长文拆解为小红书图文格式，含标签提取和封面建议，支持一键发布。'],
+        ].map(([icon, title, desc], i) => (
+          <div className="tool-card" key={i}>
+            <div className="tk-icon">{icon}</div>
+            <h4>{title}</h4>
+            <p className="tk-desc">{desc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+);
+
+/* ── CTA ───────────────────────────────────────────────────── */
+const CTA = ({ onLogin }) => (
+  <section className="section cta-section" id="cta">
+    <div className="container">
+      <div className="section-tag">— Get Started —</div>
+      <h2 className="section-title">让 AI 处理繁琐流程，<br />你专注于内容本身</h2>
+      <p className="section-sub">
+        从海量信息中提炼选题，到打磨出可发布的公众号文章——全流程自动化，你只做最终审核。
+      </p>
+      <div className="hero-actions" style={{ justifyContent: 'center' }}>
+        <button className="star-btn" onClick={onLogin}><span>免费试用 <span className="btn-arrow">→</span></span></button>
+        <a href="#features" className="btn btn-ghost btn-lg">了解更多</a>
+      </div>
+    </div>
+  </section>
+);
+
+/* ── Footer ────────────────────────────────────────────────── */
+const Footer = () => (
+  <footer className="footer">
+    <div className="container">
+      <div className="footer-inner">
+        <div className="brand">
+          <span className="brand-mark" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 8 }}>
+            <svg viewBox="0 0 28 28" fill="none" width="22" height="22">
+              <circle cx="14" cy="14" r="13" stroke="#1F1F1E" strokeWidth="1.4"/>
+              <circle cx="14" cy="9" r="2.2" fill="#CC785C"/>
+              <circle cx="9" cy="17" r="2.2" fill="#3F5C52"/>
+              <circle cx="19" cy="17" r="2.2" fill="#1F1F1E"/>
+            </svg>
+          </span>
+          <span>公众号智能体<span className="brand-suffix">GZH AGENT</span></span>
+        </div>
+        <div className="footer-meta">
+          <span>© 2026 公众号智能体</span>
+          <span>AI 驱动的公众号内容创作平台</span>
+        </div>
+      </div>
+    </div>
+  </footer>
 );
 
 /* ══════════════════════════════════════════════════════════════
-   SCROLL ANIMATION HOOK
+   APP
    ══════════════════════════════════════════════════════════════ */
-const useFadeUp = () => {
+const App = () => {
+  const [loginOpen, setLoginOpen] = useState(false);
+
+  // Scroll animation observer
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const els = document.querySelectorAll('.fade-up');
@@ -580,449 +1113,17 @@ const useFadeUp = () => {
     els.forEach(el => io.observe(el));
     return () => io.disconnect();
   }, []);
-};
-
-const useScoreAnimation = () => {
-  useEffect(() => {
-    const scores = document.querySelector('.scores');
-    if (!scores) return;
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          scores.classList.add('scores-animated');
-          io.disconnect();
-        }
-      },
-      { threshold: 0.3 }
-    );
-    io.observe(scores);
-    return () => io.disconnect();
-  }, []);
-};
-
-/* ══════════════════════════════════════════════════════════════
-   PAGE COMPONENTS
-   ══════════════════════════════════════════════════════════════ */
-
-const Nav = () => (
-  <nav className="nav">
-    <div className="nav-inner">
-      <a href="#" className="nav-brand">
-        <ShinyText text="公众号智能体" />
-      </a>
-      <ul className="nav-links">
-        <li><a href="#pain" className="nav-link-text">痛点</a></li>
-        <li><a href="#pipeline" className="nav-link-text">工作流</a></li>
-        <li><a href="#topics" className="nav-link-text">选题挖掘</a></li>
-        <li><a href="#content" className="nav-link-text">正文生成</a></li>
-        <li><a href="#tools" className="nav-link-text">创作工具</a></li>
-        <li><a href="#cta" className="nav-cta">开始使用</a></li>
-      </ul>
-    </div>
-  </nav>
-);
-
-const Hero = () => (
-  <section className="section hero">
-    <div className="silk-hero"></div>
-    <div className="container">
-      <span className="code-label">AI · 自动化 · 公众号</span>
-      <h1>
-        <BlurText text="从选题到发布，AI 全程帮你搞定公众号" delay={40} />
-      </h1>
-      <p className="lead">
-        你只负责审稿和发布——信息采集、选题策划、大纲撰写、正文创作、标题打磨，全部由 AI 自动完成。
-      </p>
-      <div className="hero-cta-row">
-        <StarBorder href="#cta">开始使用 →</StarBorder>
-        <a href="#pipeline" className="btn btn-secondary">了解工作流</a>
-      </div>
-      <p className="hero-subtle">DeepSeek / Kimi / Claude 多模型驱动</p>
-    </div>
-  </section>
-);
-
-/* ── Pain Points (NEW) ──────────────────────────────────────── */
-const PainPoints = () => (
-  <section className="section section-alt" id="pain">
-    <div className="container">
-      <div style={{ textAlign: 'center', maxWidth: 700, margin: '0 auto' }}>
-        <div className="section-label">你是否也遇到这些问题</div>
-        <h2>做公众号，<br />最难的不是写，而是坚持</h2>
-      </div>
-      <div className="pain-grid">
-        {[
-          ['😩', '选题靠灵感', '每天刷 2 小时热点，还是想不出写什么。好不容易选了个题，写到一半发现别人已经写烂了。', 'AI 从海量信息中自动发现好选题', '从 100 条信息中过滤 90 条', '从 1 条信息中衍生 5 个好选题'],
-          ['😩', '写作太耗时', '一篇 2000 字的文章，从构思到完稿要 3-4 小时。写完还要反复修改，去 AI 味、加金句、查事实。', '5 步 AI 流水线 20 分钟出稿', '一篇稿子磨 4 小时', 'AI 出初稿 + 你审稿 20 分钟'],
-          ['😩', '标题想破头', '花 1 小时想 10 个标题，最后还是选了第一个。不知道哪个标题点击率高，全凭感觉。', 'AI 生成 + 多维评分 + 自动优化', '凭感觉选标题', 'AI 评分预测 + 推荐 Top 3'],
-        ].map(([icon, title, desc, solution, before, after], i) => (
-          <div className="pain-card fade-up" key={i}>
-            <span className="pain-icon">{icon}</span>
-            <h3>{title}</h3>
-            <p>{desc}</p>
-            <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-              <div style={{ fontSize: 14, color: 'var(--accent)', fontWeight: 500, marginBottom: 8 }}>
-                ✓ {solution}
-              </div>
-              <div className="pain-vs">
-                <span className="pain-before">{before}</span>
-                <span style={{ color: '#5e5d59', flexShrink: 0 }}>→</span>
-                <span className="pain-after">{after}</span>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  </section>
-);
-
-const PipelineStep = ({ num, title, desc, icon }) => (
-  <div className="pipeline-card fade-up">
-    <div className="pipeline-card-icon">{icon}</div>
-    <div className="pipeline-card-step">STEP {num}</div>
-    <h4>{title}</h4>
-    <p>{desc}</p>
-  </div>
-);
-
-const Pipeline = () => (
-  <section className="section section-alt" id="pipeline">
-    <div className="container">
-      <div className="section-label">全流程自动化</div>
-      <h2><BlurText text="七步流水线，从信息到成品" delay={50} /></h2>
-      <p className="lead" style={{ marginBottom: 0 }}>
-        不是简单的 AI 写作工具，而是一套完整的内容生产流水线。
-      </p>
-      <div className="pipeline-cards">
-        <PipelineStep num="01" title="信息采集" desc="自动从 20+ 渠道采集热点信息"
-          icon={<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M4 9h16"/><path d="M9 4v16"/></svg>} />
-        <PipelineStep num="02" title="智能归类" desc="AI 识别相似信息，自动归并整理"
-          icon={<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 6.5l3 3.5"/><path d="M17 6.5l-3 3.5"/><path d="M7 17.5l3-3.5"/><path d="M17 17.5l-3-3.5"/></svg>} />
-        <PipelineStep num="03" title="选题挖掘" desc="从每条信息衍生多个好选题并评分"
-          icon={<svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01z"/></svg>} />
-        <PipelineStep num="04" title="大纲生成" desc="多个 AI 角色协作打磨文章框架"
-          icon={<svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 10h16"/><path d="M4 14h10"/><path d="M4 18h6"/></svg>} />
-        <PipelineStep num="05" title="标题优化" desc="多轮预测评分，推荐最佳标题"
-          icon={<svg viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>} />
-        <PipelineStep num="06" title="正文创作" desc="5 步写作流水线，自动去 AI 味"
-          icon={<svg viewBox="0 0 24 24"><path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5z"/></svg>} />
-        <PipelineStep num="07" title="编辑发布" desc="富文本编辑器 + 一键发布公众号"
-          icon={<svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>} />
-      </div>
-    </div>
-  </section>
-);
-
-const ScoreRow = ({ label, pct, weight }) => (
-  <div className="score-row">
-    <span className="score-label">{label}</span>
-    <div className="score-track">
-      <div className="score-fill" style={{ '--target-width': pct + '%' }}></div>
-    </div>
-    <span className="score-value">{weight}</span>
-  </div>
-);
-
-const TopicMining = () => {
-  useScoreAnimation();
-
-  return (
-    <section className="section" id="topics">
-      <div className="container">
-        <div className="split">
-          <div className="split-content fade-up">
-            <div className="section-label">选题挖掘</div>
-            <h2>不是过滤选题，<br />而是创造选题</h2>
-            <p className="lead">
-              传统做法从 100 条信息里过滤掉 90 条，我们从 1 条信息衍生出 5 个好选题。创意引擎负责发散，评分系统负责筛选。
-            </p>
-            <div className="agent-list">
-              <div className="agent-item">
-                <span className="agent-badge agent-badge-a">创意</span>
-                <div className="agent-item-text">
-                  <h4>选题创意引擎</h4>
-                  <p>基于多种爆款套路，从单条信息衍生 3-8 个候选选题</p>
-                </div>
-              </div>
-              <div className="agent-item">
-                <span className="agent-badge agent-badge-b">评分</span>
-                <div className="agent-item-text">
-                  <h4>智能评分系统</h4>
-                  <p>严格筛选 + 多维度加权评分，确保每个推荐选题都有数据支撑</p>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="fade-up">
-            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 32 }}>
-              <div className="section-label" style={{ marginBottom: 20 }}>多维评分体系</div>
-              <div className="scores">
-                <ScoreRow label="痛点直击度" pct="85%" weight="20%" />
-                <ScoreRow label="价值密度" pct="85%" weight="20%" />
-                <ScoreRow label="受众适配度" pct="80%" weight="20%" />
-                <ScoreRow label="传播触发器" pct="60%" weight="15%" />
-                <ScoreRow label="差异化" pct="60%" weight="15%" />
-                <ScoreRow label="新鲜度" pct="40%" weight="10%" />
-              </div>
-              <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
-                <div className="section-label">多视角独立评审</div>
-                <div className="persona-grid" style={{ marginTop: 12 }}>
-                  {[
-                    ['🔬', '技术专家', '技术深度'],
-                    ['📱', '传播达人', '传播敏感度'],
-                    ['🎯', '产品经理', '用户价值'],
-                    ['📊', '运营专家', '数据表现']
-                  ].map(([emoji, name, desc], i) => (
-                    <div className="persona-card" key={i}>
-                      <span className="persona-emoji">{emoji}</span>
-                      <h4>{name}</h4>
-                      <p>{desc}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-};
-
-const ContentGeneration = () => (
-  <section className="section section-dark" id="content">
-    <div className="container">
-      <div className="section-label">正文生成</div>
-      <h2><BlurText text="五步打磨，写出不像 AI 的文章" delay={35} /></h2>
-      <p className="lead" style={{ color: '#b0aea5' }}>
-        每篇文章经过 5 个专业模块逐层打磨——从初稿到金句，从事实核查到去除 AI 痕迹，最终输出可直接发布的公众号正文。
-      </p>
-      <div className="dark-features">
-        {[
-          ['1', '正文创作', '一次性生成 2500-3000 字正文，风格锁定确保全文语气统一，严格按大纲展开。'],
-          ['2', '金句催化', '识别文章中的关键位置，生成 3-5 个可独立传播的金句，分布在开头、中段和结尾。'],
-          ['3', '事实整理', '提取文章中的关键数据和事实，为后续核实做准备，保护重要数据不被篡改。'],
-          ['4', '联网核实', '自动联网搜索验证文章中的事实，发现错误自动修正，确保内容真实可靠。']
-        ].map(([num, title, desc], i) => (
-          <div className="dark-feature fade-up" key={i}>
-            <div className="dark-feature-num">{num}</div>
-            <h3>{title}</h3>
-            <p>{desc}</p>
-          </div>
-        ))}
-      </div>
-      <div style={{ marginTop: 32, padding: 32, border: '1px solid #30302e', borderRadius: 'var(--radius-sm)' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24, flexWrap: 'wrap' }}>
-          <div className="dark-feature-num" style={{ marginBottom: 0 }}>5</div>
-          <div style={{ flex: 1, minWidth: 280 }}>
-            <h3 style={{ marginBottom: 12 }}>去除 AI 痕迹</h3>
-            <p style={{ maxWidth: 640 }}>
-              按照严格检查清单全文扫描——去除套话、消除机器人口吻、补充真实情感、优化自然表达。改写后字数变化控制在 ±10% 以内，确保文章读起来像人写的。
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {[
-              ['🚫 一票否决', '#b53333', '#e87070'],
-              ['⚠️ 重点关注', '#eab308', '#f0d060'],
-              ['⚪ 一般优化', '#5e5d59', '#b0aea5'],
-              ['🔵 细节打磨', '#30302e', '#87867f']
-            ].map(([text, border, color], i) => (
-              <span key={i} style={{ fontSize: 13, padding: '6px 14px', borderRadius: 999, border: `1px solid ${border}`, color }}>{text}</span>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-);
-
-const TitleGeneration = () => (
-  <section className="section section-alt" id="titles">
-    <div className="container">
-      <div className="split split-reverse">
-        <div className="split-content fade-up">
-          <div className="section-label">标题生成</div>
-          <h2>四个角色协作，<br />只为一个好标题</h2>
-          <p className="lead">
-            多种标题风格 × 多维评分 × 点击预测 × 智能自检。评分不达标自动优化，直到产出满意的标题。
-          </p>
-          <div className="agent-list">
-            {[
-              ['agent-badge-a', '创', '标题创作', '生成 10-15 个候选标题，覆盖多种爆款风格'],
-              ['agent-badge-b', '筛', '标题筛选', '多维度评分，严格筛选出 Top 5 候选'],
-              ['agent-badge-c', '测', '点击预测', '模拟读者视角，预测哪个标题更吸引点击'],
-              ['agent-badge-d', '定', '最终推荐', '综合评分输出 Top 3，附推荐理由和改进方向']
-            ].map(([badge, letter, name, desc], i) => (
-              <div className="agent-item" key={i}>
-                <span className={`agent-badge ${badge}`}>{letter}</span>
-                <div className="agent-item-text">
-                  <h4>{name}</h4>
-                  <p>{desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="fade-up">
-          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 32 }}>
-            <div className="section-label">智能自检机制</div>
-            <div style={{ marginTop: 20 }}>
-              {[
-                ['1', '首轮生成', '创作 → 筛选 → 预测 → 推荐，四步完成', 'var(--accent)', 'var(--accent-on)'],
-                ['2', '自检评估', 'Top 3 综合评分达标才通过', 'var(--surface-warm)', 'var(--fg-2)'],
-                ['3', '智能优化', '未达标则携带改进方向重新生成', 'var(--surface-warm)', 'var(--fg-2)'],
-                ['✓', '输出 Top 3', '附评分、预测、推荐理由', '#17a34a20', 'var(--success)']
-              ].map(([num, title, desc, bg, fg], i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: i < 3 ? 20 : 0 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: bg, color: fg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 600, flexShrink: 0 }}>{num}</div>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 15 }}>{title}</div>
-                    <div style={{ fontSize: 14, color: 'var(--muted)' }}>{desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-);
-
-const Architecture = () => (
-  <section className="section">
-    <div className="container">
-      <div style={{ textAlign: 'center', maxWidth: 700, margin: '0 auto' }}>
-        <div className="section-label">智能架构</div>
-        <h2>每个模块只做一件事，<br />做到最好</h2>
-        <p className="lead" style={{ margin: '0 auto' }}>
-          15 个专业 AI 模块分工协作，各司其职。模块独立可测、可替换、可升级，确保每个环节都达到最佳效果。
-        </p>
-      </div>
-      <div className="stats-row">
-        {[
-          ['15+', '专业模块'],
-          ['5', '核心流水线'],
-          ['4', 'AI 模型'],
-          ['∞', '可扩展']
-        ].map(([num, label], i) => (
-          <div className="stat-item" key={i}>
-            <div className="stat-num">{num}</div>
-            <div className="stat-label">{label}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  </section>
-);
-
-const Tools = () => (
-  <section className="section" id="tools">
-    <div className="container">
-      <div style={{ textAlign: 'center', maxWidth: 700, margin: '0 auto 48px' }}>
-        <div className="section-label">创作工具箱</div>
-        <h2><BlurText text="不止于生成，更要打磨到可发布" delay={40} /></h2>
-        <p className="lead" style={{ margin: '0 auto' }}>
-          从文案润色到跨平台适配，从富文本编辑器到一键发布——完整的内容后期工具链。
-        </p>
-      </div>
-      <div className="feature-grid">
-        {[
-          ['✏️', '公众号编辑器', '专为微信排版设计的编辑器，自动适配 16px 正文、标题样式、红字高亮等公众号排版规范。'],
-          ['🔄', '文案润色', '对已有文章进行金句补充、事实核查和去除 AI 痕迹改写，让旧内容焕发新生。'],
-          ['📝', '正文续写', '从已有内容无缝续写，保持风格一致性。适合长文分批创作或补充遗漏内容。'],
-          ['🔀', '内容转写', '将公众号长文转化为不同平台的格式和风格，适配不同受众的阅读习惯。'],
-          ['📋', '内容仿写', '分析参考文章的结构、风格和套路，生成同类型但原创的新内容。'],
-          ['📕', '公众号转小红书', '自动将公众号长文拆解为小红书图文格式，含标签提取和封面建议，支持一键发布。']
-        ].map(([icon, title, desc], i) => (
-          <div className="feature-card fade-up" key={i}>
-            <div className="feature-icon">{icon}</div>
-            <h4>{title}</h4>
-            <p>{desc}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  </section>
-);
-
-const Sources = () => (
-  <section className="section section-dark">
-    <div className="container">
-      <div style={{ textAlign: 'center', maxWidth: 700, margin: '0 auto 48px' }}>
-        <div className="section-label">信息源</div>
-        <h2>全网信息，<br />一个入口采集</h2>
-        <p className="lead" style={{ color: '#b0aea5', margin: '0 auto' }}>
-          支持 10+ 种平台信息源，从 RSS 订阅到微信搜索，从 GitHub 热榜到抖音热搜——自动抓取、智能归类、去重合并。
-        </p>
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center' }}>
-        {['RSS 订阅', '微信搜索', 'GitHub 热榜', 'Hacker News', '知乎', '抖音', '小红书', 'Reddit', 'V2EX', '今日热榜', '网页采集', '公众号爆文'].map(tag => (
-          <span className="tool-tag" key={tag} style={{ borderColor: '#5e5d59', color: '#b0aea5' }}>{tag}</span>
-        ))}
-      </div>
-      <div style={{ marginTop: 48, paddingTop: 32, borderTop: '1px solid #30302e' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 32, textAlign: 'center' }}>
-          {[
-            ['智能去重', '相似内容自动合并'],
-            ['自动归类', '同类信息智能聚组'],
-            ['AI 提炼', '关键信息自动提取']
-          ].map(([num, label], i) => (
-            <div key={i}>
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 500, color: 'var(--accent)', marginBottom: 4 }}>{num}</div>
-              <div style={{ fontSize: 14, color: '#87867f' }}>{label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  </section>
-);
-
-const CTA = () => (
-  <section className="section section-alt cta-section" id="cta">
-    <div className="container">
-      <h2>让 AI 处理繁琐流程，<br />你专注于内容本身</h2>
-      <p className="lead">
-        从海量信息中提炼选题，到打磨出可发布的公众号文章——全流程自动化，你只做最终审核。
-      </p>
-      <div className="hero-cta-row">
-        <StarBorder href="#">免费试用 →</StarBorder>
-        <a href="#" className="btn btn-secondary">查看文档</a>
-      </div>
-    </div>
-  </section>
-);
-
-const Footer = () => (
-  <footer className="footer">
-    <div className="container">
-      <p>公众号智能体 · AI 驱动的公众号内容创作平台</p>
-    </div>
-  </footer>
-);
-
-/* ══════════════════════════════════════════════════════════════
-   APP
-   ══════════════════════════════════════════════════════════════ */
-const App = () => {
-  useFadeUp();
 
   return (
     <>
-      <Nav />
-      <Hero />
+      <Nav onLogin={() => setLoginOpen(true)} />
+      <Hero onLogin={() => setLoginOpen(true)} />
       <PainPoints />
-      <Pipeline />
-      <TopicMining />
-      <ContentGeneration />
-      <TitleGeneration />
-      <Architecture />
+      <Features />
       <Tools />
-      <Sources />
-      <CTA />
+      <CTA onLogin={() => setLoginOpen(true)} />
       <Footer />
+      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
     </>
   );
 };
@@ -1030,6 +1131,5 @@ const App = () => {
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App />);
 </script>
-
 </body>
 </html>

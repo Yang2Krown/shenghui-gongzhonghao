@@ -5,6 +5,7 @@
 """
 
 import logging
+import re
 from typing import List, Optional
 from pathlib import Path
 
@@ -310,8 +311,24 @@ def _build_user_prompt(
     return "\n".join(lines)
 
 
+def _strip_gold_sentence_list(text: str) -> str:
+    """剥掉 LLM 可能粘在末尾的金句清单段落。"""
+    if not text:
+        return text
+    # 剥掉「金句种子：xxx」前缀（LLM 有时保留 Agent A 的种子标记）
+    text = re.sub(r"金句种子[：:]\s*", "", text)
+    # 匹配 【金句清单（不可改段落）】 或 【金句清单】 及其后的列表行
+    pattern = r"\n*【金句清单[^】]*】[\s\S]*$"
+    cleaned = re.sub(pattern, "", text)
+    return cleaned.rstrip()
+
+
 def _parse_llm_output(raw: dict, original_word_count: int) -> AgentCOutput:
     """解析 LLM 输出为 AgentCOutput。"""
+    # 后处理：剥掉 LLM 可能粘在 rewritten_text 末尾的金句清单
+    rewritten = raw.get("rewritten_text", "")
+    rewritten = _strip_gold_sentence_list(rewritten)
+
     rewrite_table = []
     for item in raw.get("rewrite_table", []):
         rewrite_table.append(AITasteIssue(
@@ -331,7 +348,7 @@ def _parse_llm_output(raw: dict, original_word_count: int) -> AgentCOutput:
         word_change = round((rewritten_count - original_word_count) / original_word_count * 100, 1)
 
     return AgentCOutput(
-        rewritten_text=raw.get("rewritten_text", ""),
+        rewritten_text=rewritten,
         rewritten_word_count=rewritten_count,
         original_word_count=qc.get("original_word_count", original_word_count),
         word_change_pct=word_change,

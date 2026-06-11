@@ -219,9 +219,14 @@
                 <div class="text-xs text-ink-4">{{ plan.description }}</div>
               </div>
             </div>
-            <button class="btn-text btn-sm" @click="copyText(plan.content)">
-              <el-icon :size="15"><CopyDocument /></el-icon> 复制全文
-            </button>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn-text btn-sm" @click="copyText(plan.content)">
+                <el-icon :size="15"><CopyDocument /></el-icon> 复制全文
+              </button>
+              <button class="btn-text btn-sm" style="color: var(--clay-deep);" @click="selectedPlanContent = plan.content; showPublishChoice = true">
+                <el-icon :size="15"><Promotion /></el-icon> 发布
+              </button>
+            </div>
           </div>
           <!-- 方案内容 -->
           <div style="padding: 18px 22px;">
@@ -325,15 +330,28 @@
       </div>
     </div>
   </div>
+
+  <!-- 保存草稿 / 发布到公众号 弹窗 -->
+  <PublishChoiceDialog
+    v-model="showPublishChoice"
+    :title="contentText.slice(0, 30) || '续写结果'"
+    @save-draft="handleSaveDraft"
+    @publish="handlePublishToEditor"
+  />
 </template>
 
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { EditPen, Document, Link, Upload, Edit, Loading, Refresh, CopyDocument, DataAnalysis } from '@element-plus/icons-vue'
+import { EditPen, Document, Link, Upload, Edit, Loading, Refresh, CopyDocument, DataAnalysis, Promotion } from '@element-plus/icons-vue'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
+import { publishToWechatEditor } from '@/utils/publishToEditor'
+import PublishChoiceDialog from '@/components/PublishChoiceDialog.vue'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
+
+const router = useRouter()
 
 const progress = useAgentProgress()
 
@@ -359,6 +377,8 @@ const preference = ref('')
 const result = ref(null)
 const multiModelMode = ref(false)
 const multiModelResult = ref(null)
+const showPublishChoice = ref(false)
+const selectedPlanContent = ref('')
 const dragOver = ref(false)
 
 const canGenerate = computed(() => {
@@ -547,6 +567,20 @@ const handleGenerate = async () => {
 const copyText = (text) => {
   navigator.clipboard?.writeText(text).catch(() => {})
   ElMessage.success('已复制')
+}
+
+const handleSaveDraft = () => {
+  ElMessage.success('草稿已保存')
+}
+
+const handlePublishToEditor = () => {
+  // 原文 + 续写内容拼接
+  const inputContent = contentText.value || fileText.value || linkContent.value || ''
+  const continuation = selectedPlanContent.value || ''
+  const fullText = inputContent
+    ? `${inputContent}\n\n${continuation}`
+    : continuation
+  publishToWechatEditor(router, fullText, '')
 }
 
 onUnmounted(() => {

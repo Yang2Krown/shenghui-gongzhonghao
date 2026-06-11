@@ -203,7 +203,7 @@ try {
 
 watch(() => props.modelValue, (val) => {
   if (val !== valueHtml.value) {
-    valueHtml.value = val
+    valueHtml.value = plainTextToHtml(val)
   }
 })
 
@@ -580,6 +580,34 @@ onBeforeUnmount(() => {
   if (editor) editor.destroy()
 })
 
+/**
+ * 纯文本 / markdown → HTML
+ * 当内容不含 HTML 标签时，将 markdown 格式转为 wangEditor 可识别的 HTML
+ * - ## xxx → <h2>xxx</h2>
+ * - ### xxx → <h3>xxx</h3>
+ * - 段落（双换行分隔）→ <p>xxx</p>
+ */
+function plainTextToHtml(text) {
+  if (!text) return ''
+  // 如果已经包含 HTML 块级标签，认为已经是 HTML，原样返回
+  if (/<(p|h[1-6]|section|div|ul|ol|li|blockquote|table)[\s>]/i.test(text)) return text
+  // 行内 markdown
+  const inline = (s) => s
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+  return text
+    .split(/\n\n+/)
+    .map((para) => {
+      const t = para.trim()
+      if (!t) return ''
+      if (t.startsWith('### ')) return `<h3>${inline(t.slice(4).trim())}</h3>`
+      if (t.startsWith('## ')) return `<h2>${inline(t.slice(3).trim())}</h2>`
+      if (t.startsWith('# ')) return `<h2>${inline(t.slice(2).trim())}</h2>`
+      return `<p>${inline(t.replace(/\n/g, '<br>'))}</p>`
+    })
+    .join('\n')
+}
+
 // ─── 暴露给父组件 ───
 defineExpose({
   getEditor: () => editorRef.value,
@@ -588,8 +616,9 @@ defineExpose({
   extractTitle: () => extractTitle(),
   setHtml: (html) => {
     if (editorRef.value) {
-      editorRef.value.setHtml(html)
-      valueHtml.value = html
+      const finalHtml = plainTextToHtml(html)
+      editorRef.value.setHtml(finalHtml)
+      valueHtml.value = finalHtml
     }
   },
   /**

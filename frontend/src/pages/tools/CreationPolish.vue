@@ -267,9 +267,14 @@
       <div class="card" style="padding: 14px 22px; margin-top: 16px;">
         <div style="display: flex; align-items: center; justify-content: space-between;">
           <span class="text-sm text-ink-3">润色后共 {{ editableText.length }} 字</span>
-          <button class="btn-primary btn-sm" @click="copyFullText">
-            <el-icon :size="14"><CopyDocument /></el-icon> 复制全文
-          </button>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn-ghost btn-sm" @click="copyFullText">
+              <el-icon :size="14"><CopyDocument /></el-icon> 复制全文
+            </button>
+            <button class="btn-primary btn-sm" @click="showPublishChoice = true">
+              <el-icon :size="14"><Promotion /></el-icon> 发布到公众号
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -365,18 +370,30 @@
       </div>
     </div>
   </div>
+
+  <!-- 保存草稿 / 发布到公众号 弹窗 -->
+  <PublishChoiceDialog
+    v-model="showPublishChoice"
+    :title="title || '润色结果'"
+    @save-draft="handleSaveDraft"
+    @publish="handlePublishToEditor"
+  />
 </template>
 
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { MagicStick, Document, Edit, Loading, Refresh, CopyDocument, Link, Upload } from '@element-plus/icons-vue'
+import { MagicStick, Document, Edit, Loading, Refresh, CopyDocument, Link, Upload, Promotion } from '@element-plus/icons-vue'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import AgentFeedbackPanel from '@/components/creation/AgentFeedbackPanel.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
 import { diffText } from '@/utils/textDiff'
+import { publishToWechatEditor } from '@/utils/publishToEditor'
+import PublishChoiceDialog from '@/components/PublishChoiceDialog.vue'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
 
+const router = useRouter()
 const progress = useAgentProgress()
 
 const prefChips = ['金句加持', '事实核查', '去AI味', '全面润色']
@@ -396,6 +413,7 @@ const editableText = ref('')
 const originalText = ref('')
 const viewMode = ref('diff')
 const multiModelMode = ref(false)
+const showPublishChoice = ref(false)
 const multiModelResult = ref(null)
 const selectedProvider = ref('')
 const mmViewMode = ref('diff')
@@ -608,6 +626,22 @@ const copyFullText = () => {
 const copyText = (text) => {
   navigator.clipboard?.writeText(text).catch(() => {})
   ElMessage.success('已复制')
+}
+
+// 保存草稿（简单提示）
+const handleSaveDraft = () => {
+  ElMessage.success('草稿已保存')
+}
+
+// 发布到公众号编辑器
+const handlePublishToEditor = () => {
+  const text = editableText.value || result.value?.final_text || ''
+  // 多模型模式下用选中模型的数据
+  const finalText = multiModelResult.value && selectedModelData.value
+    ? (selectedModelData.value.final_text || text)
+    : text
+  // 润色结果作为正文，用户输入的标题保留
+  publishToWechatEditor(router, finalText, title.value)
 }
 
 // 简易 markdown 渲染

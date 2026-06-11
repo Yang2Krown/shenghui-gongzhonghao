@@ -229,14 +229,21 @@ async def generate_content(
     # 汇总输出
     # ──────────────────────────────────────────
 
+    # 最终清理：去除 LLM 可能残留的节标签前缀
+    final_text = agent_c_output.rewritten_text
+    # 去掉正文段落中可能出现的 【引入】【正文】【总结】 等标签
+    final_text = re.sub(r'^\s*[\[【](?:引入|正文|总结|引言|结尾|概述|结语|开头|主体|中间|结尾段)[\]】]\s*', '', final_text, flags=re.MULTILINE)
+    # 去掉 "第X节" 前缀
+    final_text = re.sub(r'^\s*第[一二三四五六七八九十\d]+节\s*', '', final_text, flags=re.MULTILINE)
+
     # 更新金句文本匹配
     updated_gold_sentences = _update_gold_sentences_for_rewritten_text(
         agent_b_output.sentences,
-        agent_c_output.rewritten_text,
+        final_text,
     )
 
     output = ContentGenerationOutput(
-        final_text=agent_c_output.rewritten_text,
+        final_text=final_text,
         final_word_count=agent_c_output.rewritten_word_count,
         section_count=agent_a_output.section_count,
         section_word_counts=[s.word_count for s in agent_a_output.sections],

@@ -261,6 +261,9 @@
                 <button class="btn-copy" @click="copyAngle(currentCandidate)">
                   <span class="copy-icon">⧉</span> 复制
                 </button>
+                <button class="btn-copy" style="color: var(--clay-deep);" @click="selectedAngleTitle = currentCandidate.title; showPublishChoice = true">
+                  <span class="copy-icon">↗</span> 发布
+                </button>
                 <button class="btn-write-outline" @click="goToOutline(currentCandidate)">
                   用此角度写大纲 <span style="font-size: 12px;">→</span>
                 </button>
@@ -287,6 +290,13 @@
     </div>
   </div>
   </div>
+
+  <PublishChoiceDialog
+    v-model="showPublishChoice"
+    :title="selectedAngleTitle || '创作角度'"
+    @save-draft="handleSaveDraft"
+    @publish="handlePublishToEditor"
+  />
 </template>
 
 <script setup>
@@ -295,9 +305,11 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   EditPen, Document, Delete, Plus, Upload, Link,
-  Edit, Loading, Refresh, ArrowRight, CopyDocument, Check
+  Edit, Loading, Refresh, ArrowRight, CopyDocument, Check, Promotion
 } from '@element-plus/icons-vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
+import { publishToWechatEditor } from '@/utils/publishToEditor'
+import PublishChoiceDialog from '@/components/PublishChoiceDialog.vue'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
 
 const router = useRouter()
@@ -338,6 +350,8 @@ const layoutHeight = ref('auto')
 const panelMode = ref('mining')
 const candidateList = ref([])
 const currentCandidateIndex = ref(0)
+const showPublishChoice = ref(false)
+const selectedAngleTitle = ref('')
 let resizeObserver = null
 
 const totalCandidates = computed(() => candidateList.value.length)
@@ -627,6 +641,28 @@ const copyAngle = (angle) => {
   const text = `${angle.title}\n${angle.summary || angle.value_promise || ''}`.trim()
   navigator.clipboard?.writeText(text).catch(() => {})
   ElMessage.success('已复制')
+}
+
+const handleSaveDraft = () => {
+  ElMessage.success('草稿已保存')
+}
+
+const handlePublishToEditor = () => {
+  const angle = candidateList.value[currentCandidateIndex.value]
+  const angleText = angle ? `${angle.title}\n${angle.summary || angle.value_promise || ''}`.trim() : ''
+  // 拼接所有信息源内容
+  const sourceTexts = sources.value
+    .filter(s => s.kind === 'text' && s.text?.trim())
+    .map(s => s.text.trim())
+  const linkTexts = sources.value
+    .filter(s => s.kind === 'link' && s.linkContent?.trim())
+    .map(s => s.linkContent.trim())
+  const fileTexts = sources.value
+    .filter(s => s.kind === 'file' && s.fileText?.trim())
+    .map(s => s.fileText.trim())
+  const allSources = [...sourceTexts, ...linkTexts, ...fileTexts].join('\n\n')
+  const fullText = angleText + (allSources ? `\n\n${allSources}` : '')
+  publishToWechatEditor(router, fullText, angle?.title || '')
 }
 
 // 评分维度

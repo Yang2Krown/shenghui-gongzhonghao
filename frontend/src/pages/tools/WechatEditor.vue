@@ -12,6 +12,12 @@
       <p class="text-body text-ink-3" style="margin-top: 12px; max-width: 600px;">
         粘贴或编辑正文，用工具栏排版，一键发布到公众号草稿箱。
       </p>
+      <!-- 自动填充的标题 -->
+      <div v-if="articleTitle" class="auto-title-bar">
+        <span class="auto-title-label">文章标题</span>
+        <span class="auto-title-text">{{ articleTitle }}</span>
+        <button class="auto-title-edit" @click="showPublishDialog = true">编辑</button>
+      </div>
     </div>
 
     <!-- 富文本编辑器 -->
@@ -118,7 +124,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { EditPen, Promotion, CopyDocument, Upload, Loading, MagicStick } from '@element-plus/icons-vue'
@@ -167,9 +173,21 @@ const canPublish = computed(() => {
 onMounted(() => {
   const savedContent = sessionStorage.getItem('wechat_editor_content')
   const savedTitle = sessionStorage.getItem('wechat_editor_title')
+  console.log('[WechatEditor] onMounted', {
+    hasContent: !!savedContent,
+    contentLength: savedContent?.length || 0,
+    contentPreview: (savedContent || '').slice(0, 100),
+    savedTitle,
+  })
   if (savedContent) {
     editorHtml.value = savedContent
     sessionStorage.removeItem('wechat_editor_content')
+    // wangEditor v-model 不一定触发内容更新，用 setHtml 强制设置
+    nextTick(() => {
+      if (editorRef.value?.setHtml) {
+        editorRef.value.setHtml(savedContent)
+      }
+    })
   }
   if (savedTitle) {
     articleTitle.value = savedTitle
@@ -408,6 +426,55 @@ const handlePublish = async () => {
 
 .tool-hero { position: relative; margin-bottom: 16px; }
 .tool-hero .kicker { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--clay-deep); background: var(--clay-tint); border: 1px solid var(--clay-soft); padding: 5px 12px; border-radius: var(--r-pill); margin-bottom: 14px; }
+
+/* 自动标题栏 */
+.auto-title-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: var(--ivory);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.auto-title-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--clay-deep);
+  background: var(--clay-tint);
+  border: 1px solid var(--clay-soft);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  flex-shrink: 0;
+}
+.auto-title-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.auto-title-edit {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--paper);
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.14s;
+}
+.auto-title-edit:hover {
+  border-color: var(--clay-soft);
+  color: var(--clay-deep);
+}
 
 .cta-bar { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; font-family: inherit; font-weight: 600; font-size: 16px; color: #fff; cursor: pointer; border: none; border-radius: var(--r-lg); padding: 16px 24px; background: linear-gradient(135deg, var(--clay) 0%, var(--clay-deep) 100%); box-shadow: 0 10px 28px rgba(204,120,92,.30); transition: all .2s; }
 .cta-bar:hover:not([disabled]) { transform: translateY(-2px); box-shadow: 0 16px 38px rgba(204,120,92,.38); }

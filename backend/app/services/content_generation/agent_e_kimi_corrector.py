@@ -5,6 +5,7 @@
 """
 
 import json
+import asyncio
 import logging
 from pathlib import Path
 
@@ -209,22 +210,56 @@ async def kimi_correct_facts(
         ]
 
         # Moonshot 用 tool_calls 时不用 json_mode
-        if use_web_search:
-            result = await client.chat(
-                messages=messages,
-                temperature=0.2,
-                max_tokens=current_max_tokens,
-                json_mode=False,
-                web_search=True,  # type: ignore[call-arg]
-            )
-        else:
-            result = await client.chat(
-                messages=messages,
-                temperature=0.2,
-                max_tokens=current_max_tokens,
-                json_mode=True,
-            )
+        result = None
+        try:
+            if use_web_search:
+                result = await client.chat(
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=current_max_tokens,
+                    json_mode=False,
+                    web_search=True,  # type: ignore[call-arg]
+                )
+            else:
+                result = await client.chat(
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=current_max_tokens,
+                    json_mode=True,
+                )
+        except Exception as api_err:
+            err_str = str(api_err)
+            # 429 / 引擎过载 → 指数退避重试（最多 3 次，10s/20s/40s）
+            if '429' in err_str or 'overloaded' in err_str.lower() or 'rate' in err_str.lower():
+                for backoff_attempt in range(1, 4):
+                    wait = 10 * (2 ** (backoff_attempt - 1))
+                    logger.warning(f"[Agent E] 引擎过载，{wait}s 后重试 ({backoff_attempt}/3)")
+                    await asyncio.sleep(wait)
+                    try:
+                        if use_web_search:
+                            result = await client.chat(
+                                messages=messages,
+                                temperature=0.2,
+                                max_tokens=current_max_tokens,
+                                json_mode=False,
+                                web_search=True,  # type: ignore[call-arg]
+                            )
+                        else:
+                            result = await client.chat(
+                                messages=messages,
+                                temperature=0.2,
+                                max_tokens=current_max_tokens,
+                                json_mode=True,
+                            )
+                        break  # 成功，跳出退避循环
+                    except Exception as retry_err:
+                        if backoff_attempt == 3:
+                            raise retry_err
+                        continue
+            else:
+                raise api_err
 
+        assert result is not None, "result should be set after try/except"
         # 检测截断，自动增大 max_tokens
         if getattr(result, 'finish_reason', None) == "length":
             logger.warning(f"[Agent E] 输出被截断 (max_tokens={current_max_tokens})，增大重试")

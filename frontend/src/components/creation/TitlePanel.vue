@@ -309,7 +309,23 @@ const selectTitle = (index) => {
 const confirmTitle = () => {
   if (selectedIndex.value !== null) {
     const chosen = titles.value[selectedIndex.value]
-    emit('complete', { ...chosen, title: chosen.editable_title || chosen.title })
+    // 把可用的内容源一起传回去，供发布时使用
+    const contentText = props.contentData?.final_text || props.contentData?.content || ''
+    // 大纲 sections 序列化为文本
+    let outlineText = ''
+    if (Array.isArray(props.outlineData?.sections)) {
+      outlineText = props.outlineData.sections
+        .filter(s => s.title || s.description)
+        .map(s => [s.title ? `## ${s.title}` : '', s.description || '', (s.core_points || []).join('\n')]
+          .filter(Boolean).join('\n'))
+        .join('\n\n')
+    }
+    const sourceText = contentText || outlineText || ''
+    emit('complete', {
+      ...chosen,
+      title: chosen.editable_title || chosen.title,
+      _sourceText: sourceText,
+    })
     emit('next-step')
     ElMessage.success('标题已确认')
   }

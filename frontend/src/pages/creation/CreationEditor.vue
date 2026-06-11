@@ -168,6 +168,8 @@ const currentOutlineId = ref(null)
 const currentOutlineData = ref(null)
 const selectedTitle = ref(null)
 const finalContent = ref(null)
+// 持久化输入文本（从任意入口进入时保存，发布时作为兜底）
+const sourceText = ref('')
 
 // 标题生成入口：将文本包装为 contentData 格式
 const contentDataForTitle = computed(() => {
@@ -343,7 +345,13 @@ const restoreFromHistory = async (recordId) => {
 }
 
 // 加载已有创作数据
-onMounted(async () => {
+onMounted(async () =>  {
+  // 捕获任意入口传入的输入文本（在 computed 清除 sessionStorage 之前）
+  sourceText.value =
+    sessionStorage.getItem('creation_title_content_text') ||
+    sessionStorage.getItem('creation_body_outline_text') ||
+    ''
+
   // 优先：从历史记录恢复
   const recordId = route.query.record_id
   if (recordId) {
@@ -417,6 +425,11 @@ const onContentComplete = (contentData) => {
   isDirty.value = true
   contentStatus.value = 'completed'
   finalContent.value = contentData || null
+  console.log('[CreationEditor] onContentComplete', {
+    contentData,
+    finalText: contentData?.final_text?.slice(0, 100),
+    finalContentSize: JSON.stringify(contentData || {}).length,
+  })
   // 不在这里调 goWorkflowStep —— 由 @next-step 事件统一处理导航
   ElMessage.success('正文生成完成，可切换到标题生成')
 }
@@ -426,8 +439,116 @@ const onTitleComplete = (titleData) => {
   isDirty.value = true
   titleStatus.value = 'completed'
   selectedTitle.value = titleData
+  // 从 TitlePanel 接收输入原文（如果有），作为发布时的兜底
+  if (titleData?._sourceText && !sourceText.value) {
+    sourceText.value = titleData._sourceText
+  }
+  console.log('[CreationEditor] onTitleComplete', {
+    titleData,
+    finalContent: finalContent.value,
+    contentStatus: contentStatus.value,
+    sourceTextFromTitle: titleData?._sourceText?.length || 0,
+  })
+  showPublishChoice.value = true
+}
+// 标题确认后 → 保存草稿
+const handleSaveDraftAfterTitle = async () => {
+  await saveDraft()
   goWorkflowStep('title')
-  ElMessage.success('创作流程完成！')
+}
+
+// 标题确认后 → 一键发布到公众号编辑器
+const handlePublishAfterTitle = async () => {
+  // 先保存草稿，确保数据不丢
+  await saveDraft()
+  // 将正文和标题写入 sessionStorage，公众号编辑器 onMounted 时读取
+  // fallback 链：finalContent → creationStore → outlineText → sourceText → 空
+  let finalText = finalContent.value?.final_text || finalContent.value?.content || ''
+  let titleText = selectedTitle.value?.title || ''
+
+  // 如果 finalContent 为空，尝试从 creationStore 恢复
+  if (!finalText) {
+    try {
+      const saved = creationStore.currentCreation
+      if (saved?.content) {
+        try {
+          const parsed = JSON.parse(saved.content)
+          if (parsed?.final_text) finalText = parsed.final_text
+        } catch {
+          finalText = saved.content
+        }
+      }
+      if (!titleText && saved?.title) titleText = saved.title
+    } catch { /* ignore */ }
+  }
+
+  // 如果仍然为空，尝试从大纲 sections 序列化
+  if (!finalText && currentOutlineData.value) {
+    const outline = currentOutlineData.value
+    if (Array.isArray(outline.sections)) {
+      // 把结构化 sections 转成纯文本
+      const parts = []
+      for (const s of outline.sections) {
+        if (s.title) parts.push(`## ${s.title}`)
+        if (s.description) parts.push(s.description)
+        if (s.core_points?.length) parts.push(s.core_points.join('\n'))
+      }
+      finalText = parts.join('\n\n')
+    } else if (outline.full_text) {
+      finalText = outline.full_text
+    }
+  }
+
+  // 最终兜底：用初始化时捕获的输入文本
+  if (!finalText && sourceText.value) {
+    finalText = sourceText.value
+  }
+
+  console.log('[PublishChoice] finalText length:', finalText.length, 'title:', titleText, {
+    finalContentRaw: finalContent.value,
+    selectedTitleRaw: selectedTitle.value,
+    isEditing: isEditing.value,
+    outlineDataRaw: currentOutlineData.value,
+    sourceTextLength: sourceText.value.length,
+  })
+  if (!finalText) {
+    ElMessage.warning('正文内容为空，编辑器将只显示标题。请先完成正文生成或在编辑器中手动输入。')
+  }
+  // 纯文本 → HTML（markdown 风格转语义 HTML，由编辑器负责最终公众号格式）
+  const textToHtml = (text) => {
+    if (!text) return ''
+    // 已经是 HTML
+    if (/<(p|h[1-6]|section|div)[\s>]/i.test(text)) return text
+    // 先清理：剥掉金句种子前缀、金句清单等 LLM 残留
+    let cleaned = text
+      .replace(/金句种子[：:]\s*/g, '')
+      .replace(/【金句清单[^】]*】[\s\S]*$/g, '')
+      .trim()
+    return cleaned
+      .split(/\n\n+/)
+      .map((para) => {
+        const t = para.trim()
+        if (!t) return ''
+        // H2：输出语义 <h2>，编辑器内显示为标题，导出时转公众号格式
+        if (t.startsWith('## ')) {
+          return `<h2>${t.slice(3).trim()}</h2>`
+        }
+        if (t.startsWith('### ')) {
+          return `<h3>${t.slice(4).trim()}</h3>`
+        }
+        if (t.startsWith('# ')) {
+          return `<h2>${t.slice(2).trim()}</h2>`
+        }
+        return `<p>${t.replace(/\n/g, '<br>')}</p>`
+      })
+      .join('\n')
+  }
+  try {
+    sessionStorage.setItem('wechat_editor_content', textToHtml(finalText))
+    sessionStorage.setItem('wechat_editor_title', titleText)
+  } catch { /* ignore */ }
+  // 跳转到公众号编辑器
+  router.push('/creation/wechat-editor')
 }
 
 // 从 ContentPanel 触发保存草稿（携带当前编辑内容）

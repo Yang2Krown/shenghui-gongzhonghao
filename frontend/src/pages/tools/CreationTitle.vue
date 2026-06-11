@@ -197,9 +197,14 @@
             </div>
             <p v-if="rec.reason" class="text-xs text-ink-4" style="margin-top: 6px;">{{ rec.reason }}</p>
           </div>
-          <button class="btn-text btn-sm" @click="copyText(rec.title)">
-            <el-icon :size="15"><CopyDocument /></el-icon> 复制
-          </button>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn-text btn-sm" @click="copyText(rec.title)">
+              <el-icon :size="15"><CopyDocument /></el-icon> 复制
+            </button>
+            <button class="btn-text btn-sm" style="color: var(--clay-deep);" @click="selectedPublishTitle = rec.title; showPublishChoice = true">
+              <el-icon :size="15"><Promotion /></el-icon> 发布
+            </button>
+          </div>
         </div>
       </div>
 
@@ -309,15 +314,24 @@
       </div>
     </div>
   </div>
+
+  <PublishChoiceDialog
+    v-model="showPublishChoice"
+    :title="selectedPublishTitle || '标题推荐'"
+    @save-draft="handleSaveDraft"
+    @publish="handlePublishToEditor"
+  />
 </template>
 
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ChatDotSquare, Document, Link, Upload, Edit, Loading, Refresh, CopyDocument, Check } from '@element-plus/icons-vue'
+import { ChatDotSquare, Document, Link, Upload, Edit, Loading, Refresh, CopyDocument, Check, Promotion } from '@element-plus/icons-vue'
 import PipelineStepper from '@/components/creation/PipelineStepper.vue'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
+import { publishToWechatEditor } from '@/utils/publishToEditor'
+import PublishChoiceDialog from '@/components/PublishChoiceDialog.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
 
@@ -345,6 +359,8 @@ const preference = ref('')
 const result = ref(null)
 const multiModelMode = ref(false) // 多模型对比模式
 const multiModelResult = ref(null) // 多模型对比结果
+const showPublishChoice = ref(false)
+const selectedPublishTitle = ref('')
 
 const canGenerate = computed(() => {
   let hasContent = false
@@ -543,6 +559,23 @@ const handleGenerate = async () => {
 const copyText = (text) => {
   navigator.clipboard?.writeText(text).catch(() => {})
   ElMessage.success('已复制')
+}
+
+const handleSaveDraft = () => {
+  ElMessage.success('草稿已保存')
+}
+
+const handlePublishToEditor = () => {
+  // 组装输入内容（文件/链接/文本）
+  const inputContent = value.value || fileText.value || linkContent.value || ''
+  console.log('[CreationTitle] handlePublishToEditor', {
+    inputValue: value.value?.length || 0,
+    fileText: fileText.value?.length || 0,
+    linkContent: linkContent.value?.length || 0,
+    inputContent: inputContent.length,
+    selectedTitle: selectedPublishTitle.value,
+  })
+  publishToWechatEditor(router, inputContent, selectedPublishTitle.value)
 }
 
 onUnmounted(() => {
