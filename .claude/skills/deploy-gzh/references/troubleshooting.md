@@ -49,11 +49,13 @@ for dp,_,fs in os.walk('/www/wwwroot/gzh/backend/alembic'):
 
 **解决**：
 ```bash
-# 本地
+# 用脚本
+bash .claude/skills/deploy-gzh/scripts/deploy.sh --frontend
+
+# 或手动
 cd frontend && npm run build && cd ..
 rsync -az --delete frontend/dist/ root@1.13.92.57:/www/wwwroot/gzh/frontend/dist/
-# 服务器
-docker compose -f docker-compose.prod.yml --env-file backend/.env.production up -d --build frontend
+ssh root@1.13.92.57 "cd /www/wwwroot/gzh && docker compose -f docker-compose.prod.yml --env-file backend/.env.production up -d --build frontend"
 ```
 然后浏览器 **硬刷新 `Cmd+Shift+R`** 或开无痕窗口（绕过浏览器缓存）。
 

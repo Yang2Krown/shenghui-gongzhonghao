@@ -83,7 +83,11 @@ def _build_user_prompt(inp: ContentGenerationInput) -> str:
     lines.append("")
 
     # 事实素材（正文写作的事实依据，禁止编造）
-    if inp.source_summary and inp.source_summary.strip():
+    # 优先使用 Phase 0 提取的素材包，回退到 source_summary
+    if inp.source_materials and inp.source_materials.strip():
+        lines.append(inp.source_materials.strip())
+        lines.append("")
+    elif inp.source_summary and inp.source_summary.strip():
         lines.append("【事实素材】")
         lines.append("以下是本选题的事实依据。正文中的数字、数据、人名、机构、产品、时间、")
         lines.append("引用等具体事实，只能基于此处内容，不得编造或篡改：")

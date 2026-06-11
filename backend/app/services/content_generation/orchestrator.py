@@ -100,11 +100,14 @@ def _update_gold_sentences_for_rewritten_text(
 async def generate_content(
     inp: ContentGenerationInput,
     progress_callback: Optional[Callable] = None,
+    db_session=None,
 ) -> ContentGenerationOutput:
-    """正文生成主流程：Agent A → B → D → E → C。
+    """正文生成主流程：Phase 0（事实搜集）→ Agent A → B → D → E → C。
 
     Args:
         inp: 正文生成总输入（选题 + 大纲 + 标题 + 风格参数）
+        progress_callback: 进度回调（可选）
+        db_session: 数据库会话（用于查询 RawInfo，可选）
 
     Returns:
         ContentGenerationOutput: 最终正文 + 金句 + 改写对照表 + 事实纠错报告
@@ -115,6 +118,57 @@ async def generate_content(
     """
     start_time = time.time()
     logger.info(f"[正文生成] 开始，标题: {inp.topic_title}")
+
+    # ──────────────────────────────────────────
+    # Phase 0: 事实素材搜集
+    # ──────────────────────────────────────────
+    source_material_text = inp.source_materials  # 已有则跳过
+    if not source_material_text and inp.candidate_id and db_session:
+        logger.info("[正文生成] Phase 0: 搜集事实素材")
+        if progress_callback:
+            await progress_callback({"event": "step_start", "data": {"step": 0, "agent": "素材搜集", "action": "正在从原始报道中提取事实...", "avatar": "/agents/source.png"}})
+        try:
+            from app.services.content_generation.source_collector import collect_source_materials
+            # 查询 candidate 的 cluster_id
+            cluster_id = None
+            from sqlalchemy.ext.asyncio import AsyncSession
+            if isinstance(db_session, AsyncSession):
+                from sqlalchemy import select
+                from app.models.topic_candidate import TopicCandidate
+                cand_result = await db_session.execute(
+                    select(TopicCandidate.info_cluster_id).where(TopicCandidate.id == inp.candidate_id)
+                )
+                row = cand_result.first()
+                cluster_id = row[0] if row else None
+            else:
+                from app.models.topic_candidate import TopicCandidate
+                cand = db_session.query(TopicCandidate.info_cluster_id).filter(
+                    TopicCandidate.id == inp.candidate_id
+                ).first()
+                cluster_id = cand[0] if cand else None
+
+            if cluster_id:
+                material = await collect_source_materials(
+                    cluster_id=cluster_id,
+                    sections=inp.sections,
+                    db_session=db_session,
+                )
+                if material and material.total_facts > 0:
+                    source_material_text = material.to_prompt_text(inp.sections)
+                    logger.info(f"[正文生成] 事实素材搜集完成: {material.total_facts} 条事实")
+                else:
+                    logger.warning("[正文生成] 未搜集到事实素材，将使用 source_summary 兜底")
+            else:
+                logger.warning("[正文生成] 无 cluster_id，跳过事实搜集")
+        except Exception as e:
+            logger.error(f"[正文生成] 事实搜集失败（不影响主流程）: {e}")
+
+        if progress_callback:
+            await progress_callback({"event": "step_done", "data": {"step": 0, "agent": "素材搜集"}})
+
+    # 将素材包注入 inp（不影响原始 inp，创建副本）
+    if source_material_text:
+        inp = inp.model_copy(update={"source_materials": source_material_text})
 
     # ──────────────────────────────────────────
     # Step 1: Agent A — 正文创作员

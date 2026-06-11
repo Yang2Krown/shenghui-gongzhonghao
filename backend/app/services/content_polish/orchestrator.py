@@ -194,6 +194,16 @@ async def run_polish_prefix(
 
     agent_a_output, cg_input = _build_virtual_agent_a_output(inp.text, inp.title)
 
+    # Phase 0: 从用户原文提取事实素材包，注入 cg_input 供 Agent D 对比检测
+    try:
+        from app.services.user_source_extractor import extract_facts_from_user_text
+        source_material = await extract_facts_from_user_text(inp.text, task_type="polish", provider=provider)
+        if source_material:
+            cg_input = cg_input.model_copy(update={"source_materials": source_material})
+            logger.info("[文案润色] 事实素材包已注入")
+    except Exception as e:
+        logger.warning(f"[文案润色] 事实提取失败（不影响主流程）: {e}")
+
     # Step 1: Agent B — 金句催化员
     logger.info("[文案润色] Step 1/4: Agent B 金句催化")
     if progress_callback:
@@ -291,6 +301,16 @@ async def run_polish_factcheck(
         (agent_a_output, cg_input, agent_d_output, agent_e_output)
     """
     agent_a_output, cg_input = _build_virtual_agent_a_output(inp.text, inp.title)
+
+    # Phase 0: 从用户原文提取事实素材包，注入 cg_input 供 Agent D 对比检测
+    try:
+        from app.services.user_source_extractor import extract_facts_from_user_text
+        source_material = await extract_facts_from_user_text(inp.text, task_type="polish", provider=provider)
+        if source_material:
+            cg_input = cg_input.model_copy(update={"source_materials": source_material})
+    except Exception as e:
+        logger.warning(f"[文案润色] 事实提取失败（不影响主流程）: {e}")
+
     # 空金句清单（绕过 min_length=3 校验），D/E 只核查原文事实
     empty_b = AgentBOutput.model_construct(sentences=[], stats={})
 

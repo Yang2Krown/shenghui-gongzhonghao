@@ -49,15 +49,29 @@ async def analyze_and_continue(content: str, preference: str = "", provider: Opt
     """
     client = get_llm_client(provider)
 
+    # Phase 0: 从事实中提取素材包，降低续写幻觉
+    source_material = None
+    try:
+        from app.services.user_source_extractor import extract_facts_from_user_text
+        source_material = await extract_facts_from_user_text(content, task_type="continuation", provider=provider)
+    except Exception as e:
+        logger.warning(f"[续写] 事实提取失败（不影响主流程）: {e}")
+
     preference_block = ""
     if preference.strip():
         preference_block = f"\n\n【用户偏好】\n{preference.strip()}"
+
+    # 事实素材块（如果有）
+    material_block = ""
+    if source_material:
+        material_block = f"\n\n{source_material}\n"
 
     prompt = f"""请分析以下已写好的文章正文，然后给出 3 个不同的续写收尾方案。
 
 【已写正文】
 {content[:6000]}
 {preference_block}
+{material_block}
 
 【要求】
 1. 先分析文章的内容脉络（核心主题、写作风格、逻辑走向、情感基调）
@@ -73,6 +87,11 @@ async def analyze_and_continue(content: str, preference: str = "", provider: Opt
    - 过渡自然，不能有"总之"、"综上"等生硬转折
    - 升华主题但不说教
    - 给读者留下深刻印象
+
+4. 【事实约束 · 最高优先级】
+   - 续写中涉及的具体事实（数字、日期、人名、产品名）必须与原文一致
+   - 禁止在续写中编造原文没有的具体数据或事件
+   - 如果「原文事实素材」中列出了关键事实，续写中引用时必须保持一致
 
 请严格按照以下 JSON 格式输出：
 

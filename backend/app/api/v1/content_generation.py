@@ -200,7 +200,7 @@ async def generate_content_async(
                 async def _progress_cb(event):
                     await progress_store.push(run_id, event)
 
-                output = await cg_generate(inp, progress_callback=_progress_cb)
+                output = await cg_generate(inp, progress_callback=_progress_cb, db_session=bg_db)
 
                 # 发送结果数据
                 factual_summary_data = None
@@ -423,12 +423,13 @@ async def generate_content_adhoc(
                     sections=sections,
                     style_params=style_params,
                     user_id=current_user.id,
+                    candidate_id=candidate.id,  # type: ignore[arg-type]
                 )
 
                 async def _progress_cb(event):
                     await progress_store.push(run_id, event)
 
-                output = await cg_generate(inp, progress_callback=_progress_cb)
+                output = await cg_generate(inp, progress_callback=_progress_cb, db_session=bg_db)
 
                 # 格式化结果
                 factual_summary_data = None

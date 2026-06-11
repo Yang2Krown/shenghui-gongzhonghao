@@ -39,54 +39,92 @@ description: >
 bash .claude/skills/deploy-gzh/scripts/deploy.sh
 ```
 
-可选参数（不传用默认值）：
-```bash
-# 跳过前端构建（只改了后端时，省时间）
-bash .claude/skills/deploy-gzh/scripts/deploy.sh --skip-frontend
+### 按组件单独部署
 
-# 自定义服务器/路径
-DEPLOY_HOST=root@1.13.92.57 DEPLOY_PATH=/www/wwwroot/gzh \
-  bash .claude/skills/deploy-gzh/scripts/deploy.sh
+改了什么就部署什么，省时间：
+
+```bash
+# 只改了前端页面 → 只部署前端
+bash .claude/skills/deploy-gzh/scripts/deploy.sh --frontend
+
+# 只改了后端 Python 代码 → 只部署后端
+bash .claude/skills/deploy-gzh/scripts/deploy.sh --backend
+
+# 只改了 models.py 或需要跑 alembic 迁移 → 只跑数据库
+bash .claude/skills/deploy-gzh/scripts/deploy.sh --db
+
+# 也可以组合：比如改了后端代码 + 新增了数据库表
+bash .claude/skills/deploy-gzh/scripts/deploy.sh --backend --db
 ```
 
-脚本跑完后，**务必硬刷新浏览器**（`Cmd+Shift+R`）或开无痕窗口访问域名，否则看到的是缓存的旧页面。
+| 参数 | 说明 |
+|---|---|
+| 无参数 | 全量部署（前端+后端+数据库迁移） |
+| `--frontend` | 只部署前端（本地 build + rsync dist + 重建前端容器） |
+| `--backend` | 只部署后端（rsync 后端源码 + 重建 backend/celery 容器） |
+| `--db` | 只跑数据库迁移（rsync 后端含 alembic 文件 + 重建 init 容器） |
+| `--frontend --backend` | 部署前端+后端，跳过数据库 |
+| `--backend --db` | 部署后端+数据库迁移，跳过前端 |
+
+### 注意事项
+
+- **`--db` 会自动同步后端代码**：因为 alembic 迁移文件在 backend/ 里，必须先 rsync 上去。
+- **`--backend` 不会触发数据库迁移**：如果改了 models.py，必须加 `--db`。
+- **`--frontend` 不会重建后端**：如果改了 API 接口，还要加 `--backend`。
+- 脚本跑完后，**务必硬刷新浏览器**（`Cmd+Shift+R`）或开无痕窗口访问域名，否则看到的是缓存的旧页面。
+
+### 自定义服务器/路径
+
+```bash
+DEPLOY_HOST=root@1.13.92.57 DEPLOY_PATH=/www/wwwroot/gzh \
+  bash .claude/skills/deploy-gzh/scripts/deploy.sh --backend
+```
 
 ## 手动方式（脚本不可用 / 想逐步确认时）
 
-### 1. 本地构建前端（改了前端才需要）
+### 只部署前端
 ```bash
 cd frontend && npm run build && cd ..
+rsync -az --delete frontend/dist/ root@1.13.92.57:/www/wwwroot/gzh/frontend/dist/
+ssh root@1.13.92.57 "cd /www/wwwroot/gzh && docker compose -f docker-compose.prod.yml --env-file backend/.env.production up -d --build frontend"
 ```
 
-### 2. 同步到服务器（用 rsync，不要用 tar）
+### 只部署后端
 ```bash
-# 后端源码（排除垃圾、密钥、本地配置）
 rsync -az --delete \
   --exclude='__pycache__' --exclude='.venv' --exclude='uploads' \
   --exclude='.env.production' --exclude='secrets' \
   --exclude='.DS_Store' --exclude='._*' \
   backend/ root@1.13.92.57:/www/wwwroot/gzh/backend/
-
-# 前端构建产物
-rsync -az --delete frontend/dist/ root@1.13.92.57:/www/wwwroot/gzh/frontend/dist/
-
-# compose 文件（若改过）
 rsync -az docker-compose.prod.yml root@1.13.92.57:/www/wwwroot/gzh/
+ssh root@1.13.92.57 "cd /www/wwwroot/gzh && find . -name '._*' -delete 2>/dev/null; docker compose -f docker-compose.prod.yml --env-file backend/.env.production up -d --build backend celery-worker celery-beat"
 ```
 
-### 3. 服务器上重建并启动
+### 只跑数据库迁移
 ```bash
-ssh root@1.13.92.57
-cd /www/wwwroot/gzh
-
-# 保险：清掉可能残留的 macOS 坏文件
-find . -name '._*' -delete
-
-# 全量重建（长构建建议 nohup 后台跑，防 SSH 断）
-docker compose -f docker-compose.prod.yml --env-file backend/.env.production up -d --build
+rsync -az --delete \
+  --exclude='__pycache__' --exclude='.venv' --exclude='uploads' \
+  --exclude='.env.production' --exclude='secrets' \
+  --exclude='.DS_Store' --exclude='._*' \
+  backend/ root@1.13.92.57:/www/wwwroot/gzh/backend/
+ssh root@1.13.92.57 "cd /www/wwwroot/gzh && find . -name '._*' -delete 2>/dev/null; docker compose -f docker-compose.prod.yml --env-file backend/.env.production up -d --build init"
+ssh root@1.13.92.57 "docker logs gzh-init-1 --tail=30 -f"
 ```
 
-### 4. 验证
+### 全量部署
+```bash
+cd frontend && npm run build && cd ..
+rsync -az --delete \
+  --exclude='__pycache__' --exclude='.venv' --exclude='uploads' \
+  --exclude='.env.production' --exclude='secrets' \
+  --exclude='.DS_Store' --exclude='._*' \
+  backend/ root@1.13.92.57:/www/wwwroot/gzh/backend/
+rsync -az --delete frontend/dist/ root@1.13.92.57:/www/wwwroot/gzh/frontend/dist/
+rsync -az docker-compose.prod.yml root@1.13.92.57:/www/wwwroot/gzh/
+ssh root@1.13.92.57 "cd /www/wwwroot/gzh && find . -name '._*' -delete 2>/dev/null; docker compose -f docker-compose.prod.yml --env-file backend/.env.production up -d --build"
+```
+
+### 验证
 ```bash
 # 服务状态：init=Exited(0)，其余 Up/healthy
 docker compose -f docker-compose.prod.yml --env-file backend/.env.production ps

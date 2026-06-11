@@ -133,8 +133,8 @@ def generate_article_task(
 
         logger.info(f"开始正文生成，选题: {inp.topic_title}")
 
-        # 执行 4 Agent 流程
-        output = asyncio.run(generate_content(inp))
+        # 执行 5 Agent 流程（Phase 0 + A → B → D → E → C）
+        output = asyncio.run(generate_content(inp, db_session=db))
 
         # 落库：创建 ContentCreation 记录
         creation = ContentCreation(

@@ -42,6 +42,9 @@ class ContentGenerationInput(BaseModel):
     # 事实素材（来自信息簇的正文级摘要，正文写作的事实依据）
     source_summary: Optional[str] = Field(default=None, description="信息簇事实摘要，正文不得偏离其中的事实/数据")
 
+    # 事实素材包（Phase 0 提取，按大纲节组织的关键事实）
+    source_materials: Optional[str] = Field(default=None, description="Phase 0 提取的事实素材包文本，正文中的具体事实只能来自此处")
+
     # 大纲（已通过自检）
     outline_id: Optional[int] = Field(default=None, description="大纲ID，用于关联")
     sections: List[SectionBrief] = Field(min_length=1, description="大纲各节")

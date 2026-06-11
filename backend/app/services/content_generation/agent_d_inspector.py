@@ -70,6 +70,14 @@ def _build_user_prompt(
     lines.append(f"【选题标题】{inp.topic_title}")
     lines.append("")
 
+    # 事实素材包（如果有的话，用于对比检测）
+    if inp.source_materials and inp.source_materials.strip():
+        lines.append("【事实素材包（Ground Truth）】")
+        lines.append("以下是经过验证的事实素材。正文中出现的具体事实必须能在素材包中找到来源。")
+        lines.append("如果正文中出现了素材包中没有的具体事实（数字、日期、人名、产品名、版本号等），必须标记为潜在错误。")
+        lines.append(inp.source_materials.strip())
+        lines.append("")
+
     # 正文全文（Agent A 的原始输出）
     lines.append("【正文】")
     lines.append(agent_a_output.full_text)
