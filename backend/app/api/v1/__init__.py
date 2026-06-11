@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate, wechat_draft, content_continuation, content_polish
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate, wechat_draft, content_continuation, content_polish, wechat_accounts
 
 api_router = APIRouter()
 
@@ -176,4 +176,11 @@ api_router.include_router(
     content_polish.router,
     prefix="/content-polish",
     tags=["文案润色"]
+)
+
+# 微信公众号账号管理路由
+api_router.include_router(
+    wechat_accounts.router,
+    prefix="/wechat-accounts",
+    tags=["公众号账号"]
 )

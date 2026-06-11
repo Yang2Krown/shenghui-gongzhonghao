@@ -46,24 +46,65 @@
     <!-- 公众号凭证配置 -->
     <div class="profile-card" style="margin-top: 20px;">
       <div style="padding: 24px;">
-        <h3 style="font-size: 17px; font-weight: 600; color: var(--ink); margin-bottom: 4px;">公众号凭证</h3>
-        <p style="font-size: 13px; color: var(--ink-4); margin-bottom: 18px;">配置后可直接发布文章到公众号草稿箱</p>
-        <el-form label-position="top" style="max-width: 480px;">
-          <el-form-item label="AppID">
-            <el-input v-model="wechatForm.appid" placeholder="公众号 AppID" />
-          </el-form-item>
-          <el-form-item label="AppSecret">
-            <el-input v-model="wechatForm.app_secret" placeholder="公众号 AppSecret" show-password />
-          </el-form-item>
-          <el-form-item label="默认作者（选填）">
-            <el-input v-model="wechatForm.author" placeholder="文章作者名" maxlength="32" />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" @click="saveWechatConfig">保存凭证</el-button>
-          </el-form-item>
-        </el-form>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+          <div>
+            <h3 style="font-size: 17px; font-weight: 600; color: var(--ink); margin-bottom: 4px;">公众号账号</h3>
+            <p style="font-size: 13px; color: var(--ink-4);">管理你的公众号凭证，支持绑定多个账号</p>
+          </div>
+          <el-button type="primary" @click="openAddAccount">+ 添加账号</el-button>
+        </div>
+
+        <!-- 账号列表 -->
+        <div v-if="wechatAccounts.length === 0" style="text-align: center; padding: 32px 0; color: var(--ink-4);">
+          <p>暂无公众号账号</p>
+          <p style="font-size: 13px; margin-top: 4px;">点击「添加账号」配置你的公众号</p>
+        </div>
+        <div v-else class="account-list">
+          <div v-for="acc in wechatAccounts" :key="acc.id" class="account-item">
+            <div class="account-info">
+              <div class="account-name">
+                {{ acc.account_name }}
+                <el-tag v-if="acc.is_default" type="success" size="small" style="margin-left: 8px;">默认</el-tag>
+              </div>
+              <div class="account-meta">AppID: {{ acc.appid }}<span v-if="acc.author"> · 作者: {{ acc.author }}</span></div>
+            </div>
+            <div class="account-actions">
+              <el-button v-if="!acc.is_default" text size="small" @click="setDefault(acc)">设为默认</el-button>
+              <el-button text size="small" @click="testAccount(acc)">测试连接</el-button>
+              <el-button text size="small" @click="openEditAccount(acc)">编辑</el-button>
+              <el-button text size="small" type="danger" @click="deleteAccount(acc)">删除</el-button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
+
+    <!-- 添加/编辑账号弹窗 -->
+    <el-dialog v-model="accountDialogVisible" :title="editingAccount ? '编辑公众号账号' : '添加公众号账号'" width="440px" destroy-on-close>
+      <el-form label-position="top" :model="accountForm" :rules="accountRules" ref="accountFormRef">
+        <el-form-item label="账号别名" prop="account_name">
+          <el-input v-model="accountForm.account_name" placeholder="如：主号、测试号" />
+        </el-form-item>
+        <el-form-item label="AppID" prop="appid">
+          <el-input v-model="accountForm.appid" placeholder="公众号 AppID" />
+        </el-form-item>
+        <el-form-item label="AppSecret" prop="app_secret">
+          <el-input v-model="accountForm.app_secret" placeholder="公众号 AppSecret" show-password />
+        </el-form-item>
+        <el-form-item label="默认作者（选填）">
+          <el-input v-model="accountForm.author" placeholder="文章作者名" maxlength="32" />
+        </el-form-item>
+        <el-form-item>
+          <el-checkbox v-model="accountForm.is_default">设为默认账号</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="accountDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveAccount" :loading="accountSaving">
+          {{ editingAccount ? '保存' : '添加' }}
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- 风格训练区 -->
     <div class="style-section">
@@ -216,6 +257,7 @@ import { useUserStore } from '@/stores/user'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Camera, SwitchButton } from '@element-plus/icons-vue'
 import { updateProfile, uploadAvatar } from '@/api/auth'
+import { get, post, put, del } from '@/api/api'
 import {
   getStyleProfile,
   deleteStyleSource,
@@ -245,34 +287,123 @@ const profileRules = {
   ],
 }
 
-// 公众号凭证（存 localStorage）
-const WECHAT_STORAGE_KEY = 'wechat_draft_credentials'
-const wechatForm = reactive({
+// 公众号账号管理（数据库持久化）
+const wechatAccounts = ref([])
+const accountDialogVisible = ref(false)
+const accountSaving = ref(false)
+const editingAccount = ref(null)
+const accountFormRef = ref(null)
+const accountForm = reactive({
+  account_name: '',
   appid: '',
   app_secret: '',
   author: '',
+  is_default: false,
 })
+const accountRules = {
+  account_name: [{ required: true, message: '请输入账号别名', trigger: 'blur' }],
+  appid: [{ required: true, message: '请输入 AppID', trigger: 'blur' }],
+  app_secret: [{ required: true, message: '请输入 AppSecret', trigger: 'blur' }],
+}
 
-// 加载已保存的凭证
-const loadWechatConfig = () => {
+const loadWechatAccounts = async () => {
   try {
-    const saved = JSON.parse(localStorage.getItem(WECHAT_STORAGE_KEY) || '{}')
-    wechatForm.appid = saved.appid || ''
-    wechatForm.app_secret = saved.app_secret || ''
-    wechatForm.author = saved.author || ''
+    const res = await get('/wechat-accounts')
+    wechatAccounts.value = res.data || []
   } catch { /* ignore */ }
 }
 
-const saveWechatConfig = () => {
-  localStorage.setItem(WECHAT_STORAGE_KEY, JSON.stringify({
-    appid: wechatForm.appid,
-    app_secret: wechatForm.app_secret,
-    author: wechatForm.author,
-  }))
-  ElMessage.success('公众号凭证已保存')
+const openAddAccount = () => {
+  editingAccount.value = null
+  Object.assign(accountForm, { account_name: '', appid: '', app_secret: '', author: '', is_default: false })
+  accountDialogVisible.value = true
 }
 
-loadWechatConfig()
+const openEditAccount = (acc) => {
+  editingAccount.value = acc
+  Object.assign(accountForm, {
+    account_name: acc.account_name,
+    appid: acc.appid,
+    app_secret: acc.app_secret,
+    author: acc.author || '',
+    is_default: acc.is_default,
+  })
+  accountDialogVisible.value = true
+}
+
+const saveAccount = async () => {
+  try {
+    await accountFormRef.value?.validate()
+  } catch { return }
+  accountSaving.value = true
+  try {
+    if (editingAccount.value) {
+      await put(`/wechat-accounts/${editingAccount.value.id}`, accountForm)
+      ElMessage.success('更新成功')
+    } else {
+      await post('/wechat-accounts', accountForm)
+      ElMessage.success('添加成功')
+    }
+    accountDialogVisible.value = false
+    await loadWechatAccounts()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || '操作失败')
+  } finally {
+    accountSaving.value = false
+  }
+}
+
+const deleteAccount = async (acc) => {
+  try {
+    await ElMessageBox.confirm(`确定删除「${acc.account_name}」？`, '删除确认', { type: 'warning' })
+    await del(`/wechat-accounts/${acc.id}`)
+    ElMessage.success('已删除')
+    await loadWechatAccounts()
+  } catch { /* cancelled */ }
+}
+
+const setDefault = async (acc) => {
+  try {
+    await put(`/wechat-accounts/${acc.id}/set-default`)
+    ElMessage.success('已设为默认')
+    await loadWechatAccounts()
+  } catch (e) {
+    ElMessage.error('操作失败')
+  }
+}
+
+const testAccount = async (acc) => {
+  try {
+    const res = await post(`/wechat-accounts/${acc.id}/test`)
+    if (res.data?.success) {
+      ElMessage.success('连接成功')
+    } else {
+      ElMessage.error(res.data?.message || '连接失败')
+    }
+  } catch (e) {
+    ElMessage.error('测试失败')
+  }
+}
+
+// 迁移 localStorage 旧凭证到数据库
+const migrateLocalCredentials = async () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem('wechat_draft_credentials') || '{}')
+    if (saved.appid && saved.app_secret && wechatAccounts.value.length === 0) {
+      await post('/wechat-accounts', {
+        account_name: '默认账号',
+        appid: saved.appid,
+        app_secret: saved.app_secret,
+        author: saved.author || '',
+        is_default: true,
+      })
+      localStorage.removeItem('wechat_draft_credentials')
+      await loadWechatAccounts()
+    }
+  } catch { /* ignore */ }
+}
+
+loadWechatAccounts().then(() => migrateLocalCredentials())
 
 const loadUserProfile = () => {
   if (user.value) {
@@ -457,6 +588,52 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 32px;
+  background: var(--paper, #fff);
+  border: 1px solid var(--line, #e5e5e5);
+  border-radius: 16px;
+  padding: 32px;
+  margin-bottom: 24px;
+}
+
+/* 公众号账号列表 */
+.account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.account-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border: 1px solid var(--line, #e5e5e5);
+  border-radius: 10px;
+  transition: border-color 0.15s;
+}
+.account-item:hover {
+  border-color: var(--clay-soft, #c5c0b8);
+}
+.account-info {
+  flex: 1;
+  min-width: 0;
+}
+.account-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink, #2c2b28);
+}
+.account-meta {
+  font-size: 13px;
+  color: var(--ink-4, #9a968d);
+  margin-top: 2px;
+}
+.account-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.style-section {
   background: var(--paper, #fff);
   border: 1px solid var(--line, #e5e5e5);
   border-radius: 16px;

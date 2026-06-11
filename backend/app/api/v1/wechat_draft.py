@@ -8,12 +8,54 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
+from app.db.session import get_db
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _resolve_credentials(
+    db: AsyncSession,
+    user: User,
+    account_id: Optional[int],
+    appid: Optional[str],
+    app_secret: Optional[str],
+) -> tuple:
+    """解析公众号凭证：优先 account_id，其次 appid+app_secret。"""
+    if account_id is not None:
+        from app.models.wechat_account import WechatAccount
+        result = await db.execute(
+            select(WechatAccount).where(
+                WechatAccount.id == account_id,
+                WechatAccount.user_id == user.id,
+            )
+        )
+        account = result.scalar_one_or_none()
+        if not account:
+            raise ValueError("公众号账号不存在")
+        return account.appid, account.app_secret
+
+    if appid and app_secret:
+        return appid, app_secret
+
+    # 如果都没传，尝试用用户的默认账号
+    from app.models.wechat_account import WechatAccount
+    result = await db.execute(
+        select(WechatAccount).where(
+            WechatAccount.user_id == user.id,
+            WechatAccount.is_default.is_(True),
+        )
+    )
+    default = result.scalar_one_or_none()
+    if default:
+        return default.appid, default.app_secret
+
+    raise ValueError("未提供公众号凭证，请先在设置页面配置公众号账号")
 
 
 class WechatDraftRequest(BaseModel):
@@ -21,8 +63,9 @@ class WechatDraftRequest(BaseModel):
     content: str = Field(..., description="文章正文（纯文本或 HTML 均可）")
     author: Optional[str] = Field(None, description="作者")
     digest: Optional[str] = Field(None, description="摘要")
-    appid: str = Field(..., description="公众号 AppID")
-    app_secret: str = Field(..., description="公众号 AppSecret")
+    account_id: Optional[int] = Field(None, description="公众号账号 ID（优先使用）")
+    appid: Optional[str] = Field(None, description="公众号 AppID（account_id 为空时使用）")
+    app_secret: Optional[str] = Field(None, description="公众号 AppSecret（account_id 为空时使用）")
     cover_image_url: Optional[str] = Field(None, description="封面图 URL（远程）")
     cover_image_base64: Optional[str] = Field(None, description="封面图 Base64 编码")
     content_source_url: Optional[str] = Field(None, description="原文链接")
@@ -46,6 +89,7 @@ class GenerateCoverRequest(BaseModel):
 @router.post("/create-draft")
 async def create_wechat_draft(
     request: WechatDraftRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """发布文章到微信公众号草稿箱"""
@@ -58,11 +102,14 @@ async def create_wechat_draft(
     import httpx
 
     try:
-        # 0. 日志：打印收到的请求
+        # 0. 解析凭证：优先 account_id，其次 appid+app_secret
+        appid, app_secret = await _resolve_credentials(db, current_user, request.account_id, request.appid, request.app_secret)
+
+        # 0.1 日志：打印收到的请求
         logger.info(f"[WeChatDraft] 收到请求 title={request.title!r} ({len(request.title)}字符), content长度={len(request.content)}字符")
 
         # 1. 获取 access_token
-        access_token = await get_access_token(request.appid, request.app_secret)
+        access_token = await get_access_token(appid, app_secret)
 
         # 2. 上传封面图
         thumb_media_id = ""
@@ -133,15 +180,18 @@ async def create_wechat_draft(
 
 @router.post("/test-connection")
 async def test_wechat_connection(
-    appid: str,
-    app_secret: str,
+    account_id: Optional[int] = None,
+    appid: Optional[str] = None,
+    app_secret: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """测试公众号连接（验证 AppID/Secret 是否正确）"""
     from app.services.wechat_draft_service import get_access_token
 
     try:
-        access_token = await get_access_token(appid, app_secret)
+        resolved_appid, resolved_secret = await _resolve_credentials(db, current_user, account_id, appid, app_secret)
+        access_token = await get_access_token(resolved_appid, resolved_secret)
         return {
             "code": 200,
             "message": "连接成功",

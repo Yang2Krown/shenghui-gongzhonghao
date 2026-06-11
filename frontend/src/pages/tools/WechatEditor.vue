@@ -66,7 +66,7 @@
         <!-- 校验提示 -->
         <div v-if="!wechatConfigured" class="card" style="padding: 14px 18px; border-color: var(--crimson);">
           <p class="text-sm" style="color: var(--crimson); margin-bottom: 8px;">
-            未配置公众号凭证，请先到「个人信息」页面填写 AppID 和 AppSecret。
+            未配置公众号账号，请先到「个人信息」页面添加公众号。
           </p>
           <button class="btn-ghost btn-sm" @click="router.push('/profile')">去配置</button>
         </div>
@@ -129,7 +129,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { EditPen, Promotion, CopyDocument, Upload, Loading, MagicStick } from '@element-plus/icons-vue'
 import WechatRichEditor from '@/components/ui/WechatRichEditor.vue'
-import { createWechatDraft, generateWechatCover } from '@/api/api'
+import { get, createWechatDraft, generateWechatCover } from '@/api/api'
 
 const router = useRouter()
 
@@ -156,14 +156,23 @@ const coverFile = ref(null)
 const generatingCover = ref(false)
 const coverError = ref('')
 
-// 读取 localStorage 中的公众号凭证
-const STORAGE_KEY = 'wechat_draft_credentials'
-const wechatConfigured = computed(() => {
+// 从 API 加载公众号账号配置
+const defaultAccountId = ref(null)
+const wechatConfigured = ref(false)
+
+const loadWechatAccount = async () => {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
-    return !!(saved.appid && saved.app_secret)
-  } catch { return false }
-})
+    const res = await get('/wechat-accounts')
+    const accounts = res.data || []
+    const defaultAcc = accounts.find(a => a.is_default) || accounts[0]
+    if (defaultAcc) {
+      defaultAccountId.value = defaultAcc.id
+      wechatConfigured.value = true
+    } else {
+      wechatConfigured.value = false
+    }
+  } catch { wechatConfigured.value = false }
+}
 
 const canPublish = computed(() => {
   return wechatConfigured.value && articleTitle.value.trim() && editorHtml.value.trim()
@@ -171,6 +180,7 @@ const canPublish = computed(() => {
 
 // 从 sessionStorage 读取传入的内容（如果从其他页面跳转过来）
 onMounted(() => {
+  loadWechatAccount()
   const savedContent = sessionStorage.getItem('wechat_editor_content')
   const savedTitle = sessionStorage.getItem('wechat_editor_title')
   console.log('[WechatEditor] onMounted', {
@@ -342,20 +352,17 @@ const handleGenerateCover = async () => {
 
 // 发布
 const handlePublish = async () => {
-  if (!wechatConfigured.value) {
-    ElMessage.warning('请先到「个人信息」配置公众号凭证')
+  if (!wechatConfigured.value || !defaultAccountId.value) {
+    ElMessage.warning('请先到「个人信息」配置公众号账号')
     return
   }
   publishing.value = true
   publishResult.value = null
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
     const params = {
       title: articleTitle.value.trim(),
       content: editorRef.value ? editorRef.value.getWechatHtml() : editorHtml.value,
-      appid: saved.appid,
-      app_secret: saved.app_secret,
-      author: saved.author || '',
+      account_id: defaultAccountId.value,
       digest: digest.value || '',
     }
     if (coverBase64.value) params.cover_image_base64 = coverBase64.value

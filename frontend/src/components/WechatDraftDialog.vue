@@ -24,11 +24,18 @@
             不填将从正文自动截取前 30 字
           </div>
         </el-form-item>
-        <el-form-item label="AppID">
-          <el-input v-model="form.appid" placeholder="公众号 AppID" />
-        </el-form-item>
-        <el-form-item label="AppSecret">
-          <el-input v-model="form.app_secret" placeholder="公众号 AppSecret" show-password />
+        <el-form-item label="公众号账号">
+          <el-select v-model="selectedAccountId" placeholder="选择公众号账号" style="width: 100%;" @change="onAccountChange">
+            <el-option
+              v-for="acc in accountOptions"
+              :key="acc.id"
+              :label="acc.account_name + (acc.is_default ? ' (默认)' : '')"
+              :value="acc.id"
+            />
+          </el-select>
+          <div v-if="accountOptions.length === 0" style="color: #E6A23C; font-size: 12px; margin-top: 4px;">
+            暂无公众号账号，请先到「个人信息」页面添加
+          </div>
         </el-form-item>
         <el-form-item label="作者（可选）">
           <el-input v-model="form.author" placeholder="文章作者名，不填则留空" maxlength="32" />
@@ -66,12 +73,12 @@
       </div>
 
       <div class="form-actions">
-        <button class="btn-secondary" @click="testConnection" :disabled="testing || !form.appid || !form.app_secret">
+        <button class="btn-secondary" @click="testConnection" :disabled="testing || !selectedAccountId">
           <el-icon v-if="testing" class="spin"><Loading /></el-icon>
           <el-icon v-else><Connection /></el-icon>
           {{ testing ? '测试中...' : '测试连接' }}
         </button>
-        <button class="btn-primary" @click="handlePublish" :disabled="publishing || !form.appid || !form.app_secret">
+        <button class="btn-primary" @click="handlePublish" :disabled="publishing || !selectedAccountId">
           <el-icon v-if="publishing" class="spin"><Loading /></el-icon>
           <el-icon v-else><Promotion /></el-icon>
           {{ publishing ? '发布中...' : '发布到草稿箱' }}
@@ -123,7 +130,7 @@ import {
   Loading, Promotion, CircleCheckFilled, CircleCloseFilled,
   Connection, Upload, MagicStick
 } from '@element-plus/icons-vue'
-import { createWechatDraft, testWechatConnection, generateWechatCover } from '@/api/api'
+import { get, post, createWechatDraft, testWechatConnection, generateWechatCover } from '@/api/api'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -152,20 +159,33 @@ const coverFile = ref(null)
 const generatingCover = ref(false)
 const coverError = ref('')
 
-// 表单数据 — 从 localStorage 读取上次填写的凭证
+// 表单数据 — 从 API 加载已保存的账号
 const STORAGE_KEY = 'wechat_draft_credentials'
-const loadSavedCredentials = () => {
+const accountOptions = ref([])
+const selectedAccountId = ref(null)
+
+const loadAccounts = async () => {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
-    return {
-      appid: saved.appid || '',
-      app_secret: saved.app_secret || '',
-      author: saved.author || props.author || '',
-      digest: saved.digest || props.digest || '',
+    const res = await get('/wechat-accounts')
+    accountOptions.value = res.data || []
+    // 自动选中默认账号
+    if (accountOptions.value.length > 0 && !selectedAccountId.value) {
+      const defaultAcc = accountOptions.value.find(a => a.is_default) || accountOptions.value[0]
+      selectedAccountId.value = defaultAcc.id
+      if (!form.value.author && defaultAcc.author) form.value.author = defaultAcc.author
     }
-  } catch {
-    return { appid: '', app_secret: '', author: props.author || '', digest: props.digest || '' }
+  } catch { /* ignore */ }
+}
+
+const onAccountChange = (accId) => {
+  const acc = accountOptions.value.find(a => a.id === accId)
+  if (acc && acc.author && !form.value.author) {
+    form.value.author = acc.author
   }
+}
+
+const loadSavedCredentials = () => {
+  return { author: '', digest: props.digest || '' }
 }
 
 const form = ref(loadSavedCredentials())
@@ -182,6 +202,8 @@ watch(() => props.modelValue, (val) => {
     testResult.value = null
     coverError.value = ''
     publishTitle.value = props.title || ''
+    // 加载账号列表
+    loadAccounts()
     // 如果有外部传入的封面图，显示预览
     if (props.coverImageUrl) {
       coverPreview.value = props.coverImageUrl
@@ -201,16 +223,9 @@ watch(visible, (val) => {
   emit('update:modelValue', val)
 })
 
-// 保存凭证到 localStorage
+// 保存凭证（已改为数据库持久化，这里只保留兼容）
 const saveCredentials = () => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      appid: form.value.appid,
-      app_secret: form.value.app_secret,
-      author: form.value.author,
-      digest: form.value.digest,
-    }))
-  } catch { /* ignore */ }
+  // 凭证已通过账号管理持久化到数据库，无需再存 localStorage
 }
 
 // ========== 封面图操作 ==========
@@ -272,7 +287,7 @@ const testConnection = async () => {
   testing.value = true
   testResult.value = null
   try {
-    const res = await testWechatConnection(form.value.appid, form.value.app_secret)
+    const res = await post('/wechat-accounts/' + selectedAccountId.value + '/test')
     const data = res.data || res
     testResult.value = data
     if (data.success) {
@@ -291,8 +306,8 @@ const testConnection = async () => {
 // ========== 发布 ==========
 
 const handlePublish = async () => {
-  if (!form.value.appid || !form.value.app_secret) {
-    ElMessage.warning('请填写 AppID 和 AppSecret')
+  if (!selectedAccountId.value) {
+    ElMessage.warning('请选择公众号账号')
     return
   }
 
@@ -319,8 +334,7 @@ const handlePublish = async () => {
       content: content,
       author: form.value.author || '',
       digest: form.value.digest || '',
-      appid: form.value.appid,
-      app_secret: form.value.app_secret,
+      account_id: selectedAccountId.value,
     }
 
     // 封面图：优先 base64（本地上传），其次 URL（AI 生成/外部链接）

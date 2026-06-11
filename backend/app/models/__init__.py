@@ -22,6 +22,9 @@ from app.models.outline import (
     OutlineInspection,
 )
 
+# 微信公众号账号管理
+from app.models.wechat_account import WechatAccount
+
 __all__ = [
     # 旧模型（过渡期保留）
     "User",
@@ -49,4 +52,6 @@ __all__ = [
     "OutlineReview",
     "OutlineCriticism",
     "OutlineInspection",
+    # 微信公众号账号
+    "WechatAccount",
 ]
