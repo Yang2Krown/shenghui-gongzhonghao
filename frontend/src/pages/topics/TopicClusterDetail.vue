@@ -25,6 +25,8 @@
                 <span v-if="cluster.freshness" class="tag-freshness">{{ formatFreshness(cluster.freshness) }}</span>
                 <span v-if="isNew(cluster)" class="tag-new">NEW</span>
                 <span v-if="cluster.heat_score" class="tag-heat">热度 {{ cluster.heat_score?.toFixed(0) }}</span>
+                <span v-if="cluster.needs_update" class="tag-needs-update-detail">待更新</span>
+                <span v-else-if="cluster.mined" class="tag-mined-detail">已挖掘</span>
               </div>
 
               <!-- 标题 -->
@@ -106,7 +108,14 @@
               <!-- 底部操作栏 -->
               <div class="flex justify-end items-center mt-3 pt-3" style="border-top: 1px solid var(--line);">
                 <button
-                  v-if="isMined && !miningRunning"
+                  v-if="cluster.needs_update && !miningRunning"
+                  class="btn-creative btn-re-mine" style="font-family: 'Source Han Serif SC', 'Songti SC', Georgia, serif;"
+                  @click="startMining"
+                >
+                  重新挖掘
+                </button>
+                <button
+                  v-else-if="isMined && !miningRunning"
                   class="btn-creative" style="font-family: 'Source Han Serif SC', 'Songti SC', Georgia, serif;"
                   @click="scrollToResults"
                 >
@@ -589,6 +598,26 @@ const startCreation = (candidate) => {
   color: var(--leaf);
 }
 
+.tag-mined-detail {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--leaf);
+  color: var(--paper);
+}
+
+.tag-needs-update-detail {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #E6A23C;
+  color: #fff;
+}
+
 /* Element Tags */
 .element-tag {
   display: inline-flex;
@@ -1007,6 +1036,16 @@ const startCreation = (candidate) => {
 .btn-creative:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.btn-re-mine {
+  border-color: #E6A23C;
+  color: #E6A23C;
+}
+.btn-re-mine:hover:not(:disabled) {
+  background: #E6A23C;
+  border-color: #E6A23C;
+  color: #fff;
 }
 
 /* ===== 动画 ===== */

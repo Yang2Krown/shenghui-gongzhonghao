@@ -120,7 +120,8 @@
               <span v-if="cluster.direction" class="tag-direction">{{ cluster.direction }}</span>
               <span v-if="cluster.freshness" class="tag-freshness">{{ formatFreshness(cluster.freshness) }}</span>
               <span v-if="cluster.low_fan_hit" class="tag-hot">🔥 低粉爆款</span>
-              <span v-if="cluster.mined" class="tag-mined">已挖掘</span>
+              <span v-if="cluster.mined && !cluster.needs_update" class="tag-mined">已挖掘</span>
+              <span v-else-if="cluster.needs_update" class="tag-needs-update">待更新</span>
               <span v-else class="tag-unmined">待挖掘</span>
             </div>
 
@@ -271,6 +272,7 @@ const minedOptions = [
   { value: '', label: '全部' },
   { value: 'true', label: '已挖掘' },
   { value: 'false', label: '未挖掘' },
+  { value: 'needs_update', label: '待更新' },
 ]
 
 const hasAnyFilter = computed(() =>
@@ -439,7 +441,11 @@ const loadClusters = async (restoreScroll = false) => {
     if (filters.info_type) params.info_type = filters.info_type
     if (filters.direction) params.direction = filters.direction
     if (filters.freshness) params.freshness = filters.freshness
-    if (filters.mined) params.mined = filters.mined
+    if (filters.mined === 'needs_update') {
+      params.needs_update = true
+    } else if (filters.mined) {
+      params.mined = filters.mined
+    }
     if (filters.keyword) params.keyword = filters.keyword
 
     const res = await get('/topic-clusters', params)
@@ -475,7 +481,11 @@ const loadNextPage = async () => {
     if (filters.info_type) params.info_type = filters.info_type
     if (filters.direction) params.direction = filters.direction
     if (filters.freshness) params.freshness = filters.freshness
-    if (filters.mined) params.mined = filters.mined
+    if (filters.mined === 'needs_update') {
+      params.needs_update = true
+    } else if (filters.mined) {
+      params.mined = filters.mined
+    }
     if (filters.keyword) params.keyword = filters.keyword
 
     const res = await get('/topic-clusters', params)
@@ -720,6 +730,16 @@ const formatFreshness = (val) => {
   font-weight: 500;
   background: var(--leaf);
   color: var(--paper);
+}
+
+.tag-needs-update {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #E6A23C;
+  color: #fff;
 }
 
 .tag-unmined {

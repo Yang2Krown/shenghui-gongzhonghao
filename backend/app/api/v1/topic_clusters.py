@@ -111,6 +111,7 @@ async def get_topic_clusters(
     info_type: Optional[str] = Query(None),
     direction: Optional[str] = Query(None),
     mined: Optional[bool] = Query(None),
+    needs_update: Optional[bool] = Query(None),
     freshness: Optional[str] = Query(None),
     keyword: Optional[str] = Query(None),
     sort_by: str = Query("display_score", description="display_score / heat_score / created_at / source_count"),
@@ -128,6 +129,7 @@ async def get_topic_clusters(
     sort_by = str(sort_by) if sort_by else "display_score"
     sort_order = str(sort_order) if sort_order else "desc"
     mined = mined if isinstance(mined, bool) else None
+    needs_update = needs_update if isinstance(needs_update, bool) else None
 
     _now = utcnow()
     cutoff = _now - timedelta(days=MAX_CONTENT_AGE_DAYS)
@@ -144,6 +146,8 @@ async def get_topic_clusters(
         base_filter.append(InfoCluster.direction == direction)
     if mined is not None:
         base_filter.append(InfoCluster.mined == mined)
+    if needs_update is not None:
+        base_filter.append(InfoCluster.needs_update == needs_update)
     if freshness:
         effective_dt = func.coalesce(InfoCluster.published_at, InfoCluster.created_at)
         if freshness == "today":
@@ -295,6 +299,7 @@ async def get_topic_clusters(
             "heat_score": c.heat_score,
             "low_fan_hit": c.low_fan_hit,
             "mined": c.mined,
+            "needs_update": c.needs_update or False,
             "candidate_count": candidate_counts.get(c.id, 0),
             "created_at": c.created_at.isoformat() if c.created_at else None,
         })
@@ -417,6 +422,7 @@ async def get_topic_cluster_detail(
             "heat_score": cluster.heat_score,
             "low_fan_hit": cluster.low_fan_hit,
             "mined": cluster.mined,
+            "needs_update": cluster.needs_update or False,
             "created_at": cluster.created_at.isoformat() if cluster.created_at else None,
             # 最新文章时间（合并时取最新）；前端右下角显示这个而非首次出现时间
             "published_at": cluster.published_at.isoformat() if cluster.published_at else None,

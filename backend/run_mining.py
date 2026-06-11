@@ -90,6 +90,7 @@ async def mine_one(db, cluster):
         ))
 
     cluster.mined = True
+    cluster.needs_update = False
     db.commit()
     print(f"    入选 {result_b.stats.get('selected', 0)}, 备选 {result_b.stats.get('backup', 0)}, 淘汰 {result_b.stats.get('rejected', 0)}")
     return result_b
@@ -99,7 +100,9 @@ async def main():
     limit = int(sys.argv[1]) if len(sys.argv) > 1 else 3
     db = SessionLocal()
 
-    clusters = db.query(InfoCluster).filter(InfoCluster.mined == False).limit(limit).all()
+    clusters = db.query(InfoCluster).filter(
+        (InfoCluster.mined == False) | (InfoCluster.needs_update == True)
+    ).limit(limit).all()
     if not clusters:
         print("没有未挖掘的 InfoCluster")
         return

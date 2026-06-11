@@ -829,10 +829,11 @@ h1, h2, h3, h4, h5 {
   display: inline-block;
   position: relative;
   overflow: hidden;
-  vertical-align: middle;
-  height: 1em;
+  vertical-align: baseline;
+  height: 1.05em;
+  line-height: 1.05;
   min-width: 2ch;
-  transform: translateY(-0.08em);
+  transform: translateY(0.08em);
 }
 .rotating-inner {
   display: flex;
@@ -840,20 +841,21 @@ h1, h2, h3, h4, h5 {
   animation: rotate-words 15s cubic-bezier(.4,.0,.2,1) infinite;
 }
 .rotating-word {
-  height: 1em;
+  height: 1.05em;
   line-height: 1.05;
   color: var(--clay-deep);
   font-family: var(--serif);
   font-weight: 600;
   white-space: nowrap;
   display: block;
+  box-sizing: border-box;
 }
 @keyframes rotate-words {
   0%,16%   { transform: translateY(0); }
-  20%,36%  { transform: translateY(-1em); }
-  40%,56%  { transform: translateY(-2em); }
-  60%,76%  { transform: translateY(-3em); }
-  80%,96%  { transform: translateY(-4em); }
+  20%,36%  { transform: translateY(-1.05em); }
+  40%,56%  { transform: translateY(-2.1em); }
+  60%,76%  { transform: translateY(-3.15em); }
+  80%,96%  { transform: translateY(-4.2em); }
   100%     { transform: translateY(0); }
 }
 
@@ -1072,6 +1074,50 @@ const CountUp = ({ end, suffix = '', duration = 2000 }) => {
 
 const HeroCardStack = () => {
   const [active, setActive] = useState(2); // default: AI 创作流卡片（核心卖点）
+  const hovering = useRef(false);
+  const cycleRef = useRef(null);
+  const orderRef = useRef([]);
+  const posRef = useRef(0);
+
+  // build a shuffled order ensuring no immediate repeat
+  const shuffleOrder = () => {
+    const arr = [0, 1, 2, 3];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    // if first element equals current active, swap with second
+    if (arr[0] === active && arr.length > 1) [arr[0], arr[1]] = [arr[1], arr[0]];
+    return arr;
+  };
+
+  useEffect(() => {
+    orderRef.current = shuffleOrder();
+    posRef.current = 0;
+
+    const tick = () => {
+      if (hovering.current) return;
+      if (posRef.current >= orderRef.current.length) {
+        orderRef.current = shuffleOrder();
+        posRef.current = 0;
+      }
+      setActive(orderRef.current[posRef.current]);
+      posRef.current++;
+    };
+
+    cycleRef.current = setInterval(tick, 3000);
+    return () => clearInterval(cycleRef.current);
+  }, []);
+
+  const handleEnter = (i) => {
+    hovering.current = true;
+    setActive(i);
+  };
+
+  const handleLeave = () => {
+    hovering.current = false;
+    // don't reset — let cycle resume from wherever it is
+  };
 
   const cards = [
     {
@@ -1142,8 +1188,8 @@ const HeroCardStack = () => {
           else if (active !== null) cls += ' hc-dim';
           return (
             <div key={c.id} className={cls}
-              onMouseEnter={() => setActive(i)}
-              onMouseLeave={() => setActive(2)}>
+              onMouseEnter={() => handleEnter(i)}
+              onMouseLeave={handleLeave}>
               <div className="card-icon">{c.icon}</div>
               <div className="card-title">{c.title}</div>
               <div className="card-desc">{c.desc}</div>
@@ -1339,19 +1385,19 @@ const PainPoints = () => (
   <section className="section pain" id="pain">
     <div className="container">
       <div className="section-head center fade-up">
-        <div className="section-tag">— 为什么做公众号这么累 —</div>
+        <div className="section-tag">— AI 科技创作者的困境 —</div>
         <h2 className="section-title">你不是不努力，<br />是被无效的内容劳动耗光了时间。</h2>
         <p className="section-sub">
-          做公众号最难的不是写，而是坚持。选题、写稿、改标题、排版、发布——每一步都在消耗你的热情。
+          做 AI 科技内容最难的不是写，而是跟上。每天都有新模型、新框架、新争议——选题、写稿、改标题、排版、发布，每一步都在消耗你的热情。
         </p>
       </div>
 
       <div className="pain-grid stagger-grid">
         {[
-          ['每天想选题想得头大，发出去又没人看', '选题靠拍脑袋，一周才憋出一个。蹭热点怕跑偏，写专业又没共鸣，写完心累内容还冷场。'],
-          ['一篇稿子磨 4 小时，时间全耗在打字上', '构思、查资料、写初稿、改措辞、去 AI 味、排版——一天的精力就这么被一篇文章榨干了。'],
-          ['标题想破头，最后还是选了第一个', '花 1 小时想 10 个标题，不知道哪个点击率高，全凭感觉选，阅读量一直上不去。'],
-          ['写完不知道好不好，发了才知道没人看', '没有反馈机制，不知道文章哪里有问题。写了 100 篇，还是在原地踏步。'],
+          ['AI 新闻刷不完，选题追到心累', '每天几十条模型更新、融资新闻、开源发布，看完就忘，选题全靠直觉，写出来的东西总比别人慢半拍。'],
+          ['技术文章写了 4 小时，读起来还是像论文', '查论文、读文档、理逻辑——写完一看，通篇术语，读者根本看不懂，白费力气。'],
+          ['标题想破头，最后选了个没人点的', 'AI 领域的标题要么太专业劝退小白，要么太标题党丢信任，怎么选都不对。'],
+          ['发了 100 篇，粉丝还是那几个', '不知道内容哪里有问题，没有反馈机制，写了删删了写，一直在原地踏步。'],
         ].map(([title, desc], i) => (
           <div className="pain-cell fade-up" key={i}>
             <div className="pain-q">"</div>
@@ -1365,7 +1411,7 @@ const PainPoints = () => (
 
       <div className="pain-answer fade-up">
         <p className="pain-answer-text">
-          所以我们做了一件事：把<em>整条内容流水线</em>，<br />装进一套懂公众号的 AI 系统。
+          所以我们做了一件事：把<em>整条内容流水线</em>，<br />装进一套懂 AI 科技内容的公众号系统。
         </p>
       </div>
     </div>
@@ -1388,8 +1434,8 @@ const Features = () => (
       <div className="feature-block fade-up">
         <div className="fb-text">
           <div className="fb-step"><span className="num">Step 01</span>选题挖掘 · Discover</div>
-          <h3>每天给你 10 个<br />已经验证过的好选题</h3>
-          <p>AI 实时扫描全网 20+ 渠道的热点信息，按匹配度和潜力评分，挑出当日最值得做的选题。不是过滤选题，而是创造选题。</p>
+          <h3>全网信息自动汇集，<br />你来挑选，AI 来深挖</h3>
+          <p>系统每天自动采集全网 20+ 渠道的 AI 和科技资讯，你只需浏览、选中一条感兴趣的，AI 就会从中衍生出多个值得写的选题并评分排序。</p>
           <ul className="fb-list">
             <li><span className="li-marker">A</span><div className="li-content"><strong>从 1 条信息衍生 5 个选题</strong><span>不是过滤 100 条留 10 条，而是从每条信息里挖出新角度</span></div></li>
             <li><span className="li-marker">B</span><div className="li-content"><strong>6 维度加权评分</strong><span>痛点直击度、价值密度、传播力、差异化——数据说话，不靠感觉</span></div></li>
@@ -1398,15 +1444,15 @@ const Features = () => (
         </div>
         <div className="fb-visual">
           <div className="mk-head">
-            <div className="t">今日推荐选题 · 2026-06-11</div>
-            <div className="tag">为你的账号筛选</div>
+            <div className="t">今日推荐选题</div>
+            <div className="tag">DeepSeek v4</div>
           </div>
           <div className="mk-topics">
             {[
-              ['#CC785C', '01', '为什么 90% 的公众号活不过半年', '9.6'],
-              ['#C49B5C', '02', '用 AI 写文章，读者看不出来的方法', '9.3'],
-              ['#3F5C52', '03', '2026 年公众号还能赚钱吗', '9.1'],
-              ['#6B6862', '04', '新手做公众号最容易犯的 5 个错', '8.7'],
+              ['#CC785C', '01', 'DeepSeek R2 来了，开发者该怎么接住这波红利', '9.6'],
+              ['#C49B5C', '02', 'OpenAI 的 o3 模型到底强在哪', '9.3'],
+              ['#3F5C52', '03', 'AI Agent 落地这一年，踩了哪些坑', '9.1'],
+              ['#6B6862', '04', '为什么你的 AI 应用 demo 跑得通上线就崩', '8.7'],
             ].map(([color, rank, text, score], i) => (
               <div className="trend-row" key={i} style={i === 3 ? { opacity: .55 } : {}}>
                 <div className="heat-bar" style={{ background: color }} />
@@ -1473,9 +1519,9 @@ const Features = () => (
           </div>
           <div className="mk-titles">
             {[
-              [true, '1', '为什么你的公众号一直做不起来', '9.4'],
-              [false, '2', '公众号运营的 3 个致命误区', '9.1'],
-              [false, '3', '做了 2 年公众号，我终于想通了', '8.8'],
+              [true, '1', '2026 年 AI Agent 已经能独立写代码了', '9.4'],
+              [false, '2', 'DeepSeek v4 发布：开源模型首次超越闭源', '9.1'],
+              [false, '3', 'RAG 还是长上下文？企业落地大模型的两条路', '8.8'],
             ].map(([top, rank, text, score], i) => (
               <div className={`mk-title-row${top ? ' top' : ''}`} key={i}>
                 <div className="mk-title-rank">{rank}</div>
@@ -1486,7 +1532,7 @@ const Features = () => (
           </div>
           <div style={{ marginTop: 16, padding: '12px 14px', background: 'var(--ivory)', borderRadius: 'var(--r-sm)', fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.6 }}>
             <strong style={{ color: 'var(--clay-deep)', fontSize: 12 }}>💡 推荐理由：</strong>
-            标题 1 使用「为什么」句式制造好奇心缺口，预计点击率最高。标题 3 使用个人叙事，适合建立信任感。
+            标题 1 使用「时间节点 + 能力陈述」制造紧迫感，预计点击率最高。标题 3 使用选择疑问句，适合引发专业读者讨论。
           </div>
         </div>
       </div>
@@ -1519,10 +1565,10 @@ const Features = () => (
               <div style={{ fontSize: 11, color: 'var(--leaf)', fontWeight: 600 }}>✓ 已保存</div>
             </div>
             <div className="mk-body">
-              <h5>为什么你的公众号一直做不起来</h5>
-              <p>很多人觉得做公众号就是写文章。错了。真正消耗时间的不是写，而是选题、查资料、改标题、排版、发布这一整套流程。</p>
-              <p>我见过太多人，<span className="red-hi">写了 100 篇文章，阅读量还是个位数</span>。不是他们写得不好，而是从第一步就做错了——选题没选对。</p>
-              <p>选题决定了 80% 的阅读量。一个好的选题，哪怕文笔一般，也能获得不错的传播。但一个差的选题…</p>
+              <h5>2026 年 AI Agent 已经能独立写代码了</h5>
+              <p>上周 Anthropic 发布了 Claude 的 Computer Use 能力升级，AI 可以自主操作浏览器、读写文件、执行终端命令。这意味着 AI 不再只是「回答问题」，而是「完成任务」。</p>
+              <p>很多人还在讨论<span className="red-hi">AI 会不会取代程序员</span>，但真正的问题是——你所在的行业，AI 已经渗透到哪一步了？</p>
+              <p>从代码审查到产品设计，从数据分析到客户服务，AI Agent 正在重新定义知识工作者的效率边界…</p>
             </div>
           </div>
         </div>
@@ -1624,7 +1670,7 @@ const CompareSection = () => {
       <div className="container">
         <div className="section-head center fade-up">
           <div className="section-tag">— Before & After —</div>
-          <h2 className="section-title">一篇公众号文章，<br />从 4 小时到 20 分钟</h2>
+          <h2 className="section-title">一篇公众号文章，<br />从 4 小时到 30 分钟</h2>
           <p className="section-sub">不是替代你的思考，而是把重复劳动交给 AI。你专注在最有价值的事：审稿和决策。</p>
         </div>
 
@@ -1637,11 +1683,11 @@ const CompareSection = () => {
             </div>
             <div className="compare-steps">
               {[
-                ['刷热点 2 小时', '翻遍微信、知乎、微博，还是不知道写什么'],
-                ['硬憋选题 30 分钟', '凭感觉选一个，不确定读者感不感兴趣'],
-                ['写大纲 + 初稿 1.5 小时', '对着空白文档发呆，写了删删了写'],
-                ['想标题 30 分钟', '想了 20 个标题，不知道哪个点击率高'],
-                ['排版 + 发布 30 分钟', '复制粘贴到公众号后台，手动调格式'],
+                ['刷 AI 新闻 2 小时', '推特、Hacker News、GitHub Trending 轮着刷，看完就忘'],
+                ['硬憋选题 30 分钟', '追热点怕过时，写深度怕没人看，全凭感觉选'],
+                ['查资料 + 写初稿 1.5 小时', '读论文、翻文档、理逻辑，写完读起来像技术报告'],
+                ['想标题 30 分钟', '太专业读者看不懂，太通俗又怕被行家嫌弃'],
+                ['排版 + 发布 30 分钟', '复制到公众号后台，代码块全乱了，手动调格式'],
               ].map(([t, d], i) => (
                 <div className="compare-step" key={i}>
                   <div className="dot"></div>
@@ -1666,11 +1712,11 @@ const CompareSection = () => {
             </div>
             <div className="compare-steps">
               {[
-                ['选题自动推送', '20+ 信息源自动采集，AI 衍生并评分推荐 Top 选题'],
-                ['大纲一键生成', '4 个 AI 角色协作：创作、评审、批评、质检'],
+                ['选题自动推送', '20+ 信息源自动采集，AI 按你的领域衍生并评分推荐 Top 选题'],
+                ['大纲一键生成', 'AI 按你的写作风格生成结构化大纲，你只需调整逻辑'],
                 ['正文 5 步出稿', 'AI 写作 → 金句补充 → 事实核查 → 联网纠错 → 去 AI 味'],
-                ['标题智能推荐', '12 种套路生成 + 评分预测，推荐最佳 3 个'],
-                ['一键发布', '自动排版，直接推送到公众号/小红书草稿箱'],
+                ['标题智能推荐', '12 种套路生成 + 评分预测，推荐最适合你读者的 3 个'],
+                ['一键发布', '自动排版适配公众号格式，直接推送到草稿箱'],
               ].map(([t, d], i) => (
                 <div className="compare-step" key={i}>
                   <div className="dot"></div>
@@ -1687,9 +1733,9 @@ const CompareSection = () => {
         <div className="compare-result fade-up">
           <div className="compare-stats">
             <div className="compare-stat-item">
-              <div><span className="stat-num stat-counter" data-target="12">0</span><span className="stat-suffix">×</span></div>
+              <div><span className="stat-num stat-counter" data-target="8">0</span><span className="stat-suffix">×</span></div>
               <div className="stat-unit">效率提升</div>
-              <div className="stat-desc">从 4 小时缩短到 20 分钟</div>
+              <div className="stat-desc">从 4 小时缩短到 30 分钟</div>
             </div>
             <div className="compare-stat-divider"></div>
             <div className="compare-stat-item">
@@ -1725,16 +1771,15 @@ const AIDemoSection = () => {
 
   const steps = ['信息采集', '选题挖掘', '大纲生成', '正文创作', '标题优化'];
   const article = {
-    title: '为什么 90% 的人用 AI 写不出好文章',
+    title: '为什么你的 AI Agent 项目总在 Demo 阶段',
     lines: [
-      '大多数人把 AI 当成「自动写作机」——输入一句话，',
-      '期待它吐出一篇完美的文章。但现实是，',
-      '直接让 AI 写出来的内容往往平淡无奇，',
-      '读起来像百科全书而不是公众号文章。',
+      '很多团队做 AI Agent，Demo 跑得很漂亮，',
+      '一到生产环境就各种问题——幻觉、延迟、成本失控。',
+      '核心原因不是技术选型错了，而是缺少系统化的工程方法。',
       '',
-      '真正高效的做法，是让 AI 成为你的「创作搭档」：',
-      '你负责选题和审稿，AI 负责采集、分析、初稿、优化。',
-      '这不是偷懒，而是把时间花在最有价值的事情上。',
+      '真正能落地的 Agent 系统，需要三层防线：',
+      '输入层的事实提取约束、推理层的 Prompt 工程、',
+      '输出层的自动校验。光靠模型本身的能力，远远不够。',
     ]
   };
 

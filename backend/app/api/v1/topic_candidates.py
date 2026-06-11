@@ -499,7 +499,7 @@ async def _mine_one(db: AsyncSession, cluster_id: int) -> dict:
     if not cluster:
         raise HTTPException(status_code=404, detail=f"话题 {cluster_id} 不存在")
 
-    if cluster.mined:
+    if cluster.mined and not cluster.needs_update:
         return {"code": 200, "message": "已挖掘过", "data": {"cluster_id": cluster_id, "skipped": True}}
 
     if not cluster.info_type:
@@ -556,7 +556,7 @@ async def _run_mining_batch(db: AsyncSession, limit: int, min_heat_score: float)
     """批量挖未挖掘的热门簇（保留旧行为，给定时任务用）。"""
     clusters = (await db.execute(
         select(InfoCluster).where(
-            InfoCluster.mined.is_(False),
+            (InfoCluster.mined.is_(False) | InfoCluster.needs_update.is_(True)),
             InfoCluster.info_type.is_not(None),
             InfoCluster.heat_score >= min_heat_score,
         ).order_by(InfoCluster.heat_score.desc()).limit(limit * 3)  # 多取一些，过滤后可能不够
@@ -594,6 +594,18 @@ async def _mine_cluster_inner(
     progress_callback=None,
 ) -> dict:
     """挖单个簇的核心逻辑：Agent A → Agent B → 写库（不 commit，调用方决定）。"""
+
+    # 重新挖掘时：先删除旧的候选选题
+    if cluster.needs_update:
+        from sqlalchemy import delete
+        old_cand_ids = [c.id for c in (await db.execute(
+            select(TopicCandidate.id).where(TopicCandidate.info_cluster_id == cluster.id)
+        )).scalars().all()]
+        if old_cand_ids:
+            await db.execute(delete(PersonaReview).where(PersonaReview.candidate_id.in_(old_cand_ids)))
+            await db.execute(delete(CandidateScore).where(CandidateScore.candidate_id.in_(old_cand_ids)))
+            await db.execute(delete(TopicCandidate).where(TopicCandidate.id.in_(old_cand_ids)))
+            await db.flush()
 
     async def _emit(event):
         if progress_callback:
@@ -705,6 +717,7 @@ async def _mine_cluster_inner(
         total_candidates += 1
 
     cluster.mined = True
+    cluster.needs_update = False
     return {"total_candidates": total_candidates, **result_b.stats}
 
 

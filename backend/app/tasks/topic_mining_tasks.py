@@ -63,9 +63,18 @@ def mine_cluster(self, cluster_id: int) -> dict:
             logger.error(f"InfoCluster {cluster_id} 不存在")
             return {"error": f"cluster {cluster_id} not found"}
 
-        if cluster.mined:
+        if cluster.mined and not cluster.needs_update:
             logger.info(f"InfoCluster {cluster_id} 已挖掘过，跳过")
             return {"cluster_id": cluster_id, "status": "already_mined"}
+
+        # 重新挖掘时：先删除旧的候选选题
+        if cluster.needs_update:
+            old_cand_ids = [c.id for c in db.query(TopicCandidate.id).filter(TopicCandidate.info_cluster_id == cluster_id).all()]
+            if old_cand_ids:
+                db.query(PersonaReview).filter(PersonaReview.candidate_id.in_(old_cand_ids)).delete()
+                db.query(CandidateScore).filter(CandidateScore.candidate_id.in_(old_cand_ids)).delete()
+                db.query(TopicCandidate).filter(TopicCandidate.id.in_(old_cand_ids)).delete()
+                db.flush()
 
         # Step 1: Agent A 衍生
         info_input = _cluster_to_input(cluster)
@@ -96,6 +105,7 @@ def mine_cluster(self, cluster_id: int) -> dict:
         if not candidates_for_b:
             logger.warning(f"InfoCluster {cluster_id} 所有选题可写性审计均不通过，跳过评分")
             cluster.mined = True
+            cluster.needs_update = False
             db.commit()
             return {"cluster_id": cluster_id, "status": "all_feasibility_failed"}
 
@@ -172,6 +182,7 @@ def mine_cluster(self, cluster_id: int) -> dict:
 
         # 标记已挖掘
         cluster.mined = True
+        cluster.needs_update = False
         db.commit()
 
         logger.info(f"InfoCluster {cluster_id} 挖掘完成: {result_b.stats}")
@@ -205,7 +216,7 @@ def run_batch(self, limit: int = 10, min_heat_score: float = 0.0) -> dict:
         stmt = (
             select(InfoCluster.id)
             .where(
-                InfoCluster.mined.is_(False),
+                (InfoCluster.mined.is_(False) | InfoCluster.needs_update.is_(True)),
                 InfoCluster.info_type.is_not(None),
                 InfoCluster.heat_score >= min_heat_score,
             )

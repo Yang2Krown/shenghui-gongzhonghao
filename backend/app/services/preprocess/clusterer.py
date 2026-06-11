@@ -126,8 +126,11 @@ async def _attach_to_cluster(db: AsyncSession, cluster: InfoCluster, raw: RawInf
 
     raw.info_cluster_id = cluster.id
     raw.state = RAW_STATE_CLUSTERED
-    # 簇有新成员加入，标记需要重新跑 LLM 富集
-    cluster.mined = False
+    # 簇有新成员加入：已挖掘的标记待更新（保留旧结果），未挖掘的保持不变
+    if cluster.mined:
+        cluster.needs_update = True
+    else:
+        cluster.mined = False
 
 
 async def cluster_raw_batch(db: AsyncSession, raws: List[RawInfo]) -> List[InfoCluster]:
