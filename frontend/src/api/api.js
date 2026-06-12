@@ -66,22 +66,10 @@ api.interceptors.response.use(
     
     // 处理其他错误
     const status = error.response?.status
-    const detail = error.response?.data?.detail
-    const message = (typeof detail === 'string' ? detail : detail?.message) || error.message || '请求失败'
+    const message = error.response?.data?.detail || error.message || '请求失败'
 
     if (status === 413) {
       ElMessage.error('文件太大，请压缩后重试（建议不超过 2MB）')
-    } else if (status === 402) {
-      // 积分不足 - 触发全局事件显示充值弹窗
-      const creditInfo = typeof detail === 'object' ? detail : {}
-      window.dispatchEvent(new CustomEvent('insufficient-credits', {
-        detail: {
-          balance: creditInfo.balance || 0,
-          required: creditInfo.required || 0,
-          operation: creditInfo.operation || '',
-          operationDesc: creditInfo.operation_desc || '',
-        }
-      }))
     } else if (status === 403) {
       ElMessage.error('没有权限访问')
     } else if (status === 404) {

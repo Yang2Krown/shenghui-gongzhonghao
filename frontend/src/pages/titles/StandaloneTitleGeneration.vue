@@ -75,7 +75,7 @@
         <span class="text-xs text-ink-3 ml-2">（开启后同时用 DeepSeek 和 Claude 生成，对比效果）</span>
       </div>
       <el-button type="primary" size="large" @click="generate" :loading="generating">
-        生成标题 <CreditHint :cost="3" />
+        生成标题
       </el-button>
     </div>
 
@@ -320,10 +320,6 @@ import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import { post } from '@/api/api'
 import { useAgentProgress } from '@/composables/useAgentProgress'
 import generationRecordApi from '@/api/generationRecord'
-import { useCreditStore } from '@/stores/credit'
-import CreditHint from '@/components/credit/CreditHint.vue'
-
-const creditStore = useCreditStore()
 
 const route = useRoute()
 
@@ -390,8 +386,6 @@ watch(() => progress.result.value, (newResult) => {
     status.value = 'completed'
     generating.value = false
     ElMessage.success('标题生成完成')
-    // 刷新积分余额
-    creditStore.refreshBalance()
   }
 })
 

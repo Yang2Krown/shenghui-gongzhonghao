@@ -134,7 +134,7 @@
         <template v-if="progress.isRunning.value">
           <el-icon class="spin"><Loading /></el-icon> 正在构思续写方案…
         </template>
-        <template v-else>生成续写 <CreditHint :cost="1" /></template>
+        <template v-else>生成续写</template>
       </button>
       <div class="multi-model-toggle">
         <label class="toggle-label">
@@ -350,10 +350,6 @@ import { useAgentProgress } from '@/composables/useAgentProgress'
 import { publishToWechatEditor } from '@/utils/publishToEditor'
 import PublishChoiceDialog from '@/components/PublishChoiceDialog.vue'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
-import { useCreditStore } from '@/stores/credit'
-import CreditHint from '@/components/credit/CreditHint.vue'
-
-const creditStore = useCreditStore()
 
 const router = useRouter()
 
@@ -505,8 +501,6 @@ const getContent = () => {
 watch(() => progress.result.value, (data) => {
   if (data?.plans) {
     result.value = data
-    // 刷新积分余额
-    creditStore.refreshBalance()
   }
   // 多模型对比结果
   if (data?.comparison) {
@@ -604,7 +598,7 @@ onUnmounted(() => {
 .seg-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: none; background: transparent; color: var(--ink-3); font-family: inherit; font-size: 13px; font-weight: 600; border-radius: var(--r-pill); cursor: pointer; transition: all .18s; }
 .seg-btn:hover { color: var(--ink); }
 .seg-btn-active { background: var(--paper); color: var(--clay-deep); box-shadow: var(--sh-1); }
-.cta-bar { position: relative; width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; font-family: inherit; font-weight: 600; font-size: 16px; color: #fff; cursor: pointer; border: none; border-radius: var(--r-lg); padding: 16px 24px; background: linear-gradient(135deg, var(--clay) 0%, var(--clay-deep) 100%); box-shadow: 0 10px 28px rgba(204,120,92,.30); transition: all .2s; }
+.cta-bar { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; font-family: inherit; font-weight: 600; font-size: 16px; color: #fff; cursor: pointer; border: none; border-radius: var(--r-lg); padding: 16px 24px; background: linear-gradient(135deg, var(--clay) 0%, var(--clay-deep) 100%); box-shadow: 0 10px 28px rgba(204,120,92,.30); transition: all .2s; }
 .cta-bar:hover:not([disabled]) { transform: translateY(-2px); box-shadow: 0 16px 38px rgba(204,120,92,.38); }
 .cta-bar[disabled] { background: var(--bone); color: var(--ink-4); box-shadow: none; cursor: not-allowed; transform: none; }
 .dropzone { border: 1px dashed var(--line); border-radius: var(--r-lg); background: var(--paper); padding: 22px; text-align: center; cursor: pointer; transition: all .15s; color: var(--ink-3); }

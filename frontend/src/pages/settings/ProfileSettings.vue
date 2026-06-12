@@ -1,48 +1,50 @@
 <template>
   <div class="settings-page">
-    <!-- 个人信息 -->
+    <!-- 个人信息区 -->
     <div class="profile-card">
-      <div class="profile-header">
-        <h3 class="profile-title">个人信息</h3>
+      <div class="logout-section">
         <el-button type="danger" plain size="small" @click="handleLogout">
           <el-icon><SwitchButton /></el-icon>
           退出登录
         </el-button>
       </div>
-      <div class="profile-body">
-        <div class="profile-content-row">
-          <!-- 头像 -->
-          <div class="profile-avatar">
-            <el-avatar :size="72" :src="userAvatar" @error="onAvatarError">
-              <span style="font-size: 24px;">{{ userName.charAt(0).toUpperCase() }}</span>
-            </el-avatar>
-            <el-button class="avatar-upload-btn" circle size="small" @click="triggerAvatarUpload">
-              <el-icon><Camera /></el-icon>
-            </el-button>
-            <input ref="avatarInput" type="file" accept="image/*" class="hidden" @change="handleAvatarChange" />
-          </div>
-          <!-- 表单 -->
-          <div class="profile-form-area">
-            <div class="nickname-row">
-              <el-input v-model="profileForm.name" placeholder="请输入昵称" style="flex: 1;" />
-              <el-button type="primary" @click="saveProfile" :loading="saving">保存</el-button>
-            </div>
-          </div>
+      <div class="profile-left">
+        <div class="relative inline-block">
+          <el-avatar :size="100" :src="userAvatar" class="bg-primary-500" @error="onAvatarError">
+            <span class="text-3xl">{{ userName.charAt(0).toUpperCase() }}</span>
+          </el-avatar>
+          <el-button class="avatar-upload-btn" circle size="small" @click="triggerAvatarUpload">
+            <el-icon><Camera /></el-icon>
+          </el-button>
+          <input
+            ref="avatarInput"
+            type="file"
+            accept="image/*"
+            class="hidden"
+            @change="handleAvatarChange"
+          />
         </div>
-        <!-- 积分卡片 -->
-        <div class="credit-card">
-          <div class="credit-card-left">
-            <span class="credit-icon">💰</span>
-            <span class="credit-num">{{ creditStore.formattedBalance }}</span>
-            <span class="credit-text">积分</span>
-          </div>
-          <el-button type="primary" plain size="small" @click="router.push('/credits/recharge')">充值</el-button>
-        </div>
+      </div>
+      <div class="profile-right">
+        <el-form
+          ref="profileFormRef"
+          :model="profileForm"
+          :rules="profileRules"
+          label-position="top"
+          class="profile-form"
+        >
+          <el-form-item label="昵称" prop="name">
+            <el-input v-model="profileForm.name" placeholder="请输入昵称" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="saveProfile" :loading="saving">保存</el-button>
+          </el-form-item>
+        </el-form>
       </div>
     </div>
 
     <!-- 公众号凭证配置 -->
-    <div class="profile-card">
+    <div class="profile-card" style="margin-top: 20px;">
       <div style="padding: 24px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
           <div>
@@ -252,7 +254,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { useCreditStore } from '@/stores/credit'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Camera, SwitchButton } from '@element-plus/icons-vue'
 import { updateProfile, uploadAvatar } from '@/api/auth'
@@ -269,7 +270,6 @@ import PreviewModal from '@/components/style/PreviewModal.vue'
 const RADAR_KEYS = ['语气温度', '专业密度', '句式节奏', '情绪强度', '修辞偏好', '结构习惯']
 
 const userStore = useUserStore()
-const creditStore = useCreditStore()
 const profileFormRef = ref(null)
 const avatarInput = ref(null)
 
@@ -577,102 +577,22 @@ onMounted(() => {
 
 <style scoped>
 .settings-page {
-  max-width: 1100px;
+  max-width: 900px;
   margin: 0 auto;
   padding: 24px 16px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  align-items: stretch;
 }
 
 /* ── 个人信息卡片 ── */
 .profile-card {
   position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 32px;
   background: var(--paper, #fff);
   border: 1px solid var(--line, #e5e5e5);
   border-radius: 16px;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-}
-
-.profile-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  padding: 32px;
   margin-bottom: 24px;
-}
-
-.profile-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--ink, #1a1a1a);
-  margin: 0;
-}
-
-.profile-body {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  flex: 1;
-  justify-content: center;
-  flex-direction: column;
-}
-
-.profile-content-row {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  width: 100%;
-}
-
-.profile-avatar {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.profile-form-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.nickname-row {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.credit-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: linear-gradient(135deg, #fdf8f3 0%, #f9f3ed 100%);
-  border: 1px solid #f0e8e0;
-  border-radius: 10px;
-  padding: 14px 18px;
-  margin-top: 16px;
-  width: 100%;
-}
-
-.credit-card-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  color: var(--ink-3, #666);
-}
-
-.credit-card-left .credit-num {
-  font-weight: 600;
-  font-size: 16px;
-  color: var(--ink, #1a1a1a);
-}
-
-.style-section {
-  grid-column: 1 / -1;
 }
 
 /* 公众号账号列表 */
@@ -739,6 +659,12 @@ onMounted(() => {
 
 .profile-form {
   max-width: 280px;
+}
+
+.logout-section {
+  position: absolute;
+  top: 16px;
+  right: 16px;
 }
 
 /* ── 风格训练区 ── */
@@ -944,13 +870,9 @@ onMounted(() => {
 .source-del:hover { color: #e74c3c; background: #fef0f0; }
 
 @media (max-width: 768px) {
-  .settings-page { grid-template-columns: 1fr; }
   .profile-card { flex-direction: column; align-items: center; text-align: center; }
-  .profile-content { flex-direction: column; }
   .profile-form { max-width: 100%; }
-  .style-section { grid-column: 1 / -1; }
 
   .style-analysis-grid { grid-template-columns: 1fr; }
 }
-
 </style>

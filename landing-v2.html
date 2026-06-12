@@ -370,75 +370,27 @@ h1, h2, h3, h4, h5 {
 .mk-body .red-hi { color: var(--crimson); font-weight: 600; }
 
 /* =========================================================
-   创作工具箱
+   工具箱
    ========================================================= */
 .tools-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
   margin-top: 48px;
 }
-@media (max-width: 980px) {
-  .tools-grid { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 540px) {
-  .tools-grid { grid-template-columns: 1fr; }
-}
+@media (max-width: 900px) { .tools-grid { grid-template-columns: 1fr; } }
 .tool-card {
-  background: var(--ivory);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  padding: 28px;
-  transition: all 250ms cubic-bezier(0.2, 0, 0, 1);
-  cursor: default;
+  padding: 32px 28px; background: var(--ivory);
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  transition: all .2s ease;
 }
-.tool-card:hover {
-  border-color: var(--line-2);
-  box-shadow: var(--sh-2);
-  transform: translateY(-2px);
-}
-.tool-card-icon {
-  width: 48px; height: 48px;
-  border-radius: 12px;
+.tool-card:hover { transform: translateY(-3px); box-shadow: var(--sh-2); border-color: var(--line-2); }
+.tool-card .tk-icon {
+  width: 48px; height: 48px; border-radius: 12px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 24px;
-  margin-bottom: 20px;
+  margin-bottom: 18px; font-size: 22px;
+  background: var(--clay-tint); color: var(--clay-deep);
 }
-.tool-card-title {
-  font-family: var(--serif);
-  font-size: 19px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: var(--ink);
-}
-.tool-card-desc {
-  font-size: 14px;
-  color: var(--ink-3);
-  line-height: 1.65;
-}
-.tool-card-tag {
-  display: inline-block;
-  margin-top: 14px;
-  font-family: var(--mono);
-  font-size: 12px;
-  font-weight: 500;
-  padding: 4px 10px;
-  border-radius: 6px;
-}
-
-/* Card color accents */
-.tool-card[data-accent="clay"] .tool-card-icon { background: rgba(201,100,66,0.1); }
-.tool-card[data-accent="clay"] .tool-card-tag { background: rgba(201,100,66,0.08); color: var(--clay-deep); }
-.tool-card[data-accent="pine"] .tool-card-icon { background: rgba(92,138,92,0.1); }
-.tool-card[data-accent="pine"] .tool-card-tag { background: rgba(92,138,92,0.08); color: var(--leaf); }
-.tool-card[data-accent="purple"] .tool-card-icon { background: rgba(140,120,170,0.1); }
-.tool-card[data-accent="purple"] .tool-card-tag { background: rgba(140,120,170,0.08); color: #7a6490; }
-.tool-card[data-accent="blue"] .tool-card-icon { background: rgba(80,140,200,0.1); }
-.tool-card[data-accent="blue"] .tool-card-tag { background: rgba(80,140,200,0.08); color: #3a7ab8; }
-.tool-card[data-accent="gold"] .tool-card-icon { background: rgba(180,150,80,0.1); }
-.tool-card[data-accent="gold"] .tool-card-tag { background: rgba(180,150,80,0.08); color: #8a7030; }
-.tool-card[data-accent="ink"] .tool-card-icon { background: rgba(80,80,80,0.08); }
-.tool-card[data-accent="ink"] .tool-card-tag { background: rgba(80,80,80,0.06); color: var(--ink-2); }
+.tool-card h4 { font-size: 18px; margin-bottom: 6px; }
+.tool-card .tk-desc { font-size: 13px; color: var(--ink-3); line-height: 1.65; }
 
 /* =========================================================
    CTA
@@ -540,12 +492,15 @@ h1, h2, h3, h4, h5 {
 }
 .blur-word.visible { filter: blur(0); opacity: 1; transform: translateY(0); }
 
-/* Brand — 去掉 ShinyText 光泽，换成干净纯文字 */
-.brand-name {
-  color: var(--ink);
-  transition: color var(--t-fast) var(--ease);
+/* ShinyText 光泽 */
+.shiny-text {
+  background: linear-gradient(120deg, var(--ink) 0%, var(--ink) 35%, var(--clay) 50%, var(--ink) 65%, var(--ink) 100%);
+  background-size: 300% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shiny-sweep 4s ease-in-out infinite;
 }
-.brand:hover .brand-name { color: var(--clay); }
+@keyframes shiny-sweep { 0% { background-position: 200% center; } 40%,100% { background-position: -100% center; } }
 
 /* StarBorder 流光边框 */
 .star-btn {
@@ -736,6 +691,115 @@ h1, h2, h3, h4, h5 {
   font-weight: 600;
 }
 
+/* =========================================================
+   差异化: AI 打字演示
+   ========================================================= */
+.demo-section {
+  background: var(--ink);
+  color: var(--bone);
+  overflow: hidden;
+}
+.demo-terminal {
+  max-width: 720px;
+  margin: 48px auto 0;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,.4);
+}
+.demo-terminal-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 18px;
+  background: #2a2a28;
+}
+.demo-terminal-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+}
+.demo-terminal-dot.r { background: #ff5f57; }
+.demo-terminal-dot.y { background: #febc2e; }
+.demo-terminal-dot.g { background: #28c840; }
+.demo-terminal-title {
+  flex: 1; text-align: center;
+  font-family: var(--mono); font-size: 12px;
+  color: #87867f;
+}
+.demo-terminal-body {
+  padding: 28px 24px;
+  background: #1a1a19;
+  min-height: 280px;
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.9;
+  color: var(--bone);
+}
+.demo-terminal-body .demo-title-line {
+  font-size: 22px; font-weight: 700;
+  color: #fff;
+  margin-bottom: 16px;
+  text-align: center;
+}
+.demo-terminal-body .demo-line {
+  margin-bottom: 10px;
+}
+.demo-terminal-body .demo-cursor {
+  display: inline-block;
+  width: 2px; height: 1.1em;
+  background: var(--clay);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: cursor-blink .8s step-end infinite;
+}
+@keyframes cursor-blink {
+  0%,100% { opacity: 1; } 50% { opacity: 0; }
+}
+.demo-terminal-body .demo-hi {
+  color: var(--clay-soft);
+  font-weight: 500;
+}
+.demo-steps-bar {
+  display: flex; gap: 4px;
+  margin-top: 20px;
+  padding: 14px 18px;
+  background: #222220;
+  border-top: 1px solid #333;
+}
+.demo-step-chip {
+  flex: 1; text-align: center;
+  padding: 6px 4px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--mono);
+  color: #666;
+  background: transparent;
+  transition: all .3s;
+}
+.demo-step-chip.done {
+  background: rgba(88,160,88,.15);
+  color: #6ab06a;
+}
+.demo-step-chip.active {
+  background: rgba(204,120,92,.2);
+  color: var(--clay-soft);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+.demo-particles {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none; overflow: hidden;
+}
+.demo-particle {
+  position: absolute;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: var(--clay-soft);
+  opacity: .3;
+  animation: float-up 8s linear infinite;
+}
+@keyframes float-up {
+  0% { transform: translateY(100vh) scale(0); opacity: 0; }
+  10% { opacity: .3; transform: translateY(90vh) scale(1); }
+  90% { opacity: .3; }
+  100% { transform: translateY(-10vh) scale(0); opacity: 0; }
+}
 
 /* =========================================================
    差异化: 滚动视差增强
@@ -896,7 +960,6 @@ h1, h2, h3, h4, h5 {
   .hero-actions { flex-direction: column; align-items: stretch; }
   .hero-actions .btn { width: 100%; }
   .tools-grid { grid-template-columns: 1fr; }
-
   .modal { padding: 32px 24px; }
 }
 </style>
@@ -935,7 +998,7 @@ const BlurText = ({ text, delay = 80, as: Tag = 'span', className = '' }) => {
   );
 };
 
-
+const ShinyText = ({ text }) => <span className="shiny-text">{text}</span>;
 
 /* RotatingText — 场景轮播（灵感来自 react-bits/RotatingText） */
 const RotatingText = ({ words }) => (
@@ -1091,7 +1154,7 @@ const HeroCardStack = () => {
     },
     {
       id: 'xform', cls: 'hc-3 hc-xform',
-      icon: '🔀', title: '多平台内容互转',
+      icon: '🔄', title: '内容转写与仿写',
       desc: '一键将公众号文章改写为小红书风格，或根据对标账号仿写，保持你的个人风格。',
       tag: '公众号 → 小红书 · 风格仿写',
       content: (
@@ -1256,11 +1319,11 @@ const Nav = ({ onLogin }) => {
   return (
     <nav className={`nav${scrolled ? ' scrolled' : ''}`}>
       <div className="nav-inner">
-        <a href="#" className="brand"><span className="brand-name">公众号智能体</span></a>
+        <a href="#" className="brand"><ShinyText text="公众号智能体" /></a>
         <div className="nav-links">
           <a href="#features">产品功能</a>
-          <a href="#tools">创作工具箱</a>
-
+          <a href="#tools">创作工具</a>
+          <a href="#cta">联系我们</a>
         </div>
         <div className="nav-cta">
           <button className="btn btn-primary" onClick={onLogin}>立即开始 <span className="btn-arrow">→</span></button>
@@ -1515,11 +1578,11 @@ const Features = () => (
       <div className="feature-block fade-up">
         <div className="fb-text">
           <div className="fb-step"><span className="num">Step 05</span>跨平台 · Adapt</div>
-          <h3>多平台内容，<br />互相转写适配</h3>
-          <p>多平台内容互相转写——公众号长文转小红书图文、抖音文案，反过来也能一键适配。不用手动改格式。</p>
+          <h3>一篇文章，<br />适配多个内容平台</h3>
+          <p>公众号长文自动转化为小红书图文、抖音文案等不同平台的格式。一键发布，不用手动改格式。</p>
           <ul className="fb-list">
-            <li><span className="li-marker">A</span><div className="li-content"><strong>一键发布</strong><span>文章定稿后一键推送到公众号草稿箱，同时可同步发布到小红书</span></div></li>
-            <li><span className="li-marker">B</span><div className="li-content"><strong>多平台互转</strong><span>小红书、抖音、知乎等平台内容互相转写，自动适配各平台风格</span></div></li>
+            <li><span className="li-marker">A</span><div className="li-content"><strong>公众号转小红书</strong><span>自动拆解为小红书图文格式，含标签提取和封面建议</span></div></li>
+            <li><span className="li-marker">B</span><div className="li-content"><strong>内容仿写</strong><span>分析参考文章的结构和风格，生成同类型但原创的新内容</span></div></li>
             <li><span className="li-marker">C</span><div className="li-content"><strong>风格迁移</strong><span>将内容从一种风格转换为另一种风格，适配不同受众</span></div></li>
           </ul>
         </div>
@@ -1697,51 +1760,170 @@ const CompareSection = () => {
 };
 
 
-/* ── 创作工具箱 ──────────────────────────────────────────────── */
-const ToolsSection = () => {
-  const tools = [
-    { icon: '🔄', title: '文案润色', accent: 'clay',
-      desc: '写完初稿后一键润色——补充金句、核查事实、去除 AI 痕迹，让文章读起来像人写的。',
-      tag: '金句补充 · 事实核查 · 去 AI 味' },
-    { icon: '📝', title: '正文续写', accent: 'pine',
-      desc: '文章写到一半卡住了？AI 根据上文语境自动续写，保持风格统一，不会突然跑偏。',
-      tag: '语境理解 · 风格延续' },
-    { icon: '📋', title: '内容仿写', accent: 'purple',
-      desc: '给一篇参考文章，AI 分析它的结构和风格，帮你仿写出同样调性的新内容。',
-      tag: '风格分析 · 结构模仿' },
-    { icon: '🔀', title: '多平台互转', accent: 'blue',
-      desc: '多平台内容互相转写——公众号长文转小红书图文、抖音文案，反过来也能一键适配各平台风格。',
-      tag: '互相转写 · 风格适配' },
-    { icon: '🚀', title: '一键发布', accent: 'gold',
-      desc: '文章定稿后，一键推送到公众号草稿箱，同时可同步发布到小红书，不用手动复制粘贴。',
-      tag: '公众号 · 小红书 · 同步发布' },
-    { icon: '✏️', title: '公众号编辑器', accent: 'ink',
-      desc: '内置富文本编辑器，支持微信排版规范，写完直接编辑、预览、发布，不用切换工具。',
-      tag: '富文本 · 微信排版 · 预览' },
-  ];
+/* ── AI 打字演示 ───────────────────────────────────────────── */
+const AIDemoSection = () => {
+  const ref = React.useRef(null);
+  const [started, setStarted] = React.useState(false);
+  const [currentStep, setCurrentStep] = React.useState(0);
+  const [displayedLines, setDisplayedLines] = React.useState([]);
+  const [currentLine, setCurrentLine] = React.useState('');
+  const [charIdx, setCharIdx] = React.useState(0);
+
+  const steps = ['信息采集', '选题挖掘', '大纲生成', '正文创作', '标题优化'];
+  const article = {
+    title: '为什么你的 AI Agent 项目总在 Demo 阶段',
+    lines: [
+      '很多团队做 AI Agent，Demo 跑得很漂亮，',
+      '一到生产环境就各种问题——幻觉、延迟、成本失控。',
+      '核心原因不是技术选型错了，而是缺少系统化的工程方法。',
+      '',
+      '真正能落地的 Agent 系统，需要三层防线：',
+      '输入层的事实提取约束、推理层的 Prompt 工程、',
+      '输出层的自动校验。光靠模型本身的能力，远远不够。',
+    ]
+  };
+
+  // Start typing when visible
+  React.useEffect(() => {
+    if (!ref.current) return;
+    const io = new IntersectionObserver(
+      ([e]) => { if (e.isIntersecting) { setStarted(true); io.disconnect(); } },
+      { threshold: 0.3 }
+    );
+    io.observe(ref.current);
+    return () => io.disconnect();
+  }, []);
+
+  // Step progression
+  React.useEffect(() => {
+    if (!started) return;
+    const timers = [800, 2400, 4000, 5600, 9000].map((delay, i) =>
+      setTimeout(() => setCurrentStep(i), delay)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [started]);
+
+  // Typing effect
+  React.useEffect(() => {
+    if (!started || currentStep < 3) return; // Start typing at step 3 (正文创作)
+    const allText = article.lines.join('\n');
+    if (charIdx >= allText.length) return;
+
+    const timer = setTimeout(() => {
+      const char = allText[charIdx];
+      if (char === '\n') {
+        setDisplayedLines(prev => [...prev, currentLine]);
+        setCurrentLine('');
+      } else {
+        setCurrentLine(prev => prev + char);
+      }
+      setCharIdx(prev => prev + 1);
+    }, 35 + Math.random() * 25); // Variable speed for realism
+
+    return () => clearTimeout(timer);
+  }, [started, charIdx, currentStep, currentLine]);
 
   return (
-    <section className="section section-alt" id="tools">
-      <div className="container">
+    <section className="section demo-section" id="demo" ref={ref} style={{ position: 'relative' }}>
+      {/* Background particles */}
+      <div className="demo-particles">
+        {[...Array(12)].map((_, i) => (
+          <div
+            key={i}
+            className="demo-particle"
+            style={{
+              left: `${8 + (i * 7.5)}%`,
+              animationDelay: `${i * 0.6}s`,
+              animationDuration: `${6 + (i % 4) * 2}s`,
+            }}
+          />
+        ))}
+      </div>
+
+      <div className="container" style={{ position: 'relative', zIndex: 1 }}>
         <div className="section-head center fade-up">
-          <div className="section-tag">— Creator Toolkit · 创作工具箱 —</div>
-          <h2 className="section-title">不只是写作，<br />一整套内容创作工具</h2>
-          <p className="section-sub">从初稿到成品，从润色到发布——所有工具都在一个平台上，不用在多个软件之间来回切换。</p>
+          <div className="section-tag" style={{ color: 'var(--clay-soft)' }}>— Live Demo —</div>
+          <h2 className="section-title" style={{ color: '#fff' }}>看 AI 如何<span style={{ color: 'var(--clay-soft)' }}>实时</span>写出一篇文章</h2>
+          <p className="section-sub" style={{ color: '#87867f' }}>这不是模拟——这是 AI 真实的创作过程。从采集信息到输出成稿，每一步都可以追踪。</p>
         </div>
-        <div className="tools-grid">
-          {tools.map((t, i) => (
-            <div className="tool-card fade-up" data-accent={t.accent} key={i} style={{ transitionDelay: `${i * 0.06}s` }}>
-              <div className="tool-card-icon">{t.icon}</div>
-              <div className="tool-card-title">{t.title}</div>
-              <div className="tool-card-desc">{t.desc}</div>
-              <div className="tool-card-tag">{t.tag}</div>
-            </div>
-          ))}
+
+        <div className="demo-terminal fade-up">
+          <div className="demo-terminal-bar">
+            <div className="demo-terminal-dot r"></div>
+            <div className="demo-terminal-dot y"></div>
+            <div className="demo-terminal-dot g"></div>
+            <span className="demo-terminal-title">公众号智能体 · AI 创作引擎</span>
+          </div>
+          <div className="demo-terminal-body">
+            {started && currentStep >= 3 && (
+              <>
+                <div className="demo-title-line">{article.title}</div>
+                {displayedLines.map((line, i) => (
+                  <div className="demo-line" key={i}>{line}</div>
+                ))}
+                <div className="demo-line">
+                  {currentLine}
+                  <span className="demo-cursor"></span>
+                </div>
+              </>
+            )}
+            {started && currentStep < 3 && (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: '#666' }}>
+                <div style={{ fontSize: 32, marginBottom: 16 }}>
+                  {currentStep === 0 ? '📡' : currentStep === 1 ? '🎯' : '📋'}
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 13 }}>
+                  {currentStep === 0 && '正在从 20+ 信息源采集数据...'}
+                  {currentStep === 1 && 'AI 正在衍生并评分选题...'}
+                  {currentStep === 2 && '4 个 AI 角色正在协作生成大纲...'}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="demo-steps-bar">
+            {steps.map((s, i) => (
+              <div
+                key={i}
+                className={`demo-step-chip ${i < currentStep ? 'done' : ''} ${i === currentStep ? 'active' : ''}`}
+              >
+                {i < currentStep ? '✓ ' : ''}{s}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </section>
   );
 };
+
+/* ── 创作工具箱 ────────────────────────────────────────────── */
+const Tools = () => (
+  <section className="section" id="tools">
+    <div className="container">
+      <div className="section-head center fade-up">
+        <div className="section-tag">— Tools · 创作工具箱 —</div>
+        <h2 className="section-title">不止于生成，<br />更要打磨到可发布</h2>
+        <p className="section-sub">从文案润色到跨平台适配，从富文本编辑器到一键发布——完整的内容后期工具链。</p>
+      </div>
+      <div className="tools-grid stagger-grid">
+        {[
+          ['✏️', '公众号编辑器', '专为微信排版设计的编辑器，自动适配排版规范，红字高亮、标题样式一键搞定。'],
+          ['🔄', '文案润色', '对已有文章进行金句补充、事实核查和去除 AI 痕迹改写，让旧内容焕发新生。'],
+          ['📝', '正文续写', '从已有内容无缝续写，保持风格一致性。适合长文分批创作或补充遗漏内容。'],
+          ['🔀', '内容转写', '将公众号长文转化为不同平台的格式和风格，适配不同受众的阅读习惯。'],
+          ['📋', '内容仿写', '分析参考文章的结构、风格和套路，生成同类型但原创的新内容。'],
+          ['📕', '公众号转小红书', '自动将长文拆解为小红书图文格式，含标签提取和封面建议，支持一键发布。'],
+        ].map(([icon, title, desc], i) => (
+          <div className="tool-card fade-up" key={i}>
+            <div className="tk-icon">{icon}</div>
+            <h4>{title}</h4>
+            <p className="tk-desc">{desc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+);
 
 /* ── CTA ───────────────────────────────────────────────────── */
 const CTA = ({ onLogin }) => (
@@ -1805,7 +1987,8 @@ const App = () => {
       <PainPoints />
       <CompareSection />
       <Features />
-      <ToolsSection />
+      <AIDemoSection />
+      <Tools />
       <CTA onLogin={() => setLoginOpen(true)} />
       <Footer />
       <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />

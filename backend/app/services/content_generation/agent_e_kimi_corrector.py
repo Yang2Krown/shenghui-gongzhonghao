@@ -171,11 +171,17 @@ async def kimi_correct_facts(
     Returns:
         AgentEOutput: 纠错后的正文 + 纠错对照表
     """
-    # Moonshot (Kimi) 暂时禁用（API 持续报错），用默认 LLM
-    from app.services.llm import get_llm_client
-    client = get_llm_client()
-    use_web_search = False
-    logger.info("[Agent E] 使用默认 LLM 纠错（Kimi 已禁用）")
+    # 尝试用 Moonshot 客户端（支持联网搜索）
+    try:
+        from app.services.llm.moonshot_client import MoonshotClient
+        client = MoonshotClient()
+        use_web_search = True
+        logger.info("[Agent E] 使用 Moonshot (Kimi) 联网搜索纠错")
+    except RuntimeError:
+        logger.warning("[Agent E] Moonshot API 未配置，回退到默认 LLM（无联网搜索）")
+        from app.services.llm import get_llm_client
+        client = get_llm_client()
+        use_web_search = False
 
     user_prompt = _build_user_prompt(inp, agent_a_output, agent_b_output, agent_d_output)
     system_prompt = _load_system_prompt()

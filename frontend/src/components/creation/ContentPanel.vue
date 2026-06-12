@@ -25,7 +25,7 @@
       <p class="text-ink-3 mb-6">基于大纲和标题，AI 将生成完整的公众号文章</p>
       <el-button type="primary" size="large" @click="generateContent" :loading="generating">
         <el-icon><MagicStick /></el-icon>
-        生成正文 <CreditHint :cost="10" />
+        生成正文
       </el-button>
     </div>
 
@@ -144,10 +144,6 @@ import AgentFeedbackPanel from './AgentFeedbackPanel.vue'
 import { post } from '@/api/api'
 import { reevaluateContent as reevaluateContentApi } from '@/api/creation'
 import { useAgentProgress } from '@/composables/useAgentProgress'
-import { useCreditStore } from '@/stores/credit'
-import CreditHint from '@/components/credit/CreditHint.vue'
-
-const creditStore = useCreditStore()
 
 const props = defineProps({
   candidateId: { type: [Number, String], default: null },
@@ -185,8 +181,6 @@ watch(() => progress.result.value, (newResult) => {
     status.value = 'completed'
     ElMessage.success('正文生成完成')
     generating.value = false
-    // 刷新积分余额
-    creditStore.refreshBalance()
   }
 })
 

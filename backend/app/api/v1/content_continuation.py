@@ -13,8 +13,6 @@ from app.core.background import spawn
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.generation_tracker import track_start, track_complete, track_fail
-from app.services.credit_service import CreditService
-from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -71,19 +69,6 @@ async def _run_continuation_background(
             result,
             display_title=f"正文续写 · {result.get('plans', [{}])[0].get('approach', '')[:20]}",
         )
-        
-        # 成功后扣减积分
-        try:
-            async with AsyncSessionLocal() as credit_db:
-                credit_svc = CreditService(credit_db)
-                await credit_svc.deduct_credits(
-                    user_id=user_id,
-                    operation="content_continuation",
-                    operation_id=run_id,
-                )
-                await credit_db.commit()
-        except Exception as credit_err:
-            logger.warning(f"积分扣费失败: {credit_err}")
 
     except Exception as e:
         logger.error(f"正文续写失败: {str(e)}", exc_info=True)
@@ -104,21 +89,6 @@ async def generate_continuation(
 
     输入已写好的文章正文，AI 会分析内容脉络，给出多个自然收尾的续写方案。
     """
-    # 检查积分
-    async with AsyncSessionLocal() as credit_db:
-        credit_service = CreditService(credit_db)
-        balance_check = await credit_service.check_balance(current_user.id, "content_continuation")
-        if not balance_check["sufficient"]:
-            raise HTTPException(
-                status_code=402,
-                detail={
-                    "code": "INSUFFICIENT_CREDITS",
-                    "message": f"积分不足，需要 {balance_check['required']} 积分，当前余额 {balance_check['balance']} 积分",
-                    "balance": balance_check["balance"],
-                    "required": balance_check["required"],
-                },
-            )
-    
     run_id = progress_store.create_run()
 
     await track_start(

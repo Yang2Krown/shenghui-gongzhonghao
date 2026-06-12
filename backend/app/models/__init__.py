@@ -25,9 +25,6 @@ from app.models.outline import (
 # 微信公众号账号管理
 from app.models.wechat_account import WechatAccount
 
-# 积分系统
-from app.models.credit import UserCredit, CreditTransaction, CreditPackage
-
 __all__ = [
     # 旧模型（过渡期保留）
     "User",
@@ -57,8 +54,4 @@ __all__ = [
     "OutlineInspection",
     # 微信公众号账号
     "WechatAccount",
-    # 积分系统
-    "UserCredit",
-    "CreditTransaction",
-    "CreditPackage",
 ]

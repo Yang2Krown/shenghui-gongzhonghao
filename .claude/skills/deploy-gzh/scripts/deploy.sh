@@ -81,8 +81,6 @@ if [ "$DEPLOY_FRONTEND" -eq 1 ]; then
 set -e
 cd "$DEPLOY_PATH"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build frontend
-# 确保前端容器真正重启（上次 up -d --build 有时没生效）
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart frontend
 echo
 echo "----- 前端服务状态 -----"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps frontend

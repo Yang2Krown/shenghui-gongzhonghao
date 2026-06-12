@@ -28,8 +28,6 @@ from app.schemas.title_generation import (
     FinalRecommendationResponse,
 )
 from app.services.generation_tracker import track_start, track_complete, track_fail
-from app.services.credit_service import CreditService
-from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -166,20 +164,6 @@ async def _run_title_generation_background(task_id: str, request_data: dict, run
                 })
                 top_title = recommendations_payload[0]["title"] if recommendations_payload else None
                 await track_complete(run_id, result_data, display_title=f"标题生成 · {top_title[:30]}" if top_title else None)
-                
-                # 成功后扣减积分
-                try:
-                    async with AsyncSessionLocal() as credit_db:
-                        credit_svc = CreditService(credit_db)
-                        await credit_svc.deduct_credits(
-                            user_id=user_id,
-                            operation="title_generation",
-                            operation_id=task_id,
-                        )
-                        await credit_db.commit()
-                except Exception as credit_err:
-                    logger.warning(f"积分扣费失败: {credit_err}")
-                
         except Exception as e:
             logger.error(f"后台标题生成任务 {task_id} 失败: {str(e)}", exc_info=True)
             from sqlalchemy import update
@@ -222,21 +206,6 @@ async def create_title_generation(
     - 如果Top 3综合分 < 7.0，将扣分理由喂给Agent A重新生成
     - 最多重生1次，失败则标记"难以成标题"丢回人工
     """
-    # 检查积分
-    async with AsyncSessionLocal() as credit_db:
-        credit_service = CreditService(credit_db)
-        balance_check = await credit_service.check_balance(current_user.id, "title_generation")
-        if not balance_check["sufficient"]:
-            raise HTTPException(
-                status_code=402,
-                detail={
-                    "code": "INSUFFICIENT_CREDITS",
-                    "message": f"积分不足，需要 {balance_check['required']} 积分，当前余额 {balance_check['balance']} 积分",
-                    "balance": balance_check["balance"],
-                    "required": balance_check["required"],
-                },
-            )
-    
     # 创建任务记录
     task = Task(
         id=str(uuid.uuid4()),
