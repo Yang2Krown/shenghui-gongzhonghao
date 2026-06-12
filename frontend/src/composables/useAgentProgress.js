@@ -79,7 +79,8 @@ export function useAgentProgress() {
       }
     }
 
-    if (d.error) {
+    // 只在任务真正结束（done）后才展示 error，避免中间重试的错误事件导致进度条卡死
+    if (d.done && d.error) {
       _stopClimb()
       _stopPoll()
       error.value = d.error

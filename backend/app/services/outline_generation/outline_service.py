@@ -341,10 +341,14 @@ async def generate_outline(
             
         except Exception as e:
             logger.error(f"大纲生成异常: {e}")
-            if progress_callback:
-                await progress_callback({"event": "error", "data": {"message": str(e)}})
             if attempt < MAX_RETRIES:
+                logger.warning(f"大纲生成第 {attempt + 1} 次尝试异常，准备重试: {e}")
                 continue
+            if progress_callback:
+                try:
+                    await progress_callback({"event": "error", "data": {"message": str(e)}})
+                except Exception:
+                    logger.warning("推送最终 error 事件失败", exc_info=True)
             raise
     
     # 不应该到达这里
