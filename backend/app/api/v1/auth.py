@@ -26,6 +26,7 @@ from app.schemas.user import (
     PhoneLoginRequest,
 )
 from app.services.sms_service import send_sms_code, verify_sms_code
+from app.services.credit_service import CreditService
 
 router = APIRouter()
 
@@ -54,6 +55,15 @@ async def register(
     
     # 创建用户
     user = await user_crud.create(db, obj_in=user_in)
+    
+    # 新用户赠送积分
+    try:
+        credit_service = CreditService(db)
+        await credit_service.welcome_gift(user.id)
+    except Exception as e:
+        # 赠送失败不影响注册
+        import logging
+        logging.getLogger(__name__).warning(f"新用户积分赠送失败: {e}")
     
     # 生成令牌
     access_token = create_access_token(subject=user.id)
@@ -216,6 +226,13 @@ async def login_by_phone(
     user = await user_crud.get_by_phone(db, phone=req.phone)
     if not user:
         user = await user_crud.create_by_phone(db, phone=req.phone)
+        # 新用户赠送积分
+        try:
+            credit_service = CreditService(db)
+            await credit_service.welcome_gift(user.id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"新用户积分赠送失败: {e}")
 
     if not user.is_active:
         raise HTTPException(

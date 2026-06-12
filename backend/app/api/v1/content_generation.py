@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import logging
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
@@ -17,6 +18,8 @@ from app.core.background import spawn
 from app.db.session import get_db
 from app.models.user import User
 from app.services.generation_tracker import track_start, track_complete, track_fail
+from app.services.credit_service import CreditService
+from app.core.credit_config import get_operation_credits
 
 router = APIRouter()
 
@@ -112,6 +115,20 @@ async def generate_content_async(
     返回 run_id，前端可通过 GET /content-generation/stream/{run_id} 获取实时进度。
     正文数据通过 SSE 的 result 事件返回（在 complete 之后）。
     """
+    # 检查积分
+    credit_service = CreditService(db)
+    balance_check = await credit_service.check_balance(current_user.id, "content_generation")
+    if not balance_check["sufficient"]:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "INSUFFICIENT_CREDITS",
+                "message": f"积分不足，需要 {balance_check['required']} 积分，当前余额 {balance_check['balance']} 积分",
+                "balance": balance_check["balance"],
+                "required": balance_check["required"],
+            },
+        )
+    
     run_id = progress_store.create_run()
 
     await track_start(
@@ -273,6 +290,20 @@ async def generate_content_async(
                     "factual_summary": factual_summary_data,
                     "factual_corrections": factual_corrections_data,
                 })
+                
+                # 成功后扣减积分
+                try:
+                    async with AsyncSessionLocal() as credit_db:
+                        credit_svc = CreditService(credit_db)
+                        await credit_svc.deduct_credits(
+                            user_id=current_user.id,
+                            operation="content_generation",
+                            operation_id=run_id,
+                        )
+                        await credit_db.commit()
+                except Exception as credit_err:
+                    logging.getLogger(__name__).warning(f"积分扣费失败: {credit_err}")
+                
             except Exception as e:
                 await progress_store.push(run_id, {
                     "event": "error",

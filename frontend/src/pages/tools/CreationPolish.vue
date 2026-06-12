@@ -140,7 +140,7 @@
         <template v-if="progress.isRunning.value">
           <el-icon class="spin"><Loading /></el-icon> 正在润色文案…
         </template>
-        <template v-else>开始润色</template>
+        <template v-else>开始润色 <CreditHint :cost="8" /></template>
       </button>
       <div class="multi-model-toggle">
         <label class="toggle-label">
@@ -392,6 +392,10 @@ import { diffText } from '@/utils/textDiff'
 import { publishToWechatEditor } from '@/utils/publishToEditor'
 import PublishChoiceDialog from '@/components/PublishChoiceDialog.vue'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
+import { useCreditStore } from '@/stores/credit'
+import CreditHint from '@/components/credit/CreditHint.vue'
+
+const creditStore = useCreditStore()
 
 const router = useRouter()
 const progress = useAgentProgress()
@@ -542,6 +546,8 @@ watch(() => progress.result.value, (data) => {
     result.value = data
     editableText.value = data.final_text || ''
     ElMessage.success('润色完成')
+    // 刷新积分余额
+    creditStore.refreshBalance()
   }
   // 多模型对比结果
   if (data?.comparison) {
@@ -820,7 +826,7 @@ onUnmounted(() => {
 .soft-panel { background: radial-gradient(120% 80% at 100% 0%, rgba(204,120,92,.06) 0%, transparent 55%), var(--paper); }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 17px 24px; border-bottom: 1px solid var(--line); }
 .panel-icon { width: 32px; height: 32px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.cta-bar { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; font-family: inherit; font-weight: 600; font-size: 16px; color: #fff; cursor: pointer; border: none; border-radius: var(--r-lg); padding: 16px 24px; background: linear-gradient(135deg, var(--clay) 0%, var(--clay-deep) 100%); box-shadow: 0 10px 28px rgba(204,120,92,.30); transition: all .2s; }
+.cta-bar { position: relative; width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; font-family: inherit; font-weight: 600; font-size: 16px; color: #fff; cursor: pointer; border: none; border-radius: var(--r-lg); padding: 16px 24px; background: linear-gradient(135deg, var(--clay) 0%, var(--clay-deep) 100%); box-shadow: 0 10px 28px rgba(204,120,92,.30); transition: all .2s; }
 .cta-bar:hover:not([disabled]) { transform: translateY(-2px); box-shadow: 0 16px 38px rgba(204,120,92,.38); }
 .cta-bar[disabled] { background: var(--bone); color: var(--ink-4); box-shadow: none; cursor: not-allowed; transform: none; }
 .type-chip { display: inline-flex; align-items: center; gap: 4px; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 500; background: var(--paper); color: #6B6862; border: 1px solid var(--line); cursor: pointer; transition: all 0.15s; }

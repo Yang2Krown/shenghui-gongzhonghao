@@ -17,7 +17,6 @@ from app.services.content_generation.schemas import (
 from app.services.content_generation.agent_a_writer import generate_article
 from app.services.content_generation.agent_b_gold_sentence import catalyze_gold_sentences
 from app.services.content_generation.agent_d_inspector import summarize_factual_errors
-from app.services.content_generation.agent_e_kimi_corrector import kimi_correct_facts
 from app.services.content_generation.agent_c_deai import deai_rewrite
 
 logger = logging.getLogger(__name__)
@@ -126,7 +125,7 @@ async def generate_content(
     if not source_material_text and inp.candidate_id and db_session:
         logger.info("[正文生成] Phase 0: 搜集事实素材")
         if progress_callback:
-            await progress_callback({"event": "step_start", "data": {"step": 0, "agent": "素材搜集", "action": "正在从原始报道中提取事实...", "avatar": "/agents/source.png"}})
+            await progress_callback({"event": "step_start", "data": {"step": 0, "agent": "沈觅源 · 素材搜集员", "action": "正在从原始报道中提取事实...", "avatar": "/agents/source.png"}})
         try:
             from app.services.content_generation.source_collector import collect_source_materials
             # 查询 candidate 的 cluster_id
@@ -164,7 +163,7 @@ async def generate_content(
             logger.error(f"[正文生成] 事实搜集失败（不影响主流程）: {e}")
 
         if progress_callback:
-            await progress_callback({"event": "step_done", "data": {"step": 0, "agent": "素材搜集"}})
+            await progress_callback({"event": "step_done", "data": {"step": 0, "agent": "沈觅源 · 素材搜集员"}})
 
     # 将素材包注入 inp（不影响原始 inp，创建副本）
     if source_material_text:
@@ -234,24 +233,16 @@ async def generate_content(
         await progress_callback({"event": "step_done", "data": {"step": 3, "agent": "Agent D"}})
 
     # ──────────────────────────────────────────
-    # Step 4: Agent E — Kimi 联网纠错员
+    # Step 4: Agent E — 联网纠错（已禁用，Kimi API 持续报错）
     # ──────────────────────────────────────────
-    logger.info("[正文生成] Step 4/5: Agent E 联网纠错")
-    if progress_callback:
-        await progress_callback({"event": "step_start", "data": {"step": 4, "agent": "齐鉴真 · 联网纠错员", "action": "正在联网验证事实...", "avatar": "/agents/content-e.png"}})
-    try:
-        agent_e_output = await kimi_correct_facts(
-            inp=inp,
-            agent_a_output=agent_a_output,
-            agent_b_output=agent_b_output,
-            agent_d_output=agent_d_output,
-        )
-    except Exception as e:
-        logger.error(f"[正文生成] Agent E 失败: {e}")
-        raise RuntimeError(f"正文生成失败（Agent E）: {e}") from e
-
-    if progress_callback:
-        await progress_callback({"event": "step_done", "data": {"step": 4, "agent": "Agent E"}})
+    from app.services.content_generation.schemas import AgentEOutput
+    agent_e_output = AgentEOutput(
+        corrected_text=agent_a_output.full_text,
+        corrected_word_count=agent_a_output.total_word_count,
+        total_corrections=0,
+        high_confidence_corrections=0,
+    )
+    logger.info("[正文生成] Step 4/5: Agent E 联网纠错（已跳过）")
 
     # ──────────────────────────────────────────
     # Step 5: Agent C — 去 AI 味改写员

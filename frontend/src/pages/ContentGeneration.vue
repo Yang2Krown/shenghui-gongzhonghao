@@ -83,7 +83,7 @@
         </div>
 
         <button class="btn-primary" @click="generateContent" :disabled="loading">
-          {{ loading ? '生成中...（约30-60秒）' : '生成正文' }}
+          {{ loading ? '生成中...（约30-60秒）' : '生成正文' }} <CreditHint :cost="10" />
         </button>
       </div>
 
@@ -187,6 +187,10 @@ import { ref, reactive, computed, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { createCreation } from '@/api/creation'
+import { useCreditStore } from '@/stores/credit'
+import CreditHint from '@/components/credit/CreditHint.vue'
+
+const creditStore = useCreditStore()
 
 const loading = ref(false)
 const result = ref(null)
@@ -357,6 +361,8 @@ const generateContent = async () => {
 
     result.value = response.data.data
     currentStep.value = 4
+    // 刷新积分余额
+    creditStore.refreshBalance()
   } catch (error) {
     console.error('生成失败:', error)
     alert('生成失败: ' + (error.response?.data?.detail || error.message))

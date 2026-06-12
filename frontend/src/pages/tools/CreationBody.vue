@@ -124,10 +124,10 @@
     </div>
 
     <button class="cta-bar" :disabled="!canGenerate || submitting" @click="handleGenerate">
-      <template v-if="submitting">
-        <el-icon class="spin"><Loading /></el-icon> 正在生成…
-      </template>
-      <template v-else>生成正文</template>
+        <template v-if="submitting">
+          <el-icon class="spin"><Loading /></el-icon> 正在生成…
+        </template>
+        <template v-else>生成正文 <CreditHint :cost="10" /></template>
     </button>
     <p v-if="!canGenerate" class="text-xs text-ink-4" style="text-align: center; margin-top: 10px;">先填入内容即可开始</p>
   </div>
@@ -139,6 +139,10 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Document, Edit, Loading, Upload, Link } from '@element-plus/icons-vue'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
+import { useCreditStore } from '@/stores/credit'
+import CreditHint from '@/components/credit/CreditHint.vue'
+
+const creditStore = useCreditStore()
 
 const router = useRouter()
 const submitting = ref(false)
@@ -319,7 +323,7 @@ const handleGenerate = async () => {
 .dropzone { border: 1px dashed var(--line); border-radius: var(--r-lg); background: var(--paper); padding: 22px; text-align: center; cursor: pointer; transition: all .15s; color: var(--ink-3); }
 .dropzone:hover { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
 .dropzone-active { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
-.cta-bar { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; font-family: inherit; font-weight: 600; font-size: 16px; color: #fff; cursor: pointer; border: none; border-radius: var(--r-lg); padding: 16px 24px; background: linear-gradient(135deg, var(--clay) 0%, var(--clay-deep) 100%); box-shadow: 0 10px 28px rgba(204,120,92,.30); transition: all .2s; }
+.cta-bar { position: relative; width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; font-family: inherit; font-weight: 600; font-size: 16px; color: #fff; cursor: pointer; border: none; border-radius: var(--r-lg); padding: 16px 24px; background: linear-gradient(135deg, var(--clay) 0%, var(--clay-deep) 100%); box-shadow: 0 10px 28px rgba(204,120,92,.30); transition: all .2s; }
 .cta-bar:hover:not([disabled]) { transform: translateY(-2px); box-shadow: 0 16px 38px rgba(204,120,92,.38); }
 .cta-bar[disabled] { background: var(--bone); color: var(--ink-4); box-shadow: none; cursor: not-allowed; transform: none; }
 .type-chip { display: inline-flex; align-items: center; gap: 4px; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 500; background: var(--paper); color: #6B6862; border: 1px solid var(--line); cursor: pointer; transition: all 0.15s; }

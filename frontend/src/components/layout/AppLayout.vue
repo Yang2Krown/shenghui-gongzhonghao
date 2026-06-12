@@ -86,7 +86,7 @@
     <div :style="{ marginLeft: isCollapsed ? '64px' : '248px' }" class="transition-all duration-300">
       <!-- 顶部导航栏 -->
       <header class="app-topbar" :style="{ left: isCollapsed ? '64px' : '248px' }">
-        <div class="flex items-center" style="gap: 8px; color: var(--ink-4); font-size: 13px;">
+        <div class="flex items-center" style="gap: 8px; color: var(--ink-4); font-size: 13px; flex: 1;">
           <span>首页</span>
           <template v-if="currentGroup">
             <el-icon :size="13"><ArrowRight /></el-icon>
@@ -95,6 +95,12 @@
           <el-icon :size="13"><ArrowRight /></el-icon>
           <span class="font-semibold text-ink-2">{{ currentLabel }}</span>
         </div>
+        <!-- 积分余额 -->
+        <button class="credit-topbar" @click="router.push('/credits/recharge')" :class="{ 'credit-animate': creditAnimating }">
+          <span class="credit-icon">💰</span>
+          <span class="credit-amount">{{ creditStore.formattedBalance }}</span>
+          <span class="credit-label">积分</span>
+        </button>
       </header>
 
       <!-- 页面内容 -->
@@ -108,13 +114,24 @@
         </div>
       </main>
     </div>
+    
+    <!-- 积分不足弹窗 -->
+    <InsufficientCreditsDialog
+      v-model="showInsufficientDialog"
+      :balance="insufficientInfo.balance"
+      :required="insufficientInfo.required"
+      :operation="insufficientInfo.operation"
+      :operation-desc="insufficientInfo.operationDesc"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useCreditStore } from '@/stores/credit'
+import InsufficientCreditsDialog from '@/components/credit/InsufficientCreditsDialog.vue'
 import {
   Edit, Setting, ArrowRight, Expand, Fold,
   Document, ChatDotSquare, Switch, EditPen, Clock
@@ -132,8 +149,43 @@ const IconTitle = ChatDotSquare
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const creditStore = useCreditStore()
 
 const isCollapsed = ref(false)
+
+// 积分动画
+const creditAnimating = ref(false)
+watch(() => creditStore.balance, (newVal, oldVal) => {
+  if (oldVal > 0 && newVal < oldVal) {
+    creditAnimating.value = true
+    setTimeout(() => { creditAnimating.value = false }, 600)
+  }
+})
+
+// 积分不足弹窗
+const showInsufficientDialog = ref(false)
+const insufficientInfo = ref({
+  balance: 0,
+  required: 0,
+  operation: '',
+  operationDesc: '',
+})
+
+// 监听积分不足事件
+const handleInsufficientCredits = (event) => {
+  insufficientInfo.value = event.detail
+  showInsufficientDialog.value = true
+}
+
+onMounted(() => {
+  window.addEventListener('insufficient-credits', handleInsufficientCredits)
+  // 初始化积分余额
+  creditStore.fetchBalance()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('insufficient-credits', handleInsufficientCredits)
+})
 
 const openGroups = reactive({
   create: true,
@@ -388,6 +440,52 @@ const navigateTo = (id) => {
 .nav-collapse-btn:hover {
   background: var(--bone);
   color: var(--ink);
+}
+
+/* 右上角积分 */
+.credit-topbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: all 0.14s;
+  font-family: inherit;
+}
+
+.credit-topbar:hover {
+  border-color: var(--clay-soft);
+  background: var(--clay-tint);
+}
+
+.credit-topbar .credit-icon {
+  font-size: 14px;
+}
+
+.credit-topbar .credit-amount {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.credit-topbar .credit-label {
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+/* 积分扣除动画 */
+.credit-animate {
+  animation: credit-deduct 0.6s ease;
+}
+
+@keyframes credit-deduct {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.1); border-color: var(--clay); background: var(--clay-tint); }
+  100% { transform: scale(1); }
 }
 
 </style>

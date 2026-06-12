@@ -299,6 +299,9 @@ import {
   MagicStick,
 } from '@element-plus/icons-vue'
 import { get, post } from '@/api/api'
+import { useCreditStore } from '@/stores/credit'
+
+const creditStore = useCreditStore()
 
 const router = useRouter()
 
@@ -402,6 +405,8 @@ const generateOutline = async (candidate) => {
       candidate_id: candidate.id
     })
     ElMessage.success('大纲生成成功')
+    // 刷新积分余额
+    creditStore.refreshBalance()
     // 跳转到大纲详情页
     router.push(`/outlines/${res.data.outline_id}`)
   } catch (error) {

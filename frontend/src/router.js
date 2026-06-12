@@ -170,6 +170,13 @@ const routes = [
         component: () => import('@/pages/settings/ProfileSettings.vue'),
         meta: { title: '个人信息' }
       },
+      // ===== 积分充值 =====
+      {
+        path: 'credits/recharge',
+        name: 'CreditRecharge',
+        component: () => import('@/pages/credits/Recharge.vue'),
+        meta: { title: '积分充值' }
+      },
       {
         path: 'settings/style',
         redirect: '/profile'

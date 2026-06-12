@@ -16,6 +16,8 @@ from app.core.progress import progress_store
 from app.core.background import spawn
 from app.models.user import User
 from app.services.generation_tracker import track_start, track_complete, track_fail
+from app.services.credit_service import CreditService
+from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -51,6 +53,21 @@ async def generate_polish(
     返回 run_id，前端可通过 GET /content-polish/stream/{run_id} 获取实时进度。
     润色结果通过 SSE 的 result 事件返回。
     """
+    # 检查积分
+    async with AsyncSessionLocal() as db:
+        credit_service = CreditService(db)
+        balance_check = await credit_service.check_balance(current_user.id, "content_polish")
+        if not balance_check["sufficient"]:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "INSUFFICIENT_CREDITS",
+                    "message": f"积分不足，需要 {balance_check['required']} 积分，当前余额 {balance_check['balance']} 积分",
+                    "balance": balance_check["balance"],
+                    "required": balance_check["required"],
+                },
+            )
+    
     run_id = progress_store.create_run()
 
     await track_start(
@@ -108,6 +125,19 @@ async def generate_polish(
             })
             await track_complete(run_id, result_data)
 
+            # 成功后扣减积分
+            try:
+                async with AsyncSessionLocal() as credit_db:
+                    credit_svc = CreditService(credit_db)
+                    await credit_svc.deduct_credits(
+                        user_id=current_user.id,
+                        operation="content_polish",
+                        operation_id=run_id,
+                    )
+                    await credit_db.commit()
+            except Exception as credit_err:
+                logger.warning(f"积分扣费失败: {credit_err}")
+            
         except Exception as e:
             logger.error(f"文案润色失败: {e}", exc_info=True)
             await progress_store.push(run_id, {

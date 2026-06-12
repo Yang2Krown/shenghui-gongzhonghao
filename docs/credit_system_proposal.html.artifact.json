@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "html",
+  "title": "docs/credit_system_proposal.html",
+  "entry": "docs/credit_system_proposal.html",
+  "renderer": "html",
+  "status": "complete",
+  "exports": [
+    "html",
+    "pdf",
+    "zip"
+  ],
+  "createdAt": "2026-06-11T10:16:18.336Z",
+  "updatedAt": "2026-06-11T10:16:18.336Z",
+  "metadata": {
+    "inferred": true,
+    "reconciled": true
+  }
+}

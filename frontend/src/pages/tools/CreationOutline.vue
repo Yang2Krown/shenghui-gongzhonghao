@@ -145,10 +145,10 @@
 
     <!-- 生成按钮 -->
     <button class="cta-bar" :disabled="!canGenerate || submitting" @click="handleGenerate">
-      <template v-if="submitting">
-        <el-icon class="spin"><Loading /></el-icon> 正在创建选题…
-      </template>
-      <template v-else>生成大纲</template>
+        <template v-if="submitting">
+          <el-icon class="spin"><Loading /></el-icon> 正在创建选题…
+        </template>
+        <template v-else>生成大纲 <CreditHint :cost="3" /></template>
     </button>
   </div>
 </template>
@@ -162,6 +162,10 @@ import {
   Loading
 } from '@element-plus/icons-vue'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
+import { useCreditStore } from '@/stores/credit'
+import CreditHint from '@/components/credit/CreditHint.vue'
+
+const creditStore = useCreditStore()
 
 const route = useRoute()
 const router = useRouter()
@@ -366,7 +370,7 @@ const handleGenerate = async () => {
 .seg-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: none; background: transparent; color: var(--ink-3); font-family: inherit; font-size: 13px; font-weight: 600; border-radius: var(--r-pill); cursor: pointer; transition: all .18s; }
 .seg-btn:hover { color: var(--ink); }
 .seg-btn-active { background: var(--paper); color: var(--clay-deep); box-shadow: var(--sh-1); }
-.cta-bar { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; font-family: inherit; font-weight: 600; font-size: 16px; color: #fff; cursor: pointer; border: none; border-radius: var(--r-lg); padding: 16px 24px; background: linear-gradient(135deg, var(--clay) 0%, var(--clay-deep) 100%); box-shadow: 0 10px 28px rgba(204,120,92,.30); transition: all .2s; }
+.cta-bar { position: relative; width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; font-family: inherit; font-weight: 600; font-size: 16px; color: #fff; cursor: pointer; border: none; border-radius: var(--r-lg); padding: 16px 24px; background: linear-gradient(135deg, var(--clay) 0%, var(--clay-deep) 100%); box-shadow: 0 10px 28px rgba(204,120,92,.30); transition: all .2s; }
 .cta-bar:hover:not([disabled]) { transform: translateY(-2px); box-shadow: 0 16px 38px rgba(204,120,92,.38); }
 .cta-bar[disabled] { background: var(--bone); color: var(--ink-4); box-shadow: none; cursor: not-allowed; transform: none; }
 .dropzone { border: 1px dashed var(--line); border-radius: var(--r-lg); background: var(--paper); padding: 22px; text-align: center; cursor: pointer; transition: all .15s; color: var(--ink-3); }

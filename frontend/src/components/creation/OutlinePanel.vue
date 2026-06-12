@@ -30,7 +30,7 @@
       </div>
       <el-button type="primary" size="large" @click="generateOutline" :loading="generating">
         <el-icon><MagicStick /></el-icon>
-        生成大纲
+        生成大纲 <CreditHint :cost="3" />
       </el-button>
     </div>
 
@@ -205,6 +205,10 @@ import AgentStatusBar from './AgentStatusBar.vue'
 import AgentFeedbackPanel from './AgentFeedbackPanel.vue'
 import outlineApi from '@/api/outline'
 import { useAgentProgress } from '@/composables/useAgentProgress'
+import { useCreditStore } from '@/stores/credit'
+import CreditHint from '@/components/credit/CreditHint.vue'
+
+const creditStore = useCreditStore()
 
 const props = defineProps({
   candidateId: { type: [Number, String], default: null },
@@ -371,6 +375,8 @@ watch(() => progress.result.value, (newResult) => {
     emit('complete', newResult)
     ElMessage.success('大纲生成完成')
     generating.value = false
+    // 刷新积分余额
+    creditStore.refreshBalance()
   }
 })
 
