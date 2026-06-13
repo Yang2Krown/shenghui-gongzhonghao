@@ -7,7 +7,7 @@ Agent A（大纲创作员）→ Agent B（大纲评审员）→ Agent C（读者
 import logging
 from typing import Callable, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -136,7 +136,14 @@ async def generate_outline(
     for attempt in range(MAX_RETRIES + 1):
         try:
             logger.info(f"大纲生成第 {attempt + 1} 次尝试: outline_id={outline.id}")
-            
+
+            # 重试前先清掉上一轮已写入的子记录，避免 outline_id 唯一约束冲突
+            # （review/criticism/inspection 三表均对 outline_id 设了 unique）
+            if attempt > 0:
+                for _model in (OutlineCandidate, OutlineReview, OutlineCriticism, OutlineInspection):
+                    await db.execute(delete(_model).where(_model.outline_id == outline.id))
+                await db.flush()
+
             # 3. Agent A 生成 3 个候选大纲
             if progress_callback:
                 await progress_callback({"event": "step_start", "data": {"step": 1, "agent": "顾清和 · 大纲创作员", "action": "正在生成 3 个候选大纲...", "avatar": "/agents/outline-a.png"}})

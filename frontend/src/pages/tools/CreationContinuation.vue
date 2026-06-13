@@ -506,7 +506,7 @@ watch(() => progress.result.value, (data) => {
   if (data?.plans) {
     result.value = data
     // 刷新积分余额
-    creditStore.refreshBalance()
+    creditStore.fetchBalance()
   }
   // 多模型对比结果
   if (data?.comparison) {

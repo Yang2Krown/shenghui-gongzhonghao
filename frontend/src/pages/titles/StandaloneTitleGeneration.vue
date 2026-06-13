@@ -391,7 +391,7 @@ watch(() => progress.result.value, (newResult) => {
     generating.value = false
     ElMessage.success('标题生成完成')
     // 刷新积分余额
-    creditStore.refreshBalance()
+    creditStore.fetchBalance()
   }
 })
 

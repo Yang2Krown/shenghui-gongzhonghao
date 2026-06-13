@@ -362,7 +362,7 @@ const generateContent = async () => {
     result.value = response.data.data
     currentStep.value = 4
     // 刷新积分余额
-    creditStore.refreshBalance()
+    creditStore.fetchBalance()
   } catch (error) {
     console.error('生成失败:', error)
     alert('生成失败: ' + (error.response?.data?.detail || error.message))

@@ -376,7 +376,7 @@ watch(() => progress.result.value, (newResult) => {
     ElMessage.success('大纲生成完成')
     generating.value = false
     // 刷新积分余额
-    creditStore.refreshBalance()
+    creditStore.fetchBalance()
   }
 })
 

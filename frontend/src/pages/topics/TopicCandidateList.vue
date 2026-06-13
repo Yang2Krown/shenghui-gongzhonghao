@@ -406,7 +406,7 @@ const generateOutline = async (candidate) => {
     })
     ElMessage.success('大纲生成成功')
     // 刷新积分余额
-    creditStore.refreshBalance()
+    creditStore.fetchBalance()
     // 跳转到大纲详情页
     router.push(`/outlines/${res.data.outline_id}`)
   } catch (error) {

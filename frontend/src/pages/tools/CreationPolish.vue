@@ -547,7 +547,7 @@ watch(() => progress.result.value, (data) => {
     editableText.value = data.final_text || ''
     ElMessage.success('润色完成')
     // 刷新积分余额
-    creditStore.refreshBalance()
+    creditStore.fetchBalance()
   }
   // 多模型对比结果
   if (data?.comparison) {
