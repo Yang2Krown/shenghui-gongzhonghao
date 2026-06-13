@@ -83,12 +83,38 @@
                 <el-icon><Upload /></el-icon> 上传
                 <input type="file" accept="image/*" style="display:none" @change="handleCoverUpload" />
               </label>
+              <!-- AI 封面：暂时隐藏，保留代码以便日后恢复
               <button class="cover-btn cover-btn-ai" @click="handleGenerateCover" :disabled="generatingCover">
                 <el-icon v-if="generatingCover" class="spin"><Loading /></el-icon>
                 <el-icon v-else><MagicStick /></el-icon>
                 {{ generatingCover ? '生成中...' : 'AI 封面' }}
               </button>
+              -->
+              <button class="cover-btn cover-btn-bing" @click="toggleBingPicker" :disabled="bingLoading">
+                <el-icon v-if="bingLoading" class="spin"><Loading /></el-icon>
+                <el-icon v-else><Picture /></el-icon>
+                {{ bingLoading ? '加载中...' : 'Bing 每日一图' }}
+              </button>
             </div>
+          </div>
+
+          <!-- Bing 每日一图选择器 -->
+          <div v-if="bingPickerOpen" class="bing-picker">
+            <div v-if="bingError" class="bing-error">{{ bingError }}</div>
+            <div v-else-if="bingImages.length" class="bing-grid">
+              <div
+                v-for="img in bingImages"
+                :key="img.url"
+                class="bing-item"
+                :class="{ active: coverPreview === img.url }"
+                :title="img.title"
+                @click="selectBingImage(img)"
+              >
+                <img :src="img.url" :alt="img.title" loading="lazy" />
+                <span class="bing-date">{{ img.date }}</span>
+              </div>
+            </div>
+            <div v-else class="bing-empty">暂无图片</div>
           </div>
           <div v-if="coverPreview" style="position: relative; margin-top: 10px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line);">
             <img :src="coverPreview" style="width: 100%; aspect-ratio: 21/9; object-fit: cover; display: block;" />
@@ -127,9 +153,9 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { EditPen, Promotion, CopyDocument, Upload, Loading, MagicStick } from '@element-plus/icons-vue'
+import { EditPen, Promotion, CopyDocument, Upload, Loading, MagicStick, Picture } from '@element-plus/icons-vue'
 import WechatRichEditor from '@/components/ui/WechatRichEditor.vue'
-import { get, createWechatDraft, generateWechatCover } from '@/api/api'
+import { get, createWechatDraft, generateWechatCover, getBingImages } from '@/api/api'
 
 const router = useRouter()
 
@@ -155,6 +181,12 @@ const coverBase64 = ref('')
 const coverFile = ref(null)
 const generatingCover = ref(false)
 const coverError = ref('')
+
+// Bing 每日一图
+const bingPickerOpen = ref(false)
+const bingLoading = ref(false)
+const bingImages = ref([])
+const bingError = ref('')
 
 // 从 API 加载公众号账号配置
 const defaultAccountId = ref(null)
@@ -350,6 +382,35 @@ const handleGenerateCover = async () => {
   }
 }
 
+// Bing 每日一图
+const toggleBingPicker = async () => {
+  if (bingPickerOpen.value) {
+    bingPickerOpen.value = false
+    return
+  }
+  bingPickerOpen.value = true
+  if (bingImages.value.length) return  // 已加载过则不重复请求
+  bingLoading.value = true
+  bingError.value = ''
+  try {
+    const res = await getBingImages(15)
+    const data = res.data || res
+    bingImages.value = data.images || []
+    if (!bingImages.value.length) bingError.value = '暂无每日一图'
+  } catch (e) {
+    bingError.value = e?.response?.data?.detail || '获取每日一图失败，请重试'
+  } finally {
+    bingLoading.value = false
+  }
+}
+const selectBingImage = (img) => {
+  coverPreview.value = img.url
+  coverBase64.value = ''   // 远程 URL，发布走 cover_image_url 分支
+  coverFile.value = null
+  coverError.value = ''
+  bingPickerOpen.value = false
+}
+
 // 发布
 const handlePublish = async () => {
   if (!wechatConfigured.value || !defaultAccountId.value) {
@@ -515,6 +576,18 @@ const handlePublish = async () => {
 .cover-btn-ai { border: 1.5px solid var(--clay); background: var(--clay); color: #fff; }
 .cover-btn-ai:hover:not([disabled]) { background: var(--clay-deep); }
 .cover-btn-ai[disabled] { opacity: 0.5; cursor: not-allowed; }
+.cover-btn-bing { border: 1.5px solid var(--clay); background: var(--clay); color: #fff; }
+.cover-btn-bing:hover:not([disabled]) { background: var(--clay-deep); }
+.cover-btn-bing[disabled] { opacity: 0.5; cursor: not-allowed; }
+.bing-picker { margin-top: 10px; }
+.bing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.bing-item { position: relative; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; cursor: pointer; border: 2px solid transparent; transition: all 0.15s; }
+.bing-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bing-item:hover { border-color: var(--clay-soft); }
+.bing-item.active { border-color: var(--clay); }
+.bing-date { position: absolute; bottom: 0; left: 0; right: 0; padding: 2px 4px; font-size: 10px; color: #fff; background: rgba(0,0,0,.45); text-align: center; }
+.bing-error, .bing-empty { font-size: 13px; color: var(--ink-4); text-align: center; padding: 16px 0; }
+.bing-error { color: var(--crimson); }
 
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

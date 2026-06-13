@@ -207,28 +207,38 @@ async def test_wechat_connection(
 
 @router.get("/bing-images")
 async def get_bing_images(
-    n: int = 7,
+    n: int = 15,
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """获取 Bing 每日一图列表（最近 n 张，横屏 1920×1080）。
 
     通过后端代理 Bing 官方 HPImageArchive 接口，避免前端直接请求的 CORS 问题。
+    官方单次最多返回 8 张、idx 最多翻到 8，因此分页请求并按日期去重，最多约 15 天。
     """
     import httpx
 
-    n = max(1, min(n, 8))  # Bing 官方最多返回 8 张
-    api_url = (
-        "https://www.bing.com/HPImageArchive.aspx"
-        f"?format=js&idx=0&n={n}&mkt=zh-CN"
-    )
+    n = max(1, min(n, 15))  # Bing 官方约能回溯 15 天
     try:
+        raw_items = []
         async with httpx.AsyncClient(timeout=15, verify=False) as client:
-            resp = await client.get(api_url)
-            resp.raise_for_status()
-            data = resp.json()
+            for idx in (0, 8):
+                api_url = (
+                    "https://www.bing.com/HPImageArchive.aspx"
+                    f"?format=js&idx={idx}&n=8&mkt=zh-CN"
+                )
+                resp = await client.get(api_url)
+                resp.raise_for_status()
+                raw_items.extend(resp.json().get("images", []))
+                if len(raw_items) >= n + 1:
+                    break
 
         images = []
-        for item in data.get("images", []):
+        seen_dates = set()
+        for item in raw_items:
+            sd = item.get("startdate", "")
+            if sd in seen_dates:  # 分页之间会有重叠，按日期去重
+                continue
+            seen_dates.add(sd)
             url_base = item.get("urlbase", "")
             # urlbase 形如 /th?id=OHR.xxx，拼成 1920×1080 横屏图
             if url_base:
@@ -236,13 +246,14 @@ async def get_bing_images(
             else:
                 full_url = f"https://www.bing.com{item.get('url', '')}"
             # startdate 形如 20240613 → 2024-06-13
-            sd = item.get("startdate", "")
             date = f"{sd[:4]}-{sd[4:6]}-{sd[6:]}" if len(sd) == 8 else sd
             images.append({
                 "url": full_url,
                 "title": item.get("copyright", "") or item.get("title", ""),
                 "date": date,
             })
+            if len(images) >= n:
+                break
 
         return {
             "code": 200,

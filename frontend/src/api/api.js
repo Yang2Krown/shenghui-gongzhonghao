@@ -205,10 +205,10 @@ export const generateWechatCover = (title, content, style) => {
 
 /**
  * 获取 Bing 每日一图列表（最近 n 张，横屏）
- * @param {number} [n=7] - 数量，最多 8
+ * @param {number} [n=15] - 数量，最多 15
  * @returns {Promise<{images: Array<{url: string, title: string, date: string}>}>}
  */
-export const getBingImages = (n = 7) => {
+export const getBingImages = (n = 15) => {
   return api.get('/wechat-draft/bing-images', { params: { n }, timeout: 20000 })
 }
 
