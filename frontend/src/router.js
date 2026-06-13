@@ -239,6 +239,12 @@ const routes = [
     ]
   },
   {
+    path: '/landing',
+    name: 'Landing',
+    component: () => import('@/pages/Landing.vue'),
+    meta: { title: '公众号智能体 — 从选题到发布，AI 全程帮你搞定' }
+  },
+  {
     path: '/login',
     name: 'Login',
     component: () => import('@/pages/auth/Login.vue'),
@@ -270,7 +276,7 @@ const router = createRouter({
 })
 
 // 不需要登录的页面
-const PUBLIC_ROUTES = ['Login', 'Register', 'NotFound']
+const PUBLIC_ROUTES = ['Login', 'Register', 'NotFound', 'Landing']
 
 // 全局前置守卫
 router.beforeEach((to, from, next) => {
@@ -280,11 +286,16 @@ router.beforeEach((to, from, next) => {
   const isPublic = PUBLIC_ROUTES.includes(to.name)
 
   if (!isPublic && !userStore.isAuthenticated) {
-    next({
-      name: 'Login',
-      query: { redirect: to.fullPath }
-    })
-  } else if (isPublic && userStore.isAuthenticated && to.name === 'Login') {
+    // 未登录访问首页 → 跳 Landing，其他页面跳登录
+    if (to.name === 'Home') {
+      next({ name: 'Landing' })
+    } else {
+      next({
+        name: 'Login',
+        query: { redirect: to.fullPath }
+      })
+    }
+  } else if (isPublic && userStore.isAuthenticated && (to.name === 'Login' || to.name === 'Landing')) {
     next({ path: '/' })
   } else {
     next()
