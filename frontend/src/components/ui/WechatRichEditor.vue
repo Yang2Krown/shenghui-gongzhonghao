@@ -141,6 +141,7 @@ function _showSpacingPopup(editor, type, btnEl) {
   // 在 popup 出现前锁定当前段落路径，避免 editor blur 后 selection 丢失
   const savedPath = editor.selection?.anchor?.path?.[0] ?? _lastKnownPath
   if (savedPath == null) return
+  // 保存选区，以便 popup 关闭后恢复焦点
   document.querySelectorAll('.spacing-popup').forEach(el => el.remove())
   const popup = document.createElement('div')
   popup.className = 'spacing-popup'
@@ -152,14 +153,25 @@ function _showSpacingPopup(editor, type, btnEl) {
     opt.style.cssText = `padding:6px 16px;font-size:13px;text-align:center;cursor:pointer;${v === currentVal ? 'color:#CC785C;font-weight:600;background:#fdf5f0;' : 'color:#333;'}`
     opt.onmouseenter = () => { opt.style.background = '#f5f5f5' }
     opt.onmouseleave = () => { opt.style.background = v === currentVal ? '#fdf5f0' : '#fff' }
-    opt.onclick = () => { _applySpacingToDOM(editor, type, v, savedPath); popup.remove() }
+    opt.onmousedown = (e) => { e.preventDefault(); e.stopPropagation() }  // 阻止编辑器 blur
+    opt.onclick = () => {
+      _applySpacingToDOM(editor, type, v, savedPath)
+      popup.remove()
+      editor.focus()  // 恢复编辑器焦点
+    }
     popup.appendChild(opt)
   }
   document.body.appendChild(popup)
   const rect = btnEl.getBoundingClientRect()
   popup.style.left = rect.left + 'px'
   popup.style.top = (rect.bottom + 4) + 'px'
-  const close = (e) => { if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('click', close) } }
+  const close = (e) => {
+    if (!popup.contains(e.target)) {
+      popup.remove()
+      document.removeEventListener('click', close)
+      editor.focus()
+    }
+  }
   setTimeout(() => document.addEventListener('click', close), 0)
 }
 
@@ -664,7 +676,7 @@ function convertToWechatHtml(html, spBefore, spAfter, spacingMap) {
       section.style.backgroundColor = '#000000'
       section.style.lineHeight = '1.75'
       section.style.padding = '2px 6px'
-      section.style.marginBottom = '16px'
+      section.style.marginBottom = '24px'
     } else {
       // h3-h6 小标题：18px 加粗
       section.style.fontSize = '18px'
@@ -855,7 +867,7 @@ function cleanPunctuation(block) {
   line-height: 24px;
 }
 /* 段前/段后距由 inline style 控制，不走 CSS 规则 */
-/* 编辑器内 H2 样式：黑底白字，用 inline-block 让 margin 生效 */
+/* 编辑器内 H2 样式：黑底白字，用 inline-block 让 margin 生效；段后距 24px */
 .wechat-editor-content :deep(.w-e-text-container h2),
 .wechat-editor-content :deep(.w-e-text-container [data-slate-editor] h2) {
   display: inline-block;
@@ -866,7 +878,7 @@ function cleanPunctuation(block) {
   background-color: #000000;
   line-height: 1.75;
   padding: 2px 6px;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
 }
 /* 表格样式 —— 模拟公众号渲染 */
 .wechat-editor-content :deep(.w-e-text-container table) {

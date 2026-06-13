@@ -640,14 +640,14 @@ const handleSaveDraft = () => {
 }
 
 // 发布到公众号编辑器
-const handlePublishToEditor = () => {
+const handlePublishToEditor = async () => {
   const text = editableText.value || result.value?.final_text || ''
   // 多模型模式下用选中模型的数据
   const finalText = multiModelResult.value && selectedModelData.value
     ? (selectedModelData.value.final_text || text)
     : text
   // 润色结果作为正文，用户输入的标题保留
-  publishToWechatEditor(router, finalText, title.value)
+  await publishToWechatEditor(router, finalText, title.value)
 }
 
 // 简易 markdown 渲染

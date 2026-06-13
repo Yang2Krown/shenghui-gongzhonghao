@@ -586,7 +586,7 @@ const handlePublishToEditor = () => {
   const fullText = inputContent
     ? `${inputContent}\n\n${continuation}`
     : continuation
-  publishToWechatEditor(router, fullText, '')
+  await publishToWechatEditor(router, fullText, '')
 }
 
 onUnmounted(() => {
@@ -786,3 +786,4 @@ onUnmounted(() => {
   background: rgba(184, 84, 80, 0.03);
 }
 </style>
+const handlePublishToEditor = async () => {

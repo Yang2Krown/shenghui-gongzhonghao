@@ -1,8 +1,11 @@
 /**
  * 发布到公众号编辑器的共享工具
  * - markdown → 语义 HTML 转换
+ * - LLM 智能换行
  * - sessionStorage 写入 + 路由跳转
  */
+import { formatParagraphs } from '@/api/api'
+import { ElLoading } from 'element-plus'
 
 /**
  * 纯文本 / markdown → 语义 HTML
@@ -35,16 +38,43 @@ export function textToHtml(text) {
  * @param {object} router - Vue Router 实例（useRouter() 的返回值）
  * @param {string} text - 正文纯文本/markdown
  * @param {string} title - 文章标题
+ * @returns {Promise<void>}
  */
-export function publishToWechatEditor(router, text, title) {
-  const html = textToHtml(text)
-  console.log('[publishToWechatEditor]', {
-    textLength: text?.length || 0,
-    htmlLength: html.length,
-    title,
-    textPreview: (text || '').slice(0, 100),
+export async function publishToWechatEditor(router, text, title) {
+  const loading = ElLoading.service({
+    fullscreen: true,
+    lock: true,
+    text: '正在智能排版中…',
+    background: 'rgba(255,255,255,0.85)',
   })
-  sessionStorage.setItem('wechat_editor_content', html)
-  sessionStorage.setItem('wechat_editor_title', title || '')
-  router.push('/creation/wechat-editor')
+
+  try {
+    console.log('[publishToWechatEditor] 开始', {
+      textLength: text?.length || 0,
+      title,
+    })
+
+    let finalText = text || ''
+
+    // 调用 LLM 做智能换行（内容不变，只插入段落分隔）
+    if (finalText.length >= 120) {
+      try {
+        const res = await formatParagraphs(finalText)
+        const formatted = res.data?.content || res.data || ''
+        if (formatted && formatted.length > 0) {
+          finalText = formatted
+          console.log('[publishToWechatEditor] LLM 换行完成', { newLength: finalText.length })
+        }
+      } catch (e) {
+        console.warn('[publishToWechatEditor] 换行失败，使用原文:', e?.message)
+      }
+    }
+
+    const html = textToHtml(finalText)
+    sessionStorage.setItem('wechat_editor_content', html)
+    sessionStorage.setItem('wechat_editor_title', title || '')
+    router.push('/creation/wechat-editor')
+  } finally {
+    loading.close()
+  }
 }

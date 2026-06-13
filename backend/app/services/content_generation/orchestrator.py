@@ -251,6 +251,8 @@ async def generate_content(
     final_text = re.sub(r'^\s*[\[【](?:引入|正文|总结|引言|结尾|概述|结语|开头|主体|中间|结尾段)[\]】]\s*', '', final_text, flags=re.MULTILINE)
     # 去掉 "第X节" 前缀
     final_text = re.sub(r'^\s*第[一二三四五六七八九十\d]+节\s*', '', final_text, flags=re.MULTILINE)
+    # 去除不必要的排版符号（双引号""、单引号''、《》、——），公众号排版更干净
+    final_text = _clean_punctuation(final_text)
 
     # 更新金句文本匹配
     updated_gold_sentences = _update_gold_sentences_for_rewritten_text(

@@ -662,7 +662,7 @@ const handlePublishToEditor = () => {
     .map(s => s.fileText.trim())
   const allSources = [...sourceTexts, ...linkTexts, ...fileTexts].join('\n\n')
   const fullText = angleText + (allSources ? `\n\n${allSources}` : '')
-  publishToWechatEditor(router, fullText, angle?.title || '')
+  await publishToWechatEditor(router, fullText, angle?.title || '')
 }
 
 // 评分维度
@@ -889,3 +889,4 @@ const reshuffleCandidates = () => {
 .angle-swap-enter-from { opacity: 0; transform: translateY(8px); }
 .angle-swap-leave-to { opacity: 0; transform: translateY(-8px); }
 </style>
+const handlePublishToEditor = async () => {

@@ -119,6 +119,7 @@ import PublishChoiceDialog from '@/components/PublishChoiceDialog.vue'
 import outlineApi from '@/api/outline'
 import generationRecordApi from '@/api/generationRecord'
 import { get } from '@/api/api'
+import { publishToWechatEditor } from '@/utils/publishToEditor'
 
 const route = useRoute()
 const router = useRouter()
@@ -514,41 +515,8 @@ const handlePublishAfterTitle = async () => {
   if (!finalText) {
     ElMessage.warning('正文内容为空，编辑器将只显示标题。请先完成正文生成或在编辑器中手动输入。')
   }
-  // 纯文本 → HTML（markdown 风格转语义 HTML，由编辑器负责最终公众号格式）
-  const textToHtml = (text) => {
-    if (!text) return ''
-    // 已经是 HTML
-    if (/<(p|h[1-6]|section|div)[\s>]/i.test(text)) return text
-    // 先清理：剥掉金句种子前缀、金句清单等 LLM 残留
-    let cleaned = text
-      .replace(/金句种子[：:]\s*/g, '')
-      .replace(/【金句清单[^】]*】[\s\S]*$/g, '')
-      .trim()
-    return cleaned
-      .split(/\n\n+/)
-      .map((para) => {
-        const t = para.trim()
-        if (!t) return ''
-        // H2：输出语义 <h2>，编辑器内显示为标题，导出时转公众号格式
-        if (t.startsWith('## ')) {
-          return `<h2>${t.slice(3).trim()}</h2>`
-        }
-        if (t.startsWith('### ')) {
-          return `<h3>${t.slice(4).trim()}</h3>`
-        }
-        if (t.startsWith('# ')) {
-          return `<h2>${t.slice(2).trim()}</h2>`
-        }
-        return `<p>${t.replace(/\n/g, '<br>')}</p>`
-      })
-      .join('\n')
-  }
-  try {
-    sessionStorage.setItem('wechat_editor_content', textToHtml(finalText))
-    sessionStorage.setItem('wechat_editor_title', titleText)
-  } catch { /* ignore */ }
-  // 跳转到公众号编辑器
-  router.push('/creation/wechat-editor')
+  // 发布到公众号编辑器（内含 LLM 智能换行 + loading 动画）
+  await publishToWechatEditor(router, finalText, titleText)
 }
 
 // 从 ContentPanel 触发保存草稿（携带当前编辑内容）

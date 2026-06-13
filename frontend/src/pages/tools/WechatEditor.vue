@@ -258,7 +258,7 @@ const oneClickFormat = () => {
       block.style.backgroundColor = '#000000'
       block.style.lineHeight = '1.75'
       block.style.padding = '2px 6px'
-      block.style.marginBottom = '16px'
+      block.style.marginBottom = '24px'
       block.style.textAlign = 'left'
     } else if (tag !== 'li' && tag !== 'blockquote') {
       // 5. 正常段落：16px 两端对齐，段前0 段后24

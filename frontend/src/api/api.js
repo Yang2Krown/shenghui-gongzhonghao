@@ -260,4 +260,13 @@ export const clickXhsPublish = () => {
   return api.post('/xhs-publish/click-publish', {}, { timeout: 30000 })
 }
 
+/**
+ * 智能换行：LLM 对正文做段落拆分，保证内容不变
+ * @param {string} content - 纯文本/markdown 正文
+ * @returns {Promise<{content: string}>}
+ */
+export const formatParagraphs = (content) => {
+  return api.post('/creation-tools/format-paragraphs', { content }, { timeout: 120000 })
+}
+
 export default api

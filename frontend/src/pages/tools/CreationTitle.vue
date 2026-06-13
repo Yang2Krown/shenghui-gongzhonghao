@@ -579,7 +579,7 @@ const handlePublishToEditor = () => {
     inputContent: inputContent.length,
     selectedTitle: selectedPublishTitle.value,
   })
-  publishToWechatEditor(router, inputContent, selectedPublishTitle.value)
+  await publishToWechatEditor(router, inputContent, selectedPublishTitle.value)
 }
 
 onUnmounted(() => {
@@ -767,3 +767,4 @@ onUnmounted(() => {
   background: rgba(184, 84, 80, 0.03);
 }
 </style>
+const handlePublishToEditor = async () => {
