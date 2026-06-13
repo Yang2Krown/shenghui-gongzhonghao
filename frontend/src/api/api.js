@@ -203,6 +203,15 @@ export const generateWechatCover = (title, content, style) => {
   return api.post('/wechat-draft/generate-cover', { title, content, style }, { timeout: 120000 })
 }
 
+/**
+ * 获取 Bing 每日一图列表（最近 n 张，横屏）
+ * @param {number} [n=7] - 数量，最多 8
+ * @returns {Promise<{images: Array<{url: string, title: string, date: string}>}>}
+ */
+export const getBingImages = (n = 7) => {
+  return api.get('/wechat-draft/bing-images', { params: { n }, timeout: 20000 })
+}
+
 // ==================== 小红书发布相关 API ====================
 
 /**

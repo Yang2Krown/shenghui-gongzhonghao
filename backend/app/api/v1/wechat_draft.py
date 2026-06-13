@@ -205,6 +205,55 @@ async def test_wechat_connection(
         }
 
 
+@router.get("/bing-images")
+async def get_bing_images(
+    n: int = 7,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """获取 Bing 每日一图列表（最近 n 张，横屏 1920×1080）。
+
+    通过后端代理 Bing 官方 HPImageArchive 接口，避免前端直接请求的 CORS 问题。
+    """
+    import httpx
+
+    n = max(1, min(n, 8))  # Bing 官方最多返回 8 张
+    api_url = (
+        "https://www.bing.com/HPImageArchive.aspx"
+        f"?format=js&idx=0&n={n}&mkt=zh-CN"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=15, verify=False) as client:
+            resp = await client.get(api_url)
+            resp.raise_for_status()
+            data = resp.json()
+
+        images = []
+        for item in data.get("images", []):
+            url_base = item.get("urlbase", "")
+            # urlbase 形如 /th?id=OHR.xxx，拼成 1920×1080 横屏图
+            if url_base:
+                full_url = f"https://www.bing.com{url_base}_1920x1080.jpg"
+            else:
+                full_url = f"https://www.bing.com{item.get('url', '')}"
+            # startdate 形如 20240613 → 2024-06-13
+            sd = item.get("startdate", "")
+            date = f"{sd[:4]}-{sd[4:6]}-{sd[6:]}" if len(sd) == 8 else sd
+            images.append({
+                "url": full_url,
+                "title": item.get("copyright", "") or item.get("title", ""),
+                "date": date,
+            })
+
+        return {
+            "code": 200,
+            "message": "获取成功",
+            "data": {"images": images},
+        }
+    except Exception as e:
+        logger.error(f"获取 Bing 每日一图失败: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail="获取每日一图失败，请重试")
+
+
 @router.post("/generate-cover")
 async def generate_cover(
     request: GenerateCoverRequest,
