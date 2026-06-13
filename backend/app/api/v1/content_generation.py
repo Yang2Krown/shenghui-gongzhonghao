@@ -72,30 +72,12 @@ class GoldSentenceResponse(BaseModel):
     word_count: int
 
 
-class FactualSummaryResponse(BaseModel):
-    """事实总结响应。"""
-    summary_text: str
-    potential_errors: list[dict]
-    total_claims_checked: int
-    error_count: int
-
-
-class FactualCorrectionResponse(BaseModel):
-    """联网纠错响应。"""
-    corrected_word_count: int
-    corrections: list[dict]
-    total_corrections: int
-    high_confidence_corrections: int
-
-
 class ContentGenerationResponse(BaseModel):
     """正文生成响应。"""
     final_text: str
     final_word_count: int
     section_count: int
     gold_sentences: list[GoldSentenceResponse]
-    factual_summary: Optional[FactualSummaryResponse] = None
-    factual_corrections: Optional[FactualCorrectionResponse] = None
     rewrite_count: int
     style_anchor: str
 
@@ -208,37 +190,17 @@ async def generate_content_async(
                     topic_direction=candidate.direction,
                     topic_routine=candidate.routine,
                     value_promise=candidate.value_promise,
-                    source_summary=source_summary,
+                    source_summary=source_summary,  # 资讯总结兜底（搜集不到原始资讯时用）
                     sections=sections,
                     style_params=style_params,
                     user_id=current_user.id,
+                    candidate_id=req.candidate_id,  # 让 Step 1 资讯总结读该话题的原始资讯
                 )
 
                 async def _progress_cb(event):
                     await progress_store.push(run_id, event)
 
                 output = await cg_generate(inp, progress_callback=_progress_cb, db_session=bg_db)
-
-                # 发送结果数据
-                factual_summary_data = None
-                if output.factual_summary:
-                    fs = output.factual_summary
-                    factual_summary_data = {
-                        "summary_text": fs.summary_text,
-                        "potential_errors": [{"claim": e.claim, "error_type": e.error_type, "section_number": e.section_number, "reason": e.reason, "search_query": e.search_query} for e in fs.potential_errors],
-                        "total_claims_checked": fs.total_claims_checked,
-                        "error_count": fs.error_count,
-                    }
-
-                factual_corrections_data = None
-                if output.factual_corrections:
-                    fc = output.factual_corrections
-                    factual_corrections_data = {
-                        "corrected_word_count": fc.corrected_word_count,
-                        "corrections": [{"original_claim": c.original_claim, "corrected_claim": c.corrected_claim, "error_type": c.error_type, "section_number": c.section_number, "search_result": c.search_result, "confidence": c.confidence} for c in fc.corrections],
-                        "total_corrections": fc.total_corrections,
-                        "high_confidence_corrections": fc.high_confidence_corrections,
-                    }
 
                 await progress_store.push(run_id, {
                     "event": "result",
@@ -273,8 +235,6 @@ async def generate_content_async(
                             }
                             for it in (output.rewrite_table or [])
                         ],
-                        "factual_summary": factual_summary_data,
-                        "factual_corrections": factual_corrections_data,
                     },
                 })
                 await track_complete(run_id, {
@@ -287,8 +247,6 @@ async def generate_content_async(
                         {"sentence_id": s.sentence_id, "sentence_type": s.sentence_type, "location": s.location, "content": s.content, "word_count": s.word_count}
                         for s in output.gold_sentences
                     ],
-                    "factual_summary": factual_summary_data,
-                    "factual_corrections": factual_corrections_data,
                 })
                 
                 # 成功后扣减积分
@@ -463,26 +421,6 @@ async def generate_content_adhoc(
                 output = await cg_generate(inp, progress_callback=_progress_cb, db_session=bg_db)
 
                 # 格式化结果
-                factual_summary_data = None
-                if output.factual_summary:
-                    fs = output.factual_summary
-                    factual_summary_data = {
-                        "summary_text": fs.summary_text,
-                        "potential_errors": [{"claim": e.claim, "error_type": e.error_type, "section_number": e.section_number, "reason": e.reason, "search_query": e.search_query} for e in fs.potential_errors],
-                        "total_claims_checked": fs.total_claims_checked,
-                        "error_count": fs.error_count,
-                    }
-
-                factual_corrections_data = None
-                if output.factual_corrections:
-                    fc = output.factual_corrections
-                    factual_corrections_data = {
-                        "corrected_word_count": fc.corrected_word_count,
-                        "corrections": [{"original_claim": c.original_claim, "corrected_claim": c.corrected_claim, "error_type": c.error_type, "section_number": c.section_number, "search_result": c.search_result, "confidence": c.confidence} for c in fc.corrections],
-                        "total_corrections": fc.total_corrections,
-                        "high_confidence_corrections": fc.high_confidence_corrections,
-                    }
-
                 result_data = {
                     "final_text": output.final_text,
                     "final_word_count": output.final_word_count,
@@ -512,8 +450,6 @@ async def generate_content_adhoc(
                         }
                         for it in (output.rewrite_table or [])
                     ],
-                    "factual_summary": factual_summary_data,
-                    "factual_corrections": factual_corrections_data,
                 }
 
                 await progress_store.push(run_id, {
@@ -530,8 +466,6 @@ async def generate_content_adhoc(
                         {"sentence_id": s.sentence_id, "sentence_type": s.sentence_type, "location": s.location, "content": s.content, "word_count": s.word_count}
                         for s in output.gold_sentences
                     ],
-                    "factual_summary": factual_summary_data,
-                    "factual_corrections": factual_corrections_data,
                 })
             except Exception as e:
                 await progress_store.push(run_id, {
@@ -654,18 +588,6 @@ async def generate_content_sync(
                 )
                 for s in output.gold_sentences
             ],
-            factual_summary=FactualSummaryResponse(
-                summary_text=output.factual_summary.summary_text,
-                potential_errors=[{"claim": e.claim, "error_type": e.error_type, "section_number": e.section_number, "reason": e.reason, "search_query": e.search_query} for e in output.factual_summary.potential_errors] if output.factual_summary else [],
-                total_claims_checked=output.factual_summary.total_claims_checked if output.factual_summary else 0,
-                error_count=output.factual_summary.error_count if output.factual_summary else 0,
-            ) if output.factual_summary else None,
-            factual_corrections=FactualCorrectionResponse(
-                corrected_word_count=output.factual_corrections.corrected_word_count,
-                corrections=[{"original_claim": c.original_claim, "corrected_claim": c.corrected_claim, "error_type": c.error_type, "section_number": c.section_number, "search_result": c.search_result, "confidence": c.confidence} for c in output.factual_corrections.corrections] if output.factual_corrections else [],
-                total_corrections=output.factual_corrections.total_corrections if output.factual_corrections else 0,
-                high_confidence_corrections=output.factual_corrections.high_confidence_corrections if output.factual_corrections else 0,
-            ) if output.factual_corrections else None,
             rewrite_count=output.agent_c_rewrite_count,
             style_anchor=output.style_anchor,
         ).dict(),

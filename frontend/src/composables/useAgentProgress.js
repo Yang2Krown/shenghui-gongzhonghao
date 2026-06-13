@@ -60,13 +60,17 @@ export function useAgentProgress() {
   function _applySnapshot(d) {
     if (Array.isArray(d.steps) && d.steps.length) {
       steps.value = d.steps.map((s) => ({
+        step: s.step,
         agent: s.agent,
         action: s.action || '',
         avatar: s.avatar || '',
       }))
     }
 
-    const curIdx = (d.current_step || 0) - 1
+    // 按步骤号在数组里找真实位置，容错步骤号断层/0 基/缺省（如正文跳过 Agent E 后是 0,1,2,3,5）。
+    // 找不到时回退到旧的「current_step - 1」逻辑。
+    let curIdx = steps.value.findIndex((s) => s.step === d.current_step)
+    if (curIdx < 0) curIdx = (d.current_step || 0) - 1
     if (curIdx >= 0 && curIdx !== currentStepIndex.value) {
       if (currentStepIndex.value < 0) {
         // 首步直接出现，不触发补满-归零动画

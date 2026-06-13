@@ -152,8 +152,6 @@ def generate_article_task(
         # 保存诊断报告到 creation 的 tags 或单独的表
         # 这里暂时用 tags 存储关键信息
         creation.tags = [
-            f"errors:{output.agent_d_error_count}",
-            f"corrections:{output.agent_e_correction_count}",
             f"gold:{len(output.gold_sentences)}",
             f"rewrite:{len(output.rewrite_table)}",
         ]
@@ -162,15 +160,12 @@ def generate_article_task(
 
         logger.info(
             f"正文生成完成，creation_id: {creation.id}，"
-            f"字数: {output.final_word_count}，"
-            f"纠错: {output.agent_e_correction_count} 处"
+            f"字数: {output.final_word_count}"
         )
 
         return {
             "creation_id": creation.id,
             "final_word_count": output.final_word_count,
-            "error_count": output.agent_d_error_count,
-            "correction_count": output.agent_e_correction_count,
             "gold_sentence_count": len(output.gold_sentences),
             "rewrite_count": len(output.rewrite_table),
         }

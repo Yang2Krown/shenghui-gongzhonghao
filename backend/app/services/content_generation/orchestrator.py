@@ -1,7 +1,7 @@
 """正文生成编排器。
 
-串联 Agent A → B → D → E → C，完成从选题+大纲到最终正文的全流程。
-5 步：生成正文 → 金句催化 → 事实总结 → 联网纠错 → 去 AI 味
+串联 资讯总结 → Agent A → Agent B → Agent C，完成从选题+大纲到最终正文的全流程。
+4 步：资讯总结（防幻觉事实清单）→ 写正文 → 造金句 → 去 AI 味
 """
 
 import logging
@@ -16,7 +16,6 @@ from app.services.content_generation.schemas import (
 )
 from app.services.content_generation.agent_a_writer import generate_article
 from app.services.content_generation.agent_b_gold_sentence import catalyze_gold_sentences
-from app.services.content_generation.agent_d_inspector import summarize_factual_errors
 from app.services.content_generation.agent_c_deai import deai_rewrite
 
 logger = logging.getLogger(__name__)
@@ -101,7 +100,11 @@ async def generate_content(
     progress_callback: Optional[Callable] = None,
     db_session=None,
 ) -> ContentGenerationOutput:
-    """正文生成主流程：Phase 0（事实搜集）→ Agent A → B → D → E → C。
+    """正文生成主流程：资讯总结（Step 1）→ Agent A → Agent B → Agent C。
+
+    资讯总结：读取该话题已落库的原始资讯（或用户上传的素材），提炼一份简短的
+    防幻觉事实清单（时间/地点/事件/人物/产品名等），贯穿写正文及后续步骤，
+    防止大模型幻觉。
 
     Args:
         inp: 正文生成总输入（选题 + 大纲 + 标题 + 风格参数）
@@ -109,7 +112,7 @@ async def generate_content(
         db_session: 数据库会话（用于查询 RawInfo，可选）
 
     Returns:
-        ContentGenerationOutput: 最终正文 + 金句 + 改写对照表 + 事实纠错报告
+        ContentGenerationOutput: 最终正文 + 金句 + 改写对照表
 
     Raises:
         ValueError: 输入校验失败
@@ -119,13 +122,13 @@ async def generate_content(
     logger.info(f"[正文生成] 开始，标题: {inp.topic_title}")
 
     # ──────────────────────────────────────────
-    # Phase 0: 事实素材搜集
+    # Step 1: 资讯总结（读原始资讯，提炼防幻觉事实清单）
     # ──────────────────────────────────────────
     source_material_text = inp.source_materials  # 已有则跳过
     if not source_material_text and inp.candidate_id and db_session:
-        logger.info("[正文生成] Phase 0: 搜集事实素材")
+        logger.info("[正文生成] Step 1/4: 资讯总结，提炼事实清单")
         if progress_callback:
-            await progress_callback({"event": "step_start", "data": {"step": 0, "agent": "沈觅源 · 素材搜集员", "action": "正在从原始报道中提取事实...", "avatar": "/agents/source.png"}})
+            await progress_callback({"event": "step_start", "data": {"step": 1, "agent": "沈觅源 · 资讯总结员", "action": "正在通读原始资讯，提炼关键事实...", "avatar": "/agents/source.png"}})
         try:
             from app.services.content_generation.source_collector import collect_source_materials
             # 查询 candidate 的 cluster_id
@@ -163,18 +166,18 @@ async def generate_content(
             logger.error(f"[正文生成] 事实搜集失败（不影响主流程）: {e}")
 
         if progress_callback:
-            await progress_callback({"event": "step_done", "data": {"step": 0, "agent": "沈觅源 · 素材搜集员"}})
+            await progress_callback({"event": "step_done", "data": {"step": 1, "agent": "沈觅源 · 资讯总结员"}})
 
     # 将素材包注入 inp（不影响原始 inp，创建副本）
     if source_material_text:
         inp = inp.model_copy(update={"source_materials": source_material_text})
 
     # ──────────────────────────────────────────
-    # Step 1: Agent A — 正文创作员
+    # Step 2: Agent A — 正文创作员
     # ──────────────────────────────────────────
-    logger.info("[正文生成] Step 1/5: Agent A 生成正文骨干")
+    logger.info("[正文生成] Step 2/4: Agent A 生成正文骨干")
     if progress_callback:
-        await progress_callback({"event": "step_start", "data": {"step": 1, "agent": "温如言 · 正文创作员", "action": "正在按节撰写初稿...", "avatar": "/agents/content-a.png"}})
+        await progress_callback({"event": "step_start", "data": {"step": 2, "agent": "温如言 · 正文创作员", "action": "正在按节撰写初稿...", "avatar": "/agents/content-a.png"}})
     try:
         agent_a_output = await generate_article(inp)
     except Exception as e:
@@ -182,7 +185,7 @@ async def generate_content(
         raise RuntimeError(f"正文生成失败（Agent A）: {e}") from e
 
     if progress_callback:
-        await progress_callback({"event": "step_done", "data": {"step": 1, "agent": "Agent A"}})
+        await progress_callback({"event": "step_done", "data": {"step": 2, "agent": "Agent A"}})
 
     # 异常处理：字数严重不足
     if agent_a_output.total_word_count < 1700:
@@ -192,11 +195,11 @@ async def generate_content(
         )
 
     # ──────────────────────────────────────────
-    # Step 2: Agent B — 金句催化员
+    # Step 3: Agent B — 金句催化员
     # ──────────────────────────────────────────
-    logger.info("[正文生成] Step 2/5: Agent B 催化金句")
+    logger.info("[正文生成] Step 3/4: Agent B 催化金句")
     if progress_callback:
-        await progress_callback({"event": "step_start", "data": {"step": 2, "agent": "居怀金 · 正文催化员", "action": "正在催化 3-5 个金句...", "avatar": "/agents/content-b.png"}})
+        await progress_callback({"event": "step_start", "data": {"step": 3, "agent": "居怀金 · 正文催化员", "action": "正在催化 3-5 个金句...", "avatar": "/agents/content-b.png"}})
     try:
         agent_b_output = await catalyze_gold_sentences(
             agent_a_output=agent_a_output,
@@ -211,57 +214,25 @@ async def generate_content(
         gs.content = _clean_punctuation(gs.content)
 
     if progress_callback:
-        await progress_callback({"event": "step_done", "data": {"step": 2, "agent": "Agent B"}})
+        await progress_callback({"event": "step_done", "data": {"step": 3, "agent": "Agent B"}})
 
     # ──────────────────────────────────────────
-    # Step 3: Agent D — 事实总结员
+    # Step 4: Agent C — 去 AI 味改写员
     # ──────────────────────────────────────────
-    logger.info("[正文生成] Step 3/5: Agent D 事实性错误扫描")
+    logger.info("[正文生成] Step 4/4: Agent C 去 AI 味改写")
     if progress_callback:
-        await progress_callback({"event": "step_start", "data": {"step": 3, "agent": "韩知微 · 事实总结员", "action": "正在扫描事实性陈述...", "avatar": "/agents/content-d.png"}})
-    try:
-        agent_d_output = await summarize_factual_errors(
-            inp=inp,
-            agent_a_output=agent_a_output,
-            agent_b_output=agent_b_output,
-        )
-    except Exception as e:
-        logger.error(f"[正文生成] Agent D 失败: {e}")
-        raise RuntimeError(f"正文生成失败（Agent D）: {e}") from e
-
-    if progress_callback:
-        await progress_callback({"event": "step_done", "data": {"step": 3, "agent": "Agent D"}})
-
-    # ──────────────────────────────────────────
-    # Step 4: Agent E — 联网纠错（已禁用，Kimi API 持续报错）
-    # ──────────────────────────────────────────
-    from app.services.content_generation.schemas import AgentEOutput
-    agent_e_output = AgentEOutput(
-        corrected_text=agent_a_output.full_text,
-        corrected_word_count=agent_a_output.total_word_count,
-        total_corrections=0,
-        high_confidence_corrections=0,
-    )
-    logger.info("[正文生成] Step 4/5: Agent E 联网纠错（已跳过）")
-
-    # ──────────────────────────────────────────
-    # Step 5: Agent C — 去 AI 味改写员
-    # ──────────────────────────────────────────
-    logger.info("[正文生成] Step 5/5: Agent C 去 AI 味改写")
-    if progress_callback:
-        await progress_callback({"event": "step_start", "data": {"step": 5, "agent": "景澄之 · 正文改写员", "action": "正在去 AI 味改写...", "avatar": "/agents/content-c.png"}})
+        await progress_callback({"event": "step_start", "data": {"step": 4, "agent": "景澄之 · 正文改写员", "action": "正在去 AI 味改写...", "avatar": "/agents/content-c.png"}})
     try:
         agent_c_output = await deai_rewrite(
             agent_a_output=agent_a_output,
             agent_b_output=agent_b_output,
-            corrected_text=agent_e_output.corrected_text,
         )
     except Exception as e:
         logger.error(f"[正文生成] Agent C 失败: {e}")
         raise RuntimeError(f"正文生成失败（Agent C）: {e}") from e
 
     if progress_callback:
-        await progress_callback({"event": "step_done", "data": {"step": 5, "agent": "Agent C"}})
+        await progress_callback({"event": "step_done", "data": {"step": 4, "agent": "Agent C"}})
 
     # 异常处理：改写字数变化超限
     if abs(agent_c_output.word_change_pct) > 10:
@@ -294,24 +265,19 @@ async def generate_content(
         section_word_counts=[s.word_count for s in agent_a_output.sections],
         gold_sentences=updated_gold_sentences,
         rewrite_table=agent_c_output.rewrite_table,
-        factual_summary=agent_d_output,
-        factual_corrections=agent_e_output,
         agent_a_word_count=agent_a_output.total_word_count,
         agent_b_sentence_count=len(agent_b_output.sentences),
         agent_c_rewrite_count=len(agent_c_output.rewrite_table),
-        agent_d_error_count=agent_d_output.error_count,
-        agent_e_correction_count=agent_e_output.total_corrections,
         style_anchor=agent_a_output.style_anchor,
     )
 
     elapsed = time.time() - start_time
     logger.info(
         f"[正文生成] 完成，耗时: {elapsed:.1f}s，"
-        f"最终字数: {output.final_word_count}，"
-        f"事实纠错: {output.agent_e_correction_count} 处"
+        f"最终字数: {output.final_word_count}"
     )
 
     if progress_callback:
-        await progress_callback({"event": "complete", "data": {"step": 5, "agent": "Agent C"}})
+        await progress_callback({"event": "complete", "data": {"step": 4, "agent": "Agent C"}})
 
     return output

@@ -140,7 +140,7 @@ class AgentCOutput(BaseModel):
 
 
 # ──────────────────────────────────────────────
-# Agent D 输出：事实性总结（潜在错误提取）
+# Agent D / E 输出（正文生成已不再使用，保留供文案润色 content_polish 复用）
 # ──────────────────────────────────────────────
 
 class PotentialFactualError(BaseModel):
@@ -159,10 +159,6 @@ class AgentDOutput(BaseModel):
     total_claims_checked: int = Field(description="检查的事实性陈述总数")
     error_count: int = Field(description="潜在错误数")
 
-
-# ──────────────────────────────────────────────
-# Agent E 输出：Kimi 联网纠错
-# ──────────────────────────────────────────────
 
 class FactualCorrection(BaseModel):
     """单条事实性纠错。"""
@@ -203,16 +199,8 @@ class ContentGenerationOutput(BaseModel):
     # 去AI味改写对照表
     rewrite_table: List[AITasteIssue] = Field(default_factory=list)
 
-    # Agent D 事实总结
-    factual_summary: Optional[AgentDOutput] = Field(default=None, description="事实性总结报告")
-
-    # Agent E 联网纠错
-    factual_corrections: Optional[AgentEOutput] = Field(default=None, description="联网纠错报告")
-
     # 过程归档
     agent_a_word_count: int = 0
     agent_b_sentence_count: int = 0
     agent_c_rewrite_count: int = 0
-    agent_d_error_count: int = 0
-    agent_e_correction_count: int = 0
     style_anchor: str = ""

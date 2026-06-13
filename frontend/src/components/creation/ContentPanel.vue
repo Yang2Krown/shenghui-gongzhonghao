@@ -61,14 +61,6 @@
               <span class="text-ink-3">改写次数：</span>
               <span class="font-medium text-ink">{{ content.rewrite_count }}</span>
             </div>
-            <div>
-              <span class="text-ink-3">纠错数：</span>
-              <span class="font-medium text-ink">{{ content.factual_corrections?.total_corrections ?? content.agent_e_correction_count ?? '-' }}</span>
-            </div>
-            <div v-if="content.factual_corrections?.total_corrections" class="ml-auto">
-              <span class="text-xs text-ink-3">高置信度：</span>
-              <span class="text-xs font-semibold text-ink">{{ content.factual_corrections.high_confidence_corrections }}</span>
-            </div>
           </div>
           <p v-if="content.style_anchor" class="style-anchor-inline">{{ content.style_anchor }}</p>
           <div v-if="highlightFragments.length" class="hl-legend">
@@ -324,11 +316,6 @@ const reevaluateContent = async () => {
 // 监听重新评估结果
 watch(() => reevaluateProgress.result.value, (newResult) => {
   if (newResult) {
-    // 更新事实总结/纠错结果
-    if (content.value) {
-      if (newResult.factual_summary) content.value.factual_summary = newResult.factual_summary
-      if (newResult.factual_corrections) content.value.factual_corrections = newResult.factual_corrections
-    }
     ElMessage.success('重新评估完成')
     reevaluating.value = false
   }
@@ -601,42 +588,6 @@ const agentFeedback = computed(() => {
     })),
   }
 
-  // Agent D 事实总结
-  const factualSummary = c.factual_summary || {}
-  const potentialErrors = factualSummary.potential_errors || []
-  const agentD = {
-    id: 'D',
-    code: 'D',
-    name: '韩知微 · 事实总结员',
-    role: '扫描事实性陈述，提取潜在错误',
-    avatar: '/agents/content-d.png',
-    summary: factualSummary.error_count !== undefined
-      ? `检查 ${factualSummary.total_claims_checked || 0} 条事实陈述，发现 ${factualSummary.error_count} 条潜在错误。${factualSummary.summary_text || ''}`
-      : '尚未扫描',
-    issues: potentialErrors.map((e) => ({
-      location: `第${e.section_number}节 · ${e.error_type}`,
-      text: e.claim,
-    })),
-  }
-
-  // Agent E 联网纠错
-  const factualCorrections = c.factual_corrections || {}
-  const corrections = factualCorrections.corrections || []
-  const agentE = {
-    id: 'E',
-    code: 'E',
-    name: '齐鉴真 · 联网纠错员',
-    role: 'Kimi 联网搜索验证并修正事实错误',
-    avatar: '/agents/content-e.png',
-    summary: factualCorrections.total_corrections !== undefined
-      ? `共纠错 ${factualCorrections.total_corrections} 处${factualCorrections.high_confidence_corrections ? `，其中 ${factualCorrections.high_confidence_corrections} 处高置信度` : ''}。`
-      : '尚未纠错',
-    issues: corrections.map((cr) => ({
-      location: `第${cr.section_number}节 · ${cr.error_type} · ${cr.confidence}`,
-      text: `${cr.original_claim} → ${cr.corrected_claim}`,
-    })),
-  }
-
   // Agent C 去 AI 味
   const rewrites = c.rewrite_table || []
   const highRewrites = rewrites.filter((r) =>
@@ -670,7 +621,7 @@ const agentFeedback = computed(() => {
     issues: [],
   }
 
-  return [agentA, agentB, agentD, agentE, agentC]
+  return [agentA, agentB, agentC]
 })
 </script>
 
