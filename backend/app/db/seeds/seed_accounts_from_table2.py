@@ -2,8 +2,11 @@
 
 87 个账号：58 X/Twitter + 29 微信公众号。
 - X 账号挂在 platform='x' 的 SourceRegistry 下（requires_auth=True, P1 阶段启用）
-- 公众号账号挂在 platform='exa_wechat' 下（搜索流，0 cookie）
-  抓取时把 display_name 当作 Exa 搜索关键词，配合 includeDomains=mp.weixin.qq.com 过滤。
+- 公众号账号挂在 platform='sogou_wechat_cases' 下（搜狗微信搜索，免费、国内可用）
+  抓取时把 display_name 当作搜狗搜索关键词。该源不设 fetch_config.keywords，
+  让 sogou adapter 走「账号名搜索」模式。
+  （历史上曾走 Exa，但 Exa 账户欠费 402 弃用；本 seed 幂等地把存量公众号账号
+  从旧 exa_wechat 源迁过来并禁用 exa，无需手动维护。）
 """
 
 import asyncio
@@ -12,7 +15,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import openpyxl
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.db.seeds import TABLE2_PATH
 from app.db.session import AsyncSessionLocal
@@ -20,7 +23,7 @@ from app.models.source_registry import (
     SourceRegistry,
     SourceAccount,
     SOURCE_TYPE_X,
-    SOURCE_TYPE_EXA_WECHAT,
+    SOURCE_TYPE_SOGOU_WECHAT,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,11 +40,15 @@ PRIORITY_KEYWORDS = {
 
 
 async def _ensure_registry(db, *, platform: str, name: str, source_type: str,
-                            requires_auth: bool, description: str) -> SourceRegistry:
+                            requires_auth: bool, description: str,
+                            fetch_config: Optional[dict] = None) -> SourceRegistry:
     existing = (await db.execute(
         select(SourceRegistry).where(SourceRegistry.platform == platform)
     )).scalar_one_or_none()
     if existing:
+        # 幂等：确保关键配置就位（如搜狗案例源的 max_keywords，避免 29 个号被默认 20 截断）
+        if fetch_config is not None:
+            existing.fetch_config = fetch_config
         return existing
     reg = SourceRegistry(
         name=name,
@@ -54,7 +61,7 @@ async def _ensure_registry(db, *, platform: str, name: str, source_type: str,
         requires_auth=requires_auth,
         auth_status="missing" if requires_auth else "ok",
         fetch_strategy="cron",
-        fetch_config={},
+        fetch_config=fetch_config or {},
         enabled=not requires_auth,                # P0 阶段：X 暂时停用，公众号启用
         description=description,
     )
@@ -125,12 +132,28 @@ async def run(db) -> dict:
     )
     wechat_reg = await _ensure_registry(
         db,
-        platform="exa_wechat",
-        name="微信公众号关键词搜索流",
-        source_type=SOURCE_TYPE_EXA_WECHAT,
+        platform="sogou_wechat_cases",
+        name="公众号案例源（搜狗）",
+        source_type=SOURCE_TYPE_SOGOU_WECHAT,
         requires_auth=False,
-        description="基于 Exa 的公众号文章搜索（关键词 = 公众号名 / 直接关键词）",
+        description="重点案例公众号，走免费搜狗微信搜索（关键词=公众号名）。不设 keywords→账号名搜索模式。",
+        # 29 个号 → max_keywords 必须 > 29，否则被 sogou adapter 默认 20 截断
+        fetch_config={"max_keywords": 40, "limit_per_keyword": 10},
     )
+
+    # 存量迁移（幂等）：把旧 exa_wechat 源下的公众号账号整体改挂到搜狗案例源，
+    # 保留 raw_infos.source_account_id 的外键引用、避免重复账号；并禁用欠费的 exa。
+    exa_old = (await db.execute(
+        select(SourceRegistry).where(SourceRegistry.platform == "exa_wechat")
+    )).scalar_one_or_none()
+    if exa_old is not None and exa_old.id != wechat_reg.id:
+        await db.execute(
+            update(SourceAccount)
+            .where(SourceAccount.source_registry_id == exa_old.id)
+            .values(source_registry_id=wechat_reg.id)
+        )
+        exa_old.enabled = False
+        await db.flush()
 
     stats = {"created": 0, "updated": 0, "skipped": 0}
 

@@ -19,4 +19,7 @@ Dockerfile
 tests/
 uploads/*
 !uploads/.gitkeep
-data/
+# data/seeds 下的 xlsx 是 seed 必需文件，必须打进镜像（否则 init 跑 seed 时 FileNotFoundError）。
+# data/ 仅 60K（3 个 seed 表），整目录保留。
+data/*
+!data/seeds/

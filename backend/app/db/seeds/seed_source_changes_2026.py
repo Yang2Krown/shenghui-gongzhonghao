@@ -140,9 +140,14 @@ async def run(db) -> dict:
         stats["disabled"] += 1
 
     # 3. 微信公众号(sogou)源：改名 + 写入主题关键词（不再用博主名搜）
+    #    例外：sogou_wechat_cases 是案例博主源，故意走「账号名搜索」模式（不设 keywords），
+    #    不能被这里的主题词覆盖，否则 adapter 会忽略挂在它下面的 29 个公众号账号。
     renamed = 0
     sogou_sources = (await db.execute(
-        select(SourceRegistry).where(SourceRegistry.source_type == "sogou_wechat")
+        select(SourceRegistry).where(
+            SourceRegistry.source_type == "sogou_wechat",
+            SourceRegistry.platform != "sogou_wechat_cases",
+        )
     )).scalars().all()
     for s in sogou_sources:
         if s.name != "微信公众号":
