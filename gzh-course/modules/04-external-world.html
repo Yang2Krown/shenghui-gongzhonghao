@@ -1,0 +1,228 @@
+<section class="module" id="module-4">
+  <div class="module-content">
+    <div class="module-header animate-in">
+      <span class="module-number">04</span>
+      <h1 class="module-title">与外部世界对话</h1>
+      <p class="module-subtitle">系统需要和微信、AI 模型、数据库等多个外部服务打交道。看看它是怎么做的</p>
+    </div>
+
+    <!-- Screen 1: 微信 API -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">微信公众号 API：最后一公里</h2>
+      <p>文章写好后，需要推送到你的微信公众号草稿箱。系统直接调用微信的官方 <span class="term" data-definition="API（Application Programming Interface）：程序之间通信的规则，就像两个人约定好的对讲机频道">API</span>，不需要你手动复制粘贴。</p>
+
+      <div class="translation-block animate-in">
+        <div class="translation-code">
+          <span class="translation-label">Python</span>
+<span class="code-keyword">async def</span> <span class="code-function">get_access_token</span>(appid: str, secret: str) -> str:
+    <span class="code-string">"""获取微信公众号 access_token"""</span>
+    url = to_ipv4_url(<span class="code-string">f"{WECHAT_API_BASE}/token"</span>)
+    params = {
+        <span class="code-string">"grant_type"</span>: <span class="code-string">"client_credential"</span>,
+        <span class="code-string">"appid"</span>: appid,
+        <span class="code-string">"secret"</span>: secret,
+    }
+    <span class="code-keyword">async with</span> wechat_client(timeout=<span class="code-number">15</span>) <span class="code-keyword">as</span> client:
+        resp = <span class="code-keyword">await</span> client.get(url, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+
+    <span class="code-keyword">if</span> <span class="code-string">"access_token"</span> <span class="code-keyword">not in</span> data:
+        <span class="code-keyword">raise</span> ValueError(<span class="code-string">f"获取失败: {data}"</span>)
+    <span class="code-keyword">return</span> data[<span class="code-string">"access_token"</span>]
+        </div>
+        <div class="translation-english">
+          <span class="translation-label">English</span>
+          <div class="translation-lines">
+            <div class="tl"><strong>第 1 行：</strong>定义一个异步函数，输入 appid 和 secret（微信公众号的账号密码），输出 access_token（临时通行证）</div>
+            <div class="tl"><strong>第 3 行：</strong>to_ipv4_url() —— 强制使用 IPv4。为什么？因为微信 API 的 DNS 有时会解析到 IPv6，而服务器可能不支持 IPv6</div>
+            <div class="tl"><strong>第 4-8 行：</strong>构造请求参数——grant_type 表示"我要用账号密码换 token"</div>
+            <div class="tl"><strong>第 9-11 行：</strong>发送 GET 请求，15 秒超时</div>
+            <div class="tl"><strong>第 13-16 行：</strong>检查返回结果——如果没有 access_token，说明失败了，抛出错误</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-warning animate-in">
+        <span class="callout-icon">⚠️</span>
+        <div class="callout-content">
+          <span class="callout-title">微信 API 的两个坑</span>
+          <p><strong>坑 1：</strong>微信 API 的 DNS 有时会解析到 IPv6 地址，但服务器可能不支持 IPv6。所以代码强制用 <code>to_ipv4_url()</code> 转换成 IPv4 地址。</p>
+          <p><strong>坑 2：</strong>微信 API 默认会把中文转义成 Unicode 编码（如 你好），导致解析失败。所以代码用 <code>ensure_ascii=False</code> 保持中文原文。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 2: 发布流程 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">发布到微信的完整流程</h2>
+
+      <div class="flow-animation" id="flow-wechat-publish"
+        data-steps='[
+          {"label": "第 1 步：获取 access_token（临时通行证）", "highlight": "flow-token", "packet": false},
+          {"label": "第 2 步：上传封面图为永久素材，获取 media_id", "highlight": "flow-cover", "from": "flow-token", "to": "flow-cover", "packet": true},
+          {"label": "第 3 步：清理标题中的 emoji（微信标题限制 64 字符）", "highlight": "flow-clean", "from": "flow-cover", "to": "flow-clean", "packet": true},
+          {"label": "第 4 步：把文章 HTML 中的图片上传为临时素材", "highlight": "flow-images", "from": "flow-clean", "to": "flow-images", "packet": true},
+          {"label": "第 5 步：调用 draft/add API 创建草稿", "highlight": "flow-draft", "from": "flow-images", "to": "flow-draft", "packet": true},
+          {"label": "第 6 步：返回 media_id，草稿创建成功！", "highlight": "flow-done", "from": "flow-draft", "to": "flow-done", "packet": true}
+        ]'>
+        <div class="flow-actors">
+          <div class="flow-actor" id="flow-token">
+            <div class="flow-actor-icon">🔑</div>
+            <span>获取 Token</span>
+          </div>
+          <div class="flow-actor" id="flow-cover">
+            <div class="flow-actor-icon">🖼️</div>
+            <span>上传封面</span>
+          </div>
+          <div class="flow-actor" id="flow-clean">
+            <div class="flow-actor-icon">🧹</div>
+            <span>清理标题</span>
+          </div>
+          <div class="flow-actor" id="flow-images">
+            <div class="flow-actor-icon">📷</div>
+            <span>上传图片</span>
+          </div>
+          <div class="flow-actor" id="flow-draft">
+            <div class="flow-actor-icon">📝</div>
+            <span>创建草稿</span>
+          </div>
+          <div class="flow-actor" id="flow-done">
+            <div class="flow-actor-icon">✅</div>
+            <span>完成</span>
+          </div>
+        </div>
+        <div class="flow-step-label">点击「Next Step」开始</div>
+        <div class="flow-packet"></div>
+        <div class="flow-controls">
+          <button class="btn btn-primary flow-next-btn">Next Step</button>
+          <button class="btn flow-reset-btn">Reset</button>
+          <span class="flow-progress"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 3: Redis + Celery -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">Redis + Celery：后台任务队列</h2>
+      <p>爬虫和 AI 流水线都很耗时——可能需要几分钟甚至更久。如果让用户一直等着，体验会很差。</p>
+
+      <div class="callout callout-accent animate-in">
+        <span class="callout-icon">📮</span>
+        <div class="callout-content">
+          <span class="callout-title">邮局比喻</span>
+          <p>想象你去邮局寄包裹。你把包裹交给柜台（提交任务），然后就可以走了（不用等）。邮局会安排分拣员（Celery Worker）处理你的包裹。你随时可以来查进度（轮询 Progress API）。Redis 就是那个"待处理包裹架"——所有任务先放在这里，分拣员按顺序取走处理。</p>
+        </div>
+      </div>
+
+      <div class="pattern-cards stagger-children animate-in">
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-error-light); color: var(--color-error);">⚡</div>
+          <h3 class="pattern-title">Redis</h3>
+          <p class="pattern-desc">内存数据库，速度极快。在这里充当"消息队列"——存放待处理的任务。也用于缓存和会话管理。</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-accent-light); color: var(--color-accent);">🔄</div>
+          <h3 class="pattern-title">Celery</h3>
+          <p class="pattern-desc">分布式任务队列。接收任务 → 放入 Redis → Worker 取出执行。支持定时任务（Beat）、重试、超时等。</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-info-light); color: var(--color-info);">📊</div>
+          <h3 class="pattern-title">Progress API</h3>
+          <p class="pattern-desc">前端通过轮询 /progress 接口获取任务进度。每个 Agent 完成后更新进度，前端实时显示"正在执行 Agent A..."</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 4: 数据库 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">PostgreSQL + pgvector：不只是存数据</h2>
+      <p>系统用 PostgreSQL 存储所有数据，但不只是简单的增删改查——它还用 <span class="term" data-definition="pgvector：PostgreSQL 的扩展，让数据库能存储和搜索向量数据（一串数字），支持快速找到最相似的向量">pgvector</span> 做语义搜索。</p>
+
+      <div class="translation-block animate-in">
+        <div class="translation-code">
+          <span class="translation-label">Python</span>
+<span class="code-comment"># SQLAlchemy 的 JSON 多态：同一字段在不同数据库用不同存储</span>
+JSONField = JSON().with_variant(JSONB(), <span class="code-string">"postgresql"</span>)
+
+<span class="code-comment"># 自动回退：没有 PostgreSQL 就用 SQLite</span>
+<span class="code-keyword">if not</span> settings.POSTGRES_PASSWORD:
+    DATABASE_URL = <span class="code-string">"sqlite+aiosqlite:///./sql_app.db"</span>
+<span class="code-keyword">else</span>:
+    DATABASE_URL = <span class="code-string">f"postgresql+asyncpg://..."</span>
+        </div>
+        <div class="translation-english">
+          <span class="translation-label">English</span>
+          <div class="translation-lines">
+            <div class="tl"><strong>第 2 行：</strong>JSON 多态——同一个字段，PostgreSQL 用 JSONB（支持索引和搜索），SQLite 用普通 JSON</div>
+            <div class="tl"><strong>第 5-8 行：</strong>自动回退——如果没有配置 PostgreSQL 密码，就用 SQLite。这让本地开发零配置，生产环境用完整功能</div>
+            <div class="tl"><strong>好处：</strong>开发者在本地用 SQLite 快速开发，部署到服务器时自动切换到 PostgreSQL + pgvector，代码不用改</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-info animate-in">
+        <span class="callout-icon">🔍</span>
+        <div class="callout-content">
+          <span class="callout-title">为什么需要向量数据库？</span>
+          <p>普通数据库只能精确匹配——"标题包含'GPT'"。但语义搜索需要理解意思——"讨论大语言模型的文章"应该匹配到包含 GPT、Claude、LLaMA 等关键词的文章。pgvector 让 PostgreSQL 具备了这种能力。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 5: 测验 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">检验你的理解</h2>
+
+      <div class="quiz-container" id="quiz-module-4">
+        <div class="quiz-question-block" data-correct="C"
+             data-explanation-right="对！Celery Beat 是定时任务调度器，它按配置的时间表（每天 5 波）自动触发爬虫任务。Worker 从 Redis 队列中取出任务执行。"
+             data-explanation_wrong="实际上 Celery Beat 是定时任务调度器——它按配置的时间表自动触发任务。在这个系统中，它每天在 06:00、10:00、14:00、18:00、22:00 触发爬虫任务。">
+          <p class="quiz-question">当系统说"每天自动抓取 5 波数据"时，是谁在控制这个定时任务？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 前端的 setTimeout 定时器
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 操作系统的 crontab
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> Celery Beat（定时任务调度器）
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 微信服务器的推送
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block" data-correct="B"
+             data-explanation-right="没错！to_ipv4_url() 强制使用 IPv4 地址，因为微信 API 的 DNS 有时会解析到 IPv6，而服务器可能不支持 IPv6。这是一个真实的坑。"
+             data-explanation_wrong="微信 API 的 DNS 有时会解析到 IPv6 地址，但服务器可能不支持 IPv6。所以代码用 to_ipv4_url() 强制转换成 IPv4 地址。这是开发者在实际部署中踩过的坑。">
+          <p class="quiz-question">为什么代码中要用 <code>to_ipv4_url()</code> 处理微信 API 的 URL？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为微信 API 只支持 HTTPS
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为微信 API 的 DNS 有时解析到 IPv6，服务器不支持
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为需要绕过防火墙
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为微信 API 的 URL 格式不标准
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-check-btn" onclick="checkQuiz('quiz-module-4')">检查答案</div>
+        <div class="quiz-reset-btn" onclick="resetQuiz('quiz-module-4')">重置</div>
+      </div>
+    </div>
+
+  </div>
+</section>

@@ -1,0 +1,289 @@
+<section class="module" id="module-3">
+  <div class="module-content">
+    <div class="module-header animate-in">
+      <span class="module-number">03</span>
+      <h1 class="module-title">数据的一生</h1>
+      <p class="module-subtitle">一条信息从被爬取到变成公众号文章，经历了什么？</p>
+    </div>
+
+    <!-- Screen 1: 数据旅程概览 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">一条信息的完整旅程</h2>
+      <p>假设 Hacker News 上有一篇关于 GPT-5 的讨论帖。它被系统发现后，会经历以下步骤：</p>
+
+      <div class="flow-animation" id="flow-data-journey"
+        data-steps='[
+          {"label": "第 1 步：爬虫从 Hacker News 抓取到这条信息", "highlight": "flow-raw", "packet": false},
+          {"label": "第 2 步：时间过滤——超过 90 天的直接丢弃", "highlight": "flow-filter1", "from": "flow-raw", "to": "flow-filter1", "packet": true},
+          {"label": "第 3 步：关键词过滤——不是 AI 相关的直接丢弃", "highlight": "flow-filter2", "from": "flow-filter1", "to": "flow-filter2", "packet": true},
+          {"label": "第 4 步：权重过滤——低权重来源的直接丢弃（省钱）", "highlight": "flow-filter3", "from": "flow-filter2", "to": "flow-filter3", "packet": true},
+          {"label": "第 5 步：嵌入向量化——把文字变成 1024 维的数字数组", "highlight": "flow-embed", "from": "flow-filter3", "to": "flow-embed", "packet": true},
+          {"label": "第 6 步：语义聚类——和已有信息比对，相似的归为一组", "highlight": "flow-cluster", "from": "flow-embed", "to": "flow-cluster", "packet": true},
+          {"label": "第 7 步：LLM 富化——提取信息类型、关键要素、方向判断", "highlight": "flow-enrich", "from": "flow-cluster", "to": "flow-enrich", "packet": true},
+          {"label": "第 8 步：信息就绪，等待被选题挖掘流水线消费", "highlight": "flow-ready", "from": "flow-enrich", "to": "flow-ready", "packet": true}
+        ]'>
+        <div class="flow-actors">
+          <div class="flow-actor" id="flow-raw">
+            <div class="flow-actor-icon">📰</div>
+            <span>原始信息</span>
+          </div>
+          <div class="flow-actor" id="flow-filter1">
+            <div class="flow-actor-icon">⏰</div>
+            <span>时间过滤</span>
+          </div>
+          <div class="flow-actor" id="flow-filter2">
+            <div class="flow-actor-icon">🏷️</div>
+            <span>关键词过滤</span>
+          </div>
+          <div class="flow-actor" id="flow-filter3">
+            <div class="flow-actor-icon">⚖️</div>
+            <span>权重过滤</span>
+          </div>
+          <div class="flow-actor" id="flow-embed">
+            <div class="flow-actor-icon">🧮</div>
+            <span>嵌入向量化</span>
+          </div>
+          <div class="flow-actor" id="flow-cluster">
+            <div class="flow-actor-icon">🔗</div>
+            <span>语义聚类</span>
+          </div>
+          <div class="flow-actor" id="flow-enrich">
+            <div class="flow-actor-icon">✨</div>
+            <span>LLM 富化</span>
+          </div>
+          <div class="flow-actor" id="flow-ready">
+            <div class="flow-actor-icon">✅</div>
+            <span>就绪</span>
+          </div>
+        </div>
+        <div class="flow-step-label">点击「Next Step」开始追踪</div>
+        <div class="flow-packet"></div>
+        <div class="flow-controls">
+          <button class="btn btn-primary flow-next-btn">Next Step</button>
+          <button class="btn flow-reset-btn">Reset</button>
+          <span class="flow-progress"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 2: 三层过滤 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">三层过滤：省钱的艺术</h2>
+      <p>嵌入（<span class="term" data-definition="Embedding：把文字变成一串数字（向量），让计算机能计算两段文字的相似度">Embedding</span>）是需要花钱的 API 调用。为了省钱，系统在嵌入之前设置了三层过滤：</p>
+
+      <div class="step-cards stagger-children animate-in">
+        <div class="step-card animate-in">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <strong>时间过滤</strong>
+            <p>超过 90 天的内容直接丢弃。过时的资讯没有价值。</p>
+          </div>
+        </div>
+        <div class="step-card animate-in">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <strong>AI 相关性过滤</strong>
+            <p>用关键词判断内容是否和 AI 相关。不相关的直接跳过。</p>
+          </div>
+        </div>
+        <div class="step-card animate-in">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <strong>权重过滤</strong>
+            <p>低权重来源（weight ≤ 2）的内容直接跳过。因为这些来源质量不高，不值得花钱做嵌入。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-accent animate-in">
+        <span class="callout-icon">💡</span>
+        <div class="callout-content">
+          <span class="callout-title">这个设计很聪明</span>
+          <p>只有通过三层过滤的内容才会被送去嵌入。这就像一个漏斗——先用免费的规则筛掉大部分垃圾，再用花钱的 AI 处理精华内容。成本可能降低 60-70%。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 3: 语义聚类 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">语义聚类：让计算机"理解"文字</h2>
+      <p>计算机不懂中文。但如果我们把一段文字变成一组数字（向量），计算机就能计算两段文字的"距离"——距离越近，意思越相似。</p>
+
+      <div class="translation-block animate-in">
+        <div class="translation-code">
+          <span class="translation-label">Python</span>
+<span class="code-comment"># 嵌入：把文字变成 1024 维的数字数组</span>
+embedding = <span class="code-keyword">await</span> embed(<span class="code-string">"GPT-5 发布了新功能"</span>)
+<span class="code-comment"># 结果：[0.023, -0.156, 0.891, ...]（共 1024 个数字）</span>
+
+<span class="code-comment"># 语义聚类：和已有信息比对</span>
+<span class="code-keyword">for</span> existing <span class="code-keyword">in</span> existing_embeddings:
+    distance = cosine_similarity(embedding, existing)
+    <span class="code-keyword">if</span> distance > <span class="code-number">0.85</span>:
+        <span class="code-comment"># 非常相似，归为同一组</span>
+        merge_into_cluster(existing, new_info)
+        </div>
+        <div class="translation-english">
+          <span class="translation-label">English</span>
+          <div class="translation-lines">
+            <div class="tl"><strong>第 1-3 行：</strong>调用 DashScope 的嵌入 API，把"GPT-5 发布了新功能"变成 1024 个数字</div>
+            <div class="tl"><strong>第 5-9 行：</strong>遍历所有已有的信息向量，计算新信息和每个已有信息的"距离"</div>
+            <div class="tl"><strong>第 7-8 行：</strong>如果距离 > 0.85（非常相似），就把它们归为同一组（InfoCluster）</div>
+            <div class="tl"><strong>类比：</strong>就像图书馆把同一主题的书放在一起——系统把讨论同一话题的文章归为一组</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-info animate-in">
+        <span class="callout-icon">📊</span>
+        <div class="callout-content">
+          <span class="callout-title">pgvector：向量数据库</span>
+          <p>这些向量存储在 <span class="term" data-definition="pgvector：PostgreSQL 的扩展，专门存储和搜索向量数据，可以快速找到最相似的向量">pgvector</span> 中。它能在百万级向量中快速找到最相似的几个——这比遍历所有向量快得多。阈值 0.85 意味着只有"非常相似"的内容才会被合并。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 4: Celery 波次调度 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">波次调度：避免把 API 打爆</h2>
+      <p>系统每天要从 13 个信息源抓取数据。如果同时请求所有源，很容易被 API 限流甚至封禁。</p>
+
+      <div class="callout callout-accent animate-in">
+        <span class="callout-icon">🌊</span>
+        <div class="callout-content">
+          <span class="callout-title">波次调度（Wave Scheduling）</span>
+          <p>想象你在餐厅点菜。如果 100 个人同时点菜，厨房会崩溃。但如果分 5 波，每波 20 个人，每波之间等 2 分钟，厨房就能从容应对。系统的爬虫也是这样——每天 5 波（06:00、10:00、14:00、18:00、22:00），每波内的源按 90 秒间隔依次请求。</p>
+        </div>
+      </div>
+
+      <div class="translation-block animate-in">
+        <div class="translation-code">
+          <span class="translation-label">Python</span>
+<span class="code-comment"># 限流并发抓取（最多 5 个同时跑，避免 API 限流）</span>
+sem = asyncio.Semaphore(<span class="code-number">5</span>)
+task_sources = []
+tasks = []
+<span class="code-keyword">for</span> src <span class="code-keyword">in</span> sources:
+    adapter = self.get_adapter(src.source_type)
+
+    <span class="code-keyword">async def</span> <span class="code-function">_limited_fetch</span>(a=adapter, s=src):
+        <span class="code-keyword">async with</span> sem:
+            <span class="code-keyword">return await</span> self._fetch_one(a, s)
+
+    tasks.append(_limited_fetch())
+        </div>
+        <div class="translation-english">
+          <span class="translation-label">English</span>
+          <div class="translation-lines">
+            <div class="tl"><strong>第 2 行：</strong>创建一个"信号量"（Semaphore），最多允许 5 个爬虫同时运行</div>
+            <div class="tl"><strong>第 4-5 行：</strong>遍历所有需要抓取的信息源</div>
+            <div class="tl"><strong>第 7-9 行：</strong>每个爬虫在执行前必须先获取"通行证"（async with sem）</div>
+            <div class="tl"><strong>类比：</strong>就像高速公路的收费站——最多 5 个车道同时通行，其他的排队等候</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 5: 去重策略 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">双重去重：同一条信息不会出现两次</h2>
+      <p>不同信息源可能报道同一件事。系统用两种方式防止重复：</p>
+
+      <div class="pattern-cards stagger-children animate-in">
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-accent-light); color: var(--color-accent);">💾</div>
+          <h3 class="pattern-title">内存去重</h3>
+          <p class="pattern-desc">同一波次内，用内存中的 Set 记录已经处理过的标题哈希。新加入的记录在数据库中还不可见，所以需要内存去重。</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-info-light); color: var(--color-info);">🗄️</div>
+          <h3 class="pattern-title">数据库去重</h3>
+          <p class="pattern-desc">跨波次去重，查数据库中是否已有相同标题（哈希匹配）或完全相同的 URL。这是最终防线。</p>
+        </div>
+      </div>
+
+      <div class="callout callout-warning animate-in">
+        <span class="callout-icon">⚠️</span>
+        <div class="callout-content">
+          <span class="callout-title">为什么需要双重去重？</span>
+          <p>如果只用数据库去重，同一波次内新增的记录在数据库中还查不到（因为还没 commit），就会导致重复。内存去重解决了这个问题。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 6: 测验 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">检验你的理解</h2>
+
+      <div class="quiz-container" id="quiz-module-3">
+        <div class="quiz-question-block" data-correct="C"
+             data-explanation-right="对！三层过滤先用免费的规则（时间、关键词、权重）筛掉大部分垃圾，只有通过的内容才花钱做嵌入。这可能节省 60-70% 的 API 成本。"
+             data-explanation_wrong="实际上系统在嵌入之前有三层过滤：时间过滤（>90天丢弃）、AI 相关性过滤（非 AI 丢弃）、权重过滤（低权重丢弃）。只有通过这三层的内容才送去嵌入，大幅节省成本。">
+          <p class="quiz-question">系统如何优化嵌入 API 的调用成本？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 使用更便宜的嵌入模型
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 把多条信息合并成一次调用
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 在嵌入前用三层过滤筛掉大部分内容
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 缓存嵌入结果，避免重复调用
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block" data-correct="B"
+             data-explanation-right="没错！cosine similarity > 0.85 意味着两段文字的语义非常接近。就像图书馆把讨论同一主题的书放在同一个书架上。"
+             data-explanation_wrong="其实系统用的是余弦相似度（cosine similarity）。当两段文字的向量距离 > 0.85 时，系统认为它们在讨论同一话题，就会合并到一个 InfoCluster 中。">
+          <p class="quiz-question">当系统说两段文字的"余弦相似度 > 0.85"时，这意味着什么？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 两段文字的字面完全相同
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 两段文字在讨论非常相似的话题
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 两段文字来自同一个作者
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 两段文字的发布时间很接近
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block" data-correct="A"
+             data-explanation-right="正确！内存去重处理同一波次内的重复（因为新记录在数据库中还不可见），数据库去重处理跨波次的重复。两者缺一不可。"
+             data-explanation_wrong="系统用双重去重：内存 Set 去重处理同一波次内的重复（新记录还没 commit 到数据库），数据库查询去重处理跨波次的重复。只用一种会有漏洞。">
+          <p class="quiz-question">为什么系统需要"双重去重"而不是只用数据库去重？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为同一波次内新增的记录在数据库中还查不到
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为数据库查询太慢了
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为不同信息源的标题格式不一样
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为需要支持离线模式
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-check-btn" onclick="checkQuiz('quiz-module-3')">检查答案</div>
+        <div class="quiz-reset-btn" onclick="resetQuiz('quiz-module-3')">重置</div>
+      </div>
+    </div>
+
+  </div>
+</section>

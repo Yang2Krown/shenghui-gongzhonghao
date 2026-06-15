@@ -1,0 +1,280 @@
+<section class="module" id="module-1">
+  <div class="module-content">
+    <div class="module-header animate-in">
+      <span class="module-number">01</span>
+      <h1 class="module-title">这个应用到底在干嘛？</h1>
+      <p class="module-subtitle">从一个简单的操作开始：点击"挖掘选题"后，AI 帮你完成从选题到发布的全流程</p>
+    </div>
+
+    <!-- Screen 1: 产品是什么 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">一句话说清楚</h2>
+      <p>想象你是一个公众号运营者。每天要做的事：<strong>找热点 → 写选题 → 写文章 → 发布</strong>。</p>
+      <p>这个平台把这四件事全部自动化了。你只需要告诉它"去挖选题"，它会自动从十几个信息源抓取最新资讯，用 AI 帮你筛选出最好的选题，生成大纲、标题、正文，最后直接推送到你的微信公众号草稿箱。</p>
+
+      <div class="callout callout-accent animate-in">
+        <span class="callout-icon">💡</span>
+        <div class="callout-content">
+          <span class="callout-title">为什么这很厉害？</span>
+          <p>传统写一篇公众号文章需要 3-5 小时。这个系统用 <span class="term" data-definition="AI Agent：一个能自主执行任务的 AI 程序，像一个虚拟员工一样工作">AI Agent</span> 流水线，把时间压缩到几分钟。而且它不是简单地让 AI 写文章——它用多个 AI 角色互相审核、打分、挑刺，确保质量。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 2: 用户操作追踪 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">你点击"挖掘选题"后发生了什么？</h2>
+      <p>让我们追踪一次完整的操作。你在界面上点击了 <strong>"挖掘选题"</strong> 按钮——接下来的事情，像一套精密的流水线：</p>
+
+      <div class="flow-animation" id="flow-overview"
+        data-steps='[
+          {"label": "你点击了「挖掘选题」按钮", "highlight": "flow-user", "packet": false},
+          {"label": "系统从 13 个信息源抓取最新资讯（RSS、GitHub、知乎、推特...）", "highlight": "flow-scraper", "from": "flow-user", "to": "flow-scraper", "packet": true},
+          {"label": "用 AI 把相似的资讯聚类，提取关键信息", "highlight": "flow-preprocess", "from": "flow-scraper", "to": "flow-preprocess", "packet": true},
+          {"label": "Agent A（选题衍生员）从每条资讯衍生出 3-8 个候选选题", "highlight": "flow-agent-a", "from": "flow-preprocess", "to": "flow-agent-a", "packet": true},
+          {"label": "Agent B（选题评分员）对每个选题打分、审核、否决", "highlight": "flow-agent-b", "from": "flow-agent-a", "to": "flow-agent-b", "packet": true},
+          {"label": "最终选题列表呈现在你面前，包含评分和推荐理由", "highlight": "flow-result", "from": "flow-agent-b", "to": "flow-result", "packet": true}
+        ]'>
+        <div class="flow-actors">
+          <div class="flow-actor" id="flow-user">
+            <div class="flow-actor-icon">👤</div>
+            <span>你</span>
+          </div>
+          <div class="flow-actor" id="flow-scraper">
+            <div class="flow-actor-icon">🔍</div>
+            <span>爬虫系统</span>
+          </div>
+          <div class="flow-actor" id="flow-preprocess">
+            <div class="flow-actor-icon">🧩</div>
+            <span>预处理</span>
+          </div>
+          <div class="flow-actor" id="flow-agent-a">
+            <div class="flow-actor-icon">✏️</div>
+            <span>Agent A</span>
+          </div>
+          <div class="flow-actor" id="flow-agent-b">
+            <div class="flow-actor-icon">⚖️</div>
+            <span>Agent B</span>
+          </div>
+          <div class="flow-actor" id="flow-result">
+            <div class="flow-actor-icon">📊</div>
+            <span>选题结果</span>
+          </div>
+        </div>
+        <div class="flow-step-label">点击「Next Step」开始</div>
+        <div class="flow-packet"></div>
+        <div class="flow-controls">
+          <button class="btn btn-primary flow-next-btn">Next Step</button>
+          <button class="btn flow-reset-btn">Reset</button>
+          <span class="flow-progress"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 3: 完整流水线 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">从选题到发布：完整的 AI 流水线</h2>
+      <p>选题只是第一步。当你选中一个候选选题后，系统会启动更长的流水线：</p>
+
+      <div class="flow-steps animate-in">
+        <div class="flow-step">
+          <div class="flow-step-num">1</div>
+          <p><strong>选题挖掘</strong><br>2 个 Agent 协作</p>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-step-num">2</div>
+          <p><strong>角度审查</strong><br>3 个子 Agent</p>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-step-num">3</div>
+          <p><strong>大纲生成</strong><br>4 个 Agent</p>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-step-num">4</div>
+          <p><strong>标题生成</strong><br>4 个 Agent</p>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-step-num">5</div>
+          <p><strong>正文生成</strong><br>4 个 Agent</p>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-step-num">6</div>
+          <p><strong>发布到微信</strong><br>API 直连</p>
+        </div>
+      </div>
+
+      <div class="callout callout-info animate-in">
+        <span class="callout-icon">🤖</span>
+        <div class="callout-content">
+          <span class="callout-title">总共用了多少个 AI？</span>
+          <p>一条选题从挖掘到发布，最多经过 <strong>21 个 AI Agent</strong>。每个 Agent 专注一件事：有的负责创造，有的负责审核，有的负责挑刺，有的负责改写。这种"分工协作"是这个系统最聪明的地方。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 4: 群聊动画 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">看看 Agent 们怎么对话</h2>
+      <p>这些 Agent 不是各干各的——它们像一个团队一样协作。来看看标题生成流水线里的对话：</p>
+
+      <div class="chat-window" id="chat-title-gen">
+        <div class="chat-messages">
+          <div class="chat-message" data-agent="agent-a" style="display:none;">
+            <div class="chat-avatar" style="background: var(--color-actor-1);">A</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-1);">Agent A · 创作者</span>
+              <p>根据大纲和角度报告，我生成了 12 个标题候选：</p>
+              <p>1. "ChatGPT 刚刚做了一件事，让所有程序员失眠"<br>2. "AI 写代码已经不新鲜了，但这个新能力让所有人沉默"<br>3. "深度解析：为什么这次 AI 更新值得你关注"</p>
+            </div>
+          </div>
+
+          <div class="chat-message" data-agent="agent-b" style="display:none;">
+            <div class="chat-avatar" style="background: var(--color-actor-2);">B</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-2);">Agent B · 评分员</span>
+              <p>我来打分。标题 1：吸引力 9/10，信息密度 6/10。标题 3：吸引力 5/10，信息密度 9/10。</p>
+              <p>标题 2 建议否决——"让所有人沉默"太夸张了，容易被读者识别为标题党。</p>
+            </div>
+          </div>
+
+          <div class="chat-message" data-agent="agent-c" style="display:none;">
+            <div class="chat-avatar" style="background: var(--color-actor-3);">C</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-3);">Agent C · 点击率预测</span>
+              <p>我预测点击率：标题 1 约 8.2%，标题 3 约 3.1%。标题 1 在朋友圈传播的概率更高。</p>
+            </div>
+          </div>
+
+          <div class="chat-message" data-agent="agent-d" style="display:none;">
+            <div class="chat-avatar" style="background: var(--color-actor-4);">D</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-4);">Agent D · 最终裁判</span>
+              <p>综合评分：标题 1 = 0.6 × B评分 + 0.4 × C预测 = <strong>7.8 分</strong>。推荐使用标题 1，但建议把"失眠"改成"重新思考"，降低标题党感。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-typing" style="display:none;">
+          <div class="chat-avatar" id="chat-title-gen-typing-avatar" style="background: var(--color-actor-1);">A</div>
+          <div class="chat-typing-dots">
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+          </div>
+        </div>
+
+        <div class="chat-controls">
+          <button class="btn btn-primary chat-next-btn">下一条消息</button>
+          <button class="btn chat-all-btn">全部显示</button>
+          <button class="btn chat-reset-btn">重置</button>
+          <span class="chat-progress"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 5: 技术栈鸟瞰 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">技术栈鸟瞰</h2>
+      <p>这个系统由三个主要部分组成：</p>
+
+      <div class="pattern-cards stagger-children animate-in">
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-accent-light); color: var(--color-accent);">🖥️</div>
+          <h3 class="pattern-title">前端 · Vue 3</h3>
+          <p class="pattern-desc">你看到的界面。用 Vue 3 构建，Element Plus 提供按钮、表格等组件。富文本编辑器让你可以直接编辑 AI 生成的文章。</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-info-light); color: var(--color-info);">⚙️</div>
+          <h3 class="pattern-title">后端 · FastAPI</h3>
+          <p class="pattern-desc">处理所有逻辑的大脑。用 Python 的 FastAPI 框架，管理 25+ 个 API 接口。所有 AI 流水线、爬虫、数据库操作都在这里。</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-success-light); color: var(--color-success);">🗄️</div>
+          <h3 class="pattern-title">数据层</h3>
+          <p class="pattern-desc">PostgreSQL 存储所有数据，pgvector 做语义相似度搜索，Redis 配合 Celery 处理后台任务（爬虫、AI 流水线）。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 6: 测验 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">检验你的理解</h2>
+
+      <div class="quiz-container" id="quiz-module-1">
+        <div class="quiz-question-block" data-correct="B"
+             data-explanation-right="完全正确！这个系统用了 21 个 AI Agent 协作，每个 Agent 专注一个任务，像一个分工明确的团队。"
+             data-explanation_wrong="实际上这个系统用了 21 个 AI Agent——它们不是一个人干所有事，而是一个团队分工协作：有的创造，有的审核，有的挑刺，有的改写。">
+          <p class="quiz-question">这个系统最核心的架构特点是什么？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 用一个超级 AI 完成所有任务
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 多个 AI Agent 分工协作，各司其职
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 完全靠规则引擎，没有用 AI
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 只用 AI 写文章，其他都是人工操作
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block" data-correct="C"
+             data-explanation-right="对了！Agent A 是"创造者"——它不是从一堆烂选题里挑好的，而是直接创造好的选题。这是这个系统最聪明的设计之一。"
+             data-explanation_wrong="Agent A 不是过滤器！它的角色是"选题衍生员"——从一条资讯出发，主动创造 3-8 个好选题。传统的做法是爬 100 条过滤到 10 条，而这里是爬 1 条创造 5 条好选题。">
+          <p class="quiz-question">在选题挖掘流水线中，Agent A 的角色最像什么？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 一个严格的编辑，负责删掉不好的选题
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 一个数据分析师，负责统计热度
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 一个创意总监，从资讯中主动创造好选题
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 一个发布专员，负责把文章推到微信
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block" data-correct="A"
+             data-explanation-right="没错！系统每天自动抓取 5 波数据（06:00、10:00、14:00、18:00、22:00），每波之间间隔 90 秒。你不需要手动操作——数据随时都是新鲜的。"
+             data-explanation_wrong="系统不是被动等你来搜的！它用 Celery Beat（一个定时任务调度器）每天自动抓取 5 次数据，覆盖 13 个信息源。你打开应用时，数据已经准备好了。">
+          <p class="quiz-question">当你打开应用时，最新的资讯数据是从哪里来的？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 系统每天自动从 13 个信息源抓取 5 次
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 你每次打开应用时实时搜索
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 数据是人工手动录入的
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 系统只在你点击"挖掘选题"时才去抓取
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-check-btn" onclick="checkQuiz('quiz-module-1')">检查答案</div>
+        <div class="quiz-reset-btn" onclick="resetQuiz('quiz-module-1')">重置</div>
+      </div>
+    </div>
+
+  </div>
+</section>

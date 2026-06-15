@@ -1,0 +1,254 @@
+<section class="module" id="module-2">
+  <div class="module-content">
+    <div class="module-header animate-in">
+      <span class="module-number">02</span>
+      <h1 class="module-title">认识主角们</h1>
+      <p class="module-subtitle">系统里有 4 条主要的 AI 流水线，每条流水线由多个 Agent 组成。认识它们，你就能指挥 AI 做更多事</p>
+    </div>
+
+    <!-- Screen 1: 多 Agent 流水线 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">多 Agent 流水线：AI 的团队协作模式</h2>
+      <p>你可能用过 ChatGPT——一个 AI 对话框，问什么答什么。但这个系统用的是完全不同的模式：<strong>多个 AI 角色按顺序协作</strong>。</p>
+
+      <div class="callout callout-accent animate-in">
+        <span class="callout-icon">🏭</span>
+        <div class="callout-content">
+          <span class="callout-title">工厂流水线比喻</span>
+          <p>想象一个汽车工厂。一辆车不是一个人从头造到尾——而是经过冲压、焊接、涂装、总装等工位，每个工位的工人只做一件事。这个系统的 AI 流水线也一样：Agent A 产出半成品，Agent B 审核，Agent C 挑刺，Agent D 做最终决定。</p>
+        </div>
+      </div>
+
+      <div class="pattern-cards stagger-children animate-in">
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-accent-light); color: var(--color-accent);">⛏️</div>
+          <h3 class="pattern-title">选题挖掘</h3>
+          <p class="pattern-desc"><strong>2 个 Agent</strong><br>Agent A（衍生员）+ Agent B（评分员）<br>从资讯中创造候选选题，打分审核</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-info-light); color: var(--color-info);">📐</div>
+          <h3 class="pattern-title">大纲生成</h3>
+          <p class="pattern-desc"><strong>4 个 Agent</strong><br>创建 → 审核 → 挑刺 → 自检<br>确保大纲结构合理、有传播力</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: #FDF5E0; color: var(--color-actor-4);">🏷️</div>
+          <h3 class="pattern-title">标题生成</h3>
+          <p class="pattern-desc"><strong>4 个 Agent</strong><br>创造 → 评分 → 预测点击率 → 最终裁判<br>生成 10-15 个标题，综合评分选出最佳</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-success-light); color: var(--color-success);">✍️</div>
+          <h3 class="pattern-title">正文生成</h3>
+          <p class="pattern-desc"><strong>4 个 Agent</strong><br>收集事实 → 写正文 → 点睛金句 → 去 AI 味<br>确保内容准确、有文采、读起来像人写的</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 2: 爬虫适配器 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">爬虫适配器：13 个信息源各司其职</h2>
+      <p>系统从 13 个不同的平台抓取信息。每个平台的网页结构都不一样——有的用 RSS，有的需要爬网页，有的需要模拟浏览器。</p>
+
+      <div class="callout callout-info animate-in">
+        <span class="callout-icon">🔌</span>
+        <div class="callout-content">
+          <span class="callout-title">适配器模式（Adapter Pattern）</span>
+          <p>就像一个万能充电器——一个充电头可以适配苹果、安卓、Type-C 等各种接口。系统用一个统一的接口（<span class="term" data-definition="SourceAdapter：一个抽象基类，定义了所有爬虫适配器必须实现的方法">SourceAdapter</span>）来处理所有信息源，每个适配器只需要实现自己的抓取逻辑。</p>
+        </div>
+      </div>
+
+      <div class="icon-rows stagger-children animate-in">
+        <div class="icon-row animate-in">
+          <div class="icon-circle" style="background: var(--color-accent-light); color: var(--color-accent);">📡</div>
+          <div>
+            <strong>RSS 适配器</strong>
+            <p>最传统的方式——订阅博客、新闻网站的 RSS 源，自动获取新文章</p>
+          </div>
+        </div>
+        <div class="icon-row animate-in">
+          <div class="icon-circle" style="background: var(--color-info-light); color: var(--color-info);">🐙</div>
+          <div>
+            <strong>GitHub Trending</strong>
+            <p>追踪 GitHub 上最火的开源项目，发现技术趋势</p>
+          </div>
+        </div>
+        <div class="icon-row animate-in">
+          <div class="icon-circle" style="background: #FDF5E0; color: var(--color-actor-4);">🔥</div>
+          <div>
+            <strong>Hacker News / Reddit / V2EX</strong>
+            <p>技术社区的热门讨论， often 是技术趋势的风向标</p>
+          </div>
+        </div>
+        <div class="icon-row animate-in">
+          <div class="icon-circle" style="background: var(--color-success-light); color: var(--color-success);">💬</div>
+          <div>
+            <strong>微信搜索（Exa + 搜狗）</strong>
+            <p>直接搜索微信公众号文章，获取竞品内容</p>
+          </div>
+        </div>
+        <div class="icon-row animate-in">
+          <div class="icon-circle" style="background: var(--color-error-light); color: var(--color-error);">🐦</div>
+          <div>
+            <strong>Playwright X（推特）</strong>
+            <p>用浏览器自动化抓取推特内容，因为推特没有公开 API</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 3: LLM 抽象层 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">LLM 抽象层：4 个 AI 大脑各有所长</h2>
+      <p>系统不只用一个 AI 模型——它根据任务特点选择最合适的模型。这就像一个公司有不同专长的员工：有的擅长创意，有的擅长分析，有的性价比高。</p>
+
+      <div class="translation-block animate-in">
+        <div class="translation-code">
+          <span class="translation-label">Python</span>
+<span class="code-keyword">class</span> <span class="code-function">LLMClient</span>(ABC):
+    <span class="code-string">"""所有 LLM provider 实现此接口。"""</span>
+
+    provider: str = <span class="code-string">""</span>
+    default_model: str = <span class="code-string">""</span>
+
+    <span class="code-keyword">@abstractmethod</span>
+    <span class="code-keyword">async def</span> <span class="code-function">chat</span>(
+        self,
+        messages: List[ChatMessage],
+        *,
+        model: Optional[str] = <span class="code-keyword">None</span>,
+        temperature: float = <span class="code-number">0.3</span>,
+        max_tokens: int = <span class="code-number">4096</span>,
+        json_mode: bool = <span class="code-keyword">False</span>,
+    ) -> ChatResult:
+        <span class="code-string">"""通用 chat 接口。"""</span>
+        </div>
+        <div class="translation-english">
+          <span class="translation-label">English</span>
+          <div class="translation-lines">
+            <div class="tl"><strong>第 1-2 行：</strong>定义一个"万能充电器"接口——所有 AI 提供商都必须实现这个标准</div>
+            <div class="tl"><strong>第 4-5 行：</strong>记录两件事：这个 AI 是谁（provider），默认用哪个型号（default_model）</div>
+            <div class="tl"><strong>第 7-14 行：</strong>核心方法 chat()——不管底层是 DeepSeek 还是 Claude，调用方式完全一样</div>
+            <div class="tl"><strong>第 16-17 行：</strong>json_mode 参数——告诉 AI "请输出 JSON 格式"，这样代码就能直接解析</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pattern-cards stagger-children animate-in">
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-accent-light); color: var(--color-accent);">💰</div>
+          <h3 class="pattern-title">DeepSeek</h3>
+          <p class="pattern-desc">便宜够用。负责预处理阶段的信息提取——从原始资讯中提取信息类型、关键要素、方向判断。</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-info-light); color: var(--color-info);">🧠</div>
+          <h3 class="pattern-title">Claude</h3>
+          <p class="pattern-desc">最强创意能力。负责选题挖掘的 Agent A/B——4 Persona 评议、6 维度评分这些需要深度思考的任务。</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: #FDF5E0; color: var(--color-actor-4);">🌙</div>
+          <h3 class="pattern-title">Moonshot/Kimi</h3>
+          <p class="pattern-desc">擅长联网搜索。当需要查询最新信息时使用，弥补其他模型无法联网的短板。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 4: 前端架构 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">前端：Vue 3 的响应式界面</h2>
+      <p>前端是用户直接看到和操作的部分。它用 <span class="term" data-definition="Vue 3：一个渐进式 JavaScript 框架，让构建交互式网页变得简单">Vue 3</span> 构建，核心思想是"数据变了，界面自动更新"。</p>
+
+      <div class="file-tree animate-in">
+        <div class="ft-folder">
+          <span class="ft-name">frontend/src</span>
+          <div class="ft-children">
+            <div class="ft-folder">
+              <span class="ft-name">api</span>
+              <span class="ft-desc">所有 HTTP 请求在这里发出去</span>
+            </div>
+            <div class="ft-folder">
+              <span class="ft-name">stores</span>
+              <span class="ft-desc">Pinia 状态管理——全局数据存在这里</span>
+            </div>
+            <div class="ft-folder">
+              <span class="ft-name">pages</span>
+              <span class="ft-desc">30+ 个页面组件</span>
+            </div>
+            <div class="ft-folder">
+              <span class="ft-name">components</span>
+              <span class="ft-desc">可复用的 UI 组件（编辑器、面板、弹窗）</span>
+            </div>
+            <div class="ft-file">
+              <span class="ft-name">router.js</span>
+              <span class="ft-desc">页面路由——哪个 URL 显示哪个页面</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-info animate-in">
+        <span class="callout-icon">🎨</span>
+        <div class="callout-content">
+          <span class="callout-title">富文本编辑器</span>
+          <p>系统用了两个编辑器：Tiptap（无头编辑器，高度可定制）和 WangEditor（开箱即用）。用户可以在编辑器里直接修改 AI 生成的文章，就像在 Word 里编辑一样。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 5: 测验 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">检验你的理解</h2>
+
+      <div class="quiz-container" id="quiz-module-2">
+        <div class="quiz-question-block" data-correct="B"
+             data-explanation-right="对！工厂流水线的比喻很贴切——每个 Agent 专注一个任务，产出半成品交给下一个。这种分工让每个 Agent 都能做到最好。"
+             data-explanation_wrong="不是这样的。多个 Agent 的核心优势是"专业分工"——每个 Agent 只做一件事，做到极致。就像工厂流水线，每个工位的工人都是该环节的专家。">
+          <p class="quiz-question">为什么系统要用多个 AI Agent 而不是一个？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为一个 AI 太慢了，多个可以并行
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为专业分工——每个 Agent 专注一件事，做到极致
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为需要不同的 AI 提供商
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为一个 AI 无法处理这么大的数据量
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block" data-correct="A"
+             data-explanation-right="完全正确！DeepSeek 负责便宜的预处理任务（信息提取），Claude 负责需要深度思考的创意任务（选题衍生、评分）。这样既省钱又保证质量。"
+             data-explanation_wrong="其实系统根据任务特点选择模型：DeepSeek（便宜）负责预处理信息提取，Claude（最强）负责选题挖掘的创意任务。这是"用对的工具做对的事"。">
+          <p class="quiz-question">为什么系统在不同阶段使用不同的 AI 模型？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 根据任务复杂度选择——简单任务用便宜模型，复杂任务用强模型
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为不同模型只能处理不同类型的数据
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为需要备份，防止一个模型挂了
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为每个模型都有独特的 API 限制
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-check-btn" onclick="checkQuiz('quiz-module-2')">检查答案</div>
+        <div class="quiz-reset-btn" onclick="resetQuiz('quiz-module-2')">重置</div>
+      </div>
+    </div>
+
+  </div>
+</section>

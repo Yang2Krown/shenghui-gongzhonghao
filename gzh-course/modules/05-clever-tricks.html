@@ -1,0 +1,318 @@
+<section class="module" id="module-5">
+  <div class="module-content">
+    <div class="module-header animate-in">
+      <span class="module-number">05</span>
+      <h1 class="module-title">聪明的工程技巧</h1>
+      <p class="module-subtitle">这个系统里有几个特别聪明的设计——理解它们，你就能在自己的项目中复制这些模式</p>
+    </div>
+
+    <!-- Screen 1: 创造者而非过滤器 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">"创造者而非过滤器"哲学</h2>
+      <p>传统的信息处理思路是：爬 100 条 → 过滤到 10 条 → 输出。但这个系统反其道而行之：</p>
+
+      <div class="callout callout-accent animate-in">
+        <span class="callout-icon">🎯</span>
+        <div class="callout-content">
+          <span class="callout-title">核心洞察</span>
+          <p>Agent A（选题衍生员）不是从一堆烂选题里挑好的——它是<strong>主动创造好选题</strong>。给它 1 条资讯，它能衍生出 3-8 个高质量的候选选题。这就像一个创意总监，不是在废纸篓里找创意，而是从零开始构思。</p>
+        </div>
+      </div>
+
+      <div class="pattern-cards stagger-children animate-in">
+        <div class="pattern-card animate-in" style="border-top-color: var(--color-error);">
+          <div class="pattern-icon" style="background: var(--color-error-light); color: var(--color-error);">❌</div>
+          <h3 class="pattern-title">传统思路：过滤器</h3>
+          <p class="pattern-desc">爬 100 条 → 用规则过滤掉 90 条 → 剩下 10 条 → 输出。问题是：如果原始数据质量不高，你过滤后也没好东西。</p>
+        </div>
+
+        <div class="pattern-card animate-in" style="border-top-color: var(--color-success);">
+          <div class="pattern-icon" style="background: var(--color-success-light); color: var(--color-success);">✅</div>
+          <h3 class="pattern-title">这个系统：创造者</h3>
+          <p class="pattern-desc">爬 1 条 → Agent A 衍生 5 个好选题 → Agent B 独立评分 → 输出最好的。原始数据质量低也没关系，Agent A 会创造价值。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 2: 程序化分数验证 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">程序化分数验证：不让 AI 算术</h2>
+      <p>Agent B（评分员）会给每个选题打 6 个维度的分。但系统<strong>不信赖 AI 的算术能力</strong>——加权总分是用 Python 重新计算的。</p>
+
+      <div class="translation-block animate-in">
+        <div class="translation-code">
+          <span class="translation-label">Python</span>
+<span class="code-comment"># Agent B 给出 6 个维度的分数</span>
+scores = {
+    <span class="code-string">"novelty"</span>: <span class="code-number">8</span>,
+    <span class="code-string">"depth"</span>: <span class="code-number">7</span>,
+    <span class="code-string">"relevance"</span>: <span class="code-number">9</span>,
+    <span class="code-string">"actionability"</span>: <span class="code-number">6</span>,
+    <span class="code-string">"trend"</span>: <span class="code-number">8</span>,
+    <span class="code-string">"audience_fit"</span>: <span class="code-number">7</span>,
+}
+
+<span class="code-comment"># 权重</span>
+weights = {
+    <span class="code-string">"novelty"</span>: <span class="code-number">0.25</span>,
+    <span class="code-string">"depth"</span>: <span class="code-number">0.20</span>,
+    <span class="code-string">"relevance"</span>: <span class="code-number">0.20</span>,
+    <span class="code-string">"actionability"</span>: <span class="code-number">0.15</span>,
+    <span class="code-string">"trend"</span>: <span class="code-number">0.10</span>,
+    <span class="code-string">"audience_fit"</span>: <span class="code-number">0.10</span>,
+}
+
+<span class="code-comment"># 用 Python 重算，不信任 AI 的算术</span>
+total = sum(scores[k] * weights[k] <span class="code-keyword">for</span> k <span class="code-keyword">in</span> scores)
+        </div>
+        <div class="translation-english">
+          <span class="translation-label">English</span>
+          <div class="translation-lines">
+            <div class="tl"><strong>第 2-8 行：</strong>Agent B 给出 6 个维度的分数（新颖性、深度、相关性、可操作性、趋势、受众匹配度）</div>
+            <div class="tl"><strong>第 11-18 行：</strong>每个维度有不同的权重——新颖性最重要（25%），趋势和受众匹配度权重最低（各 10%）</div>
+            <div class="tl"><strong>第 21 行：</strong>用 Python 的 sum() 函数精确计算加权总分——不让 AI 做算术，因为 AI 经常算错</div>
+            <div class="tl"><strong>为什么重要：</strong>LLM 经常在算术上犯错（比如把 0.25+0.20 算成 0.46）。程序化计算确保分数永远准确</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-info animate-in">
+        <span class="callout-icon">💡</span>
+        <div class="callout-content">
+          <span class="callout-title">AI 不擅长的事</span>
+          <p>LLM 擅长理解语言、创造内容，但<strong>不擅长精确计算</strong>。让 AI 做算术就像让诗人做会计——不是不能做，但你不会信任结果。这个设计原则是：让 AI 做它擅长的事（创造、评估），让代码做它擅长的事（精确计算、流程控制）。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 3: 反幻觉事实列表 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">反幻觉事实列表：让 AI 不乱编</h2>
+      <p><span class="term" data-definition="幻觉（Hallucination）：AI 编造不存在的事实，比如编造一个不存在的产品名称或统计数据">幻觉</span>是 AI 最大的问题之一——它会一本正经地编造不存在的事实。这个系统用"事实列表"来对抗幻觉。</p>
+
+      <div class="callout callout-accent animate-in">
+        <span class="callout-icon">📋</span>
+        <div class="callout-content">
+          <span class="callout-title">事实列表的工作原理</span>
+          <p>在正文生成之前，一个专门的"资料收集 Agent"会阅读所有原始文章，提取出结构化的事实列表（时间、地点、事件、人物、产品名等）。这个列表会被注入到后续所有 Agent 的提示词中——AI 被要求<strong>只使用列表中的事实</strong>，不能自己编造。</p>
+        </div>
+      </div>
+
+      <div class="step-cards stagger-children animate-in">
+        <div class="step-card animate-in">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <strong>资料收集 Agent 阅读原始文章</strong>
+            <p>提取所有可验证的事实：时间、地点、事件、人物、产品名称、数据</p>
+          </div>
+        </div>
+        <div class="step-card animate-in">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <strong>生成结构化事实列表</strong>
+            <p>格式化为 JSON，每个事实标注来源（哪篇文章说的）</p>
+          </div>
+        </div>
+        <div class="step-card animate-in">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <strong>注入到所有后续 Agent 的 Prompt</strong>
+            <p>每个 Agent 的提示词都包含这个事实列表，要求"只使用列表中的事实"</p>
+          </div>
+        </div>
+        <div class="step-card animate-in">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <strong>输出的文章有据可查</strong>
+            <p>每个数据点都能追溯到原始来源，大大降低幻觉风险</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 4: 截断 JSON 修复 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">截断 JSON 修复：AI 输出不完整时的救命稻草</h2>
+      <p>AI 生成 JSON 时，有时会因为 <span class="term" data-definition="max_tokens：限制 AI 输出的最大 token 数量（约 0.75 个单词），防止 AI 生成过长内容">max_tokens</span> 限制被截断——输出到一半就停了。这个系统有一个聪明的修复机制。</p>
+
+      <div class="translation-block animate-in">
+        <div class="translation-code">
+          <span class="translation-label">Python</span>
+<span class="code-keyword">def</span> <span class="code-function">_repair_truncated_json</span>(s: str):
+    <span class="code-string">"""尝试修复被 max_tokens 截断的 JSON。"""</span>
+    stack = []          <span class="code-comment"># 追踪嵌套顺序</span>
+    in_string = <span class="code-keyword">False</span>
+    escape_next = <span class="code-keyword">False</span>
+
+    <span class="code-keyword">for</span> ch <span class="code-keyword">in</span> s:
+        <span class="code-keyword">if</span> escape_next:
+            escape_next = <span class="code-keyword">False</span>
+            <span class="code-keyword">continue</span>
+        <span class="code-keyword">if</span> ch == <span class="code-string">"\\"</span>:
+            escape_next = <span class="code-keyword">True</span>
+            <span class="code-keyword">continue</span>
+        <span class="code-keyword">if</span> ch == <span class="code-string">'"'</span> <span class="code-keyword">and not</span> escape_next:
+            in_string = <span class="code-keyword">not</span> in_string
+        </div>
+        <div class="translation-english">
+          <span class="translation-label">English</span>
+          <div class="translation-lines">
+            <div class="tl"><strong>第 1 行：</strong>这个函数专门修复被截断的 JSON——AI 输出到一半被 max_tokens 卡住了</div>
+            <div class="tl"><strong>第 4 行：</strong>stack 是一个栈，记录遇到的 { 和 [ 的顺序——就像一摞盘子，后进先出</div>
+            <div class="tl"><strong>第 5-6 行：</strong>in_string 追踪当前是否在引号内，escape_next 追踪是否遇到了转义符 \</div>
+            <div class="tl"><strong>第 8-14 行：</strong>逐字符扫描——遇到 \ 就跳过下一个字符（转义），遇到 " 就切换 in_string 状态</div>
+            <div class="tl"><strong>原理：</strong>通过追踪括号嵌套，知道缺了几个 } 和 ]，然后补上，让 JSON 重新合法</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-info animate-in">
+        <span class="callout-icon">🔧</span>
+        <div class="callout-content">
+          <span class="callout-title">为什么需要这个？</span>
+          <p>LLM 的输出长度受 max_tokens 限制。如果 JSON 太长，输出会被截断，导致不完整。比如 <code>{"name": "张三", "age</code> 就停了。修复机制会追踪括号嵌套，补上缺失的 <code>: 25}</code>，让 JSON 重新合法。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 5: 多 Persona 评议 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">多 Persona 评议：用"分歧"检测风险</h2>
+      <p>每个候选选题会被 4 个虚拟角色独立评分。如果评分差距很大，说明这个选题有争议——需要人工审查。</p>
+
+      <div class="chat-window" id="chat-persona">
+        <div class="chat-messages">
+          <div class="chat-message" data-agent="ai-expert" style="display:none;">
+            <div class="chat-avatar" style="background: var(--color-actor-1);">AI</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-1);">AI 技术专家</span>
+              <p>这个选题技术深度足够，评分 <strong>8/10</strong>。GPT-5 的新能力确实值得深入分析。</p>
+            </div>
+          </div>
+
+          <div class="chat-message" data-agent="blogger" style="display:none;">
+            <div class="chat-avatar" style="background: var(--color-actor-2);">博</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-2);">百万粉博主</span>
+              <p>标题不够吸引人，普通用户看不懂。评分 <strong>5/10</strong>。建议加一个"和你有什么关系"的角度。</p>
+            </div>
+          </div>
+
+          <div class="chat-message" data-agent="pm" style="display:none;">
+            <div class="chat-avatar" style="background: var(--color-actor-3);">产</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-3);">产品经理</span>
+              <p>可操作性一般——读者看完能做什么？评分 <strong>6/10</strong>。需要加入具体的应用场景。</p>
+            </div>
+          </div>
+
+          <div class="chat-message" data-agent="ops" style="display:none;">
+            <div class="chat-avatar" style="background: var(--color-actor-4);">运</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-4);">运营专家</span>
+              <p>传播潜力高，但时效性窗口只有 48 小时。评分 <strong>7/10</strong>。建议立即发布。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-typing" style="display:none;">
+          <div class="chat-avatar" id="chat-persona-typing-avatar" style="background: var(--color-actor-1);">AI</div>
+          <div class="chat-typing-dots">
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+          </div>
+        </div>
+
+        <div class="chat-controls">
+          <button class="btn btn-primary chat-next-btn">下一条消息</button>
+          <button class="btn chat-all-btn">全部显示</button>
+          <button class="btn chat-reset-btn">重置</button>
+          <span class="chat-progress"></span>
+        </div>
+      </div>
+
+      <div class="callout callout-warning animate-in">
+        <span class="callout-icon">⚠️</span>
+        <div class="callout-content">
+          <span class="callout-title">分歧检测</span>
+          <p>如果 4 个角色的评分差距 ≥ 4 分（比如一个给 9 分，一个给 5 分），系统会标记这个选题为"有争议"——建议人工审查。这避免了 AI 过于自信地推荐一个实际上有风险的选题。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 6: 测验 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">检验你的理解</h2>
+
+      <div class="quiz-container" id="quiz-module-5">
+        <div class="quiz-question-block" data-correct="B"
+             data-explanation-right="完全正确！LLM 擅长创造和评估，但不擅长精确计算。让 AI 做加权平均就像让诗人做会计——结果不可信。程序化计算确保分数永远准确。"
+             data-explanation_wrong="其实是因为 LLM 不擅长精确计算。虽然 AI 能理解每个维度的含义并打分，但把 6 个分数乘以权重再求和这种算术，AI 经常算错。所以系统让 AI 做评估，让代码做计算。">
+          <p class="quiz-question">为什么系统不让 AI 直接计算加权总分，而是用 Python 重算？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为 AI 计算太慢了
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为 AI 不擅长精确算术，经常算错
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为需要审计计算过程
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 因为 AI 无法访问权重配置
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block" data-correct="A"
+             data-explanation-right="对！事实列表是一个"锚点"——它把 AI 的输出锚定在真实数据上。AI 被要求只使用列表中的事实，不能自己编造。这大大降低了幻觉风险。"
+             data-explanation_wrong="反幻觉事实列表的作用是给 AI 一个"事实锚点"。在生成正文之前，系统先从原始文章中提取结构化事实（时间、地点、事件等），然后注入到 AI 的提示词中，要求 AI 只使用这些事实。">
+          <p class="quiz-question">"反幻觉事实列表"的核心作用是什么？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 给 AI 一个"事实锚点"，限制它只能使用真实数据
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 让 AI 自动校验自己的输出
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 减少 AI 的 token 消耗
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 记录 AI 的生成历史
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block" data-correct="C"
+             data-explanation-right="没错！当 4 个角色的评分差距 ≥ 4 分时，说明这个选题有争议——有人觉得好，有人觉得差。这种情况下推荐人工审查，避免 AI 过于自信地推荐有风险的选题。"
+             data-explanation_wrong="多 Persona 评议的核心价值是"用分歧检测风险"。如果 4 个角色的评分差距 ≥ 4 分，说明选题有争议——系统会标记它需要人工审查，而不是强行推荐。">
+          <p class="quiz-question">当 4 个虚拟角色对同一个选题的评分差距 ≥ 4 分时，系统会怎么做？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 取平均分，忽略分歧
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 自动删除这个选题
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 标记为"有争议"，建议人工审查
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 让 AI 重新评分直到一致
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-check-btn" onclick="checkQuiz('quiz-module-5')">检查答案</div>
+        <div class="quiz-reset-btn" onclick="resetQuiz('quiz-module-5')">重置</div>
+      </div>
+    </div>
+
+  </div>
+</section>

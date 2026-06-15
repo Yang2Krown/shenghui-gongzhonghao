@@ -1,0 +1,272 @@
+<section class="module" id="module-6">
+  <div class="module-content">
+    <div class="module-header animate-in">
+      <span class="module-number">06</span>
+      <h1 class="module-title">当事情出错时</h1>
+      <p class="module-subtitle">AI 不是万能的——它会犯错、会幻觉、会格式错误。学会调试 AI 流水线，你就能摆脱 AI 的 bug 循环</p>
+    </div>
+
+    <!-- Screen 1: AI 流水线常见故障 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">AI 流水线的 5 种常见故障</h2>
+
+      <div class="pattern-cards stagger-children animate-in">
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-error-light); color: var(--color-error);">🚫</div>
+          <h3 class="pattern-title">JSON 解析失败</h3>
+          <p class="pattern-desc">AI 输出的 JSON 格式不合法——多了逗号、少了引号、被截断。这是最常见的故障。</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-error-light); color: var(--color-error);">👻</div>
+          <h3 class="pattern-title">幻觉输出</h3>
+          <p class="pattern-desc">AI 编造不存在的数据——比如虚构一个产品名称或统计数据。发布出去就是假新闻。</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-error-light); color: var(--color-error);">⏰</div>
+          <h3 class="pattern-title">超时</h3>
+          <p class="pattern-desc">AI 响应太慢或完全无响应。可能是模型过载，也可能是提示词太长。</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-error-light); color: var(--color-error);">📝</div>
+          <h3 class="pattern-title">输出质量差</h3>
+          <p class="pattern-desc">AI 输出的内容不符合预期——可能是提示词不够清晰，也可能是模型能力不足。</p>
+        </div>
+
+        <div class="pattern-card animate-in">
+          <div class="pattern-icon" style="background: var(--color-error-light); color: var(--color-error);">💰</div>
+          <h3 class="pattern-title">积分不足</h3>
+          <p class="pattern-desc">用户的积分余额不够执行操作。系统返回 402 状态码，前端弹出充值窗口。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 2: 调试 AI 输出 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">调试 AI 输出：当 AI 给了你一坨垃圾</h2>
+      <p>当 AI 流水线返回错误结果时，你需要像侦探一样排查。以下是排查步骤：</p>
+
+      <div class="step-cards stagger-children animate-in">
+        <div class="step-card animate-in">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <strong>检查原始 AI 输出</strong>
+            <p>日志中找到 LLM 返回的原始文本。看看是格式问题还是内容问题。</p>
+          </div>
+        </div>
+        <div class="step-card animate-in">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <strong>检查 JSON 解析结果</strong>
+            <p>parse_json_loose() 是否返回了 None？如果是，说明 AI 输出格式不对。</p>
+          </div>
+        </div>
+        <div class="step-card animate-in">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <strong>检查输入数据</strong>
+            <p>传给 Agent 的数据是否正确？空数据或异常数据会导致 AI 输出异常。</p>
+          </div>
+        </div>
+        <div class="step-card animate-in">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <strong>检查提示词</strong>
+            <p>提示词是否清晰？是否包含了所有必要信息？AI 的输出质量直接取决于提示词质量。</p>
+          </div>
+        </div>
+        <div class="step-card animate-in">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <strong>检查模型选择</strong>
+            <p>是否用了合适的模型？简单任务用 DeepSeek，复杂创意任务用 Claude。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 3: 微信 API 的坑 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">微信 API 的坑：你知道这些吗？</h2>
+      <p>微信公众号 API 有很多"坑"——很多都是开发者踩过才知道的：</p>
+
+      <div class="bug-challenge animate-in">
+        <h3>🔍 找 Bug 挑战：这段代码有什么问题？</h3>
+        <p>假设你要用微信 API 创建草稿，看看这段代码：</p>
+        <div class="bug-code">
+          <div class="bug-line" onclick="checkBugLine(this, false)">
+            <span class="line-num">1</span>
+            <code>data = json.dumps({</code>
+          </div>
+          <div class="bug-line" onclick="checkBugLine(this, false)">
+            <span class="line-num">2</span>
+            <code>    "articles": [{</code>
+          </div>
+          <div class="bug-line" onclick="checkBugLine(this, true)"
+               data-explanation="这里用了 httpx 默认的 ensure_ascii=True，中文会被转义成 \\u4f60\\u597d 这样的格式。微信 API 无法正确解析这些转义字符，导致创建草稿失败。"
+               data-hint="不是这行——中文标题本身没问题。看看序列化的时候发生了什么？">
+            <span class="line-num">3</span>
+            <code>        "title": "你好世界",</code>
+          </div>
+          <div class="bug-line" onclick="checkBugLine(this, false)">
+            <span class="line-num">4</span>
+            <code>        "content": "&lt;p&gt;这是文章内容&lt;/p&gt;",</code>
+          </div>
+          <div class="bug-line" onclick="checkBugLine(this, false)">
+            <span class="line-num">5</span>
+            <code>    }]</code>
+          </div>
+          <div class="bug-line" onclick="checkBugLine(this, false)">
+            <span class="line-num">6</span>
+            <code>})</code>
+          </div>
+        </div>
+        <div class="bug-feedback"></div>
+      </div>
+
+      <div class="callout callout-info animate-in">
+        <span class="callout-icon">🔧</span>
+        <div class="callout-content">
+          <span class="callout-title">修复方案</span>
+          <p>使用 <code>json.dumps(data, ensure_ascii=False)</code> 来保持中文原文。这个系统在调用微信 API 时都手动处理了中文编码，确保微信能正确解析。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 4: 积分系统故障 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">积分系统：402 响应的优雅处理</h2>
+      <p>当用户积分不足时，系统返回 <span class="term" data-definition="HTTP 402：状态码，表示'需要付费'。服务器用这个状态码告诉客户端'你没有足够的积分来执行这个操作'">HTTP 402</span> 状态码，前端自动弹出充值窗口。</p>
+
+      <div class="translation-block animate-in">
+        <div class="translation-code">
+          <span class="translation-label">JavaScript</span>
+<span class="code-comment">// 前端拦截 402 响应</span>
+api.interceptors.response.use(
+  response => response,
+  error => {
+    <span class="code-keyword">if</span> (error.response?.status === <span class="code-number">402</span>) {
+      <span class="code-comment">// 触发自定义事件，弹出充值窗口</span>
+      window.dispatchEvent(<span class="code-keyword">new</span> CustomEvent(
+        <span class="code-string">'show-credit-dialog'</span>,
+        { detail: error.response.data }
+      ));
+    }
+    <span class="code-keyword">return</span> Promise.reject(error);
+  }
+);
+        </div>
+        <div class="translation-english">
+          <span class="translation-label">English</span>
+          <div class="translation-lines">
+            <div class="tl"><strong>第 2 行：</strong>在 Axios（HTTP 客户端）上设置拦截器——所有响应都会先经过这里</div>
+            <div class="tl"><strong>第 5 行：</strong>检查状态码是否为 402（需要付费）</div>
+            <div class="tl"><strong>第 7-10 行：</strong>触发一个自定义事件 show-credit-dialog，把后端返回的积分信息传给弹窗组件</div>
+            <div class="tl"><strong>设计亮点：</strong>用 CustomEvent 解耦——API 层不需要知道弹窗组件的存在，只需要"喊一声"，弹窗组件自己会响应</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 5: 测验 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">检验你的理解</h2>
+
+      <div class="quiz-container" id="quiz-module-6">
+        <div class="quiz-question-block" data-correct="A"
+             data-explanation-right="正确！parse_json_loose() 是系统的第一道防线——它会尝试去掉 ```json fence、提取 { } 之间的内容、甚至修复被截断的 JSON。如果它返回 None，说明 AI 输出完全无法解析。"
+             data-explanation_wrong="第一步应该是检查 parse_json_loose() 的返回值。这个函数会尝试多种方式修复 JSON（去 fence、提取 {}、修复截断）。如果它返回 None，说明输出完全不可解析——需要查看原始 AI 输出。">
+          <p class="quiz-question">当你发现 AI 流水线返回了空结果时，第一步应该检查什么？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 检查 parse_json_loose() 是否返回了 None
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 检查数据库连接是否正常
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 检查前端是否正确发送了请求
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 重启所有服务
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block" data-correct="D"
+             data-explanation-right="对！微信 API 的 DNS 有时会解析到 IPv6，而服务器不支持 IPv6。to_ipv4_url() 强制使用 IPv4。这是一个真实的坑——如果你在自己的项目中调用微信 API，也会遇到这个问题。"
+             data-explanation_wrong="微信 API 的 DNS 有时会解析到 IPv6 地址，但很多服务器不支持 IPv6。所以代码用 to_ipv4_url() 强制转换成 IPv4 地址。这是开发者在实际部署中踩过的坑。">
+          <p class="quiz-question">如果你在调用微信 API 时遇到了"连接超时"错误，最可能的原因是什么？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 微信服务器宕机了
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 网络带宽不够
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> access_token 过期了
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> DNS 解析到了 IPv6，服务器不支持
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block" data-correct="B"
+             data-explanation-right="正确！这个系统用了"拦截器 + 自定义事件"的模式——API 层拦截 402 响应，触发自定义事件，弹窗组件监听这个事件并弹出充值窗口。这种解耦模式让代码更清晰、更易维护。"
+             data-explanation_wrong="系统用 Axios 拦截器在 API 层统一处理 402 响应，然后通过 CustomEvent 触发充值弹窗。这种"事件驱动"的解耦模式是前端工程的最佳实践——API 层不需要知道 UI 组件的存在。">
+          <p class="quiz-question">当用户积分不足时，系统如何优雅地处理？</p>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="A" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 直接报错，让用户自己处理
+            </button>
+            <button class="quiz-option" data-value="B" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 用拦截器捕获 402，触发自定义事件弹出充值窗口
+            </button>
+            <button class="quiz-option" data-value="C" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 静默失败，不告诉用户发生了什么
+            </button>
+            <button class="quiz-option" data-value="D" onclick="selectOption(this)">
+              <span class="quiz-option-radio"></span> 自动从用户的其他账户扣款
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-check-btn" onclick="checkQuiz('quiz-module-6')">检查答案</div>
+        <div class="quiz-reset-btn" onclick="resetQuiz('quiz-module-6')">重置</div>
+      </div>
+    </div>
+
+    <!-- Screen 6: 总结 -->
+    <div class="screen animate-in">
+      <h2 class="screen-heading">课程总结</h2>
+      <p>恭喜你完成了这门课程！让我们回顾一下你学到的关键知识：</p>
+
+      <div class="callout callout-accent animate-in">
+        <span class="callout-icon">🎓</span>
+        <div class="callout-content">
+          <span class="callout-title">你掌握了什么？</span>
+          <p><strong>架构思维：</strong>多 Agent 流水线、适配器模式、工厂模式——这些模式可以应用到任何项目。</p>
+          <p><strong>调试能力：</strong>当 AI 流水线出错时，你知道从哪里开始排查。</p>
+          <p><strong>决策能力：</strong>什么时候用便宜模型、什么时候用强模型、怎么设计反幻觉机制。</p>
+          <p><strong>词汇量：</strong>Embedding、pgvector、Celery、Semaphore、JSON 多态——这些术语你现在都能理解和使用。</p>
+        </div>
+      </div>
+
+      <div class="callout callout-info animate-in">
+        <span class="callout-icon">🚀</span>
+        <div class="callout-content">
+          <span class="callout-title">下一步</span>
+          <p>现在你可以用这些知识来：<br>• 更好地指导 AI 编码工具（知道该要求什么架构）<br>• 检测 AI 的错误（知道什么模式是合理的）<br>• 在 AI 卡住时介入（知道从哪里排查）<br>• 和工程师自信地讨论技术决策</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
