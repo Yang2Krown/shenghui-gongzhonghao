@@ -76,13 +76,16 @@ async def list_records(
     page: int = 1,
     page_size: int = 20,
 ) -> Tuple[List[GenerationRecord], int]:
+    # type_filter 支持逗号分隔的多类型（用于按"分类"筛选）
+    types = [t for t in (type_filter or "").split(",") if t] if type_filter else []
+
     q = select(GenerationRecord).where(GenerationRecord.user_id == user_id)
-    if type_filter:
-        q = q.where(GenerationRecord.type == type_filter)
+    if types:
+        q = q.where(GenerationRecord.type.in_(types))
 
     count_q = select(GenerationRecord.id).where(GenerationRecord.user_id == user_id)
-    if type_filter:
-        count_q = count_q.where(GenerationRecord.type == type_filter)
+    if types:
+        count_q = count_q.where(GenerationRecord.type.in_(types))
     total = len((await db.execute(count_q)).all())
 
     q = q.order_by(desc(GenerationRecord.created_at))

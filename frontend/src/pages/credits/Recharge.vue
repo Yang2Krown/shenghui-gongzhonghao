@@ -6,11 +6,17 @@
 
     <!-- 当前余额 -->
     <div class="balance-card">
-      <div class="balance-label">当前积分余额</div>
-      <div class="balance-amount">
-        <span class="number">{{ creditStore.formattedBalance }}</span>
-        <span class="unit">积分</span>
+      <div class="balance-info">
+        <div class="balance-label">当前积分余额</div>
+        <div class="balance-amount">
+          <span class="number">{{ creditStore.formattedBalance }}</span>
+          <span class="unit">积分</span>
+        </div>
       </div>
+      <button class="history-btn" @click="router.push('/creation-history')">
+        消耗记录
+        <el-icon :size="14"><ArrowRight /></el-icon>
+      </button>
     </div>
 
     <!-- 套餐列表 -->
@@ -46,9 +52,12 @@
 
 <script setup>
 import { onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import { ArrowRight } from '@element-plus/icons-vue'
 import { useCreditStore } from '@/stores/credit'
 
+const router = useRouter()
 const creditStore = useCreditStore()
 
 onMounted(async () => {
@@ -88,11 +97,38 @@ const handlePurchase = async (pkg) => {
 
 /* 余额 */
 .balance-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   padding: 24px;
   margin-bottom: 24px;
+}
+
+.history-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-radius: var(--r-pill);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-3);
+  background: transparent;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.history-btn:hover {
+  color: var(--clay-deep);
+  border-color: var(--clay);
+  background: var(--clay-tint);
 }
 
 .balance-label {

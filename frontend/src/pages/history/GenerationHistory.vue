@@ -17,14 +17,14 @@
     <!-- 类型筛选 -->
     <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 16px;">
       <div style="padding: 16px 22px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-        <span class="text-sm text-ink-4" style="flex-shrink: 0;">筛选：</span>
+        <span class="text-sm text-ink-4" style="flex-shrink: 0;">分类：</span>
         <button
-          v-for="t in typeOptions"
-          :key="t.value"
-          :class="['type-chip', { 'type-chip-active': currentType === t.value }]"
-          @click="currentType = t.value; fetchRecords()"
+          v-for="c in categories"
+          :key="c.value"
+          :class="['type-chip', { 'type-chip-active': currentCat === c.value }]"
+          @click="currentCat = c.value; currentPage = 1; fetchRecords()"
         >
-          {{ t.label }}
+          {{ c.label }}
         </button>
       </div>
     </div>
@@ -53,7 +53,7 @@
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
           <div style="display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0;">
             <!-- 类型标签 -->
-            <span :class="['type-badge', `type-${record.type}`]">
+            <span :class="['type-badge', `cat-${typeCat(record.type)}`]">
               {{ typeLabel(record.type) }}
             </span>
             <!-- 状态指示器 -->
@@ -63,7 +63,11 @@
               {{ record.display_title || '未命名' }}
             </span>
           </div>
-          <div style="display: flex; align-items: center; gap: 16px; flex-shrink: 0;">
+          <div style="display: flex; align-items: center; gap: 14px; flex-shrink: 0;">
+            <!-- 积分消耗 -->
+            <span :class="['credit-tag', typeCredits(record.type) > 0 ? 'credit-tag-cost' : 'credit-tag-free']">
+              {{ typeCredits(record.type) > 0 ? `-${typeCredits(record.type)} 积分` : '免费' }}
+            </span>
             <span class="text-sm text-ink-4 font-serif">{{ formatTime(record.created_at) }}</span>
             <button class="btn-action" @click.stop="navigateToRecord(record)">
               查看详情
@@ -100,10 +104,13 @@
       <div v-else-if="detailRecord" class="detail-content">
         <!-- 头部信息 -->
         <div class="detail-header">
-          <span :class="['type-badge', `type-${detailRecord.type}`]">
+          <span :class="['type-badge', `cat-${typeCat(detailRecord.type)}`]">
             {{ typeLabel(detailRecord.type) }}
           </span>
           <span :class="['status-dot', `status-${detailRecord.status}`]"></span>
+          <span :class="['credit-tag', typeCredits(detailRecord.type) > 0 ? 'credit-tag-cost' : 'credit-tag-free']">
+            {{ typeCredits(detailRecord.type) > 0 ? `消耗 ${typeCredits(detailRecord.type)} 积分` : '免费' }}
+          </span>
           <span class="text-sm text-ink-4 font-serif">{{ formatTime(detailRecord.created_at) }}</span>
         </div>
 
@@ -112,73 +119,46 @@
 
         <!-- 内容 -->
         <div class="detail-body font-serif">
-          <!-- 有输出内容 -->
-          <template v-if="detailRecord.output_snapshot && Object.keys(detailRecord.output_snapshot).length > 0">
-            <!-- 标题生成结果 -->
-            <template v-if="detailRecord.type === 'title_generate'">
-              <div v-if="detailRecord.output_snapshot.recommendations && detailRecord.output_snapshot.recommendations.length" class="detail-section">
-                <div class="detail-label">推荐标题</div>
-                <div class="detail-titles">
-                  <div v-for="(item, i) in detailRecord.output_snapshot.recommendations" :key="i" class="title-item">
-                    <div class="title-content">{{ item.title }}</div>
-                    <div class="title-meta">
-                      <span v-if="item.method" class="title-method">{{ item.method }}</span>
-                      <span v-if="item.final_score" class="title-score">{{ item.final_score.toFixed(1) }}分</span>
-                      <span v-if="item.word_count" class="title-words">{{ item.word_count }}字</span>
-                    </div>
-                  </div>
+          <div v-if="detailBlocks.length === 0" class="detail-text text-ink-4" style="text-align: center; padding: 40px 0;">
+            暂无输出内容
+          </div>
+          <div v-for="block in detailBlocks" :key="block.key" class="detail-section">
+            <div class="detail-label">{{ block.label }}</div>
+
+            <!-- 长文本 / Markdown -->
+            <div v-if="block.kind === 'markdown'" class="markdown-body" v-html="renderMarkdown(block.value)"></div>
+
+            <!-- 短文本 -->
+            <div v-else-if="block.kind === 'text'" class="detail-text">{{ block.value }}</div>
+
+            <!-- 标签 -->
+            <div v-else-if="block.kind === 'tags'" class="detail-tags">
+              <span v-for="(tag, i) in block.value" :key="i" class="detail-tag">#{{ tag }}</span>
+            </div>
+
+            <!-- 字符串列表 -->
+            <ul v-else-if="block.kind === 'list'" class="detail-list">
+              <li v-for="(item, i) in block.value" :key="i">{{ item }}</li>
+            </ul>
+
+            <!-- 对象数组（如推荐标题） -->
+            <div v-else-if="block.kind === 'objects'" class="detail-titles">
+              <div v-for="(pairs, i) in block.value" :key="i" class="title-item">
+                <div v-for="p in pairs" :key="p.label" class="pair-row">
+                  <span class="pair-label">{{ p.label }}</span>
+                  <span class="pair-value">{{ p.value }}</span>
                 </div>
               </div>
-              <div v-else class="detail-text">{{ JSON.stringify(detailRecord.output_snapshot, null, 2) }}</div>
-            </template>
-
-            <!-- 正文生成结果 -->
-            <template v-else-if="detailRecord.type === 'content_generate'">
-              <div v-if="detailRecord.output_snapshot.final_text" class="detail-section">
-                <div class="detail-label">生成的正文</div>
-                <div class="markdown-body" v-html="renderMarkdown(detailRecord.output_snapshot.final_text)"></div>
-              </div>
-              <div v-else-if="detailRecord.output_snapshot.gold_sentences" class="detail-section">
-                <div class="detail-label">金句</div>
-                <div class="detail-text">{{ JSON.stringify(detailRecord.output_snapshot.gold_sentences, null, 2) }}</div>
-              </div>
-              <div v-else class="detail-text">{{ JSON.stringify(detailRecord.output_snapshot, null, 2) }}</div>
-            </template>
-
-            <!-- 转写/仿写结果 -->
-            <template v-else-if="detailRecord.type === 'content_transform' || detailRecord.type === 'content_imitate'">
-              <div v-if="detailRecord.output_snapshot.title" class="detail-section">
-                <div class="detail-label">标题</div>
-                <div class="detail-text">{{ detailRecord.output_snapshot.title }}</div>
-              </div>
-              <div v-if="detailRecord.output_snapshot.content" class="detail-section">
-                <div class="detail-label">正文</div>
-                <div class="markdown-body" v-html="renderMarkdown(detailRecord.output_snapshot.content)"></div>
-              </div>
-              <div v-if="detailRecord.output_snapshot.tags && detailRecord.output_snapshot.tags.length" class="detail-section">
-                <div class="detail-label">标签</div>
-                <div class="detail-tags">
-                  <span v-for="tag in detailRecord.output_snapshot.tags" :key="tag" class="detail-tag">#{{ tag }}</span>
-                </div>
-              </div>
-            </template>
-
-            <!-- 其他类型 -->
-            <template v-else>
-              <div class="detail-text">{{ JSON.stringify(detailRecord.output_snapshot, null, 2) }}</div>
-            </template>
-          </template>
-
-          <!-- 无输出内容，显示输入信息 -->
-          <template v-else>
-            <div v-if="detailRecord.input_snapshot && Object.keys(detailRecord.input_snapshot).length > 0" class="detail-section">
-              <div class="detail-label">输入信息</div>
-              <div class="detail-text">{{ JSON.stringify(detailRecord.input_snapshot, null, 2) }}</div>
             </div>
-            <div v-else class="detail-text text-ink-4" style="text-align: center; padding: 40px 0;">
-              暂无输出内容
+
+            <!-- 键值对象 -->
+            <div v-else-if="block.kind === 'pairs'" class="title-item">
+              <div v-for="p in block.value" :key="p.label" class="pair-row">
+                <span class="pair-label">{{ p.label }}</span>
+                <span class="pair-value">{{ p.value }}</span>
+              </div>
             </div>
-          </template>
+          </div>
         </div>
       </div>
     </el-dialog>
@@ -186,7 +166,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Clock, Loading, Document, ArrowRight } from '@element-plus/icons-vue'
@@ -211,38 +191,102 @@ const records = ref([])
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = 20
-const currentType = ref('')
+const currentCat = ref('')
 
 // 详情弹窗
 const showDetail = ref(false)
 const detailLoading = ref(false)
 const detailRecord = ref(null)
 
-const typeOptions = [
-  { value: '', label: '全部' },
-  { value: 'title_generate', label: '标题生成' },
-  { value: 'content_generate', label: '正文生成' },
-  { value: 'content_transform', label: '内容转写' },
-  { value: 'content_imitate', label: '内容仿写' },
-]
-
-const typeLabels = {
-  title_generate: '标题生成',
-  content_generate: '正文生成',
-  content_transform: '内容转写',
-  content_imitate: '内容仿写',
-  // 旧数据兼容
-  outline_generate: '大纲生成',
-  outline_reevaluate: '大纲重评',
-  title_reevaluate: '标题重评',
-  content_reevaluate: '正文重评',
-  munger_generate: '芒格标题',
-  munger_score: '标题评分',
-  xhs_convert: '转小红书',
-  angle_inspection: '角度体检',
+// 类型元数据：标签、分类、积分消耗
+// credits 镜像后端 credit_config.py 的 base_credits；仅计费操作 > 0，
+// 重评/对比/独立工具等为免费功能。
+// ponytail: 静态镜像后端定价，定价若改为动态再由接口返回
+const TYPE_META = {
+  outline_generate:         { label: '大纲生成', cat: 'outline', credits: 3 },
+  outline_reevaluate:       { label: '大纲重评', cat: 'outline', credits: 0 },
+  angle_inspection:         { label: '角度体检', cat: 'outline', credits: 0 },
+  title_generate:           { label: '标题生成', cat: 'title', credits: 3 },
+  standalone_title:         { label: '独立标题', cat: 'title', credits: 0 },
+  multi_model_title:        { label: '多模型标题', cat: 'title', credits: 0 },
+  munger_generate:          { label: '芒格标题', cat: 'title', credits: 0 },
+  munger_score:             { label: '标题评分', cat: 'title', credits: 0 },
+  title_reevaluate:         { label: '标题重评', cat: 'title', credits: 0 },
+  content_generate:         { label: '正文生成', cat: 'content', credits: 10 },
+  content_polish:           { label: '文案润色', cat: 'content', credits: 8 },
+  content_continuation:     { label: '正文续写', cat: 'content', credits: 1 },
+  content_reevaluate:       { label: '正文重评', cat: 'content', credits: 0 },
+  multi_model_polish:       { label: '多模型润色', cat: 'content', credits: 0 },
+  multi_model_continuation: { label: '多模型续写', cat: 'content', credits: 0 },
+  content_transform:        { label: '内容转写', cat: 'convert', credits: 2 },
+  content_imitate:          { label: '内容仿写', cat: 'convert', credits: 3 },
+  xhs_convert:              { label: '转小红书', cat: 'convert', credits: 0 },
 }
 
-const typeLabel = (type) => typeLabels[type] || '其他'
+const categories = [
+  { value: '', label: '全部' },
+  { value: 'outline', label: '选题大纲' },
+  { value: 'title', label: '标题' },
+  { value: 'content', label: '正文' },
+  { value: 'convert', label: '转换' },
+]
+
+const typeLabel = (type) => TYPE_META[type]?.label || '其他'
+const typeCat = (type) => TYPE_META[type]?.cat || 'other'
+const typeCredits = (type) => TYPE_META[type]?.credits ?? 0
+
+// ===== 详情可读化渲染 =====
+const KEY_LABELS = {
+  final_text: '正文内容', content: '正文', body: '正文', article: '正文',
+  text: '内容', title: '标题', titles: '标题', recommendations: '推荐标题',
+  gold_sentences: '金句', tags: '标签', outline: '大纲', summary: '摘要',
+  sections: '段落', score: '评分', final_score: '评分', scores: '评分',
+  method: '手法', word_count: '字数', reason: '理由', hook: '开头钩子',
+  keywords: '关键词', angle: '切入角度', suggestions: '建议', comment: '点评',
+  source_title: '原标题', source_content: '原文', candidates: '候选',
+}
+const HIDDEN_KEYS = new Set(['error', 'run_id', 'task_id', 'raw', 'prompt', 'model', 'provider', 'id', 'created_at'])
+const LONG_TEXT_KEYS = new Set(['final_text', 'content', 'body', 'article', 'text', 'outline', 'summary'])
+
+const labelOf = (k) => KEY_LABELS[k] || k
+
+const toPairs = (obj) =>
+  Object.entries(obj)
+    .filter(([k, v]) => !HIDDEN_KEYS.has(k) && v != null && v !== '')
+    .map(([k, v]) => ({
+      label: labelOf(k),
+      value: Array.isArray(v) ? v.join('、') : typeof v === 'object' ? JSON.stringify(v) : String(v),
+    }))
+
+const buildBlocks = (snapshot) => {
+  const blocks = []
+  for (const [k, v] of Object.entries(snapshot || {})) {
+    if (HIDDEN_KEYS.has(k) || v == null || v === '') continue
+    const label = labelOf(k)
+    if (typeof v === 'string') {
+      blocks.push({ key: k, label, kind: LONG_TEXT_KEYS.has(k) || v.length > 80 ? 'markdown' : 'text', value: v })
+    } else if (typeof v === 'number' || typeof v === 'boolean') {
+      blocks.push({ key: k, label, kind: 'text', value: String(v) })
+    } else if (Array.isArray(v)) {
+      if (v.length === 0) continue
+      if (k === 'tags') blocks.push({ key: k, label, kind: 'tags', value: v })
+      else if (typeof v[0] === 'object' && v[0] !== null) blocks.push({ key: k, label, kind: 'objects', value: v.map(toPairs) })
+      else blocks.push({ key: k, label, kind: 'list', value: v.map(String) })
+    } else if (typeof v === 'object') {
+      const pairs = toPairs(v)
+      if (pairs.length) blocks.push({ key: k, label, kind: 'pairs', value: pairs })
+    }
+  }
+  return blocks
+}
+
+const detailBlocks = computed(() => {
+  const r = detailRecord.value
+  if (!r) return []
+  const out = r.output_snapshot && Object.keys(r.output_snapshot).length ? r.output_snapshot : null
+  const src = out || r.input_snapshot || {}
+  return buildBlocks(src)
+})
 
 const formatTime = (dateStr) => {
   if (!dateStr) return ''
@@ -260,7 +304,12 @@ const fetchRecords = async () => {
   loading.value = true
   try {
     const params = { page: currentPage.value, page_size: pageSize }
-    if (currentType.value) params.type = currentType.value
+    if (currentCat.value) {
+      params.type = Object.entries(TYPE_META)
+        .filter(([, m]) => m.cat === currentCat.value)
+        .map(([t]) => t)
+        .join(',')
+    }
     const res = await generationRecordApi.list(params)
     records.value = res.data.items
     total.value = res.data.total
@@ -349,57 +398,47 @@ onMounted(fetchRecords)
   color: var(--ink-2);
 }
 
-.type-badge.type-title_generate {
-  background: #e8ecf0;
-  color: #2d4a6f;
-}
-
-.type-badge.type-content_generate {
-  background: #f0e8ee;
-  color: #6a2d5f;
-}
-
-.type-badge.type-content_transform {
-  background: #fff3e8;
-  color: #8a5a2d;
-}
-
-.type-badge.type-content_imitate {
-  background: #e8f8f0;
-  color: #2d6a4f;
-}
-
-/* 旧数据类型标签 */
-.type-badge.type-outline_generate,
-.type-badge.type-outline_reevaluate {
+/* 按分类着色 */
+.type-badge.cat-outline {
   background: #e8f0ea;
   color: #2d6a4f;
 }
 
-.type-badge.type-title_reevaluate {
+.type-badge.cat-title {
   background: #e8ecf0;
   color: #2d4a6f;
 }
 
-.type-badge.type-content_reevaluate {
+.type-badge.cat-content {
   background: #f0e8ee;
   color: #6a2d5f;
 }
 
-.type-badge.type-munger_generate,
-.type-badge.type-munger_score {
-  background: #f0ece8;
-  color: #6a4a2d;
+.type-badge.cat-convert {
+  background: #fff3e8;
+  color: #8a5a2d;
 }
 
-.type-badge.type-xhs_convert {
-  background: #ffe8e8;
-  color: #c43e3e;
+/* 积分消耗标签 */
+.credit-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-.type-badge.type-angle_inspection {
-  background: #e8f0f0;
-  color: #2d5f6a;
+.credit-tag-cost {
+  background: rgba(192, 57, 43, 0.08);
+  color: #c0392b;
+}
+
+.credit-tag-free {
+  background: var(--bone);
+  color: var(--ink-4);
 }
 
 .status-dot {
@@ -520,6 +559,42 @@ onMounted(fetchRecords)
 .title-content {
   font-weight: 500;
   margin-bottom: 6px;
+}
+
+.detail-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+
+.detail-list li {
+  margin-bottom: 6px;
+}
+
+.pair-row {
+  display: flex;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 3px 0;
+}
+
+.pair-row + .pair-row {
+  border-top: 1px dashed var(--line);
+}
+
+.pair-label {
+  flex-shrink: 0;
+  min-width: 64px;
+  color: var(--ink-4);
+  font-weight: 600;
+}
+
+.pair-value {
+  color: var(--ink-2);
+  word-break: break-word;
 }
 
 .title-meta {
