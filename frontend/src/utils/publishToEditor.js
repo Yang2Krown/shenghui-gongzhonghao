@@ -1,11 +1,48 @@
 /**
  * 发布到公众号编辑器的共享工具
  * - markdown → 语义 HTML 转换
- * - LLM 智能换行
+ * - LLM 智能换行 + 客户端兜底拆分
  * - sessionStorage 写入 + 路由跳转
  */
 import { formatParagraphs } from '@/api/api'
 import { ElLoading } from 'element-plus'
+
+/**
+ * 客户端兜底：对过长段落按句号拆分，确保手机端每段不超过 ~4 行
+ * 只处理普通段落，不碰标题 / 列表 / 引用
+ */
+function splitLongParagraphs(text) {
+  if (!text) return ''
+  // 关键：LLM 智能换行往往用单换行 \n 分段，这里把任意连续换行都视为段落边界，
+  // 否则单 \n 分段会在后续被压成 <br>（换行没生效）。
+  return text
+    .split(/\n+/)
+    .map((para) => {
+      const t = para.trim()
+      if (!t) return ''
+      // 标题行不动
+      if (/^#{1,3}\s/.test(t)) return t
+      // 已经够短（<=70字）不动
+      if (t.length <= 70) return t
+      // 按中文句号/问号/感叹号 + 英文句号 拆句
+      const sentences = t.match(/[^。！？.!?]+[。！？.!?]+/g) || [t]
+      const groups = []
+      let buf = ''
+      for (const s of sentences) {
+        if (!buf) { buf = s; continue }
+        // 如果当前累积 + 下一句仍然很短（<40字），合在一起
+        if ((buf + s).replace(/[，,；;：:\s]/g, '').length < 40) {
+          buf += s
+        } else {
+          groups.push(buf.trim())
+          buf = s
+        }
+      }
+      if (buf.trim()) groups.push(buf.trim())
+      return groups.join('\n\n')
+    })
+    .join('\n\n')
+}
 
 /**
  * 纯文本 / markdown → 语义 HTML
@@ -20,15 +57,20 @@ export function textToHtml(text) {
     .replace(/金句种子[：:]\s*/g, '')
     .replace(/【金句清单[^】]*】[\s\S]*$/g, '')
     .trim()
+  // 行内 markdown：**加粗** / *斜体* → <strong>/<em>，否则会原样漏到编辑器
+  const inline = (s) => s
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*]+?)\*/g, '$1<em>$2</em>')
+  // 同样把任意连续换行视为段落边界：单 \n 也是一个新段落，而不是段内软换行
   return cleaned
-    .split(/\n\n+/)
+    .split(/\n+/)
     .map((para) => {
       const t = para.trim()
       if (!t) return ''
-      if (t.startsWith('## ')) return `<h2>${t.slice(3).trim()}</h2>`
-      if (t.startsWith('### ')) return `<h3>${t.slice(4).trim()}</h3>`
-      if (t.startsWith('# ')) return `<h2>${t.slice(2).trim()}</h2>`
-      return `<p>${t.replace(/\n/g, '<br>')}</p>`
+      if (t.startsWith('## ')) return `<h2>${inline(t.slice(3).trim())}</h2>`
+      if (t.startsWith('### ')) return `<h3>${inline(t.slice(4).trim())}</h3>`
+      if (t.startsWith('# ')) return `<h2>${inline(t.slice(2).trim())}</h2>`
+      return `<p>${inline(t)}</p>`
     })
     .join('\n')
 }
@@ -69,6 +111,9 @@ export async function publishToWechatEditor(router, text, title) {
         console.warn('[publishToWechatEditor] 换行失败，使用原文:', e?.message)
       }
     }
+
+    // 兜底：无论 LLM 是否成功，都用客户端规则拆分过长段落
+    finalText = splitLongParagraphs(finalText)
 
     const html = textToHtml(finalText)
     sessionStorage.setItem('wechat_editor_content', html)

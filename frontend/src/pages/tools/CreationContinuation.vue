@@ -579,7 +579,7 @@ const handleSaveDraft = () => {
   ElMessage.success('草稿已保存')
 }
 
-const handlePublishToEditor = () => {
+const handlePublishToEditor = async () => {
   // 原文 + 续写内容拼接
   const inputContent = contentText.value || fileText.value || linkContent.value || ''
   const continuation = selectedPlanContent.value || ''
@@ -786,4 +786,3 @@ onUnmounted(() => {
   background: rgba(184, 84, 80, 0.03);
 }
 </style>
-const handlePublishToEditor = async () => {

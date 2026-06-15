@@ -56,9 +56,9 @@ api.interceptors.response.use(
         // 重试原请求
         return api(originalRequest)
       } catch (refreshError) {
-        // 刷新失败，跳转到登录页
+        // 刷新失败，跳转到Landing页
         userStore.clearAuth()
-        router.push('/login')
+        router.push('/landing')
         ElMessage.error('登录已过期，请重新登录')
         return Promise.reject(refreshError)
       }

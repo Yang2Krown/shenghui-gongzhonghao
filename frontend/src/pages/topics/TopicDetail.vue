@@ -267,7 +267,7 @@ const loadRelatedTopics = async () => {
 const toggleCollect = async () => {
   if (!userStore.isAuthenticated) {
     ElMessage.warning('请先登录')
-    router.push('/login')
+    router.push('/landing')
     return
   }
   
@@ -291,7 +291,7 @@ const toggleCollect = async () => {
 const createCreation = () => {
   if (!userStore.isAuthenticated) {
     ElMessage.warning('请先登录')
-    router.push('/login')
+    router.push('/landing')
     return
   }
   

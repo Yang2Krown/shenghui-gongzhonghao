@@ -647,7 +647,7 @@ const handleSaveDraft = () => {
   ElMessage.success('草稿已保存')
 }
 
-const handlePublishToEditor = () => {
+const handlePublishToEditor = async () => {
   const angle = candidateList.value[currentCandidateIndex.value]
   const angleText = angle ? `${angle.title}\n${angle.summary || angle.value_promise || ''}`.trim() : ''
   // 拼接所有信息源内容
@@ -889,4 +889,3 @@ const reshuffleCandidates = () => {
 .angle-swap-enter-from { opacity: 0; transform: translateY(8px); }
 .angle-swap-leave-to { opacity: 0; transform: translateY(-8px); }
 </style>
-const handlePublishToEditor = async () => {

@@ -569,7 +569,7 @@ const handleSaveDraft = () => {
   ElMessage.success('草稿已保存')
 }
 
-const handlePublishToEditor = () => {
+const handlePublishToEditor = async () => {
   // 组装输入内容（文件/链接/文本）
   const inputContent = value.value || fileText.value || linkContent.value || ''
   console.log('[CreationTitle] handlePublishToEditor', {
@@ -767,4 +767,3 @@ onUnmounted(() => {
   background: rgba(184, 84, 80, 0.03);
 }
 </style>
-const handlePublishToEditor = async () => {

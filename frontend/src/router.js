@@ -286,15 +286,11 @@ router.beforeEach((to, from, next) => {
   const isPublic = PUBLIC_ROUTES.includes(to.name)
 
   if (!isPublic && !userStore.isAuthenticated) {
-    // 未登录访问首页 → 跳 Landing，其他页面跳登录
-    if (to.name === 'Home') {
-      next({ name: 'Landing' })
-    } else {
-      next({
-        name: 'Login',
-        query: { redirect: to.fullPath }
-      })
-    }
+    // 未登录/token过期 → 统一跳 Landing 页
+    next({
+      name: 'Landing',
+      query: { redirect: to.fullPath }
+    })
   } else if (isPublic && userStore.isAuthenticated && (to.name === 'Login' || to.name === 'Landing')) {
     next({ path: '/' })
   } else {
