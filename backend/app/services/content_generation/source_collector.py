@@ -178,6 +178,62 @@ async def _extract_facts_from_article(
     return result
 
 
+async def _backfill_missing_content(raw_infos: list, db_session) -> None:
+    """选题确定后：给缺正文但有永久 mp 链的文章补抓正文并落库缓存。
+
+    临时签名链此刻多半已过期、抓不到（抓取层已尽量在解析时就把正文落库）；
+    这里只处理永久链（/s/<token> 或 biz·mid·sn），它们不会过期，可安全延后到
+    用到的这一刻才抓。抓不到不影响主流程——上层还有 summary 兜底。
+    """
+    import httpx
+    from app.services.scraping.adapters.exa_wechat_adapter import (
+        _is_permanent_wechat_url,
+        _BROWSER_UA,
+        _extract_wechat_article_body,
+    )
+
+    targets = [
+        ri for ri in raw_infos
+        if not (ri.content or "").strip() and _is_permanent_wechat_url(ri.url or "")
+    ]
+    if not targets:
+        return
+
+    logger.info(f"[正文补抓] {len(targets)} 篇候选缺正文，补抓中")
+    sem = asyncio.Semaphore(5)
+
+    async def _one(ri):
+        async with sem:
+            try:
+                async with httpx.AsyncClient(
+                    follow_redirects=True, timeout=15,
+                    headers={"User-Agent": _BROWSER_UA},
+                ) as client:
+                    resp = await client.get(ri.url)
+                if "已过期" in resp.text:
+                    return
+                body = _extract_wechat_article_body(resp.text)
+                if body:
+                    ri.content = body
+            except Exception as e:
+                logger.debug(f"[正文补抓] 文章 {ri.id} 失败: {type(e).__name__}: {e}")
+
+    await asyncio.gather(*[_one(ri) for ri in targets])
+
+    filled = sum(1 for ri in targets if (ri.content or "").strip())
+    logger.info(f"[正文补抓] 完成，{filled}/{len(targets)} 篇拿到正文")
+
+    # 落库缓存（best-effort，失败不影响本次生成——正文已在内存里可用）
+    try:
+        from sqlalchemy.ext.asyncio import AsyncSession
+        if isinstance(db_session, AsyncSession):
+            await db_session.commit()
+        else:
+            db_session.commit()
+    except Exception as e:
+        logger.warning(f"[正文补抓] 落库缓存失败（忽略）: {type(e).__name__}: {e}")
+
+
 async def collect_source_materials(
     cluster_id: int,
     sections: list,
@@ -213,20 +269,23 @@ async def collect_source_materials(
     if db_session:
         from sqlalchemy.ext.asyncio import AsyncSession
         # 异步会话
+        # 优先有正文的文章，没正文也收（用摘要兜底）——与 enricher 同一套逻辑，
+        # 因为链接过期/未抓正文页时 content 为 None，但源站摘要 summary 仍在。
         if isinstance(db_session, AsyncSession):
-            from sqlalchemy import select
+            from sqlalchemy import select, or_
             result = await db_session.execute(
                 select(RawInfo).where(
                     RawInfo.info_cluster_id == cluster_id,
-                    RawInfo.content.isnot(None),
+                    or_(RawInfo.content.isnot(None), RawInfo.summary.isnot(None)),
                 ).order_by(RawInfo.published_at.desc()).limit(30)
             )
             raw_infos = list(result.scalars().all())
         else:
             # 同步会话
+            from sqlalchemy import or_
             raw_infos = db_session.query(RawInfo).filter(
                 RawInfo.info_cluster_id == cluster_id,
-                RawInfo.content.isnot(None),
+                or_(RawInfo.content.isnot(None), RawInfo.summary.isnot(None)),
             ).order_by(RawInfo.published_at.desc()).limit(30).all()
 
     if not raw_infos:
@@ -234,6 +293,9 @@ async def collect_source_materials(
         return None
 
     logger.info(f"[事实提取] 簇 {cluster_id} 共 {len(raw_infos)} 篇文章，开始提取")
+
+    # 选题已确定，此刻才给缺正文的候选文章补抓正文（只补永久链，省成本+避开过期）
+    await _backfill_missing_content(raw_infos, db_session)
 
     # 用 DeepSeek 做提取（便宜）
     from app.services.llm import get_llm_client
@@ -248,7 +310,7 @@ async def collect_source_materials(
             return await _extract_facts_from_article(
                 article_id=ri.id,
                 title=ri.title or "",
-                content=ri.content or "",
+                content=ri.content or ri.summary or "",
                 url=ri.url or "",
                 published_at=pub_date,
                 outline_subtitles=outline_subtitles,

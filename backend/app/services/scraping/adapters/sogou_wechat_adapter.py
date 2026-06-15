@@ -6,7 +6,8 @@
 1. 预获取搜狗 cookie（防反爬）
 2. 合并 SourceAccount.display_name + fetch_config["keywords"] 构建关键词列表
 3. 对每个关键词请求搜狗搜索页，解析 HTML 提取文章列表
-4. 尝试解析跳转链接获取真实 mp.weixin.qq.com URL
+4. 把搜狗 /link?url= 中转链解析成真实 mp.weixin.qq.com 链接，再解析成永久链
+   （否则中转链/临时签名链几小时~1 天后失效，正文抓不到）
 
 SourceRegistry.fetch_config:
 - keywords: List[str]  额外搜索关键词（同 exa_wechat）
@@ -29,8 +30,13 @@ from bs4 import BeautifulSoup
 from app.core.timezone import utcnow
 from app.models.source_registry import SourceRegistry, SourceAccount, SOURCE_TYPE_SOGOU_WECHAT
 from app.services.scraping.base import FetchedItem, SourceAdapter
+from app.services.scraping.adapters.exa_wechat_adapter import resolve_wechat_permalink
 
 logger = logging.getLogger(__name__)
+
+# 搜狗中转页把真实链接拆成多段 `url += '...'` 拼接（并掺入 @ 字符防爬）；
+# 空格可有可无（url+=/url += 都见过），用 \s* 容忍。
+_SOGOU_LINK_PART_RE = re.compile(r"url\s*\+=\s*'([^']*)'")
 
 # User-Agent 池（与 Node.js 版保持一致）
 USER_AGENTS = [
@@ -80,6 +86,31 @@ def _parse_relative_time(text: str) -> Optional[datetime]:
     return None
 
 
+async def _sogou_link_to_wechat(url: str, client: httpx.AsyncClient) -> str:
+    """搜狗中转链 weixin.sogou.com/link?url=... → 真实 mp.weixin.qq.com 链接。
+
+    中转链带时效 token，几小时内失效，必须抓取时当场解析。解析失败原样返回，
+    交由上层 resolve_wechat_permalink / summary 兜底，绝不打断主流程。
+    # ponytail: 搜狗的混淆方式偶尔会变（@ 掺字符/分段方式），变了就回这里重抓页面对照
+    """
+    if "weixin.sogou.com/link" not in url:
+        return url
+    try:
+        resp = await client.get(url, headers={"User-Agent": _random_ua()})
+        # 1) 直接 302 到了 mp 文章页
+        if "mp.weixin.qq.com" in str(resp.url):
+            return str(resp.url)
+        # 2) JS 分段拼接 + 去掉防爬的 @
+        parts = _SOGOU_LINK_PART_RE.findall(resp.text)
+        if parts:
+            real = "".join(parts).replace("@", "")
+            if "mp.weixin.qq.com" in real:
+                return real
+    except Exception as e:
+        logger.debug(f"搜狗中转链解析失败，保留原链: {type(e).__name__}: {e}")
+    return url
+
+
 class SogouWechatAdapter(SourceAdapter):
     source_type = SOURCE_TYPE_SOGOU_WECHAT
     TIMEOUT = 20  # 单次请求超时（秒）
@@ -125,7 +156,35 @@ class SogouWechatAdapter(SourceAdapter):
             # 关键词间随机延迟（防反爬）
             await asyncio.sleep(1.0 + random.random() * 2.0)
 
-        logger.info(f"[{source.platform}] sogou_wechat 抓回 {len(all_items)} 条（关键词 {len(keywords)} 个）")
+        # 搜狗结果存的是 /link?url= 中转链（几小时失效）：先解析成真实 mp 链，
+        # 再把临时签名链解析成永久链——否则存库后正文必抓不到、链接也点不开。
+        sem = asyncio.Semaphore(int(cfg.get("resolve_concurrency", 5)))
+        async with httpx.AsyncClient(follow_redirects=True, timeout=self.TIMEOUT) as client:
+            async def _resolve(it: FetchedItem) -> FetchedItem:
+                async with sem:
+                    mp_url = await _sogou_link_to_wechat(it.url, client)
+                    it.url, content = await resolve_wechat_permalink(mp_url)
+                    if content:
+                        it.content = content
+                return it
+
+            resolved = await asyncio.gather(*[_resolve(it) for it in all_items], return_exceptions=True)
+        all_items = [it for it in resolved if isinstance(it, FetchedItem)]
+
+        # 解析后多个搜狗中转链可能指向同一篇 mp 文章，按 mp 链接再去一次重
+        deduped: List[FetchedItem] = []
+        seen_final: set = set()
+        for it in all_items:
+            if it.url not in seen_final:
+                seen_final.add(it.url)
+                deduped.append(it)
+        all_items = deduped
+
+        permanent = sum(1 for it in all_items if "mp.weixin.qq.com" in it.url)
+        logger.info(
+            f"[{source.platform}] sogou_wechat 抓回 {len(all_items)} 条"
+            f"（关键词 {len(keywords)} 个，mp 永久链 {permanent} 条）"
+        )
         return all_items
 
     async def _get_sogou_cookie(self) -> str:

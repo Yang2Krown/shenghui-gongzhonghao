@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional
 
 from app.models.source_registry import SourceRegistry, SourceAccount, SOURCE_TYPE_GZH_EXPLOSIVE
 from app.services.scraping.base import FetchedItem, SourceAdapter
+from app.services.scraping.adapters.exa_wechat_adapter import resolve_items_permalinks
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,10 @@ class GzhExplosiveAdapter(SourceAdapter):
                 if it.url not in seen_urls:
                     seen_urls.add(it.url)
                     all_items.append(it)
+
+        # noteLink 多为 s?src=11&timestamp=&signature= 临时签名链，约 1 天失效；
+        # 趁 signature 有效解析成永久链接，否则存库后正文就再也抓不到。
+        all_items = await resolve_items_permalinks(all_items)
 
         logger.info(f"[{source.platform}] gzh_explosive 抓回 {len(all_items)} 条（关键词组 {len(keywords)} 个）")
         return all_items

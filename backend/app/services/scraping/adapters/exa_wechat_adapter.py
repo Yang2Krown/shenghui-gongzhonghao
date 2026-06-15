@@ -52,45 +52,86 @@ def _is_permanent_wechat_url(url: str) -> bool:
     return "__biz=" in url and "mid=" in url and "sn=" in url
 
 
-async def resolve_wechat_permalink(url: str, *, timeout: float = 10.0) -> str:
-    """把临时签名链接解析成永久链接。永久链接 / 非微信链接原样返回。"""
+def _extract_wechat_article_body(html: str) -> Optional[str]:
+    """从 mp 文章 HTML 抽正文纯文本；太短（多半只剩 meta 兜底）则视为没抓到。"""
+    try:
+        from app.services.link_extractor import _extract_wechat_content
+        text = (_extract_wechat_content(html) or "").strip()
+    except Exception:
+        return None
+    return text[:20000] if len(text) >= 100 else None
+
+
+async def resolve_wechat_permalink(
+    url: str, *, timeout: float = 10.0
+) -> tuple[str, Optional[str]]:
+    """把临时签名链接解析成永久链接，并尽量带回正文。
+
+    返回 (permalink, content)。永久链/非微信链不抓页面，content 为 None
+    （它们不会过期，留到选题后再补抓，省成本）；临时链必须现在抓（signature
+    会过期），顺手把正文也抽出来一并落库——这是链接失效前唯一能拿到正文的时刻。
+    """
     if "mp.weixin.qq.com" not in url or _is_permanent_wechat_url(url):
-        return url
+        return url, None
     try:
         async with httpx.AsyncClient(
             follow_redirects=True, timeout=timeout,
             headers={"User-Agent": _BROWSER_UA},
         ) as client:
             resp = await client.get(url)
-        # 1) 跟随 302 后已经是永久链接
-        if _is_permanent_wechat_url(str(resp.url)):
-            return str(resp.url)
         body = resp.text
         if "已过期" in body:
             logger.warning(f"微信链接抓取时已过期，无法解析永久地址: {url[:80]}")
-            return url
-        # 2) og:url meta
-        m = _OG_URL_RE.search(body)
-        if m and _is_permanent_wechat_url(m.group(1)):
-            return m.group(1)
-        # 3) 正文里的 /s/<token>
-        m = _WECHAT_PERMALINK_RE.search(body)
-        if m:
-            return m.group(0)
-        # 4) 用 biz/mid/idx/sn 拼出永久链接
-        biz, mid, idx, sn = (
-            _BIZ_RE.search(body), _MID_RE.search(body),
-            _IDX_RE.search(body), _SN_RE.search(body),
-        )
-        if biz and mid and idx and sn:
-            return (
-                f"https://mp.weixin.qq.com/s?__biz={biz.group(1)}"
-                f"&mid={mid.group(1)}&idx={idx.group(1)}&sn={sn.group(1)}"
+            return url, None
+
+        # 解析永久链接：302 落地 → og:url → 正文 /s/<token> → biz/mid/idx/sn 拼接
+        permalink = url
+        if _is_permanent_wechat_url(str(resp.url)):
+            permalink = str(resp.url)
+        else:
+            m_og = _OG_URL_RE.search(body)
+            m_s = _WECHAT_PERMALINK_RE.search(body)
+            biz, mid, idx, sn = (
+                _BIZ_RE.search(body), _MID_RE.search(body),
+                _IDX_RE.search(body), _SN_RE.search(body),
             )
-        logger.warning(f"未能从微信文章页提取永久链接，保留原链接: {url[:80]}")
+            if m_og and _is_permanent_wechat_url(m_og.group(1)):
+                permalink = m_og.group(1)
+            elif m_s:
+                permalink = m_s.group(0)
+            elif biz and mid and idx and sn:
+                permalink = (
+                    f"https://mp.weixin.qq.com/s?__biz={biz.group(1)}"
+                    f"&mid={mid.group(1)}&idx={idx.group(1)}&sn={sn.group(1)}"
+                )
+            else:
+                logger.warning(f"未能从微信文章页提取永久链接，保留原链接: {url[:80]}")
+
+        # 趁页面已在手，顺手抽正文（临时链失效前唯一能拿到正文的时刻）
+        return permalink, _extract_wechat_article_body(body)
     except Exception as e:
         logger.warning(f"微信永久链接解析失败，保留原链接: {type(e).__name__}: {e}")
-    return url
+    return url, None
+
+
+async def resolve_items_permalinks(
+    items: List[FetchedItem], *, concurrency: int = 5
+) -> List[FetchedItem]:
+    """批量把 FetchedItem.url 的微信临时签名链解析成永久链（并发，失败保原链）。
+
+    供各微信 adapter 复用：临时链存库后约 1 天失效，必须趁 signature 有效就解析。
+    """
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _one(it: FetchedItem) -> FetchedItem:
+        async with sem:
+            it.url, content = await resolve_wechat_permalink(it.url)
+            if content:
+                it.content = content
+        return it
+
+    resolved = await asyncio.gather(*[_one(it) for it in items], return_exceptions=True)
+    return [it for it in resolved if isinstance(it, FetchedItem)]
 
 
 class ExaWechatAdapter(SourceAdapter):
@@ -171,15 +212,9 @@ class ExaWechatAdapter(SourceAdapter):
                 merged.append(item)
 
         # 把临时签名链接解析成永久链接（趁 signature 还有效），否则存库后约 1 天就过期
-        resolve_sem = asyncio.Semaphore(int(cfg.get("resolve_concurrency", 5)))
-
-        async def _resolve(item: FetchedItem) -> FetchedItem:
-            async with resolve_sem:
-                item.url = await resolve_wechat_permalink(item.url)
-            return item
-
-        resolved = await asyncio.gather(*[_resolve(it) for it in merged], return_exceptions=True)
-        merged = [it for it in resolved if isinstance(it, FetchedItem)]
+        merged = await resolve_items_permalinks(
+            merged, concurrency=int(cfg.get("resolve_concurrency", 5))
+        )
 
         permanent = sum(1 for it in merged if _is_permanent_wechat_url(it.url))
         logger.info(
