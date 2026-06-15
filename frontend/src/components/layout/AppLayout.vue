@@ -96,11 +96,20 @@
           <span class="font-semibold text-ink-2">{{ currentLabel }}</span>
         </div>
         <!-- 积分余额 -->
-        <button class="credit-topbar" @click="router.push('/credits/recharge')" :class="{ 'credit-animate': creditAnimating }">
-          <span class="credit-icon">💰</span>
-          <span class="credit-amount">{{ creditStore.formattedBalance }}</span>
-          <span class="credit-label">积分</span>
-        </button>
+        <div class="credit-topbar-wrap">
+          <button class="credit-topbar" @click="router.push('/credits/recharge')" :class="{ 'credit-animate': creditAnimating }">
+            <span class="credit-icon">💰</span>
+            <span class="credit-amount">{{ creditStore.formattedBalance }}</span>
+            <span class="credit-label">积分</span>
+          </button>
+          <transition name="credit-toast">
+            <div v-if="creditDelta" class="credit-toast" :class="creditDelta > 0 ? 'is-gain' : 'is-cost'">
+              {{ creditDelta > 0 ? '充值' : '消耗' }}
+              <strong>{{ creditDelta > 0 ? '+' : '-' }}{{ Math.abs(creditDelta) }}</strong>
+              积分
+            </div>
+          </transition>
+        </div>
       </header>
 
       <!-- 页面内容 -->
@@ -155,11 +164,18 @@ const isCollapsed = ref(false)
 
 // 积分动画
 const creditAnimating = ref(false)
+const creditDelta = ref(0)
+let creditDeltaTimer = null
 watch(() => creditStore.balance, (newVal, oldVal) => {
-  if (oldVal > 0 && newVal < oldVal) {
+  // oldVal 为 undefined/0 时是首次加载，不提示
+  if (!oldVal || newVal === oldVal) return
+  if (newVal < oldVal) {
     creditAnimating.value = true
     setTimeout(() => { creditAnimating.value = false }, 600)
   }
+  creditDelta.value = newVal - oldVal
+  clearTimeout(creditDeltaTimer)
+  creditDeltaTimer = setTimeout(() => { creditDelta.value = 0 }, 2600)
 })
 
 // 积分不足弹窗
@@ -486,6 +502,54 @@ const navigateTo = (id) => {
   0% { transform: scale(1); }
   30% { transform: scale(1.1); border-color: var(--clay); background: var(--clay-tint); }
   100% { transform: scale(1); }
+}
+
+/* 积分变动弹窗（从积分框下边缘向下弹出） */
+.credit-topbar-wrap {
+  position: relative;
+}
+
+.credit-toast {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: var(--r-md);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.credit-toast strong {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.credit-toast.is-cost {
+  border-color: rgba(192, 57, 43, 0.3);
+  color: #c0392b;
+}
+.credit-toast.is-gain {
+  border-color: rgba(31, 157, 85, 0.35);
+  color: #1f9d55;
+}
+
+.credit-toast-enter-active {
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+}
+.credit-toast-leave-active {
+  transition: transform 0.22s ease, opacity 0.22s ease;
+}
+.credit-toast-enter-from,
+.credit-toast-leave-to {
+  opacity: 0;
+  transform: translateY(-12px);
 }
 
 </style>
