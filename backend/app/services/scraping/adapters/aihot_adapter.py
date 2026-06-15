@@ -129,6 +129,7 @@ async def fetch_aihot(
     new_count = 0
     dup_count = 0
     seen_hashes: set[str] = set()
+    seen_urls: set[str] = set()
 
     for entry in feed.entries[:limit]:
         url = getattr(entry, "link", "").strip()
@@ -137,25 +138,32 @@ async def fetch_aihot(
 
         title = (getattr(entry, "title", "") or url).strip()
         h = _dedup_hash(url, title)
+        url_db = url[:1000]  # 与入库值一致，去重用同一个
 
         # 同批次去重（flush 在循环外，DB 查不到本批刚 add 的）
-        if h in seen_hashes:
+        # 必须同时按 url 去重：raw_infos.url 有唯一约束，标题略有差异时
+        # 内容指纹不同但 url 相同，只查 dedup_hash 会放行进而撞唯一约束、
+        # 整批 commit 回滚 → new=0 + 重试耗尽 → aihot 彻底不入库。
+        if h in seen_hashes or url_db in seen_urls:
             dup_count += 1
             continue
 
-        # 跨批次去重：按内容指纹（标题）查
+        # 跨批次去重：内容指纹 或 url 命中任一即视为重复
         existing = (await db.execute(
-            select(RawInfo.id).where(RawInfo.dedup_hash == h).limit(1)
+            select(RawInfo.id)
+            .where((RawInfo.dedup_hash == h) | (RawInfo.url == url_db))
+            .limit(1)
         )).first()
         if existing:
             dup_count += 1
             continue
 
         seen_hashes.add(h)
+        seen_urls.add(url_db)
         db.add(RawInfo(
             source_registry_id=source.id,
             title=title[:500],
-            url=url[:1000],
+            url=url_db,
             author=(getattr(entry, "author", None) or "")[:200] or None,
             summary=_clean_html(
                 getattr(entry, "summary", "") or getattr(entry, "description", "")
