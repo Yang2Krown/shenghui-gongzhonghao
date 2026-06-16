@@ -61,9 +61,8 @@ x-backend-env: &backend-env
   EXA_API_KEY: ${EXA_API_KEY:-}
   # HTTP 代理（访问境外网站）
   HTTP_PROXY: ${HTTP_PROXY:-}
-  # X (Twitter) 可选
-  TWITTER_AUTH_TOKEN: ${TWITTER_AUTH_TOKEN:-}
-  TWITTER_CT0: ${TWITTER_CT0:-}
+  # X (Twitter) via twitterapi.io（国内直连，无需代理/cookie）。值放 backend/.env.production
+  TWITTERAPI_IO_KEY: ${TWITTERAPI_IO_KEY:-}
   # 阿里云 OSS（公众号图片上传）
   OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
   OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
@@ -162,7 +161,7 @@ services:
       <<: *backend-env
       ROLE: worker
     volumes:
-      # X cookie 文件挂载（playwright_x_adapter 用）
+      # secrets 目录（OSS / 其它密钥文件等）
       - ./backend/secrets:/app/secrets:ro
     depends_on:
       postgres:

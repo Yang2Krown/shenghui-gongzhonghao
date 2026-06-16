@@ -1,7 +1,8 @@
 """Seed: 关注博主整理_AI信息源.xlsx → SourceAccount。
 
 87 个账号：58 X/Twitter + 29 微信公众号。
-- X 账号挂在 platform='x' 的 SourceRegistry 下（requires_auth=True, P1 阶段启用）
+- X 账号挂在 platform='x' 的 SourceRegistry 下，走 twitterapi.io（国内直连，无需 Cookie）。
+  另建 platform='x_search' 同 source_type='x'，跑中英文 AI 主题词关键词搜索。
 - 公众号账号挂在 platform='sogou_wechat_cases' 下（搜狗微信搜索，免费、国内可用）
   抓取时把 display_name 当作搜狗搜索关键词。该源不设 fetch_config.keywords，
   让 sogou adapter 走「账号名搜索」模式。
@@ -27,6 +28,21 @@ from app.models.source_registry import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# 关键词搜索（platform=x_search）用的 AI 主题词：中文复用现有 sogou 主题词，
+# 再补一批英文——X 上 AI 圈以英文为主，中文词主要命中中文圈推文。
+X_KEYWORDS_CN = [
+    "大模型", "AI Agent", "Coding Agent", "Claude", "ChatGPT", "DeepSeek",
+    "Cursor", "AI 编程", "vibe coding", "Sora", "AI 视频", "Midjourney",
+    "提示词", "MCP", "智能体", "多模态", "开源模型", "具身智能",
+]
+X_KEYWORDS_EN = [
+    "AI agent", "LLM", "Claude AI", "GPT-5", "open source LLM", "RAG",
+    "AI coding", "agentic AI", "fine-tuning", "multimodal", "prompt engineering",
+    "MCP protocol", "AI startup", "LLM inference", "AI research",
+]
+X_KEYWORDS = X_KEYWORDS_CN + X_KEYWORDS_EN
 
 
 # 表 2 使用建议 sheet 给出的"每日必看 / 深度研究 / AI编程 / 中文内容参考" 名单，
@@ -127,9 +143,37 @@ async def run(db) -> dict:
         platform="x",
         name="X / Twitter 关注博主",
         source_type=SOURCE_TYPE_X,
-        requires_auth=True,
-        description="重点关注的 X/Twitter 博主清单（P1 阶段启用，需 Cookie）",
+        requires_auth=False,
+        description="重点关注的 X/Twitter 博主清单，走 twitterapi.io（国内直连，无需 Cookie/代理）。每天 1 次，串行定速跑完。",
+        # 账号模式：不设 keywords。每个号取最近 20 条。免费档 QPS=1 req/5s → 串行(concurrency=1)，
+        # 58 个号约 5 分钟跑完。升级套餐后可调高 concurrency / 调低 min_interval_sec。
+        fetch_config={"limit": 20, "concurrency": 1, "include_replies": False},
     )
+    # 幂等：旧 seed 曾把 x 源设成 enabled=False/requires_auth=True（等 Cookie 方案）。
+    # 现在改走 twitterapi.io，强制打开 + 改成免鉴权（key 在 .env，不走 requires_auth/cookie 这套）。
+    x_reg.requires_auth = False
+    x_reg.auth_status = "ok"
+    x_reg.enabled = True
+
+    x_search_reg = await _ensure_registry(
+        db,
+        platform="x_search",
+        name="X / Twitter 关键词搜索",
+        source_type=SOURCE_TYPE_X,
+        requires_auth=False,
+        description="X 关键词搜索（twitterapi.io advanced_search）。中英文 AI 主题词，按时间片轮转分批，防一次发太多。",
+        # 关键词模式：配了 keywords → adapter 走 advanced_search。
+        # rotate_batch=10 + 每 4h 轮转：~39 个词分多批，一天覆盖一轮，单次请求量小。
+        fetch_config={
+            "keywords": X_KEYWORDS,
+            "query_type": "Latest",
+            "limit": 20,
+            "concurrency": 1,          # 免费档 QPS=1 req/5s，串行定速
+            "rotate_batch": 10,
+            "rotate_period_sec": 14400,
+        },
+    )
+    x_search_reg.enabled = True
     wechat_reg = await _ensure_registry(
         db,
         platform="sogou_wechat_cases",

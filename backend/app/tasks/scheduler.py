@@ -53,6 +53,21 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute=50, hour=23),
     },
 
+    # ── X (Twitter) via twitterapi.io：独立调度，不混进上面 5 波 ──
+    # 博主订阅：每天 1 次（按用户要求）。58 个号在一次任务内并发 3 + 抖动细水长流，不一次性炸出去。
+    "x-accounts-daily": {
+        "task": "scraper.fetch_platform",
+        "schedule": crontab(minute=0, hour=7),
+        "kwargs": {"platform": "x"},
+    },
+    # 关键词搜索：每 4 小时一次，配合 fetch_config.rotate_batch 每次只搜一小批主题词，
+    # 一天覆盖一轮全部中英文关键词；单次请求量小，省钱也防限流。
+    "x-search-rotate": {
+        "task": "scraper.fetch_platform",
+        "schedule": crontab(minute=20, hour="*/4"),
+        "kwargs": {"platform": "x_search"},
+    },
+
     # ── AI HOT 独立链路（频率更高，与全网采集解耦）──
     # 精选：每 2 小时
     "aihot-selected": {

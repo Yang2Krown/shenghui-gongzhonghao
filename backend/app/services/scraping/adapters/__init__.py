@@ -14,7 +14,7 @@ from app.services.scraping.adapters.gzh_explosive_adapter import GzhExplosiveAda
 from app.services.scraping.adapters.v2ex_adapter import V2EXAdapter
 from app.services.scraping.adapters.reddit_adapter import RedditAdapter
 from app.services.scraping.adapters.xhs_daily_adapter import XhsDailyAdapter
-from app.services.scraping.adapters.playwright_x_adapter import PlaywrightXAdapter
+from app.services.scraping.adapters.x_twitterapi_adapter import XTwitterApiAdapter
 from app.services.scraping.adapters.sogou_wechat_adapter import SogouWechatAdapter
 
 
@@ -36,7 +36,7 @@ def register_adapters() -> None:
     orchestrator.register(V2EXAdapter())
     orchestrator.register(RedditAdapter())
     orchestrator.register(XhsDailyAdapter())
-    orchestrator.register(PlaywrightXAdapter())
+    orchestrator.register(XTwitterApiAdapter())
     orchestrator.register(SogouWechatAdapter())
     _REGISTERED = True
 

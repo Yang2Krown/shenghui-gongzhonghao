@@ -104,11 +104,13 @@ def fetch_platform_task(self, platform: str):
 # 每个源派发的间隔（秒）：错峰拉长，避免一次性压一堆、也给每个源充足时间
 DISPATCH_GAP_SECONDS = 120
 
-# 派发顺序：轻量稳定的先跑，重量级（需 API / Playwright）的排后面
+# 派发顺序：轻量稳定的先跑，重量级（需 API）的排后面。
+# 注意：source_type="x"（twitterapi.io，含博主订阅 platform=x 和关键词搜索 platform=x_search）
+# 故意不在此表里——它们走 scheduler.py 里专属 beat（按天/轮转），不混进这 5 波大派发。
 _TYPE_ORDER = {
     "rss": 0, "tophub": 1, "hackernews": 2, "v2ex": 3, "github": 4,
     "reddit": 5, "xhs_daily": 6, "gzh_explosive": 7, "web": 8,
-    "sogou_wechat": 9, "exa_wechat": 10, "x_playwright": 11,
+    "sogou_wechat": 9, "exa_wechat": 10,
 }
 
 
