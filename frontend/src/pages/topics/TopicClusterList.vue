@@ -3,16 +3,16 @@
     <!-- 页面标题 -->
     <div class="mb-6" style="display: flex; justify-content: space-between; align-items: flex-start;">
       <div>
-        <h1 class="font-serif text-ink" style="font-size: 30px; font-weight: 500; line-height: 1.2;">内容资讯</h1>
-        <p class="mt-1" style="color: #6B6862; font-size: 14px;">聚合各平台的热点资讯，点击任意一条查看详情与原文来源</p>
+        <h1 class="font-serif text-ink" style="font-size: 30px; font-weight: 500; line-height: 1.2;">{{ pageTitle }}</h1>
+        <p class="mt-1" style="color: #6B6862; font-size: 14px;">{{ pageSubtitle }}</p>
       </div>
       <el-button :icon="Refresh" :loading="refreshing" @click="manualRefresh">手动抓取</el-button>
     </div>
 
     <!-- 常驻筛选 -->
     <div class="filter-bar mb-5">
-      <!-- 第一行：信息类型 -->
-      <div class="filter-row">
+      <!-- 第一行：信息类型（预设页面已锁定类型，隐藏） -->
+      <div class="filter-row" v-if="!PRESET">
         <span class="filter-label">类型：</span>
         <div class="filter-chips">
           <button
@@ -181,6 +181,17 @@ import { get, post } from '@/api/api'
 const router = useRouter()
 const route = useRoute()
 
+// 预设页面：'资讯型' / '实操案例型' / ''(综合)。靠 route.meta 区分，并锁定类型筛选。
+const PRESET = route.meta?.preset || ''
+const defaultSortBy = PRESET === '资讯型' ? 'created_at' : 'display_score'  // 资讯型按时间排，其余按价值分
+const scrollKey = `topic-list-scroll-${PRESET || 'all'}`
+const pageTitle = PRESET === '资讯型' ? '资讯型' : PRESET === '实操案例型' ? '实操案例' : '内容资讯'
+const pageSubtitle = PRESET === '资讯型'
+  ? '聚合各平台的资讯型信息，按时间倒序排列'
+  : PRESET === '实操案例型'
+    ? '聚合各平台的实操案例，按创作价值排序'
+    : '聚合各平台的热点资讯，点击任意一条查看详情与原文来源'
+
 const loading = ref(false)
 const refreshing = ref(false)
 const clusters = ref([])
@@ -224,12 +235,12 @@ const manualRefresh = async () => {
 }
 
 const filters = reactive({
-  info_type: '',
+  info_type: PRESET,         // 预设页面锁定为对应类型
   direction: '',
   freshness: '',
   mined: '',
   keyword: '',
-  sort_by: 'display_score',   // 默认按"公众号创作价值"加权排序（教程/实操优先）
+  sort_by: defaultSortBy,    // 综合/实操=价值分；资讯型=时间倒序
   sort_order: 'desc',
 })
 
@@ -242,21 +253,17 @@ const quickTypeOptions = [
   { value: '资讯型', label: '资讯型' },
 ]
 
-// 话题方向 chips
+// 话题方向 chips —— 必须与后端 rules.py DIRECTION_KEYWORDS 的 key 完全一致，
+// 否则筛选出来永远是空（value 是拿去等值匹配 InfoCluster.direction 的）。
 const directionOptions = [
   { value: '', label: '全部' },
   { value: '大模型', label: '大模型' },
   { value: 'Coding Agent', label: 'Coding Agent' },
-  { value: 'AI视频', label: 'AI视频' },
-  { value: 'AI绘画', label: 'AI绘画' },
-  { value: 'AI音频', label: 'AI音频' },
-  { value: '效率工具', label: '效率工具' },
-  { value: '观点型', label: '观点型' },
-  { value: '实践型', label: '实践型' },
-  { value: '教程型', label: '教程型' },
-  { value: '解决问题型', label: '解决问题型' },
-  { value: '资讯型', label: '资讯型' },
-  { value: '整活型', label: '整活型' },
+  { value: 'Agent 工作流', label: 'Agent 工作流' },
+  { value: 'AI 视频/短剧', label: 'AI 视频/短剧' },
+  { value: '出图/设计', label: '出图/设计' },
+  { value: 'HTML/内容交付', label: 'HTML/内容交付' },
+  { value: 'Agent 基础设施', label: 'Agent 基础设施' },
 ]
 
 // 时效 chips
@@ -326,12 +333,12 @@ const noMore = computed(() => clusters.value.length >= pagination.total)
 // 改成无限滚动后不再保存 page，刷新统一从第 1 页开始
 const restoreFromQuery = () => {
   const q = route.query
-  filters.info_type   = q.info_type   ?? ''
+  filters.info_type   = PRESET || (q.info_type ?? '')
   filters.direction   = q.direction   ?? ''
   filters.freshness   = q.freshness   ?? ''
   filters.mined       = q.mined       ?? ''
   filters.keyword     = q.keyword     ?? ''
-  filters.sort_by     = q.sort_by     ?? 'display_score'
+  filters.sort_by     = q.sort_by     ?? defaultSortBy
   filters.sort_order  = q.sort_order  ?? 'desc'
   pagination.page     = 1
   pagination.pageSize = 30
@@ -355,7 +362,7 @@ const isActive = ref(true)
 
 // 离开列表页时保存滚动位置到 sessionStorage
 const saveScroll = () => {
-  try { sessionStorage.setItem('topic-list-scroll', String(window.scrollY)) } catch {}
+  try { sessionStorage.setItem(scrollKey, String(window.scrollY)) } catch {}
 }
 
 // 记录"上次真正加载用的 query"，用来区分"筛选变化"(要重载) 和"从详情页返回"(不重载)
@@ -410,7 +417,7 @@ onActivated(() => {
       sessionStorage.removeItem('topic-mined-id')
     }
   } catch {}
-  const saved = parseInt(sessionStorage.getItem('topic-list-scroll') || '0', 10)
+  const saved = parseInt(sessionStorage.getItem(scrollKey) || '0', 10)
   if (saved > 0) {
     nextTick(() => window.scrollTo({ top: saved, behavior: 'instant' }))
   }
@@ -419,7 +426,7 @@ onActivated(() => {
 // 只有"筛选/排序真正变化"才重载；从详情返回时 query 和上次加载的一样 → 不重载
 watch(() => route.query, (newQ) => {
   if (!isActive.value) return
-  if (route.name !== 'TopicClusters' && route.name !== 'Home') return
+  if (!['TopicClusters', 'Home', 'ContentInfo', 'ContentInfoNews', 'ContentInfoCases'].includes(route.name)) return
   const s = JSON.stringify(newQ)
   if (s === lastLoadedQueryStr) return
   lastLoadedQueryStr = s
@@ -458,7 +465,7 @@ const loadClusters = async (restoreScroll = false) => {
   } finally {
     loading.value = false
     if (restoreScroll) {
-      const saved = parseInt(sessionStorage.getItem('topic-list-scroll') || '0', 10)
+      const saved = parseInt(sessionStorage.getItem(scrollKey) || '0', 10)
       if (saved > 0) {
         nextTick(() => setTimeout(() => window.scrollTo({ top: saved, behavior: 'instant' }), 100))
       }

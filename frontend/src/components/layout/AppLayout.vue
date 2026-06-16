@@ -115,9 +115,9 @@
       <!-- 页面内容 -->
       <main style="padding-top: 60px;">
         <div style="padding: 32px 32px 80px;" class="fade-in">
-          <router-view v-slot="{ Component }">
+          <router-view v-slot="{ Component, route }">
             <keep-alive :include="['TopicClusterList']">
-              <component :is="Component" />
+              <component :is="Component" :key="route.name" />
             </keep-alive>
           </router-view>
         </div>
@@ -216,6 +216,16 @@ const navItems = [
     icon: 'Document',
   },
   {
+    id: 'content-info-news',
+    label: '资讯型',
+    icon: 'Document',
+  },
+  {
+    id: 'content-info-cases',
+    label: '实操案例',
+    icon: 'Document',
+  },
+  {
     id: 'create',
     label: '创作工具',
     icon: 'EditPen',
@@ -253,6 +263,8 @@ const navItems = [
 // 当前激活路由
 const activeRoute = computed(() => {
   const path = route.path
+  if (path === '/content-info/news') return 'content-info-news'
+  if (path === '/content-info/cases') return 'content-info-cases'
   if (path === '/' || path.startsWith('/topic-clusters') || path === '/content-info') return 'content-info'
   if (path.startsWith('/creation/angle')) return 'creation-angle'
   if (path.startsWith('/creation/outline')) return 'creation-outline'
@@ -309,6 +321,8 @@ const toggleGroup = (id) => {
 // 路由映射
 const routeMap = {
   'content-info': '/content-info',
+  'content-info-news': '/content-info/news',
+  'content-info-cases': '/content-info/cases',
   'creation-angle': '/creation/angle',
   'creation-outline': '/creation/outline',
   'creation-body': '/creation/body',

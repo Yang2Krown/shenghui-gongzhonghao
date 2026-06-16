@@ -21,6 +21,20 @@ const routes = [
         component: () => import('@/pages/topics/TopicClusterList.vue'),
         meta: { title: '内容资讯' }
       },
+      // 资讯型（仅资讯型，按时间排序）
+      { 
+        path: 'content-info/news',
+        name: 'ContentInfoNews',
+        component: () => import('@/pages/topics/TopicClusterList.vue'),
+        meta: { title: '资讯型', preset: '资讯型' }
+      },
+      // 实操案例（仅实操案例型，按当前价值分排序）
+      {
+        path: 'content-info/cases',
+        name: 'ContentInfoCases',
+        component: () => import('@/pages/topics/TopicClusterList.vue'),
+        meta: { title: '实操案例', preset: '实操案例型' }
+      },
       // 话题库（保留旧路由，兼容）
       {
         path: 'topic-clusters',
@@ -270,7 +284,7 @@ const router = createRouter({
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) return savedPosition
     if (to.path === from.path) return false
-    if (['Home', 'TopicClusters', 'ContentInfo'].includes(to.name)) return false
+    if (['Home', 'TopicClusters', 'ContentInfo', 'ContentInfoNews', 'ContentInfoCases'].includes(to.name)) return false
     return { top: 0 }
   }
 })
