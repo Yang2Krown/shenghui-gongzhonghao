@@ -23,6 +23,16 @@ CELERY_BEAT_SCHEDULE = {
         "kwargs": {"gap_seconds": 90},
     },
 
+    # ── 公众号案例源：独立高频小批量（防搜狗反爬）──
+    # 不混进上面 5 波大派发——那样会和 sogou_wechat_search 在同一波里把搜狗 burst 拉高，
+    # 触发 IP 风控。改成每 30 分钟单独跑一次，每次只搜一小批账号（rotate_batch），
+    # 按时间片轮转，几小时内覆盖全部 29 个号，但单次请求量小。
+    "sogou-cases-rotate": {
+        "task": "scraper.fetch_platform",
+        "schedule": crontab(minute="5,35"),
+        "kwargs": {"platform": "sogou_wechat_cases"},
+    },
+
     # ── 预处理：每 30 分钟一小批，滚动消化 pending ──
     # 不再每 2 小时一次 limit=500 硬啃——那样配合全文抓取容易撑爆 25 分钟软超时直接崩溃，
     # 导致整批数据进不了话题。改成小批量高频：每批 120 条，积压多时分多趟跑完，

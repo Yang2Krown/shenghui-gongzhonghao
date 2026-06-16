@@ -129,7 +129,9 @@ async def _list_enabled_platforms_ordered() -> List[Dict[str, str]]:
     sources = [
         {"platform": p, "source_type": t}
         for (p, t) in rows
-        if t in _TYPE_ORDER
+        # sogou_wechat_cases 走独立高频小批量调度（见 scheduler.py），不混进 5 波大派发，
+        # 否则会和 sogou_wechat_search 在同一波里把搜狗 burst 拉高、触发 IP 风控。
+        if t in _TYPE_ORDER and p != "sogou_wechat_cases"
     ]
     sources.sort(key=lambda s: (_TYPE_ORDER.get(s["source_type"], 99), s["platform"]))
     return sources

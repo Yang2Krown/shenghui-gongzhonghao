@@ -20,6 +20,7 @@ import asyncio
 import logging
 import random
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urljoin
@@ -133,8 +134,17 @@ class SogouWechatAdapter(SourceAdapter):
                 if acc.display_name and acc.display_name not in keywords:
                     keywords.append(acc.display_name)
         keywords = [kw.strip() for kw in keywords if kw and kw.strip()]
-        max_kw = cfg.get("max_keywords", 20)
-        keywords = keywords[:max_kw]
+
+        # 轮转批次（防反爬）：配了 rotate_batch 时，每次只搜一小批关键词、按时间片轮转，
+        # 配合更高的调度频率，一段时间内覆盖全部关键词；单次请求量小，不会把搜狗 burst 拉高
+        # 触发 IP 风控（antispider）。无状态：用时间片算窗口起点，跨界环形绕回。
+        rb = int(cfg.get("rotate_batch", 0) or 0)
+        if rb > 0 and len(keywords) > rb:
+            period = int(cfg.get("rotate_period_sec", 1800))  # 默认每 30 分钟换一批
+            start = (int(time.time() // period) * rb) % len(keywords)
+            keywords = (keywords + keywords)[start:start + rb]
+        else:
+            keywords = keywords[: cfg.get("max_keywords", 20)]
 
         if not keywords:
             logger.warning(f"[{source.platform}] sogou_wechat 没有配置关键词")

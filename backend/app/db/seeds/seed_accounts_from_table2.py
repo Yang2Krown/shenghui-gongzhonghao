@@ -136,9 +136,11 @@ async def run(db) -> dict:
         name="公众号案例源（搜狗）",
         source_type=SOURCE_TYPE_SOGOU_WECHAT,
         requires_auth=False,
-        description="重点案例公众号，走免费搜狗微信搜索（关键词=公众号名）。不设 keywords→账号名搜索模式。",
-        # 29 个号 → max_keywords 必须 > 29，否则被 sogou adapter 默认 20 截断
-        fetch_config={"max_keywords": 40, "limit_per_keyword": 10},
+        description="重点案例公众号，走免费搜狗微信搜索（账号名搜索）。独立高频小批量调度+轮转，防搜狗反爬。",
+        # 不设 keywords → 账号名搜索模式（全部 29 个号）。
+        # rotate_batch=4：每次只搜 4 个号，按时间片(30min)轮转，~8 次跑完一轮覆盖全部，
+        # 配合 scheduler 里 sogou-cases-rotate 每 30 分钟一次。单次 burst 小，不触发反爬。
+        fetch_config={"rotate_batch": 4, "rotate_period_sec": 1800, "limit_per_keyword": 10},
     )
 
     # 存量迁移（幂等）：把旧 exa_wechat 源下的公众号账号整体改挂到搜狗案例源，
