@@ -271,6 +271,18 @@ const routes = [
     meta: { title: '注册' }
   },
   {
+    path: '/terms',
+    name: 'Terms',
+    component: () => import('@/pages/legal/LegalDoc.vue'),
+    meta: { title: '用户协议' }
+  },
+  {
+    path: '/privacy',
+    name: 'Privacy',
+    component: () => import('@/pages/legal/LegalDoc.vue'),
+    meta: { title: '隐私政策' }
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/pages/error/NotFound.vue'),
@@ -290,7 +302,7 @@ const router = createRouter({
 })
 
 // 不需要登录的页面
-const PUBLIC_ROUTES = ['Login', 'Register', 'NotFound', 'Landing']
+const PUBLIC_ROUTES = ['Login', 'Register', 'NotFound', 'Landing', 'Terms', 'Privacy']
 
 // 全局前置守卫
 router.beforeEach((to, from, next) => {

@@ -323,7 +323,7 @@
             {{ loginLoading ? '登录中...' : '登录 / 注册' }}
           </button>
           <div class="modal-foot">
-            提交即表示同意 <a href="#">《用户协议》</a> 和 <a href="#">《隐私政策》</a>
+            提交即表示同意 <a href="/terms" target="_blank">《用户协议》</a> 和 <a href="/privacy" target="_blank">《隐私政策》</a>
           </div>
         </div>
         <div v-if="loginStep === 'success'" class="modal-success active">
@@ -424,8 +424,8 @@ const submitLogin = async () => {
     localStorage.setItem('refreshToken', refresh_token)
     await userStore.fetchUser()
     if (countdownTimer) clearInterval(countdownTimer)
-    loginStep.value = 'success'
     ElMessage.success('登录成功')
+    goToDashboard()
   } catch (error) {
     loginError.value = error.response?.data?.detail || '登录失败，请检查验证码'
   } finally {

@@ -88,9 +88,9 @@
           <div class="flex items-center">
             <el-checkbox v-model="form.agreeTerms">
               我已阅读并同意
-              <a href="#" class="text-clay-deep hover:text-clay">服务条款</a>
+              <a href="/terms" target="_blank" class="text-clay-deep hover:text-clay">服务条款</a>
               和
-              <a href="#" class="text-clay-deep hover:text-clay">隐私政策</a>
+              <a href="/privacy" target="_blank" class="text-clay-deep hover:text-clay">隐私政策</a>
             </el-checkbox>
           </div>
 

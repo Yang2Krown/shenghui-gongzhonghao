@@ -270,7 +270,7 @@ function barWidth(s, max = 10) {
 
 // ── 雷达图 ──
 const svgWidth = 520
-const svgHeight = 440
+const svgHeight = 380
 const radarRadius = 120
 const cx = svgWidth / 2
 const cy = svgHeight / 2 + 10
@@ -333,7 +333,7 @@ const dataPolygon = computed(() => {
 function labelPoint(idx) {
   const n = currentDimCount.value
   if (!n) return { x: 0, y: 0 }
-  const r = radarRadius + 60
+  const r = radarRadius + 46
   const angle = (Math.PI * 2 * idx) / n - Math.PI / 2
   return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) }
 }
@@ -385,7 +385,7 @@ function shortLabel(label) {
 }
 
 .panel-header {
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 
 /* ── 空状态 ── */
@@ -498,7 +498,7 @@ function shortLabel(label) {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  margin-bottom: 16px;
+  margin-bottom: 10px;
   overflow: hidden;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
@@ -522,7 +522,7 @@ function shortLabel(label) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px;
+  padding: 11px 16px;
   cursor: pointer;
   user-select: none;
   gap: 12px;
@@ -649,10 +649,10 @@ function shortLabel(label) {
 
 /* ── 卡片内容 ── */
 .card-body {
-  padding: 0 18px 18px;
+  padding: 0 16px 14px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
 }
 
 /* 折叠动画 */
@@ -672,7 +672,7 @@ function shortLabel(label) {
 
 /* ── 内容区块 ── */
 .section {
-  padding-top: 16px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 
@@ -706,7 +706,7 @@ function shortLabel(label) {
 .radar-container {
   display: flex;
   justify-content: center;
-  padding: 4px 0 8px;
+  padding: 0;
 }
 
 .radar-svg {

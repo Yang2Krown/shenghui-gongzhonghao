@@ -204,6 +204,7 @@ onUnmounted(() => {
 })
 
 const openGroups = reactive({
+  'topic-info': true,
   create: true,
   rewrite: true,
 })
@@ -211,19 +212,14 @@ const openGroups = reactive({
 // 导航结构
 const navItems = [
   {
-    id: 'content-info',
-    label: '内容资讯',
+    id: 'topic-info',
+    label: '信息选题',
     icon: 'Document',
-  },
-  {
-    id: 'content-info-news',
-    label: '资讯型',
-    icon: 'Document',
-  },
-  {
-    id: 'content-info-cases',
-    label: '实操案例',
-    icon: 'Document',
+    children: [
+      { id: 'content-info', label: '选题列表' },
+      { id: 'content-info-news', label: '资讯信息' },
+      { id: 'content-info-cases', label: '实操案例' },
+    ],
   },
   {
     id: 'create',
