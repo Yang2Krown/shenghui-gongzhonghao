@@ -14,6 +14,7 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.services.generation_tracker import track_start, track_complete, track_fail
 from app.services.credit_service import CreditService
+from app.core.credit_guard import ensure_credits_or_402, deduct_credits_safe
 from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
@@ -277,6 +278,8 @@ async def _run_continuation_compare_background(
         })
         await track_complete(run_id, result_data, display_title=f"多模型对比续写")
 
+        await deduct_credits_safe(user_id, "content_continuation", operation_id=run_id)
+
     except Exception as e:
         logger.error(f"多模型对比续写失败: {str(e)}", exc_info=True)
         await progress_store.push(run_id, {
@@ -295,6 +298,8 @@ async def compare_multi_model_continuation(
 
     同时用多个模型生成续写方案，用于对比不同模型的效果。
     """
+    await ensure_credits_or_402(current_user.id, "content_continuation")
+
     run_id = progress_store.create_run()
 
     await track_start(

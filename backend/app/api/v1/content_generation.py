@@ -314,6 +314,9 @@ async def generate_content_adhoc(
             detail="请提供大纲内容",
         )
 
+    from app.core.credit_guard import ensure_credits_or_402
+    await ensure_credits_or_402(current_user.id, "content_generation")
+
     # 如果没有标题，从大纲文本提取
     if not title:
         lines = outline_text.strip().split("\n")
@@ -467,6 +470,9 @@ async def generate_content_adhoc(
                         for s in output.gold_sentences
                     ],
                 })
+
+                from app.core.credit_guard import deduct_credits_safe
+                await deduct_credits_safe(current_user.id, "content_generation", operation_id=run_id)
             except Exception as e:
                 await progress_store.push(run_id, {
                     "event": "error",

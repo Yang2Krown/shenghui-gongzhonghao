@@ -272,6 +272,9 @@ async def trigger_adhoc_outline_generation(
             detail="信息源内容不能为空",
         )
 
+    from app.core.credit_guard import ensure_credits_or_402
+    await ensure_credits_or_402(current_user.id, "outline_generation")
+
     combined_text = "\n\n".join(combined_text_parts)
 
     # 从合并文本中提取标题
@@ -500,6 +503,9 @@ async def trigger_adhoc_outline_generation(
                     "data": result_data,
                 })
                 await track_complete(run_id, result_data, display_title=f"大纲生成 · {title[:30]}")
+
+                from app.core.credit_guard import deduct_credits_safe
+                await deduct_credits_safe(current_user.id, "outline_generation", operation_id=run_id)
 
             except Exception as e:
                 logger.exception("自由输入大纲生成失败")

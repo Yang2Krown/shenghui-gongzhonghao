@@ -6,7 +6,7 @@ from typing import Optional, Callable, Any
 from fastapi import HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
+from app.db.session import get_db, AsyncSessionLocal
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.credit_service import CreditService
@@ -51,6 +51,29 @@ async def check_credits(
         "balance": result["balance"],
         "required": result["required"],
     }
+
+
+async def ensure_credits_or_402(user_id: int, operation: str) -> None:
+    """检查余额，不足则抛 402。
+
+    供 spawn / background_task 型端点在创建任务前调用——这类端点会立即返回 run_id，
+    若不在此处拦截，积分不足就无法以 402 形式传回前端，只会静默生成或超时。
+    """
+    async with AsyncSessionLocal() as db:
+        result = await CreditService(db).check_balance(user_id, operation)
+
+    if not result["sufficient"]:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "INSUFFICIENT_CREDITS",
+                "message": f"积分不足，需要 {result['required']} 积分，当前余额 {result['balance']} 积分",
+                "balance": result["balance"],
+                "required": result["required"],
+                "operation": operation,
+                "operation_desc": result["operation_desc"],
+            },
+        )
 
 
 def require_credits(operation: str):
@@ -150,6 +173,28 @@ async def check_content_imitate_credits(
 
 
 # ====== 业务辅助函数 ======
+
+async def deduct_credits_safe(
+    user_id: int,
+    operation: str,
+    operation_id: Optional[str] = None,
+) -> None:
+    """成功后扣费：开独立 session、提交、失败只记日志不影响用户。
+
+    供 spawn / background_task 型端点在生成成功后调用（这类端点用 ensure_credits_or_402
+    做前置拦截，这里负责事后扣减）。
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            await CreditService(db).deduct_credits(
+                user_id=user_id,
+                operation=operation,
+                operation_id=operation_id,
+            )
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"积分扣费失败 (operation={operation}, user={user_id}): {e}")
+
 
 async def deduct_after_success(
     credit_service: CreditService,

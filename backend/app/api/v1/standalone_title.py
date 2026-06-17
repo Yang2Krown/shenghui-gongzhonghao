@@ -17,6 +17,7 @@ from app.core.background import spawn
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.generation_tracker import track_start, track_complete, track_fail
+from app.core.credit_guard import ensure_credits_or_402, deduct_credits_safe
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +287,8 @@ async def _run_standalone_title_background(content: str, run_id: str, user_id: i
                 display_title=f"标题生成 · {top_title[:30]}" if top_title else None,
             )
 
+            await deduct_credits_safe(user_id, "title_generation", operation_id=run_id)
+
     except Exception as e:
         logger.error(f"独立标题生成失败: {str(e)}", exc_info=True)
         await progress_store.push(run_id, {
@@ -306,6 +309,8 @@ async def standalone_title_generate(
     输入文章全文或摘要，自动提取选题和大纲信息，
     然后复用创作工作流中的 4 Agent 标题生成流水线（A创作 → B评分 → C点击预测 → D综合判定）。
     """
+    await ensure_credits_or_402(current_user.id, "title_generation")
+
     run_id = progress_store.create_run()
 
     await track_start(
@@ -490,6 +495,8 @@ async def _run_multi_model_title_background(
 
         await track_complete(run_id, result_data, display_title=f"多模型对比 · {topic.title[:30]}")
 
+        await deduct_credits_safe(user_id, "title_generation", operation_id=run_id)
+
     except Exception as e:
         logger.error(f"多模型对比生成失败: {str(e)}", exc_info=True)
         await progress_store.push(run_id, {
@@ -509,6 +516,8 @@ async def compare_multi_model_titles(
 
     同时用多个模型生成标题，用于对比不同模型的效果。
     """
+    await ensure_credits_or_402(current_user.id, "title_generation")
+
     run_id = progress_store.create_run()
 
     await track_start(
