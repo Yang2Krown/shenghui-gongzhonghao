@@ -8,7 +8,6 @@ from app.models.source_registry import SourceRegistry, SourceAccount
 from app.models.raw_info import RawInfo
 from app.models.info_cluster import InfoCluster
 from app.models.topic_candidate import TopicCandidate, PersonaReview, CandidateScore
-from app.models.daily_topic_list import DailyTopicList, DailyTopicListItem
 
 # 生成记录
 from app.models.generation_record import GenerationRecord
@@ -45,8 +44,6 @@ __all__ = [
     "TopicCandidate",
     "PersonaReview",
     "CandidateScore",
-    "DailyTopicList",
-    "DailyTopicListItem",
     # 生成记录
     "GenerationRecord",
     # v3.0 大纲 pipeline

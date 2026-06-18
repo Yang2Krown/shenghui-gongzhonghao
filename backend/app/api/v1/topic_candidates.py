@@ -5,7 +5,6 @@
 
 import asyncio
 import logging
-from datetime import date
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -20,9 +19,7 @@ from app.core.background import spawn
 from app.db.session import get_db
 from app.models.user import User
 from app.models.topic_candidate import TopicCandidate, PersonaReview, CandidateScore
-from app.models.daily_topic_list import DailyTopicList
 from app.models.info_cluster import InfoCluster
-from app.services.ranking_service import generate_daily_list
 from app.services.topic_mining.agent_a_deriver import derive_candidates
 from app.services.topic_mining.agent_a2_feasibility import audit_feasibility
 from app.services.topic_mining.agent_b_scorer import score_candidates
@@ -46,11 +43,11 @@ async def trigger_mining(
     """
     cluster_id = body.get("cluster_id")
     if cluster_id is not None:
-        return await _mine_one(db, int(cluster_id))
+        return await _mine_one(db, int(cluster_id), current_user.id)
 
     limit = int(body.get("limit", 3))
     min_heat = float(body.get("min_heat_score", 0))
-    result = await _run_mining_batch(db, limit, min_heat)
+    result = await _run_mining_batch(db, limit, min_heat, current_user.id)
     return {"code": 200, "message": "挖掘完成", "data": result}
 
 
@@ -144,6 +141,7 @@ async def trigger_adhoc_mining(
     await db.refresh(cluster)
 
     run_id = progress_store.create_run()
+    owner_id = current_user.id  # 背景任务里没有 request 上下文，先抓出来
 
     async def _run():
         from app.db.session import AsyncSessionLocal
@@ -233,6 +231,7 @@ async def trigger_adhoc_mining(
                 for scored in result_b.candidates:
                     fb = feasibility_map.get(scored.candidate_id)
                     tc = TopicCandidate(
+                        user_id=owner_id,
                         info_cluster_id=bg_cluster.id,
                         title=scored.title,
                         summary=fb.enriched_summary if fb and fb.enriched_summary else scored.summary,
@@ -420,6 +419,7 @@ async def create_adhoc_candidate(
 
     # 创建 TopicCandidate
     candidate = TopicCandidate(
+        user_id=current_user.id,
         info_cluster_id=cluster.id,
         title=title,
         summary=summary,
@@ -489,9 +489,9 @@ async def stream_mining_progress(
     )
 
 
-async def _mine_one(db: AsyncSession, cluster_id: int) -> dict:
+async def _mine_one(db: AsyncSession, cluster_id: int, user_id: int) -> dict:
     """挖单个指定簇。返回 run_id，前端通过轮询获取实时进度。"""
-    logger.info(f"[mine] 开始挖掘 cluster_id={cluster_id}")
+    logger.info(f"[mine] 开始挖掘 cluster_id={cluster_id} user_id={user_id}")
     cluster = (await db.execute(
         select(InfoCluster).where(InfoCluster.id == cluster_id)
     )).scalar_one_or_none()
@@ -499,7 +499,14 @@ async def _mine_one(db: AsyncSession, cluster_id: int) -> dict:
     if not cluster:
         raise HTTPException(status_code=404, detail=f"话题 {cluster_id} 不存在")
 
-    if cluster.mined and not cluster.needs_update:
+    # 「已挖掘」按用户判断：当前用户已有候选 且 簇没有新内容 → 跳过
+    already_mined = (await db.execute(
+        select(func.count(TopicCandidate.id)).where(
+            TopicCandidate.info_cluster_id == cluster_id,
+            TopicCandidate.user_id == user_id,
+        )
+    )).scalar() or 0
+    if already_mined and not cluster.needs_update:
         return {"code": 200, "message": "已挖掘过", "data": {"cluster_id": cluster_id, "skipped": True}}
 
     if not cluster.info_type:
@@ -533,7 +540,7 @@ async def _mine_one(db: AsyncSession, cluster_id: int) -> dict:
                 if not bg_cluster:
                     raise RuntimeError(f"cluster {cluster_id} 已不存在")
 
-                stats = await _mine_cluster_inner(bg_db, bg_cluster, progress_callback=_progress_cb)
+                stats = await _mine_cluster_inner(bg_db, bg_cluster, user_id, progress_callback=_progress_cb)
                 await bg_db.commit()
                 await progress_store.push(run_id, {
                     "event": "result",
@@ -552,8 +559,10 @@ async def _mine_one(db: AsyncSession, cluster_id: int) -> dict:
     return {"code": 200, "message": "挖掘任务已提交", "data": {"run_id": run_id}}
 
 
-async def _run_mining_batch(db: AsyncSession, limit: int, min_heat_score: float) -> dict:
-    """批量挖未挖掘的热门簇（保留旧行为，给定时任务用）。"""
+async def _run_mining_batch(db: AsyncSession, limit: int, min_heat_score: float, user_id: int) -> dict:
+    """批量挖热门簇，结果归 user_id。
+    ponytail: 簇筛选仍用全局 mined 标记（非用户面板入口，前端只走单簇挖掘），
+    够用；要做到逐用户去重再换成 per-user EXISTS 子查询。"""
     clusters = (await db.execute(
         select(InfoCluster).where(
             (InfoCluster.mined.is_(False) | InfoCluster.needs_update.is_(True)),
@@ -577,7 +586,7 @@ async def _run_mining_batch(db: AsyncSession, limit: int, min_heat_score: float)
     errors = []
     for cluster in clusters:
         try:
-            stats = await _mine_cluster_inner(db, cluster)
+            stats = await _mine_cluster_inner(db, cluster, user_id)
             await db.commit()
             mined += 1
             total_candidates += stats["total_candidates"]
@@ -591,21 +600,25 @@ async def _run_mining_batch(db: AsyncSession, limit: int, min_heat_score: float)
 async def _mine_cluster_inner(
     db: AsyncSession,
     cluster: InfoCluster,
+    user_id: int,
     progress_callback=None,
 ) -> dict:
-    """挖单个簇的核心逻辑：Agent A → Agent B → 写库（不 commit，调用方决定）。"""
+    """挖单个簇的核心逻辑：Agent A → Agent B → 写库（不 commit，调用方决定）。
+    候选归 user_id。重新挖掘只清理「该用户」在此簇下的旧候选，不动别人的。"""
 
-    # 重新挖掘时：先删除旧的候选选题
-    if cluster.needs_update:
+    # 重新挖掘时：先删除当前用户在此簇下的旧候选选题
+    old_cand_ids = [c.id for c in (await db.execute(
+        select(TopicCandidate.id).where(
+            TopicCandidate.info_cluster_id == cluster.id,
+            TopicCandidate.user_id == user_id,
+        )
+    )).scalars().all()]
+    if old_cand_ids:
         from sqlalchemy import delete
-        old_cand_ids = [c.id for c in (await db.execute(
-            select(TopicCandidate.id).where(TopicCandidate.info_cluster_id == cluster.id)
-        )).scalars().all()]
-        if old_cand_ids:
-            await db.execute(delete(PersonaReview).where(PersonaReview.candidate_id.in_(old_cand_ids)))
-            await db.execute(delete(CandidateScore).where(CandidateScore.candidate_id.in_(old_cand_ids)))
-            await db.execute(delete(TopicCandidate).where(TopicCandidate.id.in_(old_cand_ids)))
-            await db.flush()
+        await db.execute(delete(PersonaReview).where(PersonaReview.candidate_id.in_(old_cand_ids)))
+        await db.execute(delete(CandidateScore).where(CandidateScore.candidate_id.in_(old_cand_ids)))
+        await db.execute(delete(TopicCandidate).where(TopicCandidate.id.in_(old_cand_ids)))
+        await db.flush()
 
     async def _emit(event):
         if progress_callback:
@@ -664,6 +677,7 @@ async def _mine_cluster_inner(
     for scored in result_b.candidates:
         fb = feasibility_map.get(scored.candidate_id)
         tc = TopicCandidate(
+            user_id=user_id,
             info_cluster_id=cluster.id,
             title=scored.title,
             summary=fb.enriched_summary if fb and fb.enriched_summary else scored.summary,
@@ -736,11 +750,11 @@ async def get_topic_candidates(
 ) -> Any:
     skip = (page - 1) * page_size
 
-    # 构建查询
+    # 构建查询（只看自己挖掘/创建的候选）
     query = select(TopicCandidate).options(
         joinedload(TopicCandidate.persona_reviews),
         joinedload(TopicCandidate.score),
-    )
+    ).where(TopicCandidate.user_id == current_user.id)
 
     # 筛选
     if verdict:
@@ -753,7 +767,7 @@ async def get_topic_candidates(
         query = query.where(TopicCandidate.title.ilike(f"%{keyword}%"))
 
     # 总数
-    count_query = select(func.count(TopicCandidate.id))
+    count_query = select(func.count(TopicCandidate.id)).where(TopicCandidate.user_id == current_user.id)
     if verdict:
         count_query = count_query.where(TopicCandidate.verdict == verdict)
     if direction:
@@ -794,22 +808,23 @@ async def get_stats_overview(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    total = (await db.execute(select(func.count(TopicCandidate.id)))).scalar()
+    mine = TopicCandidate.user_id == current_user.id
+    total = (await db.execute(select(func.count(TopicCandidate.id)).where(mine))).scalar()
     selected = (await db.execute(
-        select(func.count(TopicCandidate.id)).where(TopicCandidate.verdict == "selected")
+        select(func.count(TopicCandidate.id)).where(mine, TopicCandidate.verdict == "selected")
     )).scalar()
     backup = (await db.execute(
-        select(func.count(TopicCandidate.id)).where(TopicCandidate.verdict == "backup")
+        select(func.count(TopicCandidate.id)).where(mine, TopicCandidate.verdict == "backup")
     )).scalar()
     rejected = (await db.execute(
-        select(func.count(TopicCandidate.id)).where(TopicCandidate.verdict == "rejected")
+        select(func.count(TopicCandidate.id)).where(mine, TopicCandidate.verdict == "rejected")
     )).scalar()
     vetoed = (await db.execute(
-        select(func.count(TopicCandidate.id)).where(TopicCandidate.verdict == "vetoed")
+        select(func.count(TopicCandidate.id)).where(mine, TopicCandidate.verdict == "vetoed")
     )).scalar()
 
     direction_result = await db.execute(
-        select(TopicCandidate.direction, func.count(TopicCandidate.id)).group_by(TopicCandidate.direction)
+        select(TopicCandidate.direction, func.count(TopicCandidate.id)).where(mine).group_by(TopicCandidate.direction)
     )
     direction_stats = {d: c for d, c in direction_result.all()}
 
@@ -825,50 +840,6 @@ async def get_stats_overview(
             "by_direction": direction_stats,
         },
     }
-
-
-@router.get("/daily-list/{list_date}", response_model=dict)
-async def get_daily_list(
-    list_date: date,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
-    result = await db.execute(
-        select(DailyTopicList).where(DailyTopicList.list_date == list_date)
-    )
-    daily_list = result.scalar_one_or_none()
-
-    if not daily_list:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="该日期暂无选题清单")
-
-    return {
-        "code": 200,
-        "message": "获取每日清单成功",
-        "data": {
-            "id": daily_list.id,
-            "list_date": str(daily_list.list_date),
-            "top_n": daily_list.top_n,
-            "items": daily_list.items,
-            "direction_distribution": daily_list.direction_distribution,
-            "notes": daily_list.notes,
-        },
-    }
-
-
-@router.post("/daily-list/generate", response_model=dict)
-async def trigger_generate_daily_list(
-    body: dict = {},
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
-    try:
-        target_date_str = body.get("target_date")
-        target_date = date.fromisoformat(target_date_str) if target_date_str else None
-        top_n = body.get("top_n", 10)
-        result = generate_daily_list(target_date=target_date, top_n=top_n)
-        return {"code": 200, "message": "每日清单生成成功", "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.post("/custom", response_model=dict)
@@ -912,6 +883,7 @@ async def create_custom_topic(
         )
 
     candidate = TopicCandidate(
+        user_id=current_user.id,
         title=title,
         direction=direction,
         angle_note=reference,
@@ -947,7 +919,10 @@ async def get_topic_candidate(
             joinedload(TopicCandidate.score),
             joinedload(TopicCandidate.info_cluster),
         )
-        .where(TopicCandidate.id == candidate_id)
+        .where(
+            TopicCandidate.id == candidate_id,
+            TopicCandidate.user_id == current_user.id,
+        )
     )
     candidate = result.unique().scalar_one_or_none()
 

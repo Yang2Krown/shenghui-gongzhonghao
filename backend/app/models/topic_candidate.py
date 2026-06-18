@@ -27,6 +27,8 @@ class TopicCandidate(BaseModel):
     """候选选题主表（Agent A 输出 + Agent B 评分快照）。"""
     __tablename__ = "topic_candidates"
 
+    # 挖掘结果按用户隔离：谁触发挖掘/创建，候选就归谁。NULL=历史遗留（对所有人不可见）。
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     info_cluster_id = Column(Integer, ForeignKey("info_clusters.id"), nullable=True, index=True)
 
     # Agent A：衍生信息

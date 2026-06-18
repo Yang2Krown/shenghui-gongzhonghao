@@ -38,6 +38,6 @@ celery_app.conf.update(
 import app.tasks.scraper_tasks  # noqa: F401
 import app.tasks.preprocess_tasks  # noqa: F401
 import app.tasks.topic_mining_tasks  # noqa: F401
-import app.tasks.ranking_tasks  # noqa: F401
+import app.tasks.cleanup_tasks  # noqa: F401
 
 __all__ = ["celery_app"]

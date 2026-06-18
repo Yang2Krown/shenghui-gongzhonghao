@@ -288,6 +288,7 @@ async def trigger_adhoc_outline_generation(
 
     # 1. 先创建 TopicCandidate 记录
     candidate = TopicCandidate(
+        user_id=current_user.id,
         title=title,
         direction="资讯型",
         angle_note=angle_note or combined_text[:200],

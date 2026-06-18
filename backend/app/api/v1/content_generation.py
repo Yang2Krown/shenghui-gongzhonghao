@@ -354,6 +354,7 @@ async def generate_content_adhoc(
 
     # 1. 创建 TopicCandidate 记录
     candidate = TopicCandidate(
+        user_id=current_user.id,
         title=title,
         direction="资讯型",
         angle_note=outline_text[:200] if outline_text else "",

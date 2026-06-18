@@ -12,7 +12,7 @@ from app.db.seeds import (
 )
 # 触发模型注册
 from app.models import (  # noqa: F401
-    source_registry, raw_info, info_cluster, topic_candidate, daily_topic_list,
+    source_registry, raw_info, info_cluster, topic_candidate,
     user, topic, creation, style,
 )
 

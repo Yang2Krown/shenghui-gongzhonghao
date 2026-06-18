@@ -144,10 +144,23 @@ async def get_topic_clusters(
         base_filter.append(InfoCluster.info_type == info_type)
     if direction:
         base_filter.append(InfoCluster.direction == direction)
+    # 「已挖掘」按当前用户判断：该用户在此簇下是否有候选
+    user_mined_subq = (
+        select(TopicCandidate.id)
+        .where(
+            TopicCandidate.info_cluster_id == InfoCluster.id,
+            TopicCandidate.user_id == current_user.id,
+        )
+        .exists()
+    )
     if mined is not None:
-        base_filter.append(InfoCluster.mined == mined)
+        base_filter.append(user_mined_subq if mined else ~user_mined_subq)
     if needs_update is not None:
-        base_filter.append(InfoCluster.needs_update == needs_update)
+        if needs_update:
+            base_filter.append(user_mined_subq)
+            base_filter.append(InfoCluster.needs_update.is_(True))
+        else:
+            base_filter.append(InfoCluster.needs_update.is_(False))
     if freshness:
         effective_dt = func.coalesce(InfoCluster.published_at, InfoCluster.created_at)
         if freshness == "today":
@@ -260,7 +273,10 @@ async def get_topic_clusters(
     if cluster_ids:
         count_result = await db.execute(
             select(TopicCandidate.info_cluster_id, func.count(TopicCandidate.id))
-            .where(TopicCandidate.info_cluster_id.in_(cluster_ids))
+            .where(
+                TopicCandidate.info_cluster_id.in_(cluster_ids),
+                TopicCandidate.user_id == current_user.id,
+            )
             .group_by(TopicCandidate.info_cluster_id)
         )
         candidate_counts = {row[0]: row[1] for row in count_result.all()}
@@ -283,6 +299,8 @@ async def get_topic_clusters(
         else:
             src_mul = 1.0
         display_score = round((c.heat_score or 0) * boost * src_mul, 2)
+        # 「已挖掘 / 待更新」按当前用户：有没有自己的候选
+        my_candidate_count = candidate_counts.get(c.id, 0)
         items.append({
             "id": c.id,
             "core_title": c.core_title,
@@ -298,9 +316,9 @@ async def get_topic_clusters(
             "freshness": live_freshness,
             "heat_score": c.heat_score,
             "low_fan_hit": c.low_fan_hit,
-            "mined": c.mined,
-            "needs_update": c.needs_update or False,
-            "candidate_count": candidate_counts.get(c.id, 0),
+            "mined": my_candidate_count > 0,
+            "needs_update": bool(c.needs_update) and my_candidate_count > 0,
+            "candidate_count": my_candidate_count,
             "created_at": c.created_at.isoformat() if c.created_at else None,
         })
 
@@ -338,7 +356,10 @@ async def get_topic_cluster_detail(
             joinedload(TopicCandidate.persona_reviews),
             joinedload(TopicCandidate.score),
         )
-        .where(TopicCandidate.info_cluster_id == cluster_id)
+        .where(
+            TopicCandidate.info_cluster_id == cluster_id,
+            TopicCandidate.user_id == current_user.id,
+        )
         .order_by(desc(TopicCandidate.weighted_score))
     )
     candidates = cand_result.scalars().unique().all()
@@ -421,8 +442,8 @@ async def get_topic_cluster_detail(
             "freshness": _compute_freshness(cluster.published_at, fallback_dt=cluster.created_at),
             "heat_score": cluster.heat_score,
             "low_fan_hit": cluster.low_fan_hit,
-            "mined": cluster.mined,
-            "needs_update": cluster.needs_update or False,
+            "mined": len(candidate_list) > 0,
+            "needs_update": bool(cluster.needs_update) and len(candidate_list) > 0,
             "created_at": cluster.created_at.isoformat() if cluster.created_at else None,
             # 最新文章时间（合并时取最新）；前端右下角显示这个而非首次出现时间
             "published_at": cluster.published_at.isoformat() if cluster.published_at else None,

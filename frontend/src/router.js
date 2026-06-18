@@ -48,13 +48,6 @@ const routes = [
         component: () => import('@/pages/topics/TopicClusterDetail.vue'),
         meta: { title: '话题详情' }
       },
-      // 候选选题清单（二级视图）
-      {
-        path: 'topic-candidates',
-        name: 'TopicCandidates',
-        component: () => import('@/pages/topics/TopicCandidateList.vue'),
-        meta: { title: '候选选题清单' }
-      },
       // ===== Legacy 旧表入口（隐藏，但保留可访问） =====
       {
         path: 'legacy/topics',

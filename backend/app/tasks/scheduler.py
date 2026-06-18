@@ -92,4 +92,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute=30, hour=8),
         "kwargs": {"feed_key": "daily"},
     },
+
+    # ── 信息库清理：每天凌晨 4:10 删 14 天前、没人挖掘/创作过的旧资讯 ──
+    "cleanup-stale-clusters": {
+        "task": "cleanup.purge_stale_clusters",
+        "schedule": crontab(minute=10, hour=4),
+        "kwargs": {"days": 14},
+    },
 }
