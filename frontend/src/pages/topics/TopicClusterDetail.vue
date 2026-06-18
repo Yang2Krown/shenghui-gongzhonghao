@@ -828,6 +828,8 @@ const startCreation = (candidate) => {
   flex: 1 1 calc(50% - 8px);
   min-width: 280px;
   max-width: calc(50% - 8px);
+  display: flex;
+  flex-direction: column;
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -973,6 +975,7 @@ const startCreation = (candidate) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-top: auto;        /* 把操作行顶到卡片底部，留白落在简介和按钮之间 */
   padding-top: 14px;
   border-top: 1px solid var(--line);
 }
