@@ -4,9 +4,9 @@
     <header class="draft-header mb-6">
       <div class="flex items-center justify-between">
         <div>
-          <el-button text @click="router.push('/creation')" class="text-ink-3">
+          <el-button text @click="router.push('/content-info')" class="text-ink-3">
             <el-icon><ArrowLeft /></el-icon>
-            返回创作列表
+            返回选题列表
           </el-button>
           <h1 class="text-h2 font-serif text-ink mt-2">
             {{ creation.title || '无标题' }}
@@ -66,7 +66,7 @@
     <div v-else-if="!creation.id" class="text-center py-20">
       <el-icon :size="64" class="text-ink-4"><Document /></el-icon>
       <h3 class="text-h4 font-sans text-ink mt-4">创作不存在</h3>
-      <el-button type="primary" class="mt-4" @click="router.push('/creation')">返回列表</el-button>
+      <el-button type="primary" class="mt-4" @click="router.push('/content-info')">返回选题列表</el-button>
     </div>
 
     <div v-else class="draft-split">

@@ -120,12 +120,10 @@ const routes = [
         component: () => import('@/pages/tools/WechatEditor.vue'),
         meta: { title: '公众号编辑器' }
       },
-      // ===== 我的创作（保留旧入口） =====
+      // ===== 我的创作已下线 → 重定向到选题列表 =====
       {
         path: 'creation',
-        name: 'Creation',
-        component: () => import('@/pages/creation/CreationList.vue'),
-        meta: { title: '我的创作' }
+        redirect: '/content-info'
       },
       {
         path: 'creation/new',

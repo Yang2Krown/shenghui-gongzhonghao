@@ -54,8 +54,8 @@
             <router-link to="/" class="text-clay-deep hover:text-clay font-medium">
               每日选题
             </router-link>
-            <router-link to="/creation" class="text-clay-deep hover:text-clay font-medium">
-              我的创作
+            <router-link to="/content-info" class="text-clay-deep hover:text-clay font-medium">
+              选题列表
             </router-link>
             <router-link to="/settings" class="text-clay-deep hover:text-clay font-medium">
               个人设置

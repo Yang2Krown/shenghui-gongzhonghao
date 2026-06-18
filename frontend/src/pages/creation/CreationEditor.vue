@@ -5,9 +5,9 @@
       <div class="flex items-center justify-between">
         <div>
           <div class="flex items-center gap-3 mb-1">
-            <el-button text @click="router.push('/creation')" class="text-ink-3">
+            <el-button text @click="router.push('/content-info')" class="text-ink-3">
               <el-icon><ArrowLeft /></el-icon>
-              返回创作列表
+              返回选题列表
             </el-button>
           </div>
           <h1 class="text-h2 font-serif text-ink">
@@ -581,7 +581,7 @@ const publishCreation = async () => {
   try {
     // TODO: 实现发布逻辑
     ElMessage.success('发布成功')
-    router.push('/creation')
+    router.push('/content-info')
   } catch (e) {
     console.error('发布失败:', e)
   } finally {
