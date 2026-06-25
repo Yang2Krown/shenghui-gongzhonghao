@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate, wechat_draft, content_continuation, content_polish, wechat_accounts, credits, credit_purchase
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate, wechat_draft, content_continuation, content_polish, wechat_accounts, credits, credit_purchase, practical
 
 api_router = APIRouter()
 
@@ -197,4 +197,11 @@ api_router.include_router(
     credit_purchase.router,
     prefix="/credits",
     tags=["积分购买"]
+)
+
+# 实操 / 商稿创作流
+api_router.include_router(
+    practical.router,
+    prefix="/practical",
+    tags=["实操创作"]
 )

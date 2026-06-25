@@ -57,6 +57,18 @@ OPERATION_COSTS = {
         "estimated_tokens": 20000,
         "estimated_cost_yuan": 0.04,
     },
+    "practical_research": {
+        "base_credits": 3,
+        "description": "产品研究（实操类）",
+        "estimated_tokens": 20000,
+        "estimated_cost_yuan": 0.05,
+    },
+    "practical_draft": {
+        "base_credits": 10,
+        "description": "实操成稿",
+        "estimated_tokens": 60000,
+        "estimated_cost_yuan": 0.15,
+    },
 }
 
 # ====== 积分套餐定义 ======

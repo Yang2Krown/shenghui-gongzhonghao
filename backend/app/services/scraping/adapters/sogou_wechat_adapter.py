@@ -107,6 +107,10 @@ async def _sogou_link_to_wechat(url: str, client: httpx.AsyncClient) -> str:
             real = "".join(parts).replace("@", "")
             if "mp.weixin.qq.com" in real:
                 return real
+        # 命中反爬：搜狗把当前出口 IP 拉黑，返回 antispider/验证码页（无 url+= 段）。
+        # 不是代码问题，是 IP/频率问题——明确告警，避免上层只看到“0 篇”查不到原因。
+        if "antispider" in str(resp.url) or "antispider" in resp.text or "请输入验证码" in resp.text:
+            logger.warning("搜狗 antispider 拦截：当前出口 IP 被风控，公众号正文抓不到。换 IP / 降频 / 或改用 Exa。")
     except Exception as e:
         logger.debug(f"搜狗中转链解析失败，保留原链: {type(e).__name__}: {e}")
     return url
@@ -196,6 +200,29 @@ class SogouWechatAdapter(SourceAdapter):
             f"（关键词 {len(keywords)} 个，mp 永久链 {permanent} 条）"
         )
         return all_items
+
+    async def search_articles(self, keyword: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """即时关键词搜索：返回 [{title, url, content}]（含正文）。
+
+        给实操创作等需要按产品/竞品名临时搜公众号爆文的场景用，
+        复用本 adapter 的搜狗搜索 + 中转链解析 + 永久链正文抓取，不走 SourceRegistry。
+        """
+        cookie = await self._get_sogou_cookie()
+        items = await self._search_keyword(keyword, limit, cookie)
+        sem = asyncio.Semaphore(3)
+        async with httpx.AsyncClient(follow_redirects=True, timeout=self.TIMEOUT) as client:
+            async def _one(it: FetchedItem) -> Optional[Dict[str, Any]]:
+                async with sem:
+                    try:
+                        mp_url = await _sogou_link_to_wechat(it.url, client)
+                        url, content = await resolve_wechat_permalink(mp_url)
+                        if content:
+                            return {"title": it.title, "url": url, "content": content}
+                    except Exception as e:
+                        logger.debug(f"search_articles 解析失败: {type(e).__name__}: {e}")
+                    return None
+            resolved = await asyncio.gather(*[_one(it) for it in items[:limit]])
+        return [r for r in resolved if r]
 
     async def _get_sogou_cookie(self) -> str:
         """预获取搜狗 cookie（同 Node.js 版的 getSogouCookie）。"""

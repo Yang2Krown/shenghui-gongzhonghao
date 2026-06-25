@@ -232,6 +232,7 @@ const navItems = [
       { id: 'creation-title', label: '标题生成' },
       { id: 'creation-continuation', label: '正文续写' },
       { id: 'creation-polish', label: '文案润色' },
+      { id: 'creation-practical', label: '实操 / 商稿' },
       { id: 'creation-wechat-editor', label: '公众号编辑器' },
     ],
   },
@@ -268,6 +269,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/creation/title')) return 'creation-title'
   if (path.startsWith('/creation/continuation')) return 'creation-continuation'
   if (path.startsWith('/creation/polish')) return 'creation-polish'
+  if (path.startsWith('/creation/practical')) return 'creation-practical'
   if (path.startsWith('/creation/wechat-editor')) return 'creation-wechat-editor'
   if (path.startsWith('/creation')) {
     // 检查是否是旧的创作列表页面
@@ -325,6 +327,7 @@ const routeMap = {
   'creation-title': '/creation/title',
   'creation-continuation': '/creation/continuation',
   'creation-polish': '/creation/polish',
+  'creation-practical': '/creation/practical',
   'creation-wechat-editor': '/creation/wechat-editor',
   'content-transform': '/content-transform',
   'content-imitate': '/content-imitate',

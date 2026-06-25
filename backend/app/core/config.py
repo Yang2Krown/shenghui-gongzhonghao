@@ -124,6 +124,12 @@ class Settings(BaseSettings):
     # Exa API（微信公众号搜索，替代 mcporter CLI）
     EXA_API_KEY: Optional[str] = None
 
+    # 博查 Bocha（国内可充值的 web 搜索 API，替代 Exa/搜狗，先用于实操类爆文搜索）
+    BOCHA_API_KEY: Optional[str] = None
+
+    # Jina Reader（抓网页/教程全文，r.jina.ai；留空走免费档，有 key 限额更高）
+    JINA_API_KEY: Optional[str] = None
+
     # Moonshot / Kimi（联网搜索专用，Agent A2 可写性审计）
     MOONSHOT_API_KEY: Optional[str] = None
     MOONSHOT_API_BASE: str = "https://api.moonshot.cn/v1"

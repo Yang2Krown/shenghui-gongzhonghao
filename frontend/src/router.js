@@ -108,6 +108,12 @@ const routes = [
         meta: { title: '文案润色' }
       },
       {
+        path: 'creation/practical',
+        name: 'PracticalCreation',
+        component: () => import('@/pages/creation/PracticalCreation.vue'),
+        meta: { title: '实操 / 商稿创作' }
+      },
+      {
         path: 'creation/wechat-editor',
         name: 'WechatEditor',
         component: () => import('@/pages/tools/WechatEditor.vue'),
