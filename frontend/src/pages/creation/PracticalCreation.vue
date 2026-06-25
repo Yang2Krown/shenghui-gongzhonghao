@@ -33,13 +33,7 @@
             <label class="form-label">商单 brief <span class="opt">选填</span></label>
             <textarea class="input textarea" v-model="form.brief" placeholder="粘贴商单要求：必提卖点、禁忌、调性、官网链接等"></textarea>
           </div>
-          <div class="form-section">
-            <label class="form-label">创作模板</label>
-            <div class="seg">
-              <button v-for="t in templates" :key="t.key" class="seg-btn" :class="{ 'seg-btn-active': form.template === t.key }" @click="form.template = t.key">{{ t.icon }} {{ t.label }}</button>
-            </div>
-            <div class="template-hint">{{ templateHint }}</div>
-          </div>
+          <!-- 创作模板切换已隐藏，默认走「工具主线」（form.template = 'tool'） -->
         </div>
       </div>
       <button class="cta-bar" style="margin-top: 20px;" :disabled="!form.product.trim()" @click="startResearch">
@@ -109,6 +103,7 @@
           <div style="padding: 22px;">
             <div class="ref-article-list">
               <div class="ref-article-row" v-for="(r, i) in research.references" :key="i">
+                <span v-if="r.source" class="ref-src-badge" :class="{ 'is-wechat': r.source === '公众号' }">{{ r.source }}</span>
                 <span class="ref-article-title">{{ r.title || r.url }}</span>
                 <a :href="r.url" target="_blank" class="btn-ref-visit">点击访问</a>
               </div>
@@ -354,6 +349,8 @@ onUnmounted(() => progress.stop())
 .ref-article-list { display: flex; flex-direction: column; }
 .ref-article-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .ref-article-row:last-child { border-bottom: none; }
+.ref-src-badge { flex-shrink: 0; margin-right: 8px; font-size: 11px; font-weight: 500; color: var(--ink-4); background: var(--line); padding: 2px 7px; border-radius: 5px; white-space: nowrap; }
+.ref-src-badge.is-wechat { color: #07803a; background: rgba(7, 193, 96, 0.12); }
 .ref-article-title { font-size: 13px; color: var(--ink-2); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn-ref-visit { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--clay-deep); text-decoration: none; white-space: nowrap; margin-left: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); transition: all .15s; }
 .btn-ref-visit:hover { background: var(--clay-tint); border-color: var(--clay); color: var(--clay); }

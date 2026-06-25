@@ -2,11 +2,12 @@
 
 ProductResearch 是产品研究产出，对应前端「研究确认」的三块：产品定位 / 功能点 / 产品优势。
 功能点（FeaturePoint）同时是「卖点选择」步骤里可勾选成实操段的候选项。
-HotResearch（v2）是爆文套路研究产出，挂在 ProductResearch.hot 上。
+references 是筛选后的参考资料（含知乎/CSDN 等教程站 + Exa 搜来的公众号爆文），
+每条带 source 标签，既在前端展示、也喂给正文生成。
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 
 
 @dataclass
@@ -34,25 +35,6 @@ class FeaturePoint:
 
 
 @dataclass
-class HotResearch:
-    """爆文套路研究（v2）：从公众号 / 竞品爆文里提炼的套路，供大纲角度与开头借鉴。"""
-    patterns: str = ""                       # 套路摘要（开头钩子 / 结构 / 卖点呈现）
-    sources: List[str] = field(default_factory=list)  # 参考爆文链接
-
-    def to_dict(self) -> dict:
-        return {"patterns": self.patterns, "sources": self.sources}
-
-    @staticmethod
-    def from_dict(d: dict) -> "HotResearch":
-        if not d:
-            return HotResearch()
-        return HotResearch(
-            patterns=str(d.get("patterns", "")).strip(),
-            sources=[str(s).strip() for s in (d.get("sources") or []) if str(s).strip()],
-        )
-
-
-@dataclass
 class ProductResearch:
     """产品研究结果。"""
     product: str
@@ -61,8 +43,7 @@ class ProductResearch:
     advantages: List[str] = field(default_factory=list)        # 产品优势
     insufficient: bool = False               # 信息不足标记
     sources: List[str] = field(default_factory=list)           # 来源链接
-    references: List[dict] = field(default_factory=list)       # 参考资料原文 [{title,url,summary}]
-    hot: Optional[HotResearch] = None        # v2：爆文套路研究
+    references: List[dict] = field(default_factory=list)       # 参考资料 [{title,url,summary,source}]
 
     def to_dict(self) -> dict:
         return {
@@ -73,7 +54,6 @@ class ProductResearch:
             "insufficient": self.insufficient,
             "sources": self.sources,
             "references": self.references,
-            "hot": self.hot.to_dict() if self.hot else None,
         }
 
     @staticmethod
@@ -86,7 +66,6 @@ class ProductResearch:
             insufficient=bool(d.get("insufficient", False)),
             sources=[str(s).strip() for s in (d.get("sources") or []) if str(s).strip()],
             references=[r for r in (d.get("references") or []) if isinstance(r, dict) and r.get("url")],
-            hot=HotResearch.from_dict(d.get("hot")) if d.get("hot") else None,
         )
 
     def to_material_text(self) -> str:
@@ -106,12 +85,13 @@ class ProductResearch:
             for a in self.advantages:
                 lines.append(f"  · {a}")
             lines.append("")
-        # 参考资料原文：实操步骤要据此写，别凭空编操作流程
+        # 参考资料原文：已经筛选过，全部带上；实操步骤据此写，别凭空编操作流程
         refs = [r for r in self.references if r.get("summary")]
         if refs:
-            lines.append("--- 参考资料原文（写实操步骤时据此，尤其教程类）---")
-            for r in refs[:8]:
-                lines.append(f"  · {r.get('title', '')}：{r['summary'][:240]}")
+            lines.append("--- 参考资料原文（写实操步骤时据此，尤其教程 / 公众号爆文）---")
+            for r in refs:
+                tag = f"[{r['source']}]" if r.get("source") else ""
+                lines.append(f"  · {tag}{r.get('title', '')}：{r['summary'][:300]}")
             lines.append("")
         lines += [
             "【使用规则】",

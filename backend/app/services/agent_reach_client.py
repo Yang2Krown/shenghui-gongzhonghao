@@ -27,16 +27,23 @@ class AgentReachClient:
     def _get_proxy(self) -> Optional[str]:
         return settings.HTTP_PROXY or None
 
-    async def read_url(self, url: str) -> str:
-        """通过 Jina Reader 读取任意网页，返回 Markdown 正文。"""
-        target = f"{self.JINA_READER_BASE}{url}"
-        # 仅在配置了代理时才传；httpx>=0.26 用 proxy，更早版本用 proxies（传 None 也会报错）
-        client_kwargs: Dict[str, Any] = {"timeout": self.request_timeout}
+    def _client_kwargs(self, **extra: Any) -> Dict[str, Any]:
+        """构造 httpx.AsyncClient 参数，统一处理代理与 httpx 版本差异。
+
+        仅在配了代理时才传该参数：httpx>=0.26 用 proxy=、更早用 proxies=，
+        且两版本传 None 都会报错——所以不配代理就干脆不传这个 key。
+        """
+        kwargs: Dict[str, Any] = {"timeout": self.request_timeout, **extra}
         proxy = self._get_proxy()
         if proxy:
             _ver = tuple(int(x) for x in httpx.__version__.split(".")[:2])
-            client_kwargs["proxy" if _ver >= (0, 26) else "proxies"] = proxy
-        async with httpx.AsyncClient(**client_kwargs) as client:
+            kwargs["proxy" if _ver >= (0, 26) else "proxies"] = proxy
+        return kwargs
+
+    async def read_url(self, url: str) -> str:
+        """通过 Jina Reader 读取任意网页，返回 Markdown 正文。"""
+        target = f"{self.JINA_READER_BASE}{url}"
+        async with httpx.AsyncClient(**self._client_kwargs()) as client:
             resp = await client.get(target)
             resp.raise_for_status()
             return resp.text
@@ -46,21 +53,33 @@ class AgentReachClient:
         query: str,
         num_results: int = 10,
         include_domains: Optional[List[str]] = None,
+        text_chars: Optional[int] = None,
+        start_published_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Exa 全网语义搜索（HTTP API）。返回 [{title, url, published, author, snippet}]"""
+        """Exa 全网语义搜索（HTTP API）。返回 [{title, url, published, author, snippet}]。
+
+        计费坑：contents 是按「返回条数」逐条收费的（约 $0.001/条），所以 num_results
+        要按真实需要给，别盲目放大；highlights / text 都算内容费。
+        text_chars 给定时返回正文（maxCharacters=text_chars），可直接当正文用、省一次 /contents；
+        否则只取 highlights 片段（便宜的预览，用于排序/筛选）。
+        start_published_date：ISO 8601 时间，只要该时间之后发布的内容（如只要近一个月）。
+        """
         if not settings.EXA_API_KEY:
             raise RuntimeError("EXA_API_KEY 未配置")
 
+        contents = {"text": {"maxCharacters": text_chars}} if text_chars else {"highlights": True}
         payload: Dict[str, Any] = {
             "query": query,
             "numResults": num_results,
             "type": "auto",
-            "contents": {"highlights": True},
+            "contents": contents,
         }
         if include_domains:
             payload["includeDomains"] = include_domains
+        if start_published_date:
+            payload["startPublishedDate"] = start_published_date
 
-        async with httpx.AsyncClient(timeout=self.request_timeout, proxy=self._get_proxy()) as client:
+        async with httpx.AsyncClient(**self._client_kwargs()) as client:
             resp = await client.post(
                 f"{self.EXA_API_BASE}/search",
                 json=payload,
@@ -74,8 +93,11 @@ class AgentReachClient:
 
         results = []
         for r in data.get("results", []):
-            highlights = r.get("highlights") or []
-            snippet = highlights[0] if highlights else r.get("text") or ""
+            if text_chars:
+                snippet = r.get("text") or ""
+            else:
+                highlights = r.get("highlights") or []
+                snippet = highlights[0] if highlights else r.get("text") or ""
             results.append({
                 "title": r.get("title", ""),
                 "url": r.get("url", ""),
@@ -85,12 +107,25 @@ class AgentReachClient:
             })
         return results
 
-    async def search_wechat(self, keyword: str, num_results: int = 10) -> List[Dict[str, Any]]:
-        """微信公众号搜索：限定 mp.weixin.qq.com 域名。"""
+    async def search_wechat(
+        self,
+        keyword: str,
+        num_results: int = 10,
+        text_chars: Optional[int] = None,
+        start_published_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """微信公众号搜索：限定 mp.weixin.qq.com 域名。
+
+        includeDomains 已保证结果都是公众号，不再 ×N 过量请求（每多一条都按内容费收钱）。
+        text_chars 给定时连正文一并搜回，省掉后续 crawl_wechat 的额外 /contents 调用。
+        start_published_date：只要该时间之后发布的爆文（如只要近一个月）。
+        """
         candidates = await self.search_web(
             query=keyword,
-            num_results=num_results * 3,
+            num_results=num_results,
             include_domains=["mp.weixin.qq.com"],
+            text_chars=text_chars,
+            start_published_date=start_published_date,
         )
         wechat = [r for r in candidates if "mp.weixin.qq.com" in (r.get("url") or "")]
         return wechat[:num_results]
@@ -100,7 +135,7 @@ class AgentReachClient:
         if not settings.EXA_API_KEY:
             raise RuntimeError("EXA_API_KEY 未配置")
 
-        async with httpx.AsyncClient(timeout=self.request_timeout, proxy=self._get_proxy()) as client:
+        async with httpx.AsyncClient(**self._client_kwargs()) as client:
             resp = await client.post(
                 f"{self.EXA_API_BASE}/contents",
                 json={"urls": urls, "text": {"maxCharacters": max_characters}},
@@ -130,17 +165,10 @@ class AgentReachClient:
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36"
             )
         }
-        client_kwargs: Dict[str, Any] = {
-            "timeout": self.request_timeout,
-            "follow_redirects": True,
-            "headers": headers,
-        }
-        proxy = self._get_proxy()
-        if proxy:  # 国内无代理时不传该参数；httpx <0.26 用 proxies=，>=0.26 用 proxy=
-            _ver = tuple(int(x) for x in httpx.__version__.split(".")[:2])
-            client_kwargs["proxy" if _ver >= (0, 26) else "proxies"] = proxy
         try:
-            async with httpx.AsyncClient(**client_kwargs) as client:
+            async with httpx.AsyncClient(
+                **self._client_kwargs(follow_redirects=True, headers=headers)
+            ) as client:
                 resp = await client.get(feed_url)
                 resp.raise_for_status()
                 content = resp.content

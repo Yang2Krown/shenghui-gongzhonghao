@@ -57,7 +57,7 @@ async def generate_practical_draft(
 ) -> dict:
     """返回 {title, text, word_count, sections}。
 
-    爆文套路（research.hot.patterns）走 topic_routine 注入正文创作（agent_a_writer 会读它）。
+    参考资料（含公众号爆文）经 research.to_material_text() 进 source_materials 喂写手。
     """
     sections = build_sections(research, selected, template)
     direction = "工具主线（实操类）" if template != "case" else "案例主线（实操类）"
@@ -66,11 +66,9 @@ async def generate_practical_draft(
         tone=brief_tone or "第一人称、实操向、口语、信息密集",
         banned_words=brief_banned or [],
     )
-    routine = research.hot.patterns if research.hot and research.hot.patterns else None
     inp = ContentGenerationInput(
         topic_title=f"{research.product} 实操指南",
         topic_direction=direction,
-        topic_routine=routine,
         source_materials=research.to_material_text(),
         sections=sections,
         style_params=style,

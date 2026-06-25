@@ -1,14 +1,19 @@
-"""产品研究：迭代搜索（最多 3 轮，AI 判断够不够、不够就换词）+ 抓教程全文 → 提炼结构化研究。
+"""产品研究：博查搜教程站 + Exa 搜公众号 → 合并候选 → 筛选 → 抓全文 → 提炼结构化研究。
 
-- 迭代搜索：搜 10 条 → deepseek 看够不够、有没有噪音 → 不够就换关键词再搜，最多 3 轮。
+- 教程站迭代搜索：博查搜 10 条 → deepseek 看够不够 → 不够就换关键词再搜，最多 3 轮。
   DeepSeek 无状态，所以把每轮的 query + 结果标题累积进 messages 一起传，裁判才有"记忆"。
-- 抓全文：对教程类页面抓正文，供提炼真实操作步骤（国内服务器走 webfetch 直连）。
+- 公众号搜索：Exa 限定 mp.weixin 域名搜爆文（博查公众号索引太旧用不了），并入候选池。
+- 筛选（启发式预筛 + AI 选）：去重 / 同域名限量 / 公众号·教程优先，再让 deepseek 挑最相关 N 篇，
+  避免一股脑全塞稀释 prompt、拉低生成质量。筛后的 references 既前端展示、也喂正文生成。
+- 抓全文：教程站走 webfetch 直连；公众号直连会被"请在客户端打开"挡，必须走 Exa crawl。
 """
 
 import asyncio
 import logging
 from typing import Callable, List, Optional
+from urllib.parse import urlparse
 
+from app.core.config import settings
 from app.services.llm import get_llm_client
 from app.services.llm.llm_client import ChatMessage, parse_json_loose
 from app.services.practical_creation.bocha import bocha_search
@@ -20,14 +25,175 @@ logger = logging.getLogger(__name__)
 _HOWTO_HINTS = ("教程", "怎么", "使用", "入门", "上手", "指南", "教学", "操作", "step", "如何")
 _MAX_ROUNDS = 3
 
+# 筛选参数
+_WECHAT_NUM = 8          # Exa 公众号搜回多少条候选（公众号是首选源，够了就不搜博查，故给足）
+_WECHAT_BODY = 3000      # 公众号搜回时一并取的正文长度（复用作筛选摘要 + 正文，省掉额外 crawl 调用）
+_WECHAT_ENOUGH = 5       # 公众号（含正文、非 junk）≥ 这个数就够了，不再补搜博查教程站
+_PER_DOMAIN_CAP = 2      # 预筛时同一教程站最多保留几篇（避免 8 篇全是 CSDN）
+_WECHAT_CAP = 4          # 混搭模式下公众号占比上限；公众号独占模式不受此限
+_FINAL_K = 8             # AI 最终选出、喂生成 / 显示的参考资料条数
+
 # 只在这些优质平台里搜（白名单）：解决"结果太散、混进文档站/软件下载站/公益站"的问题。
-# 注：博查的公众号(mp.weixin)索引又少又旧（新品基本搜到 0），加了也没用，故不放进来；
-# 真要公众号最新教程得走搜狗或新榜，博查做不了。
+# 注：博查的公众号(mp.weixin)索引又少又旧（新品基本搜到 0），公众号那路改走 Exa，见 _search_wechat。
 _GOOD_DOMAINS = "|".join([
     "zhihu.com", "csdn.net", "juejin.cn", "jianshu.com", "sspai.com",
     "woshipm.com", "cnblogs.com", "segmentfault.com", "36kr.com",
     "ifanr.com", "infoq.cn",
 ])
+
+# 域名 → 中文站点名（前端 source 标签 + 预筛分组用）
+_DOMAIN_NAMES = {
+    "zhihu.com": "知乎", "csdn.net": "CSDN", "juejin.cn": "掘金", "jianshu.com": "简书",
+    "sspai.com": "少数派", "woshipm.com": "人人都是产品经理", "cnblogs.com": "博客园",
+    "segmentfault.com": "思否", "36kr.com": "36氪", "ifanr.com": "爱范儿", "infoq.cn": "InfoQ",
+}
+
+
+def _host(url: str) -> str:
+    try:
+        return (urlparse(url).netloc or "").lower()
+    except Exception:
+        return ""
+
+
+def _domain_label(url: str) -> str:
+    host = _host(url)
+    for d, name in _DOMAIN_NAMES.items():
+        if d in host:
+            return name
+    return host or "网页"
+
+
+def _is_howto(title: str) -> bool:
+    return any(k in (title or "") for k in _HOWTO_HINTS)
+
+
+def _norm_platform(h: dict) -> dict:
+    """博查教程站结果归一化为 {title,url,summary,source}。"""
+    return {
+        "title": h.get("title", ""),
+        "url": h.get("url", ""),
+        "summary": h.get("summary") or h.get("snippet") or "",
+        "source": _domain_label(h.get("url", "")),
+    }
+
+
+def _is_junk_wechat(h: dict) -> bool:
+    """Exa 抓近期公众号常被微信"请在客户端打开"拦截，缓存的是拦截页样板（标题恒为
+    'Weixin Official Accounts Platform'、正文是 meta 样板）。这类无正文价值，直接丢。"""
+    title = h.get("title", "") or ""
+    return (not title.strip()) or ("Weixin Official Accounts Platform" in title)
+
+
+def _mentions(h: dict, product: str) -> bool:
+    """文章标题或正文里真提到产品名才算相关。
+
+    Exa 神经搜索对任何词都会返回一批"语义最近"的公众号（冷门/乱码产品也能返回 7-8 篇擦边文），
+    所以判断公众号"够不够"不能只看数量，要看真提到产品的有几篇。"""
+    p = (product or "").strip().lower()
+    if not p:
+        return False
+    blob = (h.get("title", "") + " " + h.get("summary", "")).lower()
+    return p in blob
+
+
+def _norm_wechat(h: dict) -> dict:
+    """Exa 公众号结果归一化。"""
+    return {
+        "title": h.get("title", ""),
+        "url": h.get("url", ""),
+        "summary": h.get("snippet") or "",
+        "source": "公众号",
+    }
+
+
+async def _search_wechat(product: str, num: int = _WECHAT_NUM) -> List[dict]:
+    """Exa 搜公众号爆文（连正文一并搜回，省掉额外 crawl）。无 key / 失败都返回空，绝不打断主流程。
+
+    不加发布日期过滤：实测一加 startPublishedDate，Exa 就只返回"最近抓但被微信拦"的
+    junk 拦截页（0 篇真正文）；不加才按相关度返回它早抓好、正文完整的热门文。
+    """
+    if not settings.EXA_API_KEY:
+        return []
+    try:
+        from app.services.agent_reach_client import agent_reach_client
+        hits = await agent_reach_client.search_wechat(product, num_results=num, text_chars=_WECHAT_BODY)
+        return [_norm_wechat(h) for h in hits if h.get("url") and not _is_junk_wechat(h)]
+    except Exception as e:
+        logger.warning(f"[产品研究] 公众号(Exa)搜索失败，跳过: {type(e).__name__}: {e}")
+        return []
+
+
+def _prefilter(cands: List[dict], wechat_cap: int = _WECHAT_CAP) -> List[dict]:
+    """启发式预筛：公众号 / 教程标题优先排序 → 去重 + 同域名限量 + 丢空摘要。
+
+    wechat_cap：公众号占比上限；公众号独占模式传 _FINAL_K 即不限量。
+    """
+    ranked = sorted(
+        cands,
+        key=lambda h: (h.get("source") != "公众号", not _is_howto(h.get("title", ""))),
+    )
+    seen: set = set()
+    per: dict = {}
+    out: List[dict] = []
+    for h in ranked:
+        u = h.get("url")
+        if not u or u in seen or not h.get("summary"):
+            continue
+        group = h.get("source") or _host(u)
+        cap = wechat_cap if group == "公众号" else _PER_DOMAIN_CAP
+        if per.get(group, 0) >= cap:
+            continue
+        seen.add(u)
+        per[group] = per.get(group, 0) + 1
+        out.append(h)
+    return out
+
+
+_SELECT_SYS = """你在为一篇产品实操指南筛选参考资料。给你产品名、可选 brief，和一批候选（编号 + 来源 + 标题 + 摘要）。
+挑出最该保留的不超过 {k} 篇：优先与产品强相关、含真实操作 / 功能讲解、信息密度高的；
+剔除蹭词、宽泛、与产品无关、纯营销无干货的。公众号爆文若与产品相关要保留（学开头钩子与表达）。
+只输出 JSON：{{"keep": [编号...]}}，按相关度从高到低。"""
+
+
+async def _ai_select(product: str, brief: str, cands: List[dict], k: int = _FINAL_K) -> List[dict]:
+    """从预筛候选里让 deepseek 选最相关的 k 篇。失败 / 不够则退回前 k 篇。"""
+    if len(cands) <= k:
+        return cands
+    listing = "\n".join(
+        f"[{i}] ({h.get('source', '')}) {h.get('title', '')}：{(h.get('summary') or '')[:120]}"
+        for i, h in enumerate(cands)
+    )
+    client = get_llm_client("deepseek")
+    try:
+        res = await client.chat(
+            [ChatMessage(role="system", content=_SELECT_SYS.format(k=k)),
+             ChatMessage(role="user", content=f"产品：{product}\nbrief：{brief or '无'}\n候选：\n{listing}")],
+            max_tokens=1500,  # deepseek 推理模型先吃一段 reasoning，给足空间避免 JSON 被截
+        )
+        data = parse_json_loose(res.text) or {}
+        keep = [i for i in (data.get("keep") or []) if isinstance(i, int) and 0 <= i < len(cands)]
+        if keep:
+            return [cands[i] for i in keep[:k]]
+    except Exception as e:
+        logger.warning(f"[参考资料筛选] AI 选择失败，退回启发式前 {k}: {e}")
+    return cands[:k]
+
+
+async def _fetch_fulltext(curated: List[dict]) -> dict:
+    """深抓筛后教程站正文（webfetch 直连，免费）。返回 {url: 正文}。
+
+    公众号正文在 _search_wechat 时已随搜索一并取回（在 summary 里），不再单独 crawl——
+    省掉那几次 Exa /contents 调用（每条按内容费收钱）。
+    """
+    web_urls = [c["url"] for c in curated if c.get("source") != "公众号" and c.get("url")]
+    if not web_urls:
+        return {}
+    try:  # 整体兜底：抓取再慢也不拖死整个研究
+        return await asyncio.wait_for(fetch_many(web_urls, max_chars=6000), timeout=45)
+    except asyncio.TimeoutError:
+        logger.warning("[产品研究] 教程全文抓取整体超时，跳过用摘要")
+        return {}
 
 JUDGE_SYS = """你是产品调研员，边搜边判断。目标：攒够资料写一篇实操指南，覆盖三要素——产品定位、主要功能、典型使用步骤。
 
@@ -132,25 +298,42 @@ async def research_product(
                 "step": 0, "agent": "产品调研员", "action": action,
                 "avatar": "/agents/source.png"}})
 
-    hits = await _iterative_search(product, brief, _push)
+    # 公众号优先：先搜公众号（近一个月，含正文）。够了就只用公众号、不再搜博查；
+    # 不够才补搜博查教程站（知乎/CSDN）凑足资料。
+    await _push("正在搜公众号爆文…")
+    wechat_hits = [
+        h for h in await _search_wechat(product)
+        if h.get("summary") and _mentions(h, product)  # 只留真提到产品的，滤掉神经搜索的擦边文
+    ]
 
-    # 优先抓"教程/怎么用"类页面的全文（实操步骤的真正来源）；多抓几篇 = 更多功能能提炼出步骤
-    ranked = sorted(hits, key=lambda h: any(k in (h.get("title", "")) for k in _HOWTO_HINTS), reverse=True)
-    deep_urls = [h["url"] for h in ranked[:6] if h.get("url")]
-    fulltext = {}
-    if deep_urls:
-        await _push("正在抓取教程全文…")
-        try:  # 整体兜底：抓取再慢也不拖死整个研究
-            fulltext = await asyncio.wait_for(fetch_many(deep_urls, max_chars=6000), timeout=45)
-        except asyncio.TimeoutError:
-            logger.warning("[产品研究] 教程抓取整体超时，跳过全文用摘要")
+    if len(wechat_hits) >= _WECHAT_ENOUGH:
+        await _push(f"公众号已搜到 {len(wechat_hits)} 篇相关爆文，资料充足，只用公众号")
+        cands = wechat_hits
+        wechat_cap = _FINAL_K  # 独占模式：公众号不限量
+    else:
+        await _push(f"相关公众号仅 {len(wechat_hits)} 篇，补搜知乎/CSDN 等平台凑足资料…")
+        platform_hits = await _iterative_search(product, brief, _push)
+        cands = [_norm_platform(h) for h in platform_hits if h.get("url")] + wechat_hits
+        wechat_cap = _WECHAT_CAP
+
+    # 启发式预筛 → AI 选最相关 N 篇（避免太多稀释 prompt）
+    await _push("正在筛选最相关的参考资料…")
+    curated = await _ai_select(product, brief, _prefilter(cands, wechat_cap=wechat_cap), k=_FINAL_K)
+    wx_n = sum(1 for c in curated if c.get("source") == "公众号")
+    await _push(f"筛选出 {len(curated)} 篇参考资料（含公众号 {wx_n} 篇），正在抓全文…")
+
+    # 深抓筛后参考资料正文（教程站直连 / 公众号走 Exa），抓到的回填进 summary 一并喂生成
+    fulltext = await _fetch_fulltext(curated)
+    for c in curated:
+        body = fulltext.get(c["url"])
+        if body:
+            c["summary"] = body
 
     await _push("正在提炼定位、功能点与操作步骤…")
-    parts = []
-    for h in hits[:15]:
-        body = fulltext.get(h.get("url", "")) or h.get("summary") or h.get("snippet") or ""
-        if body:
-            parts.append(f"标题：{h.get('title', '')}\n内容：{body}\n来源：{h.get('url', '')}")
+    parts = [
+        f"标题：{c['title']}\n内容：{c['summary']}\n来源：{c['url']}"
+        for c in curated if c.get("summary")
+    ]
     corpus = "\n\n".join(parts)
     user = (
         f"产品名：{product}\n"
@@ -169,10 +352,11 @@ async def research_product(
     data.setdefault("product", product)
     research = ProductResearch.from_dict(data)
     research.product = product
-    research.sources = [h["url"] for h in hits[:15] if h.get("url")]
-    research.references = [  # 前端只展示标题 + 链接
-        {"title": h.get("title", ""), "url": h.get("url", "")}
-        for h in hits[:15] if h.get("url")
+    research.sources = [c["url"] for c in curated]
+    research.references = [  # 前端展示 + 喂生成；带 source 标签区分公众号 / 教程站
+        {"title": c["title"], "url": c["url"],
+         "summary": (c.get("summary") or "")[:300], "source": c.get("source", "")}
+        for c in curated
     ]
 
     if not research.features:
