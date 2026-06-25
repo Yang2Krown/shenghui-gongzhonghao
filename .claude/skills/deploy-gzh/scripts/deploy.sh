@@ -83,6 +83,8 @@ cd "$DEPLOY_PATH"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build frontend
 # 确保前端容器真正重启（上次 up -d --build 有时没生效）
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart frontend
+# 清理本次构建产生的悬空镜像（预防磁盘堆积）
+docker image prune -f >/dev/null 2>&1 || true
 echo
 echo "----- 前端服务状态 -----"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps frontend
@@ -116,6 +118,8 @@ cd "$DEPLOY_PATH"
 find . -name '._*' -delete 2>/dev/null || true
 # 重建后端相关容器（不重建 postgres/frontend）
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build backend celery-worker celery-beat
+# 清理本次构建产生的悬空镜像（预防磁盘堆积）
+docker image prune -f >/dev/null 2>&1 || true
 echo
 echo "----- 后端服务状态 -----"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps backend celery-worker celery-beat
@@ -146,6 +150,8 @@ find . -name '._*' -delete 2>/dev/null || true
 
 # 强制重建 init 容器（确保代码是最新的）
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build init
+# 清理本次构建产生的悬空镜像（预防磁盘堆积）
+docker image prune -f >/dev/null 2>&1 || true
 echo
 
 # 等 init 跑完（最多 120 秒）
@@ -188,8 +194,20 @@ EOF
 fi
 
 # ═══════════════════════════════════════════════════
-# 收尾：整体状态
+# 收尾：清理 + 整体状态
 # ═══════════════════════════════════════════════════
+echo "==> [清理] 回收磁盘（悬空镜像 + 过期构建缓存）..."
+ssh "$DEPLOY_HOST" bash -s <<EOF
+set -e
+# 悬空镜像（构建时产生的旧版本）
+docker image prune -f >/dev/null 2>&1 || true
+# 构建缓存保留最近 2GB，其余清除（防止像之前那样堆到 26GB）
+docker builder prune --force --keep-storage=2GB >/dev/null 2>&1 || true
+echo "    磁盘使用："
+df -h / | tail -1
+EOF
+echo
+
 echo "==> [状态] 所有服务："
 ssh "$DEPLOY_HOST" bash -s <<EOF
 cd "$DEPLOY_PATH"

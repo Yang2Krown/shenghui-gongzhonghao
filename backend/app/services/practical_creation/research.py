@@ -28,7 +28,7 @@ _MAX_ROUNDS = 3
 # 筛选参数
 _WECHAT_NUM = 8          # Exa 公众号搜回多少条候选（公众号是首选源，够了就不搜博查，故给足）
 _WECHAT_BODY = 3000      # 公众号搜回时一并取的正文长度（复用作筛选摘要 + 正文，省掉额外 crawl 调用）
-_WECHAT_ENOUGH = 5       # 公众号（含正文、非 junk）≥ 这个数就够了，不再补搜博查教程站
+_WECHAT_ENOUGH = 99      # 公众号独占模式几乎不触发——公众号缺操作步骤，始终补搜博查教程站
 _PER_DOMAIN_CAP = 2      # 预筛时同一教程站最多保留几篇（避免 8 篇全是 CSDN）
 _WECHAT_CAP = 4          # 混搭模式下公众号占比上限；公众号独占模式不受此限
 _FINAL_K = 8             # AI 最终选出、喂生成 / 显示的参考资料条数
@@ -114,11 +114,17 @@ async def _search_wechat(product: str, num: int = _WECHAT_NUM) -> List[dict]:
     junk 拦截页（0 篇真正文）；不加才按相关度返回它早抓好、正文完整的热门文。
     """
     if not settings.EXA_API_KEY:
+        logger.warning("[产品研究] EXA_API_KEY 未配置，跳过公众号搜索")
         return []
     try:
         from app.services.agent_reach_client import agent_reach_client
-        hits = await agent_reach_client.search_wechat(product, num_results=num, text_chars=_WECHAT_BODY)
-        return [_norm_wechat(h) for h in hits if h.get("url") and not _is_junk_wechat(h)]
+        raw = await agent_reach_client.search_wechat(product, num_results=num, text_chars=_WECHAT_BODY)
+        logger.info(f"[产品研究] Exa 公众号原始结果: {len(raw)} 条")
+        filtered = [_norm_wechat(h) for h in raw if h.get("url") and not _is_junk_wechat(h)]
+        logger.info(f"[产品研究] 过滤后公众号: {len(filtered)} 条")
+        for i, h in enumerate(filtered[:3]):
+            logger.info(f"  [{i}] {h['title'][:40]}  summary_len={len(h.get('summary',''))}")
+        return filtered
     except Exception as e:
         logger.warning(f"[产品研究] 公众号(Exa)搜索失败，跳过: {type(e).__name__}: {e}")
         return []
@@ -303,7 +309,7 @@ async def research_product(
     await _push("正在搜公众号爆文…")
     wechat_hits = [
         h for h in await _search_wechat(product)
-        if h.get("summary") and _mentions(h, product)  # 只留真提到产品的，滤掉神经搜索的擦边文
+        if h.get("summary") and _mentions(h, product)  # 精确匹配产品名，避免语义搜索的擦边文
     ]
 
     if len(wechat_hits) >= _WECHAT_ENOUGH:

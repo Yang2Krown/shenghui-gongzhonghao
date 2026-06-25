@@ -59,6 +59,8 @@ x-backend-env: &backend-env
   ALLOWED_HOSTS: ${ALLOWED_HOSTS:-["*"]}
   # Exa API（微信公众号搜索）
   EXA_API_KEY: ${EXA_API_KEY:-}
+  # 博查 Bocha（实操类爆文搜索，国内可充值）
+  BOCHA_API_KEY: ${BOCHA_API_KEY:-}
   # HTTP 代理（访问境外网站）
   HTTP_PROXY: ${HTTP_PROXY:-}
   # X (Twitter) via twitterapi.io（国内直连，无需代理/cookie）。值放 backend/.env.production

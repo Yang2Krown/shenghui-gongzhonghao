@@ -22,6 +22,7 @@ description: >
 | **要全量重建** | 只 `build init backend` 会漏掉 frontend。部署时 `--build` 不指定服务名，重建全部。 |
 | **`init` 容器跑数据库迁移** | `alembic upgrade head` + seed。它失败 backend 起不来。新增数据库表要先生成 alembic 迁移文件。 |
 | **不要覆盖服务器的密钥/配置** | 同步时排除 `backend/.env.production` 和 `backend/secrets`，用服务器上已有的。 |
+| **每次 build 会堆积构建缓存** | `docker build --build` 每次都产生新的构建层，历史缓存可达 26GB+。**deploy.sh 每次构建后自动 `docker image prune`，收尾时 `docker builder prune --keep-storage=2GB` 限流。** |
 
 ## 部署配置（默认值）
 
