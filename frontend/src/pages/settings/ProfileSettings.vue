@@ -77,6 +77,9 @@
       </div>
     </div>
 
+    <!-- 飞书绑定 -->
+    <FeishuConnect />
+
     <!-- 添加/编辑账号弹窗 -->
     <el-dialog v-model="accountDialogVisible" :title="editingAccount ? '编辑公众号账号' : '添加公众号账号'" width="440px" destroy-on-close>
       <el-form label-position="top" :model="accountForm" :rules="accountRules" ref="accountFormRef">
@@ -255,6 +258,7 @@ import { useUserStore } from '@/stores/user'
 import { useCreditStore } from '@/stores/credit'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Camera, SwitchButton } from '@element-plus/icons-vue'
+import FeishuConnect from '@/components/settings/FeishuConnect.vue'
 import { updateProfile, uploadAvatar } from '@/api/auth'
 import { get, post, put, del } from '@/api/api'
 import {

@@ -24,6 +24,9 @@ from app.models.outline import (
 # 微信公众号账号管理
 from app.models.wechat_account import WechatAccount
 
+# 飞书授权绑定（商单 brief 接入）
+from app.models.feishu_auth import FeishuAuth
+
 # 积分系统
 from app.models.credit import UserCredit, CreditTransaction, CreditPackage
 
@@ -54,6 +57,8 @@ __all__ = [
     "OutlineInspection",
     # 微信公众号账号
     "WechatAccount",
+    # 飞书授权绑定
+    "FeishuAuth",
     # 积分系统
     "UserCredit",
     "CreditTransaction",

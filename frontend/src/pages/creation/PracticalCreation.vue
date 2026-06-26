@@ -30,8 +30,31 @@
             <input class="input" v-model="form.product" type="text" placeholder="请输入产品名称">
           </div>
           <div class="form-section">
-            <label class="form-label">商单 brief <span class="opt">选填</span></label>
-            <textarea class="input textarea" v-model="form.brief" placeholder="粘贴商单要求：必提卖点、禁忌、调性、官网链接等"></textarea>
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <label class="form-label" style="margin-bottom:0;">商单 brief <span class="opt">选填</span></label>
+              <el-button text size="small" type="primary" @click="briefDialog = true">
+                <el-icon style="margin-right:4px;"><MagicStick /></el-icon> 导入飞书 / 文件 brief
+              </el-button>
+            </div>
+
+            <!-- 未解析：直接编辑文本 -->
+            <textarea v-if="!structuredBrief" class="input textarea" v-model="form.brief" style="margin-top:8px;"
+              placeholder="粘贴商单要求：必提卖点、禁忌、调性、官网链接等；或点右上角从飞书链接/文件自动导入"></textarea>
+
+            <!-- 已解析：结构化卡片 + 折叠的原文 -->
+            <template v-else>
+              <BriefStructuredCard :brief="structuredBrief">
+                <template #actions>
+                  <el-button text size="small" @click="clearBrief">清除</el-button>
+                </template>
+              </BriefStructuredCard>
+              <div class="raw-toggle">
+                <el-button text size="small" @click="showRawBrief = !showRawBrief">
+                  {{ showRawBrief ? '收起' : '查看 / 编辑' }}写作要求原文（喂给 AI 研究）
+                </el-button>
+              </div>
+              <textarea v-show="showRawBrief" class="input textarea" v-model="form.brief" rows="15" style="margin-top:6px; min-height:340px;"></textarea>
+            </template>
           </div>
           <!-- 创作模板切换已隐藏，默认走「工具主线」（form.template = 'tool'） -->
         </div>
@@ -178,6 +201,31 @@
         <button class="btn-ghost" @click="reset">↺ 再写一篇</button>
       </div>
     </div>
+
+    <!-- brief 导入弹窗 -->
+    <el-dialog v-model="briefDialog" title="导入商单 brief" width="520px" destroy-on-close>
+      <el-radio-group v-model="briefSource" style="margin-bottom: 14px;">
+        <el-radio-button label="feishu_link">飞书链接</el-radio-button>
+        <el-radio-button label="file">上传文件</el-radio-button>
+      </el-radio-group>
+
+      <div v-if="briefSource === 'feishu_link'">
+        <el-input v-model="briefLink" placeholder="粘贴飞书文档/wiki 链接（需先在「设置」连接飞书）" />
+        <p class="brief-dlg-tip">用你绑定的飞书身份读取，仅你本人能访问的文档可读。</p>
+      </div>
+      <div v-else>
+        <el-upload drag :auto-upload="false" :show-file-list="true" :limit="1"
+          accept=".docx,.pdf,.txt,.md" :on-change="onPickFile">
+          <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+          <div class="el-upload__text">拖拽或<em>点击上传</em> docx / pdf / txt</div>
+        </el-upload>
+      </div>
+
+      <template #footer>
+        <el-button @click="briefDialog = false">取消</el-button>
+        <el-button type="primary" :loading="briefLoading" @click="importBrief">读取并解析</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -185,8 +233,10 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { MagicStick } from '@element-plus/icons-vue'
+import { MagicStick, UploadFilled } from '@element-plus/icons-vue'
+import { feishuBriefRead, feishuBriefUpload, feishuBriefSummarize } from '@/api/feishu'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
+import BriefStructuredCard from '@/components/creation/BriefStructuredCard.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
 import { publishToWechatEditor } from '@/utils/publishToEditor'
 import api from '@/api/api'
@@ -206,6 +256,17 @@ const templates = [
 
 const stage = ref('form')          // form | review | result
 const form = ref({ product: '', brief: '', template: 'tool' })
+
+// brief 导入
+const briefDialog = ref(false)
+const briefSource = ref('feishu_link')
+const briefLink = ref('')
+const briefFile = ref(null)
+const briefLoading = ref(false)
+const structuredBrief = ref(null)
+const showRawBrief = ref(false)
+
+const clearBrief = () => { structuredBrief.value = null; form.value.brief = ''; showRawBrief.value = false }
 const research = ref(null)
 const selected = ref([])
 const draft = ref(null)
@@ -233,6 +294,56 @@ const addFeature = () => {
   selected.value.push(name)
 }
 
+const unwrap = (res) => (res && res.data !== undefined ? res.data : res)
+
+const onPickFile = (f) => { briefFile.value = f?.raw || null }
+
+// 把结构化 brief 拼成可读文本，喂进 research 的 brief
+const composeBriefText = (sb) => {
+  const parts = []
+  if (sb.brief) parts.push(sb.brief)
+  if (sb.core_message) parts.push(`【核心主张】${sb.core_message}`)
+  if (sb.must_cover?.length) parts.push('【必须覆盖】\n' + sb.must_cover.map(x => '· ' + x).join('\n'))
+  if (sb.banned?.length) parts.push('【禁忌/红线】\n' + sb.banned.map(x => '· ' + x).join('\n'))
+  if (sb.tone) parts.push(`【调性】${sb.tone}`)
+  if (sb.cta) parts.push(`【引导动作】${sb.cta}`)
+  if (sb.audience) parts.push(`【目标读者】${sb.audience}`)
+  if (sb.publish) parts.push(`【发布档期】${sb.publish}`)
+  if (sb.notes) parts.push(`【其他】${sb.notes}`)
+  return parts.join('\n\n')
+}
+
+const importBrief = async () => {
+  briefLoading.value = true
+  try {
+    // 1) 取原文
+    let title = '', rawText = ''
+    if (briefSource.value === 'feishu_link') {
+      if (!briefLink.value.trim()) { ElMessage.warning('请粘贴飞书链接'); return }
+      const d = unwrap(await feishuBriefRead('feishu_link', briefLink.value.trim()))
+      title = d.title || ''; rawText = d.raw_text || ''
+    } else {
+      if (!briefFile.value) { ElMessage.warning('请先选择文件'); return }
+      const d = unwrap(await feishuBriefUpload(briefFile.value))
+      title = d.title || ''; rawText = d.raw_text || ''
+    }
+    if (!rawText.trim()) { ElMessage.warning('未读到内容'); return }
+
+    // 2) 结构化总结
+    const sb = unwrap(await feishuBriefSummarize(rawText, title))
+    structuredBrief.value = sb
+    if (!form.value.product.trim() && sb.product) form.value.product = sb.product
+    form.value.brief = composeBriefText(sb)
+    briefDialog.value = false
+    ElMessage.success('brief 已导入并解析')
+  } catch (e) {
+    const msg = e?.response?.data?.detail || e.message || '导入失败'
+    ElMessage.error(typeof msg === 'string' ? msg : '导入失败')
+  } finally {
+    briefLoading.value = false
+  }
+}
+
 const startResearch = async () => {
   if (!form.value.product.trim()) return
   progress.stop(); draft.value = null
@@ -257,6 +368,8 @@ const startDraft = async () => {
       research: research.value,
       selected: selected.value,
       template: form.value.template,
+      brief_banned: structuredBrief.value?.banned || [],
+      brief_tone: structuredBrief.value?.tone || null,
     }, { timeout: 10000 })
     const runId = (res?.data || res)?.run_id
     if (runId) progress.start(`/api/v1/practical/stream/${runId}`)
@@ -292,6 +405,7 @@ const reset = () => {
   stage.value = 'form'
   form.value = { product: '', brief: '', template: 'tool' }
   research.value = null; selected.value = []; draft.value = null
+  structuredBrief.value = null
 }
 
 onUnmounted(() => progress.stop())
@@ -299,6 +413,8 @@ onUnmounted(() => progress.stop())
 
 <style scoped>
 .page-wrap { max-width: 860px; margin: 0 auto; padding: 8px 0 64px; }
+.brief-dlg-tip { font-size: 12px; color: var(--ink-4, #999); margin-top: 8px; }
+.raw-toggle { margin-top: 8px; }
 .serif { font-family: "Source Han Serif SC", "Songti SC", "Noto Serif SC", Georgia, serif; font-weight: 500; }
 
 .tool-hero { position: relative; margin-bottom: 26px; }

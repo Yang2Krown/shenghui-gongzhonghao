@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     TOPHUB_API_KEY: Optional[str] = None
     TOPHUB_API_BASE: str = "https://api.tophubdata.com"
 
+    # ====== 飞书商单 brief 接入 ======
+    # 平台共用一个自建应用；每个用户各自走设备码 OAuth 授权，token 存库按 user_id 隔离。
+    # 原生 HTTP 调飞书开放平台，不依赖 lark-cli / 系统钥匙串。密钥放 .env / .env.production。
+    FEISHU_APP_ID: Optional[str] = None
+    FEISHU_APP_SECRET: Optional[str] = None
+    # 读文档时申请的 scope；offline_access 用来换取 refresh_token（否则 access_token 2h 后失效需重授权）
+    FEISHU_SCOPES: str = "offline_access docx:document:readonly wiki:wiki:readonly drive:drive:readonly"
+
     # ====== Embedding 配置 ======
     EMBEDDING_PROVIDER: str = "dashscope"
     EMBEDDING_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
