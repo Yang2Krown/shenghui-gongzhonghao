@@ -38,8 +38,15 @@
             </div>
 
             <!-- 未解析：直接编辑文本 -->
-            <textarea v-if="!structuredBrief" class="input textarea" v-model="form.brief" style="margin-top:8px;"
-              placeholder="粘贴商单要求：必提卖点、禁忌、调性、官网链接等；或点右上角从飞书链接/文件自动导入"></textarea>
+            <template v-if="!structuredBrief">
+              <textarea class="input textarea" v-model="form.brief" style="margin-top:8px;"
+                placeholder="粘贴商单要求：必提卖点、禁忌、调性、官网链接等；或点右上角从飞书链接/文件自动导入"></textarea>
+              <div v-if="form.brief.trim()" class="raw-toggle">
+                <el-button text size="small" type="primary" :loading="briefLoading" @click="summarizeCurrent">
+                  <el-icon style="margin-right:4px;"><MagicStick /></el-icon> AI 总结这段要求 → 结构化
+                </el-button>
+              </div>
+            </template>
 
             <!-- 已解析：结构化卡片 + 折叠的原文 -->
             <template v-else>
@@ -206,12 +213,17 @@
     <el-dialog v-model="briefDialog" title="导入商单 brief" width="520px" destroy-on-close>
       <el-radio-group v-model="briefSource" style="margin-bottom: 14px;">
         <el-radio-button label="feishu_link">飞书链接</el-radio-button>
+        <el-radio-button label="text">粘贴文本</el-radio-button>
         <el-radio-button label="file">上传文件</el-radio-button>
       </el-radio-group>
 
       <div v-if="briefSource === 'feishu_link'">
         <el-input v-model="briefLink" placeholder="粘贴飞书文档/wiki 链接（需先在「设置」连接飞书）" />
         <p class="brief-dlg-tip">用你绑定的飞书身份读取，仅你本人能访问的文档可读。</p>
+      </div>
+      <div v-else-if="briefSource === 'text'">
+        <el-input v-model="briefText" type="textarea" :rows="10"
+          placeholder="把商单要求粘贴进来，AI 会自动总结成结构化 brief（产品、必覆盖、禁忌、调性等）" />
       </div>
       <div v-else>
         <el-upload drag :auto-upload="false" :show-file-list="true" :limit="1"
@@ -261,12 +273,13 @@ const form = ref({ product: '', brief: '', template: 'tool' })
 const briefDialog = ref(false)
 const briefSource = ref('feishu_link')
 const briefLink = ref('')
+const briefText = ref('')
 const briefFile = ref(null)
 const briefLoading = ref(false)
 const structuredBrief = ref(null)
 const showRawBrief = ref(false)
 
-const clearBrief = () => { structuredBrief.value = null; form.value.brief = ''; showRawBrief.value = false }
+const clearBrief = () => { structuredBrief.value = null; form.value.brief = ''; briefText.value = ''; showRawBrief.value = false }
 const research = ref(null)
 const selected = ref([])
 const draft = ref(null)
@@ -313,6 +326,24 @@ const composeBriefText = (sb) => {
   return parts.join('\n\n')
 }
 
+// 直接对当前文本框里的内容做 AI 总结
+const summarizeCurrent = async () => {
+  const raw = form.value.brief.trim()
+  if (!raw) return
+  briefLoading.value = true
+  try {
+    const sb = unwrap(await feishuBriefSummarize(raw, ''))
+    structuredBrief.value = sb
+    if (!form.value.product.trim() && sb.product) form.value.product = sb.product
+    form.value.brief = composeBriefText(sb)
+    ElMessage.success('已结构化')
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || '总结失败')
+  } finally {
+    briefLoading.value = false
+  }
+}
+
 const importBrief = async () => {
   briefLoading.value = true
   try {
@@ -322,6 +353,9 @@ const importBrief = async () => {
       if (!briefLink.value.trim()) { ElMessage.warning('请粘贴飞书链接'); return }
       const d = unwrap(await feishuBriefRead('feishu_link', briefLink.value.trim()))
       title = d.title || ''; rawText = d.raw_text || ''
+    } else if (briefSource.value === 'text') {
+      if (!briefText.value.trim()) { ElMessage.warning('请粘贴文本'); return }
+      rawText = briefText.value.trim()
     } else {
       if (!briefFile.value) { ElMessage.warning('请先选择文件'); return }
       const d = unwrap(await feishuBriefUpload(briefFile.value))

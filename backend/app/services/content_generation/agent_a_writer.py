@@ -100,7 +100,10 @@ def _build_user_prompt(inp: ContentGenerationInput) -> str:
     lines.append(f"【大纲】（目标总字数约 {total_target} 字，请严格按每节目标字数写）")
     for sec in inp.sections:
         part_label = _PART_LABEL.get(sec.part or "body", "主体段")
-        lines.append(f"{sec.subtitle}（目标 {sec.word_estimate} 字，{part_label}）")
+        if inp.free_subtitles:
+            lines.append(f"第{sec.section_number}节（目标 {sec.word_estimate} 字，{part_label}）｜方向参考：{sec.subtitle}")
+        else:
+            lines.append(f"{sec.subtitle}（目标 {sec.word_estimate} 字，{part_label}）")
         if sec.description:
             lines.append(f"  要写什么: {sec.description}")
         elif sec.core_points:
@@ -121,6 +124,10 @@ def _build_user_prompt(inp: ContentGenerationInput) -> str:
         lines.append("")
 
     # 输出格式要求
+    subtitle_spec = (
+        "小标题（据本节内容自拟一个自然、贴切的小标题）"
+        if inp.free_subtitles else "小标题（必须与大纲一致）"
+    )
     lines.append("【输出格式】")
     lines.append("请严格按以下 JSON 格式输出，不要输出其他内容：")
     lines.append("""```json
@@ -129,8 +136,8 @@ def _build_user_prompt(inp: ContentGenerationInput) -> str:
   "sections": [
     {
       "section_number": 1,
-      "subtitle": "小标题（必须与大纲一致）",
-      "content": "该节正文内容...",
+      "subtitle": "%s",
+      "content": "该节正文内容...",""" % subtitle_spec + """
       "gold_seed": {
         "section_number": 1,
         "position": "第1节末尾",
@@ -146,6 +153,12 @@ def _build_user_prompt(inp: ContentGenerationInput) -> str:
     lines.append("2. 每节 content 直接写正文，不要加小标题（小标题由 subtitle 字段单独提供）")
     lines.append("3. content 里禁止出现「第X节」「[引入]」「[正文]」「[总结]」「【引入】」「【正文】」「【总结】」这类节号或标签前缀，直接写内容即可")
     lines.append(f"4. 每节字数尽量贴近其目标字数，全文总字数贴近约 {total_target} 字")
+    if inp.free_subtitles:
+        lines.append(
+            "5. subtitle 要像正常文章的小标题：贴合本节内容、自然有吸引力；"
+            "严禁用「开头」「引入」「正文」「实操」「实践」「结尾」「升华」「总结」等结构词或其作前缀"
+            "（如「实操：xxx」「结尾升华」都不行），直接写真正的小标题"
+        )
 
     return "\n".join(lines)
 

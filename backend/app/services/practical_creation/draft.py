@@ -73,6 +73,7 @@ async def generate_practical_draft(
         sections=sections,
         style_params=style,
         user_id=user_id,
+        free_subtitles=True,  # 让写手自拟自然小标题，不要「引入：/实操：/结尾升华」这类结构词
     )
     out = await generate_content(inp, progress_callback=progress_callback)
     return {

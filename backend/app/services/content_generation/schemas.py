@@ -52,6 +52,10 @@ class ContentGenerationInput(BaseModel):
     # 风格参数（可选）
     style_params: Optional[StyleParams] = Field(default=None, description="风格参数")
 
+    # 小标题策略：True=大纲 subtitle 仅作方向提示，由写手据内容自拟自然小标题
+    # （用于实操/商稿流，避免「引入：」「实操：」「结尾升华」这类结构词当标题）
+    free_subtitles: bool = Field(default=False, description="是否让写手自拟自然小标题")
+
     # 关联
     candidate_id: Optional[int] = Field(default=None, description="选题候选ID")
     user_id: Optional[int] = Field(default=None, description="用户ID")
