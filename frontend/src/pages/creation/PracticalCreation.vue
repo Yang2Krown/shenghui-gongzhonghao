@@ -30,21 +30,76 @@
             <input class="input" v-model="form.product" type="text" placeholder="请输入产品名称">
           </div>
           <div class="form-section">
-            <div style="display:flex; align-items:center; justify-content:space-between;">
-              <label class="form-label" style="margin-bottom:0;">商单 brief <span class="opt">选填</span></label>
-              <el-button text size="small" type="primary" @click="briefDialog = true">
-                <el-icon style="margin-right:4px;"><MagicStick /></el-icon> 导入飞书 / 文件 brief
-              </el-button>
-            </div>
+            <label class="form-label">商单 brief <span class="opt">选填</span></label>
 
-            <!-- 未解析：直接编辑文本 -->
+            <!-- 未解析：直接显示导入面板 -->
             <template v-if="!structuredBrief">
-              <textarea class="input textarea" v-model="form.brief" style="margin-top:8px;"
-                placeholder="粘贴商单要求：必提卖点、禁忌、调性、官网链接等；或点右上角从飞书链接/文件自动导入"></textarea>
-              <div v-if="form.brief.trim()" class="raw-toggle">
-                <el-button text size="small" type="primary" :loading="briefLoading" @click="summarizeCurrent">
-                  <el-icon style="margin-right:4px;"><MagicStick /></el-icon> AI 总结这段要求 → 结构化
-                </el-button>
+              <div v-for="(source, index) in briefSources" :key="index" class="src-card slide-up">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px;">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="src-number">{{ index + 1 }}</span>
+                    <div class="seg">
+                      <button v-for="kind in sourceKinds" :key="kind.key"
+                        @click="source.kind = kind.key"
+                        :class="['seg-btn', { 'seg-btn-active': source.kind === kind.key }]">
+                        {{ kind.label }}
+                      </button>
+                    </div>
+                  </div>
+                  <button v-if="briefSources.length > 1" @click="briefSources.splice(index, 1)" class="btn-text text-ink-4" style="padding: 4px;">
+                    <el-icon :size="15"><Delete /></el-icon>
+                  </button>
+                </div>
+
+                <!-- 文本输入 -->
+                <el-input v-if="source.kind === 'text'" v-model="source.text" type="textarea" :rows="4"
+                  placeholder="粘贴商单要求：必提卖点、禁忌、调性、官网链接等" />
+
+                <!-- 链接输入 -->
+                <div v-else-if="source.kind === 'link'">
+                  <div v-if="source.linkTitle" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                      <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
+                        <el-icon class="text-clay"><Link /></el-icon> {{ source.linkTitle }}
+                      </span>
+                      <button @click="source.linkTitle = ''; source.url = ''" class="btn-text text-sm">移除</button>
+                    </div>
+                  </div>
+                  <div v-else style="position: relative;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <div style="flex: 1; position: relative;">
+                        <el-icon :size="16" style="position: absolute; left: 13px; top: 13px; color: var(--ink-4); z-index: 1;"><Link /></el-icon>
+                        <el-input v-model="source.url" placeholder="粘贴飞书文档/wiki 链接（需先在「设置」连接飞书）"
+                          style="padding-left: 38px;" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 文件上传 -->
+                <div v-else-if="source.kind === 'file'">
+                  <div v-if="source.fileName" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                      <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
+                        <el-icon class="text-clay"><Document /></el-icon> {{ source.fileName }}
+                      </span>
+                      <button @click="source.fileName = ''; source.file = null" class="btn-text text-sm">移除</button>
+                    </div>
+                  </div>
+                  <div v-else class="dropzone" @click="$refs['fileInput' + index]?.click()">
+                    <el-icon :size="22" style="margin: 0 auto 6px;"><Upload /></el-icon>
+                    <div class="text-sm font-medium">点击或拖拽上传 PDF / Word / TXT / MD</div>
+                  </div>
+                  <input :ref="'fileInput' + index" type="file" accept=".pdf,.docx,.txt,.md" style="display:none"
+                    @change="(e) => handleSourceFile(source, e)" />
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
+                <button @click="addBriefSource" class="btn-ghost" style="border-style: dashed;">
+                  <el-icon :size="16"><Plus /></el-icon> 添加 brief
+                </button>
+                <el-button type="primary" size="small" :loading="briefLoading" @click="importBrief">读取并解析</el-button>
               </div>
             </template>
 
@@ -209,35 +264,6 @@
       </div>
     </div>
 
-    <!-- brief 导入弹窗 -->
-    <el-dialog v-model="briefDialog" title="导入商单 brief" width="520px" destroy-on-close>
-      <el-radio-group v-model="briefSource" style="margin-bottom: 14px;">
-        <el-radio-button label="feishu_link">飞书链接</el-radio-button>
-        <el-radio-button label="text">粘贴文本</el-radio-button>
-        <el-radio-button label="file">上传文件</el-radio-button>
-      </el-radio-group>
-
-      <div v-if="briefSource === 'feishu_link'">
-        <el-input v-model="briefLink" placeholder="粘贴飞书文档/wiki 链接（需先在「设置」连接飞书）" />
-        <p class="brief-dlg-tip">用你绑定的飞书身份读取，仅你本人能访问的文档可读。</p>
-      </div>
-      <div v-else-if="briefSource === 'text'">
-        <el-input v-model="briefText" type="textarea" :rows="10"
-          placeholder="把商单要求粘贴进来，AI 会自动总结成结构化 brief（产品、必覆盖、禁忌、调性等）" />
-      </div>
-      <div v-else>
-        <el-upload drag :auto-upload="false" :show-file-list="true" :limit="1"
-          accept=".docx,.pdf,.txt,.md" :on-change="onPickFile">
-          <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-          <div class="el-upload__text">拖拽或<em>点击上传</em> docx / pdf / txt</div>
-        </el-upload>
-      </div>
-
-      <template #footer>
-        <el-button @click="briefDialog = false">取消</el-button>
-        <el-button type="primary" :loading="briefLoading" @click="importBrief">读取并解析</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -245,7 +271,7 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { MagicStick, UploadFilled } from '@element-plus/icons-vue'
+import { MagicStick, UploadFilled, Delete, Plus, Upload, Document, Link } from '@element-plus/icons-vue'
 import { feishuBriefRead, feishuBriefUpload, feishuBriefSummarize } from '@/api/feishu'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import BriefStructuredCard from '@/components/creation/BriefStructuredCard.vue'
@@ -270,16 +296,17 @@ const stage = ref('form')          // form | review | result
 const form = ref({ product: '', brief: '', template: 'tool' })
 
 // brief 导入
-const briefDialog = ref(false)
-const briefSource = ref('feishu_link')
-const briefLink = ref('')
-const briefText = ref('')
-const briefFile = ref(null)
+const sourceKinds = [
+  { key: 'file', label: '文件' },
+  { key: 'link', label: '链接' },
+  { key: 'text', label: '文本' },
+]
+const briefSources = ref([{ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '' }])
 const briefLoading = ref(false)
 const structuredBrief = ref(null)
 const showRawBrief = ref(false)
 
-const clearBrief = () => { structuredBrief.value = null; form.value.brief = ''; briefText.value = ''; showRawBrief.value = false }
+const clearBrief = () => { structuredBrief.value = null; form.value.brief = ''; briefSources.value = [{ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '' }]; showRawBrief.value = false }
 const research = ref(null)
 const selected = ref([])
 const draft = ref(null)
@@ -309,7 +336,17 @@ const addFeature = () => {
 
 const unwrap = (res) => (res && res.data !== undefined ? res.data : res)
 
-const onPickFile = (f) => { briefFile.value = f?.raw || null }
+const addBriefSource = () => {
+  briefSources.value.push({ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '' })
+}
+
+const handleSourceFile = (source, e) => {
+  const file = e.target.files?.[0]
+  if (file) {
+    source.file = file
+    source.fileName = file.name
+  }
+}
 
 // 把结构化 brief 拼成可读文本，喂进 research 的 brief
 const composeBriefText = (sb) => {
@@ -348,27 +385,30 @@ const importBrief = async () => {
   briefLoading.value = true
   try {
     // 1) 取原文
-    let title = '', rawText = ''
-    if (briefSource.value === 'feishu_link') {
-      if (!briefLink.value.trim()) { ElMessage.warning('请粘贴飞书链接'); return }
-      const d = unwrap(await feishuBriefRead('feishu_link', briefLink.value.trim()))
-      title = d.title || ''; rawText = d.raw_text || ''
-    } else if (briefSource.value === 'text') {
-      if (!briefText.value.trim()) { ElMessage.warning('请粘贴文本'); return }
-      rawText = briefText.value.trim()
-    } else {
-      if (!briefFile.value) { ElMessage.warning('请先选择文件'); return }
-      const d = unwrap(await feishuBriefUpload(briefFile.value))
-      title = d.title || ''; rawText = d.raw_text || ''
+    const parts = []
+    for (const source of briefSources.value) {
+      if (source.kind === 'text') {
+        if (source.text?.trim()) parts.push(source.text.trim())
+      } else if (source.kind === 'link') {
+        if (source.url?.trim()) {
+          const d = unwrap(await feishuBriefRead('feishu_link', source.url.trim()))
+          if (d.raw_text) parts.push(d.raw_text)
+        }
+      } else if (source.kind === 'file') {
+        if (source.file) {
+          const d = unwrap(await feishuBriefUpload(source.file))
+          if (d.raw_text) parts.push(d.raw_text)
+        }
+      }
     }
+    const rawText = parts.join('\n\n---\n\n')
     if (!rawText.trim()) { ElMessage.warning('未读到内容'); return }
 
     // 2) 结构化总结
-    const sb = unwrap(await feishuBriefSummarize(rawText, title))
+    const sb = unwrap(await feishuBriefSummarize(rawText, ''))
     structuredBrief.value = sb
     if (!form.value.product.trim() && sb.product) form.value.product = sb.product
     form.value.brief = composeBriefText(sb)
-    briefDialog.value = false
     ElMessage.success('brief 已导入并解析')
   } catch (e) {
     const msg = e?.response?.data?.detail || e.message || '导入失败'
@@ -447,8 +487,42 @@ onUnmounted(() => progress.stop())
 
 <style scoped>
 .page-wrap { max-width: 860px; margin: 0 auto; padding: 8px 0 64px; }
-.brief-dlg-tip { font-size: 12px; color: var(--ink-4, #999); margin-top: 8px; }
 .raw-toggle { margin-top: 8px; }
+.src-card {
+  position: relative;
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 18px 18px 18px 20px;
+  margin-bottom: 12px;
+  background: var(--paper);
+  transition: border-color .18s, box-shadow .18s;
+}
+.src-card::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  left: 0;
+  width: 3px;
+  height: 0;
+  background: var(--clay);
+  border-radius: 0 3px 3px 0;
+  transition: height .2s;
+}
+.src-card:focus-within { border-color: var(--clay-soft); box-shadow: var(--sh-2); }
+.src-card:focus-within::before { height: calc(100% - 24px); }
+.src-number { width: 26px; height: 26px; border-radius: 8px; background: var(--clay); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+.seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--bone); border-radius: var(--r-pill); }
+.seg-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: none; background: transparent; color: var(--ink-3); font-family: inherit; font-size: 13px; font-weight: 600; border-radius: var(--r-pill); cursor: pointer; transition: all .18s; }
+.seg-btn:hover { color: var(--ink); }
+.seg-btn-active { background: var(--paper); color: var(--clay-deep); box-shadow: var(--sh-1); }
+.dropzone { border: 1px dashed var(--line); border-radius: var(--r-lg); background: var(--paper); padding: 22px; text-align: center; cursor: pointer; transition: all .15s; color: var(--ink-3); }
+.dropzone:hover { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
+.btn-ghost { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: 1.5px solid var(--line); border-radius: var(--r-md); background: transparent; color: var(--ink-3); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: all .18s; }
+.btn-ghost:hover { border-color: var(--clay-soft); color: var(--clay-deep); background: var(--ivory); }
+.btn-text { background: none; border: none; cursor: pointer; font-family: inherit; }
+.btn-text:hover { color: var(--clay); }
+.slide-up { animation: slideUp .3s cubic-bezier(.32,.72,0,1); }
+@keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .serif { font-family: "Source Han Serif SC", "Songti SC", "Noto Serif SC", Georgia, serif; font-weight: 500; }
 
 .tool-hero { position: relative; margin-bottom: 26px; }
