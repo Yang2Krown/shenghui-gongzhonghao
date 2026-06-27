@@ -71,6 +71,9 @@ x-backend-env: &backend-env
   OSS_ENDPOINT: ${OSS_ENDPOINT:-}
   OSS_BUCKET_NAME: ${OSS_BUCKET_NAME:-}
   OSS_DIR: ${OSS_DIR:-gzh-images}
+  # 飞书商单 brief 接入（值放 backend/.env.production；scopes 不设则用代码默认含 offline_access）
+  FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+  FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
 
 services:
 
