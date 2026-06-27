@@ -167,6 +167,20 @@ export const imitateContent = (params) => {
 // ==================== 微信公众号草稿箱 API ====================
 
 /**
+ * 上传图片到 OSS
+ * @param {File} file - 图片文件
+ * @returns {Promise<{url: string, filename: string, size: number}>}
+ */
+export const uploadImage = (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post('/images/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  })
+}
+
+/**
  * 发布文章到微信公众号草稿箱
  * @param {Object} params - 发布参数
  * @param {string} params.title - 文章标题

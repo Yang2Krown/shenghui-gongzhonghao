@@ -26,15 +26,26 @@ def is_oss_configured() -> bool:
     return bool(_access_key_id and _access_key_secret and _endpoint and _bucket_name)
 
 
-def upload_bytes(data: bytes, filename: str, content_type: str = "") -> Optional[str]:
-    """上传字节数据到 OSS，返回签名 URL（10 年有效期）。"""
+def upload_bytes(data: bytes, filename: str, content_type: str = "", dir_prefix: str = "") -> Optional[str]:
+    """
+    上传字节数据到 OSS，返回签名 URL（10 年有效期）。
+
+    :param data: 图片数据
+    :param filename: 文件名
+    :param content_type: MIME 类型
+    :param dir_prefix: 目录前缀（如用户 ID），为空则使用默认目录
+    :return: 签名 URL
+    """
     if not is_oss_configured():
         return None
 
     if not content_type:
         content_type = mimetypes.guess_type(filename)[0] or "image/jpeg"
 
-    key = f"{_dir.rstrip('/')}/{filename}"
+    # 构建完整的 key
+    base_dir = dir_prefix.rstrip('/') if dir_prefix else _dir.rstrip('/')
+    key = f"{base_dir}/{filename}"
+
     auth = oss2.Auth(_access_key_id, _access_key_secret)
     bucket = oss2.Bucket(auth, _endpoint, _bucket_name)
 

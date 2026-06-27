@@ -222,56 +222,50 @@ watch(() => props.modelValue, (val) => {
 // ─── 工具栏配置 ───
 const toolbarConfig = {
   toolbarKeys: [
-    // 标题 + 段落
+    // 第一行：基础格式
     'headerSelect',
-    'blockquote',
     '|',
-    // 文字样式
     'bold',
-    'underline',
     'italic',
-    {
-      key: 'group-more-style',
-      title: '更多',
-      menuKeys: ['through', 'sup', 'sub', 'clearStyle'],
-    },
-    '|',
-    // 字号 + 字体 + 颜色
+    'underline',
+    'through',
     'fontSize',
     'fontFamily',
+    '|',
+    // 第二行：样式 + 颜色
     'color',
     'bgColor',
+    'sup',
+    'sub',
     '|',
-    // 对齐 + 缩进
+    // 第三行：段落格式
     'justifyLeft',
     'justifyCenter',
     'justifyRight',
     'justifyJustify',
+    '|',
     'indent',
     'delIndent',
-    'paragraphBefore',
-    'paragraphAfter',
+    'bulletedList',
+    'numberedList',
+    'todo',
     '|',
-    // 插入
+    // 第四行：插入
     'insertLink',
-    {
-      key: 'group-image',
-      title: '图片',
-      menuKeys: ['insertImage', 'uploadImage'],
-    },
+    'uploadImage',
     'emotion',
     'insertTable',
     'codeBlock',
     'divider',
     '|',
-    // 撤销
+    'blockquote',
+    'paragraphBefore',
+    'paragraphAfter',
+    '|',
+    // 第五行：操作
+    'clearStyle',
     'undo',
     'redo',
-    '|',
-    // 列表（第二行）
-    'bulletedList',
-    'numberedList',
-    'todo',
   ],
   // 排除视频模块（公众号不支持）
   excludeKeys: ['group-video', 'insertVideo', 'uploadVideo'],
@@ -283,10 +277,48 @@ const editorConfig = {
   // 图片配置
   MENU_CONF: {
     uploadImage: {
-      // 不使用内置上传，改为插入 URL
-      customUpload: (insertFn) => {
-        const url = prompt('请输入图片 URL：')
-        if (url) insertFn(url, '', '')
+      // 自定义上传：选择文件后上传到后端
+      customUpload: async (file, insertFn) => {
+        console.log('[uploadImage] 开始上传:', file.name, file.type, file.size)
+
+        // 验证文件类型
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+        if (!allowedTypes.includes(file.type)) {
+          ElMessage.error('不支持的图片格式，请上传 JPEG、PNG、GIF 或 WebP 格式的图片')
+          return
+        }
+
+        // 验证文件大小（10MB）
+        const maxSize = 10 * 1024 * 1024
+        if (file.size > maxSize) {
+          ElMessage.error(`图片大小超过限制: ${(file.size / 1024 / 1024).toFixed(1)}MB，最大: 10MB`)
+          return
+        }
+
+        try {
+          ElMessage.info('正在上传图片...')
+
+          // 使用 API 模块上传图片到 OSS
+          const { uploadImage } = await import('@/api/api')
+          const response = await uploadImage(file)
+          console.log('[uploadImage] 上传成功:', response)
+
+          // axios 返回的是 response 对象，数据在 response.data 中
+          const data = response?.data || response
+          const url = data?.url
+          if (!url) {
+            throw new Error('未获取到图片 URL')
+          }
+
+          // 插入图片到编辑器
+          insertFn(url, file.name || 'image.jpg', '')
+          ElMessage.success('图片上传成功')
+
+        } catch (error) {
+          console.error('[uploadImage] 上传失败:', error)
+          const message = error.response?.data?.detail || error.message || '上传失败'
+          ElMessage.error(`图片上传失败: ${message}`)
+        }
       },
     },
     insertImage: {
@@ -297,7 +329,7 @@ const editorConfig = {
         if (src) ElMessage.success('图片已插入')
       },
     },
-    // 字号选项 —— 公众号常用
+    // 字号选项 —— 公众号常用（16px 同时由 i18n default 提供按钮文字，DOM patch 会隐藏重复项）
     fontSize: {
       fontSizeList: [
         { name: '12px', value: '12px' },
@@ -313,15 +345,14 @@ const editorConfig = {
         { name: '32px', value: '32px' },
       ],
     },
-    // 字体
+    // 字体（微软雅黑同时由 i18n default 提供按钮文字，DOM patch 会隐藏重复项）
     fontFamily: {
       fontFamilyList: [
-        { name: '默认', value: '' },
+        { name: '微软雅黑', value: '"Microsoft YaHei", sans-serif' },
         { name: '宋体', value: 'SimSun, serif' },
         { name: '黑体', value: 'SimHei, sans-serif' },
         { name: '楷体', value: 'KaiTi, serif' },
         { name: '仿宋', value: 'FangSong, serif' },
-        { name: '微软雅黑', value: '"Microsoft YaHei", sans-serif' },
       ],
     },
     // 颜色 —— 公众号常用色板
@@ -394,29 +425,25 @@ const handleCreated = (editor) => {
         })
       })
     }
-    // fontSize: "默认字号" 改成 "16px"
+    // fontSize: 隐藏 wangeditor 内置的"默认字号"项（第一个 li 没有 data-value）
     if (e.target.closest('button[data-menu-key="fontSize"]')) {
       requestAnimationFrame(() => {
         document.querySelectorAll('.w-e-select-list').forEach(panel => {
-          panel.querySelectorAll('li[data-value]').forEach(li => {
-            if (!li.getAttribute('data-value')) {
-              const span = li.querySelector('span')
-              if (span) span.textContent = '16px'
-            }
-          })
+          const firstLi = panel.querySelector('li')
+          if (firstLi && !firstLi.getAttribute('data-value')) {
+            firstLi.style.display = 'none'
+          }
         })
       })
     }
-    // fontFamily: "默认字体" 改成 "微软雅黑"
+    // fontFamily: 隐藏 wangeditor 内置的"默认字体"项（第一个 li 没有 data-value）
     if (e.target.closest('button[data-menu-key="fontFamily"]')) {
       requestAnimationFrame(() => {
         document.querySelectorAll('.w-e-select-list').forEach(panel => {
-          panel.querySelectorAll('li[data-value]').forEach(li => {
-            if (!li.getAttribute('data-value')) {
-              const span = li.querySelector('span')
-              if (span) span.textContent = '微软雅黑'
-            }
-          })
+          const firstLi = panel.querySelector('li')
+          if (firstLi && !firstLi.getAttribute('data-value')) {
+            firstLi.style.display = 'none'
+          }
         })
       })
     }

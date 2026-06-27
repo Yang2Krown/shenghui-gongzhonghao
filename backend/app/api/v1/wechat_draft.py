@@ -4,6 +4,9 @@
 """
 import logging
 import base64
+import re
+import asyncio
+import httpx
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -17,6 +20,70 @@ from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _upload_images_to_wechat(access_token: str, html_content: str) -> str:
+    """
+    将 HTML 中的图片上传到微信，获取微信可识别的 URL
+
+    :param access_token: 微信 access_token
+    :param html_content: HTML 内容
+    :return: 替换后的 HTML 内容
+    """
+    from app.services.wechat.wechat_draft_service import upload_content_image
+
+    # 匹配所有 img 标签的 src
+    img_pattern = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
+
+    async with httpx.AsyncClient(timeout=30, verify=False) as client:
+        async def replace_img_url(match):
+            original_url = match.group(1)
+
+            # 跳过已经是微信 URL 的图片
+            if 'mmbiz.qpic.cn' in original_url or 'mmbiz.qlogo.cn' in original_url:
+                return match.group(0)
+
+            try:
+                # 下载图片
+                resp = await client.get(original_url, follow_redirects=True)
+                resp.raise_for_status()
+
+                # 获取文件名
+                filename = original_url.split('/')[-1].split('?')[0]
+                if not filename or '.' not in filename:
+                    content_type = resp.headers.get('content-type', 'image/jpeg')
+                    ext_map = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif'}
+                    ext = ext_map.get(content_type, '.jpg')
+                    filename = f"image_{hash(original_url) & 0xFFFFFFFF:08x}{ext}"
+
+                # 上传到微信
+                wechat_url = await upload_content_image(
+                    access_token=access_token,
+                    image_data=resp.content,
+                    filename=filename,
+                )
+
+                logger.info(f"图片已上传到微信: {original_url[:50]}... -> {wechat_url[:50]}...")
+                return match.group(0).replace(original_url, wechat_url)
+
+            except Exception as e:
+                logger.warning(f"上传图片到微信失败: {original_url[:50]}... - {e}")
+                # 上传失败，保留原 URL
+                return match.group(0)
+
+        # 异步替换所有图片 URL
+        tasks = []
+        for match in img_pattern.finditer(html_content):
+            tasks.append(replace_img_url(match))
+
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            # 按顺序替换（从后往前，避免索引偏移）
+            for i, (match, result) in enumerate(zip(img_pattern.finditer(html_content), results)):
+                if isinstance(result, str):
+                    html_content = html_content.replace(match.group(0), result, 1)
+
+    return html_content
 
 
 async def _resolve_credentials(
@@ -147,11 +214,16 @@ async def create_wechat_draft(
             if not title:
                 title = "未命名文章"
 
-        # 4. 创建草稿
+        # 4. 处理正文中的图片：将非微信 URL 的图片上传到微信
+        logger.info("[WeChatDraft] 开始处理正文图片...")
+        content = await _upload_images_to_wechat(access_token, request.content)
+        logger.info(f"[WeChatDraft] 图片处理完成，content长度={len(content)}字符")
+
+        # 5. 创建草稿
         result = await create_draft(
             access_token=access_token,
             title=title,
-            content=request.content,
+            content=content,
             author=request.author or "",
             digest=request.digest or "",
             thumb_media_id=thumb_media_id,
