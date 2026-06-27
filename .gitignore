@@ -54,3 +54,25 @@ Thumbs.db
 # Test / temp
 /tmp/
 seed_test.db
+
+# Dev tools (local only)
+.agents/
+.claude/
+.od-skills/
+.pytest_cache/
+.workbuddy/
+
+# Dev docs / notes
+AGENT.md
+AGENTS.md
+test_report.md
+
+# Landing page drafts (not deployed)
+landing*.html
+*.artifact.json
+
+# DB dumps
+*.dump
+
+# Docker compose override (local dev)
+docker-compose.override.yml
