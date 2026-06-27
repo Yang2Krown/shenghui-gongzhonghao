@@ -117,7 +117,7 @@ async def _search_wechat(product: str, num: int = _WECHAT_NUM) -> List[dict]:
         logger.warning("[产品研究] EXA_API_KEY 未配置，跳过公众号搜索")
         return []
     try:
-        from app.services.agent_reach_client import agent_reach_client
+        from app.services.scraping.agent_reach_client import agent_reach_client
         raw = await agent_reach_client.search_wechat(product, num_results=num, text_chars=_WECHAT_BODY)
         logger.info(f"[产品研究] Exa 公众号原始结果: {len(raw)} 条")
         filtered = [_norm_wechat(h) for h in raw if h.get("url") and not _is_junk_wechat(h)]

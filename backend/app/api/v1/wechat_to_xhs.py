@@ -13,10 +13,10 @@ from pydantic import BaseModel, Field
 
 from app.core.security import get_current_user
 from app.models.user import User
-from app.services.wechat_to_xhs_service import generate_xhs_content
-from app.services.link_extractor import extract_wechat, extract_wechat_with_images
-from app.services import oss_uploader
-from app.services.generation_tracker import track_start, track_complete, track_fail
+from app.services.wechat.wechat_to_xhs_service import generate_xhs_content
+from app.services.scraping.link_extractor import extract_wechat, extract_wechat_with_images
+from app.core import oss_uploader
+from app.core.generation_tracker import track_start, track_complete, track_fail
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

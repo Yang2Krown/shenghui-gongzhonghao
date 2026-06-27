@@ -227,7 +227,7 @@ async def test_account_connection(
     """测试某个公众号账号的连接。"""
     account = await _get_or_404(db, current_user.id, account_id)
 
-    from app.services.wechat_draft_service import get_access_token
+    from app.services.wechat.wechat_draft_service import get_access_token
 
     try:
         access_token = await get_access_token(account.appid, account.app_secret)

@@ -8,7 +8,7 @@ import re
 from typing import Optional
 from dataclasses import dataclass
 
-from app.services.wechat_common import (
+from app.services.wechat.wechat_common import (
     to_ipv4_url,
     wechat_client,
     WECHAT_HOST_HEADER,
@@ -144,7 +144,7 @@ async def create_draft(
     clean_digest = re.sub(r'[\n\r\t]+', ' ', digest).strip()[:120] if digest else ""
 
     # 确保 content 是 HTML 格式（兜底转换）
-    from app.services.wechat_common import ensure_html
+    from app.services.wechat.wechat_common import ensure_html
     html_content = ensure_html(content)
 
     article = {

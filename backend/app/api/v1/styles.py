@@ -200,7 +200,7 @@ async def add_source(
     if content_type == "link" and url:
         # 自动提取链接内容
         try:
-            from app.services.link_extractor import extract_link_content, detect_platform
+            from app.services.scraping.link_extractor import extract_link_content, detect_platform
             logger.info(f"开始提取链接内容: {url[:100]}")
             extracted = await extract_link_content(url)
             logger.info(f"提取结果: platform={extracted.get('platform')}, content_len={len(extracted.get('content', ''))}")

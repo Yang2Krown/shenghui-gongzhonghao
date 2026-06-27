@@ -17,7 +17,7 @@ from app.core.progress import progress_store
 from app.core.background import spawn
 from app.core.security import get_current_user
 from app.models.user import User
-from app.services.generation_tracker import track_start, track_complete, track_fail
+from app.core.generation_tracker import track_start, track_complete, track_fail
 from app.services.credit_service import CreditService
 from app.db.session import AsyncSessionLocal
 from app.services.practical_creation import (

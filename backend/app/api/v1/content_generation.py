@@ -17,7 +17,7 @@ from app.core.progress import progress_store
 from app.core.background import spawn
 from app.db.session import get_db
 from app.models.user import User
-from app.services.generation_tracker import track_start, track_complete, track_fail
+from app.core.generation_tracker import track_start, track_complete, track_fail
 from app.services.credit_service import CreditService
 from app.core.credit_config import get_operation_credits
 

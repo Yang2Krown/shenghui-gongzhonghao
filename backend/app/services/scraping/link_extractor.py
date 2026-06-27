@@ -464,7 +464,7 @@ async def extract_douyin(url: str, cookie: str = None) -> Dict[str, Any]:
     :return: {title, content, author, tags, platform, video_url, stats}
     """
     try:
-        from app.services.douyin_extractor import DouyinExtractor
+        from app.utils.douyin_extractor import DouyinExtractor
 
         extractor = DouyinExtractor(cookie)
         result = await extractor.extract(url)

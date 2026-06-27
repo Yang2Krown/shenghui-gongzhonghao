@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.crud.topic import topic as topic_crud
 from app.schemas.topic import TopicCreate, TopicUpdate
-from app.services.agent_reach_client import agent_reach_client
+from app.services.scraping.agent_reach_client import agent_reach_client
 
 logger = logging.getLogger(__name__)
 

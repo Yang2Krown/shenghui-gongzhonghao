@@ -25,7 +25,7 @@ from app.schemas.user import (
     SendSmsCodeRequest,
     PhoneLoginRequest,
 )
-from app.services.sms_service import send_sms_code, verify_sms_code
+from app.core.sms_service import send_sms_code, verify_sms_code
 from app.services.credit_service import CreditService
 
 router = APIRouter()

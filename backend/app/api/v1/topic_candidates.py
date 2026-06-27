@@ -79,7 +79,7 @@ async def trigger_adhoc_mining(
         )
 
     # 合并所有信息源内容
-    from app.services.link_extractor import extract_link_content
+    from app.services.scraping.link_extractor import extract_link_content
     combined_text_parts = []
     for src in sources:
         content = (src.get("content") or "").strip()
@@ -362,7 +362,7 @@ async def create_adhoc_candidate(
         )
 
     # 合并所有信息源内容
-    from app.services.link_extractor import extract_link_content
+    from app.services.scraping.link_extractor import extract_link_content
     combined_text_parts = []
     for src in sources:
         content = (src.get("content") or "").strip()

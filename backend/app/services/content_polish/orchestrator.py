@@ -196,7 +196,7 @@ async def run_polish_prefix(
 
     # Phase 0: 从用户原文提取事实素材包，注入 cg_input 供 Agent D 对比检测
     try:
-        from app.services.user_source_extractor import extract_facts_from_user_text
+        from app.utils.user_source_extractor import extract_facts_from_user_text
         source_material = await extract_facts_from_user_text(inp.text, task_type="polish", provider=provider)
         if source_material:
             cg_input = cg_input.model_copy(update={"source_materials": source_material})
@@ -304,7 +304,7 @@ async def run_polish_factcheck(
 
     # Phase 0: 从用户原文提取事实素材包，注入 cg_input 供 Agent D 对比检测
     try:
-        from app.services.user_source_extractor import extract_facts_from_user_text
+        from app.utils.user_source_extractor import extract_facts_from_user_text
         source_material = await extract_facts_from_user_text(inp.text, task_type="polish", provider=provider)
         if source_material:
             cg_input = cg_input.model_copy(update={"source_materials": source_material})

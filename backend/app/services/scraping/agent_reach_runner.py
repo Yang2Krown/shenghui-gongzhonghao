@@ -4,6 +4,6 @@
 后续如果要新增 agent-reach CLI 命令，集中在这里。
 """
 
-from app.services.agent_reach_client import agent_reach_client
+from app.services.scraping.agent_reach_client import agent_reach_client
 
 __all__ = ["agent_reach_client"]

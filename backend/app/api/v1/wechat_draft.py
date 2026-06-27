@@ -93,7 +93,7 @@ async def create_wechat_draft(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """发布文章到微信公众号草稿箱"""
-    from app.services.wechat_draft_service import (
+    from app.services.wechat.wechat_draft_service import (
         get_access_token,
         upload_permanent_image,
         create_draft,
@@ -187,7 +187,7 @@ async def test_wechat_connection(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """测试公众号连接（验证 AppID/Secret 是否正确）"""
-    from app.services.wechat_draft_service import get_access_token
+    from app.services.wechat.wechat_draft_service import get_access_token
 
     try:
         resolved_appid, resolved_secret = await _resolve_credentials(db, current_user, account_id, appid, app_secret)
@@ -271,7 +271,7 @@ async def generate_cover(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """用 AI 根据文章标题生成封面图"""
-    from app.services.wechat_draft_service import generate_ai_cover
+    from app.services.wechat.wechat_draft_service import generate_ai_cover
 
     try:
         image_url = await generate_ai_cover(

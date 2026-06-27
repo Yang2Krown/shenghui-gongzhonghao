@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 from app.core.config import settings
 
 from app.utils.file_extractor import extract_text, UnsupportedFileType
-from app.services.link_extractor import extract_link_content
+from app.services.scraping.link_extractor import extract_link_content
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

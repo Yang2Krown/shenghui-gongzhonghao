@@ -21,7 +21,7 @@ from app.schemas.title_munger import (
     ScorerRequest,
     ScorerResponse,
 )
-from app.services.generation_tracker import track_start, track_complete, track_fail
+from app.core.generation_tracker import track_start, track_complete, track_fail
 
 logger = logging.getLogger(__name__)
 

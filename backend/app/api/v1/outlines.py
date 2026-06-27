@@ -31,7 +31,7 @@ from app.models.outline import (
 from app.models.topic_candidate import TopicCandidate
 from app.services.angle_inspection import inspect_creation_angle
 from app.services.outline_generation.outline_service import generate_outline
-from app.services.generation_tracker import track_start, track_complete, track_fail
+from app.core.generation_tracker import track_start, track_complete, track_fail
 
 logger = logging.getLogger(__name__)
 

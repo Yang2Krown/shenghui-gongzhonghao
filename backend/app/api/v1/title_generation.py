@@ -27,7 +27,7 @@ from app.schemas.title_generation import (
     TitleCandidateResponse,
     FinalRecommendationResponse,
 )
-from app.services.generation_tracker import track_start, track_complete, track_fail
+from app.core.generation_tracker import track_start, track_complete, track_fail
 from app.services.credit_service import CreditService
 from app.db.session import AsyncSessionLocal
 

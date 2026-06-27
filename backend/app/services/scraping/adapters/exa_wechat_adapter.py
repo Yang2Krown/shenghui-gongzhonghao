@@ -55,7 +55,7 @@ def _is_permanent_wechat_url(url: str) -> bool:
 def _extract_wechat_article_body(html: str) -> Optional[str]:
     """从 mp 文章 HTML 抽正文纯文本；太短（多半只剩 meta 兜底）则视为没抓到。"""
     try:
-        from app.services.link_extractor import _extract_wechat_content
+        from app.services.scraping.link_extractor import _extract_wechat_content
         text = (_extract_wechat_content(html) or "").strip()
     except Exception:
         return None

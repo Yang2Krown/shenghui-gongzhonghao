@@ -7,7 +7,7 @@ from typing import Optional
 
 from app.core.security import get_current_user
 from app.models.user import User
-from app.services.content_imitate_service import imitate_content
+from app.services.content_generation.content_imitate_service import imitate_content
 from app.services.credit_service import CreditService
 from app.db.session import AsyncSessionLocal
 

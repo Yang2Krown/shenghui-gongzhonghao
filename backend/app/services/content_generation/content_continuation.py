@@ -52,7 +52,7 @@ async def analyze_and_continue(content: str, preference: str = "", provider: Opt
     # Phase 0: 从事实中提取素材包，降低续写幻觉
     source_material = None
     try:
-        from app.services.user_source_extractor import extract_facts_from_user_text
+        from app.utils.user_source_extractor import extract_facts_from_user_text
         source_material = await extract_facts_from_user_text(content, task_type="continuation", provider=provider)
     except Exception as e:
         logger.warning(f"[续写] 事实提取失败（不影响主流程）: {e}")
