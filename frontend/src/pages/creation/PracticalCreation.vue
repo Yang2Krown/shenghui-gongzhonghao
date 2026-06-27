@@ -97,9 +97,16 @@
 
               <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
                 <button @click="addBriefSource" class="btn-ghost" style="border-style: dashed;">
-                  <el-icon :size="16"><Plus /></el-icon> 添加 brief
+                  <el-icon :size="15"><Plus /></el-icon> 添加 brief
                 </button>
-                <el-button type="primary" size="small" :loading="briefLoading" @click="importBrief">读取并解析</el-button>
+                <button class="btn-clay" style="padding: 8px 16px;" :disabled="briefLoading" @click="importBrief">
+                  <template v-if="briefLoading">
+                    <el-icon class="is-loading" :size="14"><Loading /></el-icon> 解析中...
+                  </template>
+                  <template v-else>
+                    读取并解析
+                  </template>
+                </button>
               </div>
             </template>
 
@@ -119,6 +126,49 @@
             </template>
           </div>
           <!-- 创作模板切换已隐藏，默认走「工具主线」（form.template = 'tool'） -->
+        </div>
+      </div>
+
+      <!-- 参考文章链接（选填） -->
+      <div class="card">
+        <div class="panel-head">
+          <div class="ph-left">
+            <div class="panel-icon" style="background: #EEF3EE; color: var(--leaf);">📎</div>
+            <div>
+              <div class="text-sm font-semibold text-ink">参考文章链接</div>
+              <div class="text-xs text-ink-4">提供已写好的文章，AI 会学习其风格和结构</div>
+            </div>
+          </div>
+        </div>
+        <div style="padding: 22px;">
+          <div v-for="(link, index) in form.referenceLinks" :key="index" class="src-card slide-up">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="ref-link-type">{{ getLinkType(link) }}</span>
+              <input class="input" v-model="form.referenceLinks[index]"
+                     placeholder="粘贴公众号/小红书/知乎文章链接"
+                     style="flex: 1;" />
+              <span v-if="link.trim() && initialLinkStatus[index]" class="link-status" :class="initialLinkStatus[index].type">
+                {{ initialLinkStatus[index].icon }}
+              </span>
+              <button v-if="form.referenceLinks.length > 1"
+                      @click="removeInitialLink(index)"
+                      class="btn-text text-ink-4"
+                      style="padding: 4px;">
+                <el-icon :size="15"><Delete /></el-icon>
+              </button>
+            </div>
+            <div v-if="link.trim() && initialLinkStatus[index]?.message" class="link-hint">
+              {{ initialLinkStatus[index].message }}
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
+            <button @click="form.referenceLinks.push('')" class="btn-ghost" style="border-style: dashed;">
+              <el-icon :size="16"><Plus /></el-icon> 添加链接
+            </button>
+            <button class="btn-clay" :disabled="!form.referenceLinks.some(l => l.trim())" @click="validateAllInitialLinks">
+              识别链接
+            </button>
+          </div>
         </div>
       </div>
       <button class="cta-bar" style="margin-top: 20px;" :disabled="!form.product.trim()" @click="startResearch">
@@ -177,26 +227,123 @@
 
       <!-- 参考资料 -->
       <div class="card" v-if="research.references && research.references.length">
-        <details class="ref-details">
-          <summary class="panel-head" style="margin-bottom: 0;">
-            <div class="ph-left">
-              <div class="panel-icon" style="background: var(--sand-soft); color: var(--sand);">📄</div>
-              <span class="text-sm font-semibold text-ink">参考资料</span>
-              <span class="ref-count">{{ research.references.length }} 篇</span>
-            </div>
-          </summary>
-          <div style="padding: 22px;">
-            <div class="ref-article-list">
-              <div class="ref-article-row" v-for="(r, i) in research.references" :key="i">
-                <span v-if="r.source" class="ref-src-badge" :class="{ 'is-wechat': r.source === '公众号' }">{{ r.source }}</span>
-                <span class="ref-article-title">{{ r.title || r.url }}</span>
-                <a :href="r.url" target="_blank" class="btn-ref-visit">点击访问</a>
-              </div>
+        <div class="panel-head">
+          <div class="ph-left">
+            <div class="panel-icon" style="background: var(--sand-soft); color: var(--sand);">📄</div>
+            <span class="text-sm font-semibold text-ink">参考资料</span>
+            <span class="ref-count">{{ research.references.length }} 篇</span>
+          </div>
+        </div>
+        <div class="ref-scroll-wrapper">
+          <div class="ref-article-list">
+            <div class="ref-article-row" v-for="(r, i) in research.references" :key="i">
+              <span v-if="r.is_user_reference" class="ref-src-badge is-user-ref">⭐ 我的参考</span>
+              <span v-else-if="r.source" class="ref-src-badge" :class="{ 'is-wechat': r.source === '公众号' }">{{ r.source }}</span>
+              <span class="ref-article-title">{{ r.title || r.url }}</span>
+              <a :href="r.url" target="_blank" class="btn-ref-visit">点击访问</a>
             </div>
           </div>
-        </details>
+        </div>
       </div>
 
+      <!-- 搜索建议（资料不足时显示） -->
+      <div class="card" v-if="research.search_suggestions && (research.search_suggestions.missing?.length || research.search_suggestions.keywords?.length)">
+        <div class="panel-head">
+          <div class="ph-left">
+            <div class="panel-icon" style="background: #FFF3E0; color: #FF9800;">💡</div>
+            <div>
+              <div class="text-sm font-semibold text-ink">搜索建议</div>
+              <div class="text-xs text-ink-4">以下信息可能需要补充，建议搜索这些关键词</div>
+            </div>
+          </div>
+        </div>
+        <div style="padding: 22px;">
+          <!-- 缺少什么 -->
+          <div v-if="research.search_suggestions.missing?.length" style="margin-bottom: 16px;">
+            <div class="text-xs font-semibold text-ink-3" style="margin-bottom: 8px;">当前资料缺少：</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span v-for="(item, i) in research.search_suggestions.missing" :key="i"
+                    class="suggestion-tag missing">
+                {{ item }}
+              </span>
+            </div>
+          </div>
+
+          <!-- 建议关键词 -->
+          <div v-if="research.search_suggestions.keywords?.length" style="margin-bottom: 16px;">
+            <div class="text-xs font-semibold text-ink-3" style="margin-bottom: 8px;">建议搜索关键词：</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span v-for="(keyword, i) in research.search_suggestions.keywords" :key="i"
+                    class="suggestion-tag keyword"
+                    @click="copyKeyword(keyword)">
+                {{ keyword }}
+              </span>
+            </div>
+          </div>
+
+          <!-- 支持的平台提示 -->
+          <div class="text-xs text-ink-4" style="margin-top: 8px;">
+            💡 可在公众号、小红书、知乎搜索以上关键词，找到文章后粘贴链接
+          </div>
+        </div>
+      </div>
+
+      <!-- 补充参考链接（可选） -->
+      <div class="card">
+        <div class="panel-head">
+          <div class="ph-left">
+            <div class="panel-icon" style="background: #EEF3EE; color: var(--leaf);">📎</div>
+            <div>
+              <div class="text-sm font-semibold text-ink">补充参考文章</div>
+              <div class="text-xs text-ink-4">搜索结果不满意？添加更多参考链接重新分析</div>
+            </div>
+          </div>
+        </div>
+        <div style="padding: 22px;">
+          <div v-for="(link, index) in additionalLinks" :key="index" class="src-card slide-up">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="ref-link-type">{{ getLinkType(link) }}</span>
+              <input class="input" v-model="additionalLinks[index]"
+                     placeholder="粘贴公众号/小红书/知乎文章链接"
+                     style="flex: 1;" />
+              <span v-if="link.trim() && linkStatus[index]" class="link-status" :class="linkStatus[index].type">
+                {{ linkStatus[index].icon }}
+              </span>
+              <button v-if="additionalLinks.length > 1"
+                      @click="removeAdditionalLink(index)"
+                      class="btn-text text-ink-4"
+                      style="padding: 4px;">
+                <el-icon :size="15"><Delete /></el-icon>
+              </button>
+            </div>
+            <div v-if="link.trim() && linkStatus[index]?.message" class="link-hint">
+              {{ linkStatus[index].message }}
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
+            <button @click="additionalLinks.push('')" class="btn-ghost" style="border-style: dashed;">
+              <el-icon :size="16"><Plus /></el-icon> 添加链接
+            </button>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn-ghost" :disabled="!additionalLinks.some(l => l.trim())" @click="validateAllAdditionalLinks">
+                识别链接
+              </button>
+              <button class="btn-clay" :disabled="!additionalLinks.some(l => l.trim())" @click="reAnalyze">
+                🔄 重新分析
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="action-bar">
+        <button class="btn-ghost" @click="stage = 'form'">← 重新研究</button>
+        <button class="btn-clay" @click="confirmResearch">确认研究结果 →</button>
+      </div>
+    </div>
+
+    <!-- ③ 选择功能点 -->
+    <div v-if="stage === 'selectFeatures' && research && !progress.isRunning.value" class="fade-in">
       <!-- 选择实操段 -->
       <div class="card">
         <div class="panel-head">
@@ -234,12 +381,12 @@
       </div>
 
       <div class="action-bar">
-        <button class="btn-ghost" @click="stage = 'form'">← 重新研究</button>
+        <button class="btn-ghost" @click="stage = 'review'">← 重新确认</button>
         <button class="btn-clay" :disabled="!selected.length" @click="startDraft">生成实操脚本 <CreditHint :cost="10" /></button>
       </div>
     </div>
 
-    <!-- ③ 成稿 -->
+    <!-- ④ 成稿 -->
     <div v-if="stage === 'result' && draft && !progress.isRunning.value" class="fade-in">
       <div class="success-banner">
         <span style="font-size: 20px;">✅</span>
@@ -259,7 +406,7 @@
         <div class="article" v-html="renderedDraft"></div>
       </div>
       <div class="action-bar" style="justify-content: flex-end; gap: 10px;">
-        <button class="btn-ghost" @click="stage = 'review'">← 修改功能点</button>
+        <button class="btn-ghost" @click="stage = 'selectFeatures'">← 修改功能点</button>
         <button class="btn-ghost" @click="reset">↺ 再写一篇</button>
       </div>
     </div>
@@ -270,8 +417,8 @@
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { MagicStick, UploadFilled, Delete, Plus, Upload, Document, Link } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { MagicStick, UploadFilled, Delete, Plus, Upload, Document, Link, Loading } from '@element-plus/icons-vue'
 import { feishuBriefRead, feishuBriefUpload, feishuBriefSummarize } from '@/api/feishu'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import BriefStructuredCard from '@/components/creation/BriefStructuredCard.vue'
@@ -292,8 +439,11 @@ const templates = [
   { key: 'case', icon: '📖', label: '案例主线', hint: '核心是案例，工具只是其中一小部分' },
 ]
 
-const stage = ref('form')          // form | review | result
-const form = ref({ product: '', brief: '', template: 'tool' })
+const stage = ref('form')          // form | review | selectFeatures | result
+const form = ref({ product: '', brief: '', template: 'tool', referenceLinks: [''] })
+const initialLinkStatus = ref({})  // 阶段1：参考链接状态
+const additionalLinks = ref([''])  // 阶段2：补充参考链接
+const linkStatus = ref({})         // 阶段2：补充链接状态
 
 // brief 导入
 const sourceKinds = [
@@ -307,12 +457,107 @@ const structuredBrief = ref(null)
 const showRawBrief = ref(false)
 
 const clearBrief = () => { structuredBrief.value = null; form.value.brief = ''; briefSources.value = [{ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '' }]; showRawBrief.value = false }
+
+// 获取链接类型图标
+const getLinkType = (url) => {
+  if (!url) return '🔗'
+  if (url.includes('mp.weixin.qq.com')) return '📗 公众号'
+  if (url.includes('xiaohongshu.com') || url.includes('xhslink.com')) return '📕 小红书'
+  if (url.includes('zhihu.com')) return '📘 知乎'
+  if (url.includes('douyin.com') || url.includes('iesdouyin.com')) return '🎵 抖音'
+  return '🔗 网页'
+}
+
+// 删除阶段1的链接
+const removeInitialLink = (index) => {
+  form.value.referenceLinks.splice(index, 1)
+  const newStatus = {}
+  Object.keys(initialLinkStatus.value).forEach(key => {
+    const k = parseInt(key)
+    if (k < index) newStatus[k] = initialLinkStatus.value[k]
+    else if (k > index) newStatus[k - 1] = initialLinkStatus.value[k]
+  })
+  initialLinkStatus.value = newStatus
+}
+
+// 批量识别阶段1的链接（调用后端真正验证）
+const validateAllInitialLinks = async () => {
+  const links = form.value.referenceLinks.filter(l => l.trim())
+  if (!links.length) { ElMessage.warning('请先添加参考链接'); return }
+
+  form.value.referenceLinks.forEach((link, i) => {
+    if (link.trim()) initialLinkStatus.value[i] = { type: 'loading', icon: '⏳', message: '正在验证链接...' }
+  })
+
+  let ok = 0, fail = 0
+  for (let i = 0; i < form.value.referenceLinks.length; i++) {
+    const url = form.value.referenceLinks[i]?.trim()
+    if (!url) continue
+    try {
+      const res = await api.post('/practical/validate-link', { url }, { timeout: 15000 })
+      const data = res?.data || res
+      initialLinkStatus.value[i] = data.valid
+        ? { type: 'success', icon: '✅', message: data.message }
+        : { type: 'error', icon: '❌', message: data.message }
+      data.valid ? ok++ : fail++
+    } catch {
+      initialLinkStatus.value[i] = { type: 'error', icon: '❌', message: '验证失败，请检查网络' }
+      fail++
+    }
+  }
+  if (ok && !fail) ElMessage.success(`✅ 全部识别成功！共 ${ok} 个有效链接`)
+  else if (ok && fail) ElMessage.warning(`⚠️ ${ok} 个成功，${fail} 个失败`)
+  else if (fail) ElMessage.error(`❌ ${fail} 个链接识别失败，请检查链接是否有效`)
+}
+
+// 删除阶段2的链接
+const removeAdditionalLink = (index) => {
+  additionalLinks.value.splice(index, 1)
+  const newStatus = {}
+  Object.keys(linkStatus.value).forEach(key => {
+    const k = parseInt(key)
+    if (k < index) newStatus[k] = linkStatus.value[k]
+    else if (k > index) newStatus[k - 1] = linkStatus.value[k]
+  })
+  linkStatus.value = newStatus
+}
+
+// 批量识别阶段2的链接（调用后端真正验证）
+const validateAllAdditionalLinks = async () => {
+  const links = additionalLinks.value.filter(l => l.trim())
+  if (!links.length) { ElMessage.warning('请先添加参考链接'); return }
+
+  additionalLinks.value.forEach((link, i) => {
+    if (link.trim()) linkStatus.value[i] = { type: 'loading', icon: '⏳', message: '正在验证链接...' }
+  })
+
+  let ok = 0, fail = 0
+  for (let i = 0; i < additionalLinks.value.length; i++) {
+    const url = additionalLinks.value[i]?.trim()
+    if (!url) continue
+    try {
+      const res = await api.post('/practical/validate-link', { url }, { timeout: 15000 })
+      const data = res?.data || res
+      linkStatus.value[i] = data.valid
+        ? { type: 'success', icon: '✅', message: data.message }
+        : { type: 'error', icon: '❌', message: data.message }
+      data.valid ? ok++ : fail++
+    } catch {
+      linkStatus.value[i] = { type: 'error', icon: '❌', message: '验证失败，请检查网络' }
+      fail++
+    }
+  }
+  if (ok && !fail) ElMessage.success(`✅ 全部识别成功！共 ${ok} 个有效链接`)
+  else if (ok && fail) ElMessage.warning(`⚠️ ${ok} 个成功，${fail} 个失败`)
+  else if (fail) ElMessage.error(`❌ ${fail} 个链接识别失败，请检查链接是否有效`)
+}
+
 const research = ref(null)
 const selected = ref([])
 const draft = ref(null)
 const openSteps = ref(new Set())
 
-const stepIndex = computed(() => ({ form: 0, review: 2, result: 3 }[stage.value]))
+const stepIndex = computed(() => ({ form: 0, review: 1, selectFeatures: 2, result: 3 }[stage.value]))
 const templateHint = computed(() => templates.find(t => t.key === form.value.template)?.hint || '')
 const selectableFeatures = computed(() => (research.value?.features || []).filter(f => f.name?.trim()))
 const renderedDraft = computed(() => marked.parse(draft.value?.text || ''))
@@ -328,10 +573,18 @@ const toggleSteps = (i) => {
   openSteps.value = new Set(s)
 }
 const addFeature = () => {
-  const name = (window.prompt('功能点名称') || '').trim()
-  if (!name) return
-  research.value.features.push({ name, desc: '', steps: [], recommend: true, reason: '手动添加' })
-  selected.value.push(name)
+  ElMessageBox.prompt('功能点名称', '手动添加功能点', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    inputPlaceholder: '请输入功能点名称',
+    inputValidator: (val) => val?.trim() ? true : '名称不能为空',
+  }).then(({ value }) => {
+    const name = value?.trim()
+    if (name) {
+      research.value.features.push({ name, desc: '', steps: [], recommend: true, reason: '手动添加' })
+      selected.value.push(name)
+    }
+  }).catch(() => {})
 }
 
 const unwrap = (res) => (res && res.data !== undefined ? res.data : res)
@@ -421,10 +674,15 @@ const importBrief = async () => {
 const startResearch = async () => {
   if (!form.value.product.trim()) return
   progress.stop(); draft.value = null
+
+  // 过滤空链接
+  const referenceLinks = form.value.referenceLinks.filter(url => url.trim())
+
   try {
     const res = await api.post('/practical/research', {
       product: form.value.product.trim(),
       brief: form.value.brief.trim(),
+      reference_links: referenceLinks,
     }, { timeout: 10000 })
     const runId = (res?.data || res)?.run_id
     if (runId) progress.start(`/api/v1/practical/stream/${runId}`)
@@ -437,6 +695,7 @@ const startResearch = async () => {
 const startDraft = async () => {
   if (!selected.value.length) return
   progress.stop()
+  stage.value = 'result'  // 切到第4步，让进度条显示正确
   try {
     const res = await api.post('/practical/draft', {
       research: research.value,
@@ -453,13 +712,80 @@ const startDraft = async () => {
   }
 }
 
+// 补充参考链接后重新分析
+const reAnalyze = async () => {
+  const newLinks = additionalLinks.value.filter(url => url.trim())
+
+  if (!newLinks.length) {
+    ElMessage.warning('请先添加参考链接')
+    return
+  }
+
+  // 检查链接格式
+  const invalidLinks = newLinks.filter(url => !url.startsWith('http'))
+  if (invalidLinks.length > 0) {
+    ElMessage.warning('链接需要以 http:// 或 https:// 开头')
+    return
+  }
+
+  progress.stop()
+  linkStatus.value = {}  // 清空状态
+
+  try {
+    const res = await api.post('/practical/re-analyze', {
+      product: research.value.product,
+      brief: form.value.brief.trim(),
+      existing_research: research.value,  // 上次的研究结果（可能被用户编辑过）
+      new_reference_links: newLinks,
+    }, { timeout: 10000 })
+
+    const runId = (res?.data || res)?.run_id
+    if (runId) {
+      ElMessage.info(`正在抓取 ${newLinks.length} 个参考链接并重新分析...`)
+      progress.start(`/api/v1/practical/stream/${runId}`)
+    } else {
+      progress.error.value = '未获取到任务 ID'
+    }
+  } catch (err) {
+    progress.error.value = err?.response?.data?.detail || err.message || '请求失败'
+  }
+}
+
+// 确认研究结果，进入功能点分析
+const confirmResearch = async () => {
+  progress.stop()
+  stage.value = 'selectFeatures'  // 先切换阶段，让进度条显示正确
+  try {
+    const res = await api.post('/practical/analyze-features', {
+      research: research.value,  // 用户确认后的研究结果（可能被编辑过）
+    }, { timeout: 10000 })
+
+    const runId = (res?.data || res)?.run_id
+    if (runId) progress.start(`/api/v1/practical/stream/${runId}`)
+    else progress.error.value = '未获取到任务 ID'
+  } catch (err) {
+    progress.error.value = err?.response?.data?.detail || err.message || '请求失败'
+  }
+}
+
 watch(() => progress.result.value, (data) => {
   if (!data) return
-  if (Array.isArray(data.features)) {          // 研究结果
+
+  // 研究结果（有 positioning 字段）
+  if (data.positioning !== undefined) {
     research.value = data
-    selected.value = (data.features || []).filter(f => f.recommend && f.name).map(f => f.name)
-    openSteps.value = new Set()
-    stage.value = 'review'
+    // 研究阶段可能没有 features，或 features 没有 steps
+    if (data.features && data.features.length > 0 && data.features[0].steps) {
+      // 功能点分析结果
+      selected.value = data.features.filter(f => f.recommend && f.name).map(f => f.name)
+      openSteps.value = new Set()
+      stage.value = 'selectFeatures'
+    } else {
+      // 初始研究结果
+      stage.value = 'review'
+      additionalLinks.value = ['']
+    }
+    linkStatus.value = {}  // 清空链接状态
     creditStore.fetchBalance()
   } else if (typeof data.text === 'string') {  // 成稿结果
     draft.value = data
@@ -471,15 +797,24 @@ watch(() => progress.result.value, (data) => {
 const copy = (text) => {
   navigator.clipboard?.writeText(text).then(() => ElMessage.success('已复制全文')).catch(() => ElMessage.error('复制失败'))
 }
+
+// 复制搜索关键词
+const copyKeyword = (keyword) => {
+  navigator.clipboard?.writeText(keyword).then(() => ElMessage.success(`已复制：${keyword}`)).catch(() => ElMessage.error('复制失败'))
+}
 const toEditor = async () => {
   await publishToWechatEditor(router, draft.value?.text || '', draft.value?.title || '')
 }
 const reset = () => {
   progress.stop()
   stage.value = 'form'
-  form.value = { product: '', brief: '', template: 'tool' }
+  form.value = { product: '', brief: '', template: 'tool', referenceLinks: [''] }
+  initialLinkStatus.value = {}
+  additionalLinks.value = ['']
+  linkStatus.value = {}
   research.value = null; selected.value = []; draft.value = null
   structuredBrief.value = null
+  openSteps.value = new Set()
 }
 
 onUnmounted(() => progress.stop())
@@ -524,6 +859,78 @@ onUnmounted(() => progress.stop())
 .slide-up { animation: slideUp .3s cubic-bezier(.32,.72,0,1); }
 @keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .serif { font-family: "Source Han Serif SC", "Songti SC", "Noto Serif SC", Georgia, serif; font-weight: 500; }
+.ref-link-type {
+  flex-shrink: 0;
+  font-size: 13px;
+  padding: 4px 10px;
+  background: var(--bone);
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+
+.suggestion-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.suggestion-tag.missing {
+  background: #FFF3E0;
+  color: #E65100;
+  border: 1px solid #FFE0B2;
+}
+
+.suggestion-tag.keyword {
+  background: var(--clay-tint);
+  color: var(--clay-deep);
+  border: 1px solid var(--clay-soft);
+  cursor: pointer;
+  transition: all .15s;
+}
+
+.suggestion-tag.keyword:hover {
+  background: var(--clay);
+  color: #fff;
+}
+
+.suggestion-tag.platform {
+  background: #E3F2FD;
+  color: #1565C0;
+  border: 1px solid #BBDEFB;
+}
+
+.link-status {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.link-status.loading {
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.link-hint {
+  margin-top: 6px;
+  padding-left: 50px;
+  font-size: 11px;
+  color: var(--ink-4);
+  line-height: 1.4;
+}
+
+.link-status.success + .link-hint { color: var(--leaf); }
+.link-status.error + .link-hint { color: var(--crimson); }
+.link-status.warning + .link-hint { color: #E65100; }
+.link-status.info + .link-hint { color: #1565C0; }
+.link-status.loading + .link-hint { color: var(--ink-4); }
 
 .tool-hero { position: relative; margin-bottom: 26px; }
 .tool-hero .kicker { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--clay-deep); background: var(--clay-tint); border: 1px solid var(--clay-soft); padding: 5px 12px; border-radius: var(--r-pill); margin-bottom: 14px; }
@@ -567,14 +974,22 @@ onUnmounted(() => progress.stop())
 
 .info-banner { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: var(--r-md); background: var(--sand-soft); color: var(--sand); font-size: 13px; font-weight: 500; margin-bottom: 16px; }
 
-.ref-details summary { list-style: none; cursor: pointer; }
-.ref-details summary::-webkit-details-marker { display: none; }
 .ref-count { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--clay-deep); background: var(--clay-tint); padding: 2px 8px; border-radius: var(--r-pill); }
+.ref-scroll-wrapper {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 0 22px 16px;
+}
+.ref-scroll-wrapper::-webkit-scrollbar { width: 4px; }
+.ref-scroll-wrapper::-webkit-scrollbar-track { background: transparent; }
+.ref-scroll-wrapper::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+.ref-scroll-wrapper::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
 .ref-article-list { display: flex; flex-direction: column; }
 .ref-article-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .ref-article-row:last-child { border-bottom: none; }
 .ref-src-badge { flex-shrink: 0; margin-right: 8px; font-size: 11px; font-weight: 500; color: var(--ink-4); background: var(--line); padding: 2px 7px; border-radius: 5px; white-space: nowrap; }
 .ref-src-badge.is-wechat { color: #07803a; background: rgba(7, 193, 96, 0.12); }
+.ref-src-badge.is-user-ref { color: #07803a; background: rgba(7, 193, 96, 0.2); font-weight: 600; }
 .ref-article-title { font-size: 13px; color: var(--ink-2); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn-ref-visit { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--clay-deep); text-decoration: none; white-space: nowrap; margin-left: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); transition: all .15s; }
 .btn-ref-visit:hover { background: var(--clay-tint); border-color: var(--clay); color: var(--clay); }

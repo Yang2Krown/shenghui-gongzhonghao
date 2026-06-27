@@ -8,12 +8,14 @@
 """
 
 from app.services.practical_creation.schemas import ProductResearch, FeaturePoint
-from app.services.practical_creation.research import research_product
+from app.services.practical_creation.research import research_product, re_analyze_product, analyze_features
 from app.services.practical_creation.draft import generate_practical_draft
 
 __all__ = [
     "ProductResearch",
     "FeaturePoint",
     "research_product",
+    "re_analyze_product",
+    "analyze_features",
     "generate_practical_draft",
 ]

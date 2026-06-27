@@ -44,6 +44,7 @@ class ProductResearch:
     insufficient: bool = False               # 信息不足标记
     sources: List[str] = field(default_factory=list)           # 来源链接
     references: List[dict] = field(default_factory=list)       # 参考资料 [{title,url,summary,source}]
+    search_suggestions: dict = field(default_factory=dict)     # 搜索建议 {keywords, platforms, missing}
 
     def to_dict(self) -> dict:
         return {
@@ -54,6 +55,7 @@ class ProductResearch:
             "insufficient": self.insufficient,
             "sources": self.sources,
             "references": self.references,
+            "search_suggestions": self.search_suggestions,
         }
 
     @staticmethod
@@ -85,13 +87,17 @@ class ProductResearch:
             for a in self.advantages:
                 lines.append(f"  · {a}")
             lines.append("")
-        # 参考资料原文：已经筛选过，全部带上；实操步骤据此写，别凭空编操作流程
+        # 参考资料摘要：只保留标题和简短摘要，不提供完整内容，防止 AI 直接复制
         refs = [r for r in self.references if r.get("summary")]
         if refs:
-            lines.append("--- 参考资料原文（写实操步骤时据此，尤其教程 / 公众号爆文）---")
+            lines.append("--- 参考资料摘要（仅供了解风格，禁止直接复制）---")
             for r in refs:
                 tag = f"[{r['source']}]" if r.get("source") else ""
-                lines.append(f"  · {tag}{r.get('title', '')}：{r['summary'][:300]}")
+                lines.append(f"  · {tag}{r.get('title', '')}")
+                # 只取前50字摘要，不提供完整内容
+                summary = (r.get('summary') or '')[:50]
+                if summary:
+                    lines.append(f"    摘要：{summary}...")
             lines.append("")
         lines += [
             "【使用规则】",
@@ -99,6 +105,9 @@ class ProductResearch:
             "- 实操步骤要基于「参考资料原文」里的真实用法来写；资料没覆盖到的操作细节，",
             "  写成让读者照着做的引导（如「进入X→点击Y」）并预留截图位，不要编造不存在的按钮/路径",
             "- 素材没有的，用泛化表述，不要编造具体数据",
+            "- 【严格禁止】不得直接复制、照搬、大段引用参考资料的原文内容",
+            "- 参考资料仅供学习写作风格、行文结构、表达方式，必须用全新的语言重新组织",
+            "- 用自己的话重新表达，可以借鉴风格但内容必须原创",
         ]
         if self.insufficient:
             lines.append("- 本次联网信息不足，缺失处需在正文显式标注「（信息有限）」或改用分析性表述")

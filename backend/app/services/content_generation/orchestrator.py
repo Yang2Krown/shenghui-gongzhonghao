@@ -26,9 +26,15 @@ def _clean_punctuation(text: str) -> str:
 
     公众号文章不需要新闻报纸式的排版符号，保持排版美观、阅读流畅。
     """
-    text = text.replace('\u201c', '').replace('\u201d', '')
-    text = text.replace('\u2018', '').replace('\u2019', '')
+    # 双引号/单引号
+    text = text.replace('“', '').replace('”', '')
+    text = text.replace('‘', '').replace('’', '')
+    text = text.replace('"', '').replace('"', '')
+    # 书名号
     text = text.replace('《', '').replace('》', '')
+    # 「」引号
+    text = text.replace('「', '').replace('」', '')
+    # 破折号
     text = text.replace('——', '，')
     return text.strip()
 

@@ -18,7 +18,7 @@ from app.services.llm import get_llm_client
 from app.services.llm.llm_client import ChatMessage, parse_json_loose
 from app.services.practical_creation.bocha import bocha_search
 from app.services.practical_creation.webfetch import fetch_many
-from app.services.practical_creation.schemas import ProductResearch
+from app.services.practical_creation.schemas import ProductResearch, FeaturePoint
 
 logger = logging.getLogger(__name__)
 
@@ -215,23 +215,23 @@ JUDGE_SYS = """你是产品调研员，边搜边判断。目标：攒够资料�
 
 RESEARCH_SYSTEM = """你是产品调研员。下面给你一个产品名、可选的商单 brief，以及一批联网搜索/教程全文。
 基于这些信息把产品调研清楚，输出严格的 JSON（不要任何额外文字）。
-注意：advantages 放在 features 前面，必须先写完整，别因为后面 features 太长而漏掉。
+
+注意：这是初步研究阶段，只需要调研产品定位、优势和参考资料，不需要分析功能点（功能点会在用户确认后再分析）。
+
 {
   "positioning": "产品定位，一两句话说清它是什么、给谁用",
   "advantages": ["产品优势1", "产品优势2", "产品优势3"],
-  "features": [
-    {"name": "功能点名称", "desc": "一句话说明",
-     "steps": ["操作步骤1", "操作步骤2"],
-     "recommend": true, "reason": "为何建议/不建议做成实操段"}
-  ],
-  "insufficient": false
+  "insufficient": false,
+  "search_suggestions": {
+    "missing": ["当前资料缺少什么，如：缺少具体操作步骤、缺少价格信息等"],
+    "keywords": ["建议搜索的关键词1", "建议搜索的关键词2", "建议搜索的关键词3"]
+  }
 }
 
 要求：
-- features 给 4-6 个，按是否适合写成「实操演示段」给 recommend（核心高频功能 true，边缘/无截图价值 false）。
-- steps：从教程全文里提炼该功能的真实操作步骤（如"进入X→点击Y→设置Z"），3-5 步；
-  资料里没讲到操作的功能，steps 给空数组 []，不要编造不存在的按钮/路径。
-- 只用所给材料里的信息，别编造具体数字；信息明显不足时把 insufficient 设为 true。"""
+- 只用所给材料里的信息，别编造具体数字
+- 信息明显不足时把 insufficient 设为 true
+- 不要输出 features 字段，功能点会在后续单独分析"""
 
 
 async def _iterative_search(product: str, brief: str, push: Callable) -> List[dict]:
@@ -296,13 +296,32 @@ async def research_product(
     product: str,
     brief: str = "",
     progress_callback: Optional[Callable] = None,
+    reference_links: List[str] = None,
 ) -> ProductResearch:
-    """调研产品，返回 ProductResearch（含每个功能的操作步骤）。"""
+    """调研产品，返回 ProductResearch（含每个功能的操作步骤）。
+
+    Args:
+        product: 产品名
+        brief: 商单 brief
+        progress_callback: 进度回调
+        reference_links: 用户提供的参考文章链接列表
+    """
     async def _push(action: str):
         if progress_callback:
             await progress_callback({"event": "step_start", "data": {
                 "step": 0, "agent": "产品调研员", "action": action,
-                "avatar": "/agents/source.png"}})
+                "avatar": "/agents/angle-a.png"}})
+
+    # 新增：抓取用户提供的参考链接
+    user_references = []
+    if reference_links:
+        from app.services.scraping.link_extractor import extract_link_content
+        from app.services.practical_creation.link_fetcher import fetch_reference_links
+        user_references = await fetch_reference_links(reference_links, progress_callback)
+        if user_references:
+            await _push(f"已抓取 {len(user_references)} 个用户参考链接")
+        else:
+            await _push("用户参考链接抓取完成（无有效内容）")
 
     # 公众号优先：先搜公众号（近一个月，含正文）。够了就只用公众号、不再搜博查；
     # 不够才补搜博查教程站（知乎/CSDN）凑足资料。
@@ -314,17 +333,27 @@ async def research_product(
 
     if len(wechat_hits) >= _WECHAT_ENOUGH:
         await _push(f"公众号已搜到 {len(wechat_hits)} 篇相关爆文，资料充足，只用公众号")
-        cands = wechat_hits
-        wechat_cap = _FINAL_K  # 独占模式：公众号不限量
+        cands = wechat_hits + user_references  # 合并用户参考链接
+        wechat_cap = _FINAL_K + len(user_references)  # 独占模式：公众号不限量，加上用户参考
     else:
         await _push(f"相关公众号仅 {len(wechat_hits)} 篇，补搜知乎/CSDN 等平台凑足资料…")
         platform_hits = await _iterative_search(product, brief, _push)
-        cands = [_norm_platform(h) for h in platform_hits if h.get("url")] + wechat_hits
+        cands = [_norm_platform(h) for h in platform_hits if h.get("url")] + wechat_hits + user_references  # 合并用户参考链接
         wechat_cap = _WECHAT_CAP
 
     # 启发式预筛 → AI 选最相关 N 篇（避免太多稀释 prompt）
     await _push("正在筛选最相关的参考资料…")
-    curated = await _ai_select(product, brief, _prefilter(cands, wechat_cap=wechat_cap), k=_FINAL_K)
+
+    # 用户参考链接优先保留，不参与筛选
+    user_refs = [c for c in cands if c.get("is_user_reference")]
+    other_cands = [c for c in cands if not c.get("is_user_reference")]
+
+    # 只对搜索结果进行筛选
+    filtered_others = _prefilter(other_cands, wechat_cap=wechat_cap)
+    selected_others = await _ai_select(product, brief, filtered_others, k=_FINAL_K)
+
+    # 合并：用户参考 + 筛选后的搜索结果
+    curated = user_refs + selected_others
     wx_n = sum(1 for c in curated if c.get("source") == "公众号")
     await _push(f"筛选出 {len(curated)} 篇参考资料（含公众号 {wx_n} 篇），正在抓全文…")
 
@@ -335,7 +364,7 @@ async def research_product(
         if body:
             c["summary"] = body
 
-    await _push("正在提炼定位、功能点与操作步骤…")
+    await _push("正在提炼产品定位与优势…")
     parts = [
         f"标题：{c['title']}\n内容：{c['summary']}\n来源：{c['url']}"
         for c in curated if c.get("summary")
@@ -351,7 +380,7 @@ async def research_product(
     res = await client.chat(
         [ChatMessage(role="system", content=RESEARCH_SYSTEM),
          ChatMessage(role="user", content=user)],
-        max_tokens=8000,  # 质量优先，给足空间写全功能点+步骤+优势
+        max_tokens=4000,  # 只需要定位+优势+搜索建议，不需要功能点
     )
 
     data = parse_json_loose(res.text) or {}
@@ -365,12 +394,221 @@ async def research_product(
         for c in curated
     ]
 
-    if not research.features:
-        logger.warning(f"[产品研究] 解析不到功能点，标记信息不足。原始：{res.text[:300]}")
+    # 处理搜索建议
+    if data.get("search_suggestions"):
+        research.search_suggestions = data["search_suggestions"]
+
+    # 初始研究阶段不生成功能点，所以检查 insufficient
+    if not research.positioning:
+        logger.warning(f"[产品研究] 解析不到产品定位，标记信息不足。原始：{res.text[:300]}")
         research.insufficient = True
 
     if progress_callback:
         await progress_callback({"event": "step_done", "data": {"step": 0, "agent": "产品调研员"}})
+    return research
+
+
+async def re_analyze_product(
+    product: str,
+    brief: str,
+    existing_research: dict,
+    new_reference_links: List[str],
+    progress_callback: Optional[Callable] = None,
+) -> ProductResearch:
+    """补充参考链接后重新分析。
+
+    策略：
+    1. 抓取新增的参考链接
+    2. 合并到现有的参考资料中（去重）
+    3. 重新进行 AI 分析
+
+    Args:
+        product: 产品名
+        brief: 商单 brief
+        existing_research: 上次的研究结果（用户可能编辑过）
+        new_reference_links: 新增的参考链接
+        progress_callback: 进度回调
+
+    Returns:
+        更新后的 ProductResearch
+    """
+    async def _push(action: str):
+        if progress_callback:
+            await progress_callback({"event": "step_start", "data": {
+                "step": 0, "agent": "产品调研员", "action": action,
+                "avatar": "/agents/angle-b.png"}})
+
+    # 1. 抓取新增的参考链接
+    await _push(f"正在抓取 {len(new_reference_links)} 个补充参考链接…")
+    from app.services.practical_creation.link_fetcher import fetch_reference_links
+    new_refs = await fetch_reference_links(new_reference_links, progress_callback)
+    await _push(f"已抓取 {len(new_refs)} 个有效补充链接")
+
+    # 2. 合并现有参考资料（去重）
+    existing_refs = existing_research.get("references", [])
+    seen_urls = set()
+    merged_refs = []
+
+    # 先加新的（优先级高，标记为用户参考）
+    for ref in new_refs:
+        url = ref.get("url", "")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            merged_refs.append({
+                "title": ref.get("title", ""),
+                "url": url,
+                "summary": ref.get("content", "")[:300],  # 限制长度
+                "source": ref.get("source", ""),
+                "is_user_reference": True,
+            })
+
+    # 再加现有的
+    for ref in existing_refs:
+        url = ref.get("url", "")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            merged_refs.append(ref)
+
+    await _push(f"合并后共 {len(merged_refs)} 篇参考资料，正在重新分析…")
+
+    # 3. 重新进行 AI 分析
+    parts = [
+        f"标题：{c.get('title', '')}\n内容：{c.get('summary', '')}\n来源：{c.get('url', '')}"
+        for c in merged_refs if c.get("summary")
+    ]
+    corpus = "\n\n".join(parts)
+
+    user = (
+        f"产品名：{product}\n"
+        f"商单 brief：{brief or '无'}\n\n"
+        f"联网搜索/教程内容（含用户补充参考）：\n{corpus or '（内容不足）'}"
+    )
+
+    client = get_llm_client("deepseek")
+    res = await client.chat(
+        [ChatMessage(role="system", content=RESEARCH_SYSTEM),
+         ChatMessage(role="user", content=user)],
+        max_tokens=4000,  # 只需要定位+优势+搜索建议
+    )
+
+    data = parse_json_loose(res.text) or {}
+    data.setdefault("product", product)
+    research = ProductResearch.from_dict(data)
+    research.product = product
+    research.sources = [c.get("url", "") for c in merged_refs]
+    research.references = merged_refs
+
+    # 处理搜索建议
+    if data.get("search_suggestions"):
+        research.search_suggestions = data["search_suggestions"]
+
+    # 补充研究阶段不生成功能点
+    if not research.positioning:
+        logger.warning(f"[补充研究] 解析不到产品定位，标记信息不足。原始：{res.text[:300]}")
+        research.insufficient = True
+
+    if progress_callback:
+        await progress_callback({"event": "step_done", "data": {"step": 0, "agent": "产品调研员"}})
+
+    return research
+
+
+async def analyze_features(
+    existing_research: dict,
+    progress_callback: Optional[Callable] = None,
+) -> ProductResearch:
+    """基于用户确认的研究结果分析功能点。
+
+    在用户确认产品定位、参考资料后，才进行功能点分析，
+    避免用户不满意时浪费 token。
+
+    Args:
+        existing_research: 用户确认后的研究结果（可能被编辑过）
+        progress_callback: 进度回调
+
+    Returns:
+        包含功能点的完整研究结果
+    """
+    async def _push(action: str):
+        if progress_callback:
+            await progress_callback({"event": "step_start", "data": {
+                "step": 0, "agent": "产品调研员", "action": action,
+                "avatar": "/agents/angle-c.png"}})
+
+    await _push("正在分析功能点与操作步骤…")
+
+    # 从现有研究结果中提取信息
+    product = existing_research.get("product", "")
+    positioning = existing_research.get("positioning", "")
+    brief = existing_research.get("brief", "")
+    references = existing_research.get("references", [])
+
+    # 构建参考资料文本
+    parts = [
+        f"标题：{c.get('title', '')}\n内容：{c.get('summary', '')}\n来源：{c.get('url', '')}"
+        for c in references if c.get("summary")
+    ]
+    corpus = "\n\n".join(parts)
+
+    # 只分析功能点的提示词
+    FEATURES_ONLY_SYSTEM = """你是产品调研员。基于已确认的产品定位和参考资料，分析产品的核心功能点。
+
+输出严格的 JSON（不要任何额外文字）：
+{
+  "features": [
+    {"name": "功能点名称", "desc": "一句话说明",
+     "steps": ["操作步骤1", "操作步骤2"],
+     "recommend": true, "reason": "为何建议/不建议做成实操段"}
+  ],
+  "search_suggestions": {
+    "missing": ["当前资料缺少什么"],
+    "keywords": ["建议搜索的关键词"]
+  }
+}
+
+要求：
+- features 给 4-6 个，按是否适合写成「实操演示段」给 recommend（核心高频功能 true，边缘/无截图价值 false）。
+- steps：从参考资料里提炼该功能的真实操作步骤（如"进入X→点击Y→设置Z"），3-5 步；
+  资料里没讲到操作的功能，steps 给空数组 []，不要编造不存在的按钮/路径。
+- 只用所给材料里的信息，别编造具体数字。
+- 同时分析资料是否足够，给出搜索建议。"""
+
+    user = (
+        f"产品名：{product}\n"
+        f"产品定位：{positioning}\n"
+        f"商单 brief：{brief or '无'}\n\n"
+        f"参考资料：\n{corpus or '（无参考资料）'}"
+    )
+
+    client = get_llm_client("deepseek")
+    res = await client.chat(
+        [ChatMessage(role="system", content=FEATURES_ONLY_SYSTEM),
+         ChatMessage(role="user", content=user)],
+        max_tokens=6000,
+    )
+
+    data = parse_json_loose(res.text) or {}
+
+    # 合并结果：保留用户编辑的 positioning，更新 features
+    research = ProductResearch.from_dict(existing_research)
+    research.product = product
+    research.positioning = positioning  # 保留用户编辑的定位
+
+    # 更新功能点
+    if data.get("features"):
+        research.features = [FeaturePoint.from_dict(f) for f in data["features"] if f.get("name")]
+
+    # 更新搜索建议
+    if data.get("search_suggestions"):
+        research.search_suggestions = data["search_suggestions"]
+
+    if not research.features:
+        logger.warning(f"[功能点分析] 解析不到功能点，标记信息不足。原始：{res.text[:300]}")
+        research.insufficient = True
+
+    if progress_callback:
+        await progress_callback({"event": "step_done", "data": {"step": 0, "agent": "产品调研员"}})
+
     return research
 
 
