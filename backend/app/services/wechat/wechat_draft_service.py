@@ -92,13 +92,19 @@ async def upload_content_image(
     content_type = "image/jpeg"
     if filename.lower().endswith(".png"):
         content_type = "image/png"
+    elif filename.lower().endswith(".gif"):
+        content_type = "image/gif"
 
     files = {"media": (filename, io.BytesIO(image_data), content_type)}
+
+    logger.info(f"[WeChatDraft] 上传图片到微信: {filename}, 大小: {len(image_data)} bytes")
 
     async with wechat_client(timeout=30) as client:
         resp = await client.post(url, params=params, files=files, headers=WECHAT_HOST_HEADER)
         resp.raise_for_status()
         data = resp.json()
+
+    logger.info(f"[WeChatDraft] 微信 API 响应: {data}")
 
     if "url" not in data:
         errcode = data.get("errcode", "unknown")

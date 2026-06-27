@@ -32,21 +32,34 @@ async def _upload_images_to_wechat(access_token: str, html_content: str) -> str:
     """
     from app.services.wechat.wechat_draft_service import upload_content_image
 
-    # 匹配所有 img 标签的 src
+    # 匹配所有 img 标签的 src（支持单引号和双引号）
     img_pattern = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
 
-    async with httpx.AsyncClient(timeout=30, verify=False) as client:
+    # 统计图片数量
+    all_imgs = img_pattern.findall(html_content)
+    logger.info(f"[WeChatDraft] 找到 {len(all_imgs)} 张图片")
+    for i, img_url in enumerate(all_imgs):
+        logger.info(f"[WeChatDraft] 图片 {i+1}: {img_url[:100]}...")
+
+    async with httpx.AsyncClient(timeout=60, verify=False) as client:
         async def replace_img_url(match):
             original_url = match.group(1)
 
             # 跳过已经是微信 URL 的图片
             if 'mmbiz.qpic.cn' in original_url or 'mmbiz.qlogo.cn' in original_url:
+                logger.info(f"[WeChatDraft] 跳过微信图片: {original_url[:50]}...")
                 return match.group(0)
+
+            logger.info(f"[WeChatDraft] 处理图片: {original_url[:50]}...")
+
+            # 修复 HTML 转义的 &amp; → &
+            fixed_url = original_url.replace('&amp;', '&')
 
             try:
                 # 下载图片
-                resp = await client.get(original_url, follow_redirects=True)
+                resp = await client.get(fixed_url, follow_redirects=True)
                 resp.raise_for_status()
+                logger.info(f"[WeChatDraft] 图片下载成功, 大小: {len(resp.content)} bytes, url: {fixed_url[:80]}...")
 
                 # 获取文件名
                 filename = original_url.split('/')[-1].split('?')[0]
@@ -57,17 +70,21 @@ async def _upload_images_to_wechat(access_token: str, html_content: str) -> str:
                     filename = f"image_{hash(original_url) & 0xFFFFFFFF:08x}{ext}"
 
                 # 上传到微信
+                logger.info(f"[WeChatDraft] 上传图片到微信: {filename}")
                 wechat_url = await upload_content_image(
                     access_token=access_token,
                     image_data=resp.content,
                     filename=filename,
                 )
 
-                logger.info(f"图片已上传到微信: {original_url[:50]}... -> {wechat_url[:50]}...")
-                return match.group(0).replace(original_url, wechat_url)
+                logger.info(f"[WeChatDraft] 图片已上传到微信: {original_url[:50]}... -> {wechat_url[:50]}...")
+                # 替换 URL
+                new_tag = match.group(0).replace(original_url, wechat_url)
+                logger.info(f"[WeChatDraft] 替换后的标签: {new_tag[:100]}...")
+                return new_tag
 
             except Exception as e:
-                logger.warning(f"上传图片到微信失败: {original_url[:50]}... - {e}")
+                logger.error(f"[WeChatDraft] 上传图片到微信失败: {original_url[:50]}... - {e}", exc_info=True)
                 # 上传失败，保留原 URL
                 return match.group(0)
 
@@ -174,6 +191,8 @@ async def create_wechat_draft(
 
         # 0.1 日志：打印收到的请求
         logger.info(f"[WeChatDraft] 收到请求 title={request.title!r} ({len(request.title)}字符), content长度={len(request.content)}字符")
+        # 调试：打印内容的前 500 字符
+        logger.info(f"[WeChatDraft] content前500字符: {request.content[:500]}")
 
         # 1. 获取 access_token
         access_token = await get_access_token(appid, app_secret)
