@@ -81,7 +81,7 @@ def upgrade() -> None:
     op.execute("""
         INSERT INTO credit_packages (name, credits, price_yuan, original_price_yuan, description, badge, sort_order)
         VALUES 
-            ('体验包', 100, 9.9, NULL, '适合轻度使用，可创作约 5 篇完整文章', NULL, 1),
+            ('体验包', 100, 0.01, NULL, '测试套餐，可创作约 5 篇完整文章', '测试', 1),
             ('标准包', 500, 39, 49.5, '最受欢迎，可创作约 27 篇完整文章', '推荐', 2),
             ('专业包', 1200, 79, 118.8, '专业运营首选，可创作约 66 篇完整文章', '超值', 3),
             ('团队包', 3000, 169, 297, '团队批量采购，可创作约 166 篇完整文章', NULL, 4)

@@ -14,6 +14,7 @@
 #   DEPLOY_PATH   (默认 /www/wwwroot/gzh)
 #   COMPOSE_FILE  (默认 docker-compose.prod.yml)
 #   ENV_FILE      (默认 backend/.env.production)
+#   WXPAY_SECRETS_DIR (默认 backend/secrets/wxpay)
 
 set -euo pipefail
 
@@ -22,6 +23,7 @@ DEPLOY_PATH="${DEPLOY_PATH:-/www/wwwroot/gzh}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 ENV_FILE="${ENV_FILE:-backend/.env.production}"
 DOMAIN="${DOMAIN:-https://gzh.midonghub.com}"
+WXPAY_SECRETS_DIR="${WXPAY_SECRETS_DIR:-backend/secrets/wxpay}"
 
 # ─── 参数解析 ───
 DEPLOY_FRONTEND=0
@@ -62,6 +64,26 @@ echo "==> 部署目标: $DEPLOY_HOST:$DEPLOY_PATH"
 echo "==> 仓库根: $REPO_ROOT"
 echo "==> 组件: $([ "$DEPLOY_FRONTEND" -eq 1 ] && echo -n "前端 " || true)$([ "$DEPLOY_BACKEND" -eq 1 ] && echo -n "后端 " || true)$([ "$DEPLOY_DB" -eq 1 ] && echo -n "数据库" || true)"
 echo
+
+sync_wxpay_secrets() {
+  if [ ! -d "$WXPAY_SECRETS_DIR" ]; then
+    echo "⚠  未找到微信支付证书目录: $WXPAY_SECRETS_DIR"
+    echo "   如需上线微信支付，请先放入 apiclient_key.pem 和 pub_key.pem。"
+    return 0
+  fi
+
+  if [ ! -f "$WXPAY_SECRETS_DIR/apiclient_key.pem" ] || [ ! -f "$WXPAY_SECRETS_DIR/pub_key.pem" ]; then
+    echo "⚠  微信支付证书不完整: $WXPAY_SECRETS_DIR"
+    echo "   需要 apiclient_key.pem 和 pub_key.pem。"
+    return 0
+  fi
+
+  echo "==> [后端] 同步微信支付证书目录..."
+  ssh "$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH/backend/secrets/wxpay'"
+  rsync -az "$WXPAY_SECRETS_DIR/" "$DEPLOY_HOST:$DEPLOY_PATH/backend/secrets/wxpay/"
+  ssh "$DEPLOY_HOST" "chown 1000:1000 '$DEPLOY_PATH/backend/secrets' && chown -R 1000:1000 '$DEPLOY_PATH/backend/secrets/wxpay' && chmod 700 '$DEPLOY_PATH/backend/secrets' '$DEPLOY_PATH/backend/secrets/wxpay' && chmod 600 '$DEPLOY_PATH/backend/secrets/wxpay/apiclient_key.pem' '$DEPLOY_PATH/backend/secrets/wxpay/pub_key.pem'"
+  echo
+}
 
 # ═══════════════════════════════════════════════════
 # A) 前端部署
@@ -110,6 +132,8 @@ if [ "$DEPLOY_BACKEND" -eq 1 ]; then
   rsync -az "$COMPOSE_FILE" "$DEPLOY_HOST:$DEPLOY_PATH/"
   echo
 
+  sync_wxpay_secrets
+
   echo "==> [后端] 重建后端服务（backend + celery）..."
   ssh "$DEPLOY_HOST" bash -s <<EOF
 set -e
@@ -140,6 +164,8 @@ if [ "$DEPLOY_DB" -eq 1 ]; then
     --exclude='.DS_Store' --exclude='._*' \
     backend/ "$DEPLOY_HOST:$DEPLOY_PATH/backend/"
   echo
+
+  sync_wxpay_secrets
 
   echo "==> [数据库] 重建 init 容器并跑迁移..."
   ssh "$DEPLOY_HOST" bash -s <<EOF

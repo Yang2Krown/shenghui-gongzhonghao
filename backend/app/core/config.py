@@ -147,6 +147,17 @@ class Settings(BaseSettings):
     PIXUS_API_KEY: Optional[str] = None
     PIXUS_API_BASE: str = "https://pixus.dev"
 
+    # ====== 微信支付 v3 Native 扫码支付 ======
+    WXPAY_MCH_ID: Optional[str] = None
+    WXPAY_APP_ID: Optional[str] = None
+    WXPAY_API_V3_KEY: Optional[str] = None
+    WXPAY_PRIVATE_KEY_PATH: Optional[str] = None
+    WXPAY_MCH_SERIAL_NO: Optional[str] = None
+    WXPAY_PUBLIC_KEY_PATH: Optional[str] = None
+    WXPAY_PUBLIC_KEY_ID: Optional[str] = None
+    WXPAY_NOTIFY_URL: Optional[str] = None
+    WXPAY_TEST_MODE: bool = False
+
     # HTTP 代理（用于访问境外网站：HN / Reddit / V2EX / GitHub 等）
     HTTP_PROXY: Optional[str] = None
 

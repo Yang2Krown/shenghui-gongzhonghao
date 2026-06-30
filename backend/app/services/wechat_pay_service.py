@@ -1,0 +1,217 @@
+"""微信支付 v3 Native 扫码支付服务。"""
+import base64
+import json
+import logging
+import secrets
+import time
+from datetime import datetime
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import httpx
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.timezone import utcnow
+from app.models.payment import PaymentOrder
+from app.services.credit_service import CreditService
+
+logger = logging.getLogger(__name__)
+
+
+class WechatPayService:
+    """微信支付 v3 Native 支付。"""
+
+    NATIVE_PREPAY_URL = "https://api.mch.weixin.qq.com/v3/pay/transactions/native"
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    @property
+    def configured(self) -> bool:
+        return all(
+            [
+                settings.WXPAY_MCH_ID,
+                settings.WXPAY_APP_ID,
+                settings.WXPAY_API_V3_KEY,
+                settings.WXPAY_PRIVATE_KEY_PATH,
+                settings.WXPAY_MCH_SERIAL_NO,
+                settings.WXPAY_PUBLIC_KEY_PATH,
+                settings.WXPAY_PUBLIC_KEY_ID,
+                settings.WXPAY_NOTIFY_URL,
+            ]
+        )
+
+    def require_configured(self) -> None:
+        if not self.configured:
+            raise ValueError("微信支付未配置，请补齐 WXPAY_* 环境变量")
+
+    async def create_native_order(self, user_id: int, package: Dict[str, Any]) -> PaymentOrder:
+        """创建 Native 扫码支付订单。"""
+        self.require_configured()
+
+        out_trade_no = self._generate_trade_no()
+        amount_fen = 1 if settings.WXPAY_TEST_MODE else int(Decimal(str(package["price_yuan"])) * 100)
+
+        payload = {
+            "appid": settings.WXPAY_APP_ID,
+            "mchid": settings.WXPAY_MCH_ID,
+            "description": f"公众号智能体-{package['name']}",
+            "out_trade_no": out_trade_no,
+            "notify_url": settings.WXPAY_NOTIFY_URL,
+            "amount": {
+                "total": amount_fen,
+                "currency": "CNY",
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                self.NATIVE_PREPAY_URL,
+                content=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                headers=self._wechat_headers("POST", "/v3/pay/transactions/native", payload),
+            )
+
+        if response.status_code >= 400:
+            logger.error("[WechatPay] 下单失败 status=%s body=%s", response.status_code, response.text)
+            raise ValueError("微信支付下单失败")
+
+        data = response.json()
+        code_url = data.get("code_url")
+        if not code_url:
+            raise ValueError("微信支付未返回二维码链接")
+
+        order = PaymentOrder(
+            out_trade_no=out_trade_no,
+            user_id=user_id,
+            package_name=package["name"],
+            amount_fen=amount_fen,
+            credits=int(package["credits"]),
+            status="PENDING",
+            payment_method="wechat",
+            code_url=code_url,
+        )
+        self.db.add(order)
+        await self.db.flush()
+        logger.info("[WechatPay] 下单成功 out_trade_no=%s user_id=%s", out_trade_no, user_id)
+        return order
+
+    async def get_order(self, out_trade_no: str, user_id: Optional[int] = None) -> Optional[PaymentOrder]:
+        stmt = select(PaymentOrder).where(PaymentOrder.out_trade_no == out_trade_no)
+        if user_id is not None:
+            stmt = stmt.where(PaymentOrder.user_id == user_id)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def handle_notify(
+        self,
+        body: str,
+        timestamp: str,
+        nonce: str,
+        signature: str,
+        serial_no: str,
+    ) -> Optional[PaymentOrder]:
+        """处理微信回调，验签、解密并幂等入账。"""
+        self.require_configured()
+        self._verify_signature(timestamp, nonce, body, signature, serial_no)
+
+        payload = json.loads(body)
+        resource = payload.get("resource") or {}
+        transaction = self._decrypt_resource(resource)
+
+        out_trade_no = transaction.get("out_trade_no")
+        trade_state = transaction.get("trade_state")
+        transaction_id = transaction.get("transaction_id")
+        success_time = transaction.get("success_time")
+        logger.info("[WechatPay] 回调 out_trade_no=%s trade_state=%s", out_trade_no, trade_state)
+
+        if not out_trade_no or trade_state != "SUCCESS":
+            return None
+
+        order = await self.get_order(out_trade_no)
+        if not order:
+            logger.warning("[WechatPay] 回调订单不存在 out_trade_no=%s", out_trade_no)
+            return None
+
+        order.notify_raw = body
+        if order.status == "PAID":
+            return order
+
+        order.status = "PAID"
+        order.transaction_id = transaction_id
+        order.paid_at = self._parse_success_time(success_time) or utcnow()
+
+        credit_service = CreditService(self.db)
+        await credit_service.purchase_credits(
+            user_id=order.user_id,
+            package_name=order.package_name,
+            payment_amount_yuan=order.amount_yuan,
+            payment_method="wechat",
+            payment_order_id=order.out_trade_no,
+        )
+        await self.db.flush()
+        logger.info("[WechatPay] 积分到账 out_trade_no=%s user_id=%s credits=%s", out_trade_no, order.user_id, order.credits)
+        return order
+
+    def _wechat_headers(self, method: str, url_path: str, payload: Dict[str, Any]) -> Dict[str, str]:
+        timestamp = str(int(time.time()))
+        nonce = secrets.token_hex(16)
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        message = f"{method}\n{url_path}\n{timestamp}\n{nonce}\n{body}\n"
+        signature = self._sign(message)
+        authorization = (
+            'WECHATPAY2-SHA256-RSA2048 '
+            f'mchid="{settings.WXPAY_MCH_ID}",'
+            f'nonce_str="{nonce}",'
+            f'signature="{signature}",'
+            f'timestamp="{timestamp}",'
+            f'serial_no="{settings.WXPAY_MCH_SERIAL_NO}"'
+        )
+        return {
+            "Authorization": authorization,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+
+    def _sign(self, message: str) -> str:
+        private_key_pem = Path(settings.WXPAY_PRIVATE_KEY_PATH).read_bytes()
+        private_key = serialization.load_pem_private_key(private_key_pem, password=None)
+        signature = private_key.sign(message.encode("utf-8"), padding.PKCS1v15(), hashes.SHA256())
+        return base64.b64encode(signature).decode("utf-8")
+
+    def _verify_signature(self, timestamp: str, nonce: str, body: str, signature: str, serial_no: str) -> None:
+        if serial_no != settings.WXPAY_PUBLIC_KEY_ID:
+            logger.debug("[WechatPay] 回调平台证书/公钥序列 serial_no=%s configured_public_key_id=%s", serial_no, settings.WXPAY_PUBLIC_KEY_ID)
+
+        public_key_pem = Path(settings.WXPAY_PUBLIC_KEY_PATH).read_bytes()
+        public_key = serialization.load_pem_public_key(public_key_pem)
+        message = f"{timestamp}\n{nonce}\n{body}\n".encode("utf-8")
+        try:
+            public_key.verify(base64.b64decode(signature), message, padding.PKCS1v15(), hashes.SHA256())
+        except InvalidSignature as exc:
+            raise ValueError("微信支付回调验签失败") from exc
+
+    def _decrypt_resource(self, resource: Dict[str, str]) -> Dict[str, Any]:
+        api_v3_key = settings.WXPAY_API_V3_KEY.encode("utf-8")
+        nonce = resource["nonce"].encode("utf-8")
+        ciphertext = base64.b64decode(resource["ciphertext"])
+        associated_data = (resource.get("associated_data") or "").encode("utf-8")
+        plaintext = AESGCM(api_v3_key).decrypt(nonce, ciphertext, associated_data)
+        return json.loads(plaintext.decode("utf-8"))
+
+    def _generate_trade_no(self) -> str:
+        return "GZH" + datetime.now().strftime("%Y%m%d%H%M%S") + secrets.token_hex(6).upper()
+
+    def _parse_success_time(self, value: Optional[str]):
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            return None

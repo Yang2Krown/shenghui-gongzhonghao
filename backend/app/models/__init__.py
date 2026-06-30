@@ -30,6 +30,9 @@ from app.models.feishu_auth import FeishuAuth
 # 积分系统
 from app.models.credit import UserCredit, CreditTransaction, CreditPackage
 
+# 支付订单
+from app.models.payment import PaymentOrder
+
 __all__ = [
     # 旧模型（过渡期保留）
     "User",
@@ -63,4 +66,5 @@ __all__ = [
     "UserCredit",
     "CreditTransaction",
     "CreditPackage",
+    "PaymentOrder",
 ]

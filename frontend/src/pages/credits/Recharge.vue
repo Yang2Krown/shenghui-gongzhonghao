@@ -47,18 +47,48 @@
       <p>· 积分永不过期，操作失败不扣费</p>
       <p>· 1 积分 = ¥0.10</p>
     </div>
+
+    <el-dialog
+      v-model="payDialogVisible"
+      title="微信扫码支付"
+      width="360px"
+      :close-on-click-modal="false"
+      @closed="stopPolling"
+    >
+      <div class="pay-dialog">
+        <div class="pay-summary">
+          <div class="pay-package">{{ activeOrder?.package }}</div>
+          <div class="pay-amount">¥{{ activeOrder?.amount_yuan }}</div>
+          <div class="pay-credits">{{ activeOrder?.credits }} 积分</div>
+        </div>
+        <canvas ref="qrCanvasRef" class="qr-canvas"></canvas>
+        <p class="qr-tip">请使用微信扫一扫完成支付</p>
+        <p class="qr-sub">支付成功后页面会自动刷新余额</p>
+      </div>
+      <template #footer>
+        <el-button @click="payDialogVisible = false">稍后支付</el-button>
+        <el-button type="primary" :loading="checkingPay" @click="checkStatusOnce">我已支付</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight } from '@element-plus/icons-vue'
+import QRCode from 'qrcode'
+import { getPurchaseStatus } from '@/api/credit'
 import { useCreditStore } from '@/stores/credit'
 
 const router = useRouter()
 const creditStore = useCreditStore()
+const payDialogVisible = ref(false)
+const activeOrder = ref(null)
+const qrCanvasRef = ref(null)
+const pollTimer = ref(null)
+const checkingPay = ref(false)
 
 onMounted(async () => {
   await Promise.all([
@@ -67,16 +97,69 @@ onMounted(async () => {
   ])
 })
 
+onBeforeUnmount(() => {
+  stopPolling()
+})
+
 const handlePurchase = async (pkg) => {
   try {
     await ElMessageBox.confirm(
-      `确定购买 ${pkg.name}（${pkg.credits} 积分）？`,
-      '确认购买',
-      { confirmButtonText: '确定购买', cancelButtonText: '取消' }
+      `确定购买 ${pkg.name}（${pkg.credits} 积分，¥${pkg.price_yuan}）？`,
+      '确认微信支付',
+      { confirmButtonText: '生成二维码', cancelButtonText: '取消' }
     )
-    await creditStore.purchase(pkg.name)
+    const order = await creditStore.purchase(pkg.name)
+    if (!order) return
+    activeOrder.value = order
+    payDialogVisible.value = true
+    await nextTick()
+    await renderQr(order.code_url)
+    startPolling(order.out_trade_no)
   } catch {
     // 用户取消
+  }
+}
+
+const renderQr = async (codeUrl) => {
+  if (!qrCanvasRef.value || !codeUrl) return
+  await QRCode.toCanvas(qrCanvasRef.value, codeUrl, {
+    width: 220,
+    margin: 1,
+    color: {
+      dark: '#1f1f1f',
+      light: '#ffffff',
+    },
+  })
+}
+
+const startPolling = (outTradeNo) => {
+  stopPolling()
+  pollTimer.value = window.setInterval(() => {
+    checkStatusOnce(outTradeNo)
+  }, 2000)
+}
+
+const stopPolling = () => {
+  if (pollTimer.value) {
+    window.clearInterval(pollTimer.value)
+    pollTimer.value = null
+  }
+}
+
+const checkStatusOnce = async (tradeNo = activeOrder.value?.out_trade_no) => {
+  if (!tradeNo || checkingPay.value) return
+  checkingPay.value = true
+  try {
+    const res = await getPurchaseStatus(tradeNo)
+    const data = res.data || res
+    if (data.status === 'PAID') {
+      stopPolling()
+      payDialogVisible.value = false
+      await creditStore.fetchBalance()
+      ElMessage.success('支付成功，积分已到账')
+    }
+  } finally {
+    checkingPay.value = false
   }
 }
 </script>
@@ -242,5 +325,57 @@ const handlePurchase = async (pkg) => {
   color: var(--ink-3);
   line-height: 2;
   margin: 0;
+}
+
+.pay-dialog {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+:deep(.el-dialog__footer) {
+  text-align: center;
+}
+
+.pay-summary {
+  margin-bottom: 16px;
+}
+
+.pay-package {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.pay-amount {
+  margin-top: 4px;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--clay);
+}
+
+.pay-credits,
+.qr-sub {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--ink-4);
+}
+
+.qr-canvas {
+  display: block;
+  box-sizing: content-box;
+  width: 220px;
+  height: 220px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: #fff;
+}
+
+.qr-tip {
+  margin: 14px 0 0;
+  font-size: 14px;
+  color: var(--ink-2);
 }
 </style>

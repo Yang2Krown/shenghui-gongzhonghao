@@ -76,10 +76,10 @@ CREDIT_PACKAGES = [
     {
         "name": "体验包",
         "credits": 100,
-        "price_yuan": 9.9,
+        "price_yuan": 0.01,
         "original_price_yuan": None,
-        "description": "适合轻度使用，可创作约 5 篇完整文章",
-        "badge": None,
+        "description": "测试套餐，可创作约 5 篇完整文章",
+        "badge": "测试",
         "sort_order": 1,
     },
     {

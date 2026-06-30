@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 
 // 默认套餐数据
 const DEFAULT_PACKAGES = [
-  { name: '体验包', credits: 100, price_yuan: 9.9, original_price_yuan: null, description: '适合轻度使用', badge: null },
+  { name: '体验包', credits: 100, price_yuan: 0.01, original_price_yuan: null, description: '测试套餐', badge: '测试' },
   { name: '标准包', credits: 500, price_yuan: 39, original_price_yuan: 49.5, description: '最受欢迎', badge: '推荐' },
   { name: '专业包', credits: 1200, price_yuan: 79, original_price_yuan: 118.8, description: '专业运营首选', badge: '超值' },
   { name: '团队包', credits: 3000, price_yuan: 169, original_price_yuan: 297, description: '团队批量采购', badge: null },
@@ -48,12 +48,11 @@ export const useCreditStore = defineStore('credit', () => {
     try {
       const res = await purchaseCredits(packageName)
       const data = res.data || res
-      balance.value = data.balance || balance.value
-      ElMessage.success(`购买成功，获得 ${data.credits_added} 积分`)
-      return true
+      return data
     } catch (error) {
-      ElMessage.error('购买失败')
-      return false
+      const detail = error?.response?.data?.detail || error?.message || '创建支付订单失败'
+      ElMessage.error(detail)
+      return null
     } finally {
       loading.value = false
     }

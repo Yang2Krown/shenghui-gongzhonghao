@@ -74,6 +74,16 @@ x-backend-env: &backend-env
   # 飞书商单 brief 接入（值放 backend/.env.production；scopes 不设则用代码默认含 offline_access）
   FEISHU_APP_ID: ${FEISHU_APP_ID:-}
   FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+  # 微信支付 v3 Native 扫码支付
+  WXPAY_TEST_MODE: ${WXPAY_TEST_MODE:-false}
+  WXPAY_MCH_ID: ${WXPAY_MCH_ID:-}
+  WXPAY_APP_ID: ${WXPAY_APP_ID:-}
+  WXPAY_API_V3_KEY: ${WXPAY_API_V3_KEY:-}
+  WXPAY_PRIVATE_KEY_PATH: ${WXPAY_PRIVATE_KEY_PATH:-}
+  WXPAY_MCH_SERIAL_NO: ${WXPAY_MCH_SERIAL_NO:-}
+  WXPAY_PUBLIC_KEY_PATH: ${WXPAY_PUBLIC_KEY_PATH:-}
+  WXPAY_PUBLIC_KEY_ID: ${WXPAY_PUBLIC_KEY_ID:-}
+  WXPAY_NOTIFY_URL: ${WXPAY_NOTIFY_URL:-}
 
 services:
 
@@ -121,6 +131,8 @@ services:
     environment:
       <<: *backend-env
       ROLE: init
+    volumes:
+      - ./backend/secrets:/app/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -139,6 +151,7 @@ services:
       ROLE: web
     volumes:
       - uploads_data:/app/uploads
+      - ./backend/secrets:/app/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -194,6 +207,8 @@ services:
     environment:
       <<: *backend-env
       ROLE: beat
+    volumes:
+      - ./backend/secrets:/app/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy

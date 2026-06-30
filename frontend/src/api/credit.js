@@ -31,6 +31,11 @@ export const getConsumptionStats = () => get('/credits/consumption-stats')
 export const getCreditPackages = () => get('/credits/packages')
 
 /**
- * 购买积分套餐（模拟，直接到账）
+ * 创建微信支付订单
  */
 export const purchaseCredits = (packageName) => post(`/credits/purchase?package_name=${encodeURIComponent(packageName)}`)
+
+/**
+ * 查询支付状态
+ */
+export const getPurchaseStatus = (outTradeNo) => get(`/credits/purchase/status/${outTradeNo}`)

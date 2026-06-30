@@ -7,6 +7,7 @@ from app.db.session import engine, AsyncSessionLocal
 from app.models import (
     user, topic, creation, style,
     source_registry, raw_info, info_cluster, topic_candidate,
+    payment,
 )
 
 logger = logging.getLogger(__name__)
