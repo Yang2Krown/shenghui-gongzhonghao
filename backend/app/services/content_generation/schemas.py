@@ -120,9 +120,9 @@ class AgentBOutput(BaseModel):
 class AITasteIssue(BaseModel):
     """单处AI味问题。"""
     location: str = Field(description="位置：第X节第Y段")
-    ai_taste_type: str = Field(description="AI味类型：结构性/词汇性/句式性/情感性/思维性/排版性")
-    ai_taste_subtype: str = Field(description="具体子类，如'连接词滥用'")
-    priority: str = Field(description="优先级：🚫/⚠️/⚪/🔵")
+    ai_taste_type: str = Field(description="AI味类型：铺垫套话/公式化结构/主语缺失/抽象笼统/距离感/节奏问题/过度解释/金句腔/翻译腔/格式问题")
+    ai_taste_subtype: str = Field(description="具体子类，如'开场清嗓''二元反转''虚假主体'")
+    priority: str = Field(description="优先级：🚫/⚠️")
     original_text: str = Field(description="原文")
     rewritten_text: str = Field(description="改写后")
     reason: str = Field(description="改写理由")
