@@ -422,12 +422,13 @@ watch(() => reevaluateProgress.error.value, (newError) => {
 
 // ── Agent 反馈数据组装 ────────────────────────────
 const B_DIMENSIONS = [
-  { key: 'three_eyes', label: '三个一眼达标度', weight: 0.25 },
-  { key: 'emotion_trigger', label: '情绪触发力度', weight: 0.20 },
-  { key: 'specificity', label: '具体性', weight: 0.15 },
-  { key: 'length_compliance', label: '长度合规', weight: 0.10 },
-  { key: 'method_maturity', label: '套路成熟度', weight: 0.15 },
+  { key: 'three_eyes', label: '三个一眼达标度', weight: 0.20 },
+  { key: 'emotion_trigger', label: '情绪触发力度', weight: 0.18 },
+  { key: 'afeng_style_fit', label: '实测口语感', weight: 0.15 },
+  { key: 'specificity', label: '具体性', weight: 0.14 },
   { key: 'outline_consistency', label: '与大纲一致性', weight: 0.15 },
+  { key: 'method_maturity', label: '套路成熟度', weight: 0.10 },
+  { key: 'length_compliance', label: '长度合规', weight: 0.08 },
 ]
 
 const agentFeedback = computed(() => {

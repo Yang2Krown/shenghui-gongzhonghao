@@ -60,6 +60,19 @@ def _load_title_methods_library() -> str:
 """
 
 
+def _load_afeng_style_library() -> str:
+    """加载阿枫科技标题风格资产，用于约束 AI 科技实测类语感。"""
+    style_file = CURRENT_DIR / "assets" / "阿枫科技标题风格.md"
+    if style_file.exists():
+        return style_file.read_text(encoding="utf-8")
+    return """# 阿枫科技标题风格（简化版）
+
+标题要像真实 AI 科技博主刚测完工具后的口语判断。
+优先组合：新品/新功能 + 我测过/试过 + 反差或强情绪 + 省事低门槛收益。
+高频表达：我测完、试了、用了、终于、不香了、没那么简单、真有点东西、无需部署、下载就能用。
+避免新闻稿式、课程式、产品公告式标题。"""
+
+
 class TitleCreatorAgent(BaseAgent):
     """
     Agent A - 标题创作员
@@ -221,6 +234,7 @@ class TitleCreatorAgent(BaseAgent):
         max_c = max_candidates or settings.MAX_CANDIDATES
         # 加载完整的标题套路库
         title_library = _load_title_methods_library()
+        afeng_style_library = _load_afeng_style_library()
 
         # 构建正文参考部分
         content_section = ""
@@ -258,6 +272,9 @@ class TitleCreatorAgent(BaseAgent):
 【参考资产 - 标题套路库】
 {title_library}
 
+【参考资产 - 阿枫科技标题风格】
+{afeng_style_library}
+
 【你的任务】
 产出 {min_c}-{max_c} 个标题候选，每个候选必须标注使用的套路和修饰元素。
 
@@ -268,6 +285,8 @@ class TitleCreatorAgent(BaseAgent):
 4. 优先使用该方向的优先套路（占比 ≥ {settings.PRIORITY_METHOD_RATIO * 100}%）
 5. 不允许标题党词、敏感内容、虚假承诺
 6. 文字必须真实差异，不允许"换一个字"的伪候选
+7. 至少 70% 候选必须带有"真人实测后的口语判断"：新鲜感、实测感、反差感、低门槛、情绪判断、具体利益中至少命中 2 类
+8. 避免新闻稿式、论文式、产品公告式标题；不要写"一文看懂""深度解析""全面盘点"这类泛标题
 
 【自检清单】
 □ 候选数量是否在 {min_c}-{max_c}？
@@ -275,7 +294,8 @@ class TitleCreatorAgent(BaseAgent):
 □ 单套路是否未超过 {settings.MAX_SAME_METHOD} 个？
 □ 优先套路占比是否 ≥ {settings.PRIORITY_METHOD_RATIO * 100}%？
 □ 是否避免了一票否决词？
-□ 每个候选是否真实差异？"""
+□ 每个候选是否真实差异？
+□ 是否像真实博主刚测完后的判断，而不是产品公告？"""
         
         # 添加重生反馈
         if feedback:

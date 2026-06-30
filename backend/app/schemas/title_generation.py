@@ -80,11 +80,12 @@ class TitleGenerationResponse(BaseModel):
 
 class BScoreDetails(BaseModel):
     """Agent B评分详情模式"""
-    three_eyes: float = Field(..., ge=0, le=10, description="三个一眼达标度(25%)")
-    emotion_trigger: float = Field(..., ge=0, le=10, description="情绪触发力度(20%)")
-    specificity: float = Field(..., ge=0, le=10, description="具体性(15%)")
-    length_compliance: float = Field(..., ge=0, le=10, description="长度合规(10%)")
-    method_maturity: float = Field(..., ge=0, le=10, description="套路成熟度(15%)")
+    three_eyes: float = Field(..., ge=0, le=10, description="三个一眼达标度(20%)")
+    emotion_trigger: float = Field(..., ge=0, le=10, description="情绪触发力度(18%)")
+    afeng_style_fit: Optional[float] = Field(None, ge=0, le=10, description="阿枫科技式真人实测口语感(15%)")
+    specificity: float = Field(..., ge=0, le=10, description="具体性(14%)")
+    length_compliance: float = Field(..., ge=0, le=10, description="长度合规(8%)")
+    method_maturity: float = Field(..., ge=0, le=10, description="套路成熟度(10%)")
     outline_consistency: float = Field(..., ge=0, le=10, description="与大纲一致性(15%)")
 
 

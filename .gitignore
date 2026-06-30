@@ -59,8 +59,10 @@ seed_test.db
 .agents/
 .claude/
 .od-skills/
+.pycache_tmp/
 .pytest_cache/
 .workbuddy/
+wechat_account_analyzer/
 
 # Dev docs / notes
 AGENT.md

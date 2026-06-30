@@ -3,7 +3,7 @@ Agent B - 标题评审员 单元测试
 
 测试覆盖:
 1. 一票否决扫描
-2. 6维度评分权重验证
+2. 7维度评分权重验证
 3. 加权总分计算
 4. Top 5筛选逻辑
 """
@@ -17,7 +17,7 @@ from tests.conftest import make_candidate, make_candidates
 
 
 class TestScoreWeights:
-    """测试6维度评分权重配置"""
+    """测试7维度评分权重配置"""
 
     def test_weight_sum_equals_1(self):
         """权重总和应等于1.0"""
@@ -26,24 +26,25 @@ class TestScoreWeights:
 
     def test_weight_values_match_design(self):
         """权重值应与设计文档一致"""
-        assert SCORE_WEIGHTS["three_eyes"] == 0.25
-        assert SCORE_WEIGHTS["emotion_trigger"] == 0.20
-        assert SCORE_WEIGHTS["specificity"] == 0.15
-        assert SCORE_WEIGHTS["length_compliance"] == 0.10
-        assert SCORE_WEIGHTS["method_maturity"] == 0.15
+        assert SCORE_WEIGHTS["three_eyes"] == 0.20
+        assert SCORE_WEIGHTS["emotion_trigger"] == 0.18
+        assert SCORE_WEIGHTS["afeng_style_fit"] == 0.15
+        assert SCORE_WEIGHTS["specificity"] == 0.14
         assert SCORE_WEIGHTS["outline_consistency"] == 0.15
+        assert SCORE_WEIGHTS["method_maturity"] == 0.10
+        assert SCORE_WEIGHTS["length_compliance"] == 0.08
 
-    def test_6_dimensions_defined(self):
-        """应定义6个评分维度"""
-        assert len(SCORE_WEIGHTS) == 6
+    def test_7_dimensions_defined(self):
+        """应定义7个评分维度"""
+        assert len(SCORE_WEIGHTS) == 7
 
 
 class TestVetoConditions:
     """测试一票否决条件"""
 
-    def test_5_veto_conditions(self):
-        """应定义5个一票否决条件"""
-        assert len(VETO_CONDITIONS) == 5
+    def test_4_veto_conditions(self):
+        """应定义4个一票否决条件，长度交给评分维度处理"""
+        assert len(VETO_CONDITIONS) == 4
 
     def test_conditions_match_design(self):
         """条件应与设计文档一致"""
@@ -52,7 +53,6 @@ class TestVetoConditions:
         assert "政治" in conditions_text
         assert "人身攻击" in conditions_text
         assert "虚假承诺" in conditions_text
-        assert "字数" in conditions_text
 
 
 class TestCheckVetoWords:
@@ -119,25 +119,24 @@ class TestVetoScan:
         assert len(survived) == 2
         assert len(eliminated) == 0
 
-    def test_short_title_eliminated(self):
-        """过短标题应被淘汰"""
+    def test_short_title_survives_veto_scan(self):
+        """过短标题不做一票否决，交给长度合规评分降权"""
         candidates = [
             make_candidate("c1", "AI助手", 3),  # < 10字
             make_candidate("c2", "用了一周Claude Goal的体验", 14),
         ]
         eliminated, survived = self.agent._veto_scan(candidates)
-        assert len(eliminated) == 1
-        assert len(survived) == 1
-        assert "字数" in eliminated[0]["elimination_reason"]
+        assert len(eliminated) == 0
+        assert len(survived) == 2
 
-    def test_long_title_eliminated(self):
-        """过长标题应被淘汰"""
+    def test_long_title_survives_veto_scan(self):
+        """过长标题不做一票否决，交给长度合规评分降权"""
         candidates = [
             make_candidate("c1", "这是一个非常非常非常非常非常非常非常非常长的标题用来测试字数限制", 30),  # > 22字
         ]
         eliminated, survived = self.agent._veto_scan(candidates)
-        assert len(eliminated) == 1
-        assert len(survived) == 0
+        assert len(eliminated) == 0
+        assert len(survived) == 1
 
     def test_clickbait_eliminated(self):
         """标题党词应被淘汰"""
@@ -150,7 +149,7 @@ class TestVetoScan:
         assert "标题党词" in eliminated[0]["elimination_reason"]
 
     def test_mixed_candidates(self):
-        """混合候选：合法+短标题+标题党"""
+        """混合候选：合法+短标题+标题党，只有标题党被一票否决"""
         candidates = [
             make_candidate("c1", "用了一周Claude Goal的体验", 14),
             make_candidate("c2", "太短", 2),
@@ -158,8 +157,8 @@ class TestVetoScan:
             make_candidate("c4", "Claude的7个隐藏用法", 11),
         ]
         eliminated, survived = self.agent._veto_scan(candidates)
-        assert len(eliminated) == 2
-        assert len(survived) == 2
+        assert len(eliminated) == 1
+        assert len(survived) == 3
 
     def test_all_eliminated(self):
         """所有候选被否决时应返回空存活列表"""
@@ -188,22 +187,24 @@ class TestVetoScan:
         eliminated, survived = self.agent._veto_scan(candidates)
         assert len(survived) == 1
 
-    def test_boundary_length_9_eliminated(self):
-        """9字标题应被淘汰"""
+    def test_boundary_length_9_survives_veto_scan(self):
+        """9字标题不做一票否决"""
         candidates = [
             make_candidate("c1", "一二三四五六七八九", 9),
         ]
         eliminated, survived = self.agent._veto_scan(candidates)
-        assert len(eliminated) == 1
+        assert len(eliminated) == 0
+        assert len(survived) == 1
 
-    def test_boundary_length_23_eliminated(self):
-        """23字标题应被淘汰"""
+    def test_boundary_length_23_survives_veto_scan(self):
+        """23字标题处于参考账号常见区间，不做一票否决"""
         title_23 = "一二三四五六七八九十一二三四五六七八九十一二三"  # 23字
         candidates = [
             make_candidate("c1", title_23, 23),
         ]
         eliminated, survived = self.agent._veto_scan(candidates)
-        assert len(eliminated) == 1
+        assert len(eliminated) == 0
+        assert len(survived) == 1
 
 
 class TestCalculateWeightedScore:
@@ -217,6 +218,7 @@ class TestCalculateWeightedScore:
         score_data = {
             "three_eyes": 10,
             "emotion_trigger": 10,
+            "afeng_style_fit": 10,
             "specificity": 10,
             "length_compliance": 10,
             "method_maturity": 10,
@@ -230,6 +232,7 @@ class TestCalculateWeightedScore:
         score_data = {
             "three_eyes": 0,
             "emotion_trigger": 0,
+            "afeng_style_fit": 0,
             "specificity": 0,
             "length_compliance": 0,
             "method_maturity": 0,
@@ -241,14 +244,15 @@ class TestCalculateWeightedScore:
     def test_weighted_calculation(self):
         """验证加权计算公式正确"""
         score_data = {
-            "three_eyes": 8,       # 8 * 0.25 = 2.0
-            "emotion_trigger": 7,   # 7 * 0.20 = 1.4
-            "specificity": 9,       # 9 * 0.15 = 1.35
-            "length_compliance": 10, # 10 * 0.10 = 1.0
-            "method_maturity": 8,   # 8 * 0.15 = 1.2
+            "three_eyes": 8,       # 8 * 0.20 = 1.6
+            "emotion_trigger": 7,   # 7 * 0.18 = 1.26
+            "afeng_style_fit": 8,   # 8 * 0.15 = 1.2
+            "specificity": 9,       # 9 * 0.14 = 1.26
             "outline_consistency": 9, # 9 * 0.15 = 1.35
+            "method_maturity": 8,   # 8 * 0.10 = 0.8
+            "length_compliance": 10, # 10 * 0.08 = 0.8
         }
-        expected = 2.0 + 1.4 + 1.35 + 1.0 + 1.2 + 1.35  # = 8.3
+        expected = 1.6 + 1.26 + 1.2 + 1.26 + 1.35 + 0.8 + 0.8  # = 8.27
         result = self.agent._calculate_weighted_score(score_data)
         assert abs(result - expected) < 0.01
 
@@ -259,8 +263,8 @@ class TestCalculateWeightedScore:
             # 缺失其他维度
         }
         result = self.agent._calculate_weighted_score(score_data)
-        # 10*0.25 + 5*0.20 + 5*0.15 + 5*0.10 + 5*0.15 + 5*0.15
-        expected = 2.5 + 1.0 + 0.75 + 0.5 + 0.75 + 0.75  # = 6.25
+        # 10*0.20 + 5*0.18 + 5*0.15 + 5*0.14 + 5*0.15 + 5*0.10 + 5*0.08
+        expected = 2.0 + 0.9 + 0.75 + 0.7 + 0.75 + 0.5 + 0.4  # = 6.0
         assert abs(result - expected) < 0.01
 
     def test_three_eyes_has_highest_weight(self):

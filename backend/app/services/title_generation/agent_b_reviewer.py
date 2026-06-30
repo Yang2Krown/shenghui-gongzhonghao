@@ -56,14 +56,15 @@ def _robust_id_map(items: List[Dict[str, Any]], candidates: List[Dict[str, Any]]
 # 获取当前文件所在目录
 CURRENT_DIR = Path(__file__).parent
 
-# 6维度评分权重
+# 7维度评分权重
 SCORE_WEIGHTS = {
-    "three_eyes": 0.25,  # 三个一眼达标度
-    "emotion_trigger": 0.20,  # 情绪触发力度
-    "specificity": 0.15,  # 具体性
-    "length_compliance": 0.10,  # 长度合规
-    "method_maturity": 0.15,  # 套路成熟度
+    "three_eyes": 0.20,  # 三个一眼达标度
+    "emotion_trigger": 0.18,  # 情绪触发力度
+    "afeng_style_fit": 0.15,  # 阿枫科技式真人实测口语感
+    "specificity": 0.14,  # 具体性
     "outline_consistency": 0.15,  # 与大纲一致性
+    "method_maturity": 0.10,  # 套路成熟度
+    "length_compliance": 0.08,  # 长度合规
 }
 
 # 一票否决条件
@@ -274,8 +275,8 @@ class TitleReviewerAgent(BaseAgent):
                 extra_hint = (
                     "\n\n【重要】上一次输出格式不符合要求。"
                     "请严格输出 JSON，必须包含 scores 数组，每个元素含 candidate_id、"
-                    "three_eyes、emotion_trigger、specificity、length_compliance、"
-                    "method_maturity、outline_consistency、explanation 字段。"
+                    "three_eyes、emotion_trigger、afeng_style_fit、specificity、"
+                    "outline_consistency、method_maturity、length_compliance、explanation 字段。"
                     "不要输出任何 markdown 标记或解释文字。"
                 )
 
@@ -327,10 +328,11 @@ class TitleReviewerAgent(BaseAgent):
                     "b_score_details": {
                         "three_eyes": score_data.get("three_eyes", 5),
                         "emotion_trigger": score_data.get("emotion_trigger", 5),
+                        "afeng_style_fit": score_data.get("afeng_style_fit", 5),
                         "specificity": score_data.get("specificity", 5),
-                        "length_compliance": score_data.get("length_compliance", 5),
-                        "method_maturity": score_data.get("method_maturity", 5),
                         "outline_consistency": score_data.get("outline_consistency", 5),
+                        "method_maturity": score_data.get("method_maturity", 5),
+                        "length_compliance": score_data.get("length_compliance", 5),
                     },
                     "scoring_explanation": score_data.get("explanation", ""),
                 })
@@ -344,7 +346,8 @@ class TitleReviewerAgent(BaseAgent):
         """
         计算加权总分
         
-        B评分总分 = 0.25×一眼 + 0.20×情绪 + 0.15×具体性 + 0.10×长度 + 0.15×套路 + 0.15×大纲一致
+        B评分总分 = 0.20×一眼 + 0.18×情绪 + 0.15×阿枫风格 + 0.14×具体性
+                  + 0.15×大纲一致 + 0.10×套路 + 0.08×长度
         
         Args:
             score_data: 评分数据
@@ -397,7 +400,7 @@ class TitleReviewerAgent(BaseAgent):
 
 你的核心能力：
 1. 从一堆候选中识别"哪些是真正有打开潜力的"
-2. 精通6维度评分体系
+2. 精通7维度评分体系
 3. 能准确判断标题与大纲的一致性
 
 你的评分原则：
@@ -444,45 +447,51 @@ class TitleReviewerAgent(BaseAgent):
 - 关键信息点: {', '.join(outline.key_points)}
 
 【你的任务】
-对每个候选进行6维度评分:
+对每个候选进行7维度评分:
 
 维度说明:
-1. 三个一眼达标度 (25%): 1秒内看出"讲什么"、"对我有什么用"、"跟我什么关系"
+1. 三个一眼达标度 (20%): 1秒内看出"讲什么"、"对我有什么用"、"跟我什么关系"
    - 9-10: 三个一眼全到位
    - 7-8: 达成2个，第3个隐含
    - 4-6: 只达成1个
    - 1-3: 三个一眼都模糊
 
-2. 情绪触发力度 (20%): 焦虑/好奇/共鸣/装逼/反差
+2. 情绪触发力度 (18%): 焦虑/好奇/共鸣/装逼/反差
    - 9-10: 强烈触发2个以上情绪
    - 7-8: 明确触发1个情绪
    - 4-6: 弱触发1个情绪
    - 1-3: 无明显情绪触发
 
-3. 具体性 (15%): 数字/工具名/身份/场景
+3. 阿枫科技式真人实测口语感 (15%): 是否像 AI 科技博主刚测完后的口语判断
+   - 9-10: 同时有新鲜感、实测感、反差/情绪判断、低门槛或具体收益，像真人分享
+   - 7-8: 有明显实测/口语判断，略少一点反差或收益
+   - 4-6: 有工具名和情绪词，但仍偏通用公众号标题
+   - 1-3: 新闻稿、产品公告、论文题目、课程标题感很重
+
+4. 具体性 (14%): 数字/工具名/身份/场景/具体动作
    - 9-10: 含3个及以上具体元素
    - 7-8: 含2个具体元素
    - 4-6: 含1个具体元素
    - 1-3: 无具体元素
 
-4. 长度合规 (10%):
-   - 10: 标题长度适中，阅读流畅
-   - 7-8: 稍长或稍短，但不影响理解
-   - 4-6: 偏长或偏短，影响阅读体验
-   - 1-3: 过短缺乏信息量，或过长影响传播
-
-5. 套路成熟度 (15%):
-   - 9-10: 命中高爆款模式，使用准确
-   - 7-8: 命中套路，使用基本到位
-   - 4-6: 命中套路但生硬
-   - 1-3: 不属于已知套路
-
-6. 与大纲一致性 (15%):
+5. 与大纲一致性 (15%):
    - 9-10: 标题承诺被大纲完美兑现
    - 7-8: 标题承诺被大纲兑现，但对应弱化
    - 4-6: 标题承诺被大纲部分兑现
    - 1-3: 标题与大纲明显脱节
    - 0: 标题承诺无法被大纲兑现
+
+6. 套路成熟度 (10%):
+   - 9-10: 命中高爆款模式，使用准确
+   - 7-8: 命中套路，使用基本到位
+   - 4-6: 命中套路但生硬
+   - 1-3: 不属于已知套路
+
+7. 长度合规 (8%):
+   - 10: 标题长度适中，阅读流畅
+   - 7-8: 稍长或稍短，但不影响理解
+   - 4-6: 偏长或偏短，影响阅读体验
+   - 1-3: 过短缺乏信息量，或过长影响传播
 
 【输出格式】
 请严格按照以下JSON格式输出:
@@ -492,10 +501,11 @@ class TitleReviewerAgent(BaseAgent):
       "candidate_id": "1",
       "three_eyes": 8,
       "emotion_trigger": 7,
+      "afeng_style_fit": 8,
       "specificity": 9,
-      "length_compliance": 10,
-      "method_maturity": 8,
       "outline_consistency": 9,
+      "method_maturity": 8,
+      "length_compliance": 10,
       "explanation": "评分说明"
     }},
     ...

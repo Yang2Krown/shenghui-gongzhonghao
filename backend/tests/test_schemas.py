@@ -67,10 +67,12 @@ class TestTopicInfo:
                 value_promise="测试",
             )
 
-    def test_missing_required_fields(self):
-        """缺少必填字段应被拒绝"""
-        with pytest.raises(ValidationError):
-            TopicInfo(title="测试")  # 缺少direction, method, value_promise
+    def test_missing_optional_context_fields_allowed(self):
+        """从大纲流程进入标题生成时，方向/套路/价值承诺允许缺省"""
+        topic = TopicInfo(title="测试")
+        assert topic.direction == ""
+        assert topic.method == ""
+        assert topic.value_promise == ""
 
 
 class TestOutlineInfo:
@@ -93,21 +95,21 @@ class TestOutlineInfo:
         )
         assert outline.spread_tags == []
 
-    def test_empty_section_titles_rejected(self):
-        """空的小标题列表应被拒绝"""
-        with pytest.raises(ValidationError):
-            OutlineInfo(
-                section_titles=[],
-                key_points=["要点1"],
-            )
+    def test_empty_section_titles_allowed(self):
+        """大纲字段允许为空列表，调用方可用正文或选题兜底"""
+        outline = OutlineInfo(
+            section_titles=[],
+            key_points=["要点1"],
+        )
+        assert outline.section_titles == []
 
-    def test_empty_key_points_rejected(self):
-        """空的关键信息点列表应被拒绝"""
-        with pytest.raises(ValidationError):
-            OutlineInfo(
-                section_titles=["第一章"],
-                key_points=[],
-            )
+    def test_empty_key_points_allowed(self):
+        """关键信息点允许为空列表，调用方可用正文或小标题兜底"""
+        outline = OutlineInfo(
+            section_titles=["第一章"],
+            key_points=[],
+        )
+        assert outline.key_points == []
 
 
 class TestBScoreDetails:
@@ -118,6 +120,7 @@ class TestBScoreDetails:
         scores = BScoreDetails(
             three_eyes=8.0,
             emotion_trigger=7.0,
+            afeng_style_fit=8.0,
             specificity=9.0,
             length_compliance=10.0,
             method_maturity=8.0,
@@ -130,6 +133,7 @@ class TestBScoreDetails:
         scores = BScoreDetails(
             three_eyes=0,
             emotion_trigger=0,
+            afeng_style_fit=0,
             specificity=0,
             length_compliance=0,
             method_maturity=0,
@@ -142,6 +146,7 @@ class TestBScoreDetails:
         scores = BScoreDetails(
             three_eyes=10,
             emotion_trigger=10,
+            afeng_style_fit=10,
             specificity=10,
             length_compliance=10,
             method_maturity=10,
@@ -155,6 +160,7 @@ class TestBScoreDetails:
             BScoreDetails(
                 three_eyes=11,
                 emotion_trigger=7,
+                afeng_style_fit=8,
                 specificity=9,
                 length_compliance=10,
                 method_maturity=8,
@@ -167,6 +173,7 @@ class TestBScoreDetails:
             BScoreDetails(
                 three_eyes=-1,
                 emotion_trigger=7,
+                afeng_style_fit=8,
                 specificity=9,
                 length_compliance=10,
                 method_maturity=8,
