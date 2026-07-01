@@ -219,6 +219,7 @@ const navItems = [
       { id: 'content-info', label: '选题列表' },
       { id: 'content-info-news', label: '资讯信息' },
       { id: 'content-info-cases', label: '实操案例' },
+      { id: 'content-info-commercial', label: '疑似商单' },
     ],
   },
   {
@@ -262,6 +263,7 @@ const activeRoute = computed(() => {
   const path = route.path
   if (path === '/content-info/news') return 'content-info-news'
   if (path === '/content-info/cases') return 'content-info-cases'
+  if (path === '/content-info/commercial') return 'content-info-commercial'
   if (path === '/' || path.startsWith('/topic-clusters') || path === '/content-info') return 'content-info'
   if (path.startsWith('/creation/angle')) return 'creation-angle'
   if (path.startsWith('/creation/outline')) return 'creation-outline'
@@ -321,6 +323,7 @@ const routeMap = {
   'content-info': '/content-info',
   'content-info-news': '/content-info/news',
   'content-info-cases': '/content-info/cases',
+  'content-info-commercial': '/content-info/commercial',
   'creation-angle': '/creation/angle',
   'creation-outline': '/creation/outline',
   'creation-body': '/creation/body',

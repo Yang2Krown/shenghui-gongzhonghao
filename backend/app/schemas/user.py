@@ -64,6 +64,7 @@ class UserResponse(UserBase):
 class UserProfileBase(BaseModel):
     """用户资料基础模型"""
     bio: Optional[str] = Field(None, max_length=500, description="个人简介")
+    persona: Optional[str] = Field(None, max_length=2000, description="创作者人设/背景设定")
     wechat_id: Optional[str] = Field(None, max_length=100, description="微信号")
     target_audience: Optional[str] = Field(None, max_length=200, description="目标受众")
     content_style: Optional[str] = Field(None, max_length=200, description="内容风格")

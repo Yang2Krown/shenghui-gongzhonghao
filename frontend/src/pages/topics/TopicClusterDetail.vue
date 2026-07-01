@@ -77,6 +77,13 @@
                   >
                     <div class="source-card-header">
                       <span class="source-platform">{{ raw.source_name }}</span>
+                      <span
+                        v-if="raw.commercial_level && raw.commercial_level !== 'none'"
+                        class="source-commercial-badge"
+                        :title="raw.commercial_meta?.reason || '命中商业推广结构信号'"
+                      >
+                        {{ raw.commercial_level === 'likely' ? '高可能商单' : '疑似商单' }}
+                      </span>
                       <span v-if="raw.published_at" class="source-time">
                         {{ formatRelativeTime(raw.published_at) }}
                       </span>
@@ -660,7 +667,7 @@ const startCreation = (candidate) => {
 .source-card-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   margin-bottom: 4px;
 }
 
@@ -676,8 +683,20 @@ const startCreation = (candidate) => {
 }
 
 .source-time {
+  margin-left: auto;
   font-size: 11px;
   color: var(--ink-4);
+}
+
+.source-commercial-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #FFE3B3;
+  color: #7A3E00;
+  border: 1px solid #F1C77F;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .source-title {

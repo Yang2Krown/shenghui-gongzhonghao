@@ -35,6 +35,12 @@ const routes = [
         component: () => import('@/pages/topics/TopicClusterList.vue'),
         meta: { title: '实操案例', preset: '实操案例型' }
       },
+      {
+        path: 'content-info/commercial',
+        name: 'CommercialRawInfos',
+        component: () => import('@/pages/topics/CommercialRawInfoList.vue'),
+        meta: { title: '疑似商单' }
+      },
       // 话题库（保留旧路由，兼容）
       {
         path: 'topic-clusters',

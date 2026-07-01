@@ -125,6 +125,10 @@ async def generate_content(
         RuntimeError: Agent 执行异常
     """
     start_time = time.time()
+    if not inp.persona and inp.user_id and db_session:
+        from app.services.content_generation.persona import apply_user_persona
+
+        inp = await apply_user_persona(inp, db_session)
     logger.info(f"[正文生成] 开始，标题: {inp.topic_title}")
 
     # ──────────────────────────────────────────
@@ -210,6 +214,7 @@ async def generate_content(
         agent_b_output = await catalyze_gold_sentences(
             agent_a_output=agent_a_output,
             topic_title=inp.topic_title,
+            persona=inp.persona,
         )
     except Exception as e:
         logger.error(f"[正文生成] Agent B 失败: {e}")

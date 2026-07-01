@@ -54,6 +54,7 @@ async def generate_practical_draft(
     brief_tone: Optional[str] = None,
     progress_callback: Optional[Callable] = None,
     user_id: Optional[int] = None,
+    persona: Optional[str] = None,
 ) -> dict:
     """返回 {title, text, word_count, sections}。
 
@@ -72,6 +73,7 @@ async def generate_practical_draft(
         source_materials=research.to_material_text(),
         sections=sections,
         style_params=style,
+        persona=persona,
         user_id=user_id,
         free_subtitles=True,  # 让写手自拟自然小标题，不要「引入：/实操：/结尾升华」这类结构词
     )

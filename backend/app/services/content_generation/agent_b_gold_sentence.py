@@ -65,12 +65,20 @@ def _load_system_prompt() -> str:
 def _build_user_prompt(
     agent_a_output: AgentAOutput,
     topic_title: str,
+    persona: Optional[str] = None,
 ) -> str:
     """构建用户提示词。"""
     lines = []
 
     lines.append(f"【选题标题】{topic_title}")
     lines.append("")
+
+    if persona and persona.strip():
+        lines.append("【作者人设】")
+        lines.append("生成金句时必须尊重作者人设：不能写出与作者身份、经验阶段相冲突的第一人称经历；")
+        lines.append("如果需要表达经验，只能基于人设中明确给出的背景，或写成观点/观察。")
+        lines.append(persona.strip())
+        lines.append("")
 
     # 正文（含金句种子位置标注）
     lines.append("【正文骨干】")
@@ -146,6 +154,7 @@ MAX_RETRIES = 3
 async def catalyze_gold_sentences(
     agent_a_output: AgentAOutput,
     topic_title: str,
+    persona: Optional[str] = None,
     provider: Optional[str] = None,
 ) -> AgentBOutput:
     """Agent B 主入口：催化 3-5 个金句。
@@ -161,7 +170,7 @@ async def catalyze_gold_sentences(
         AgentBOutput: 金句清单
     """
     client = get_llm_client(provider)
-    user_prompt = _build_user_prompt(agent_a_output, topic_title)
+    user_prompt = _build_user_prompt(agent_a_output, topic_title, persona)
     system_prompt = _load_system_prompt()
 
     logger.info(f"[Agent B] 开始催化金句，标题: {topic_title}")

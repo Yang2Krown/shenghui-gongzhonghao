@@ -114,6 +114,7 @@ async def get_topic_clusters(
     needs_update: Optional[bool] = Query(None),
     freshness: Optional[str] = Query(None),
     keyword: Optional[str] = Query(None),
+    commercial_only: bool = Query(False, description="True=仅显示含疑似商单原文的话题"),
     sort_by: str = Query("display_score", description="display_score / heat_score / created_at / source_count"),
     sort_order: str = Query("desc"),
     balanced: bool = Query(True, description="True=每类保底配额，False=纯分数排序"),
@@ -178,6 +179,16 @@ async def get_topic_clusters(
                 InfoCluster.core_title_zh.ilike(f"%{keyword}%"),
             )
         )
+    if commercial_only:
+        commercial_raw_exists = (
+            select(RawInfo.id)
+            .where(
+                RawInfo.info_cluster_id == InfoCluster.id,
+                RawInfo.commercial_level.in_(["suspected", "likely"]),
+            )
+            .exists()
+        )
+        base_filter.append(commercial_raw_exists)
 
     # display_score 表达式（与 SQL CASE 保持一致）
     # 所有类型平等：不再按 info_type 加权
@@ -270,6 +281,7 @@ async def get_topic_clusters(
     # 批量查询候选选题数
     cluster_ids = [c.id for c in page_clusters]
     candidate_counts = {}
+    commercial_counts = {}
     if cluster_ids:
         count_result = await db.execute(
             select(TopicCandidate.info_cluster_id, func.count(TopicCandidate.id))
@@ -280,6 +292,16 @@ async def get_topic_clusters(
             .group_by(TopicCandidate.info_cluster_id)
         )
         candidate_counts = {row[0]: row[1] for row in count_result.all()}
+
+        commercial_count_result = await db.execute(
+            select(RawInfo.info_cluster_id, func.count(RawInfo.id))
+            .where(
+                RawInfo.info_cluster_id.in_(cluster_ids),
+                RawInfo.commercial_level.in_(["suspected", "likely"]),
+            )
+            .group_by(RawInfo.info_cluster_id)
+        )
+        commercial_counts = {row[0]: row[1] for row in commercial_count_result.all()}
 
     items = []
     for c in page_clusters:
@@ -319,6 +341,7 @@ async def get_topic_clusters(
             "mined": my_candidate_count > 0,
             "needs_update": bool(c.needs_update) and my_candidate_count > 0,
             "candidate_count": my_candidate_count,
+            "commercial_count": commercial_counts.get(c.id, 0),
             "created_at": c.created_at.isoformat() if c.created_at else None,
         })
 
@@ -421,6 +444,8 @@ async def get_topic_cluster_detail(
             "published_at": raw.published_at.isoformat() if raw.published_at else None,
             "source_name": row.source_name or "未知来源",
             "source_platform": row.source_platform or "",
+            "commercial_level": raw.commercial_level or "none",
+            "commercial_meta": raw.commercial_meta or {},
         })
 
     return {

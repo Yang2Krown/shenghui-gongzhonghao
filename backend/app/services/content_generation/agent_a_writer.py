@@ -112,6 +112,15 @@ def _build_user_prompt(inp: ContentGenerationInput) -> str:
             lines.append(f"  备注: {sec.notes}")
     lines.append("")
 
+    # 作者人设（身份/经验边界）
+    if inp.persona and inp.persona.strip():
+        lines.append("【作者人设】")
+        lines.append("以下是作者长期保持一致的人设、经验背景和表达边界。")
+        lines.append("写作时必须与此一致：不能把作者写成相反身份，不能编造人设之外的具体经历；")
+        lines.append("如果要使用第一人称经历，只能使用人设中明确给出的背景，或改写成观察/判断。")
+        lines.append(inp.persona.strip())
+        lines.append("")
+
     # 风格参数
     if inp.style_params:
         lines.append("【风格参数】")

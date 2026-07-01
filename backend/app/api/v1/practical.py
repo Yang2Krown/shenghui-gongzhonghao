@@ -246,10 +246,14 @@ async def _run_draft(req: DraftRequest, run_id: str, user_id: int):
         async def cb(ev):
             await progress_store.push(run_id, ev)
         research = ProductResearch.from_dict(req.research)
+        async with AsyncSessionLocal() as db:
+            from app.services.content_generation.persona import get_user_persona
+
+            persona = await get_user_persona(db, user_id)
         result = await generate_practical_draft(
             research, selected=req.selected, template=req.template,
             brief_banned=req.brief_banned, brief_tone=req.brief_tone,
-            progress_callback=cb, user_id=user_id,
+            progress_callback=cb, user_id=user_id, persona=persona,
         )
         await progress_store.push(run_id, {"event": "result", "data": result})
         await track_complete(run_id, result, display_title=result.get("title", "实操成稿"))

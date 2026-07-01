@@ -90,6 +90,7 @@ class ScrapingOrchestrator:
             "items_duplicate": 0,
             "per_source": {},
         }
+        commercial_detection_ids: List[int] = []
 
         for src, outcome in zip(task_sources, per_source):
             entry: Dict[str, Any] = {"platform": src.platform, "source_type": src.source_type}
@@ -99,7 +100,8 @@ class ScrapingOrchestrator:
                 stats["sources_failed"] += 1
             else:
                 items: List[FetchedItem] = outcome
-                new_count, dup_count = await self._persist(db, src, items)
+                new_count, dup_count, new_raw_info_ids = await self._persist(db, src, items)
+                commercial_detection_ids.extend(new_raw_info_ids)
                 entry.update(
                     status="ok",
                     fetched=len(items),
@@ -114,6 +116,7 @@ class ScrapingOrchestrator:
             stats["per_source"][src.platform] = entry
 
         await db.commit()
+        self._dispatch_commercial_detection(commercial_detection_ids)
         logger.info(
             f"orchestrator 完成: new={stats['items_new']} dup={stats['items_duplicate']} "
             f"ok={stats['sources_ok']} failed={stats['sources_failed']}"
@@ -133,9 +136,10 @@ class ScrapingOrchestrator:
         db: AsyncSession,
         source: SourceRegistry,
         items: Iterable[FetchedItem],
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int, List[int]]:
         new_count = 0
         dup_count = 0
+        new_raw_info_ids: List[int] = []
         seen_hashes: set[str] = set()
         seen_urls: set[str] = set()
         for item in items:
@@ -165,7 +169,7 @@ class ScrapingOrchestrator:
 
             seen_hashes.add(h)
             seen_urls.add(url_trunc)
-            db.add(RawInfo(
+            raw = RawInfo(
                 source_registry_id=source.id,
                 source_account_id=item.source_account_id,
                 title=(item.title or url)[:500],
@@ -179,10 +183,24 @@ class ScrapingOrchestrator:
                 extras=item.extras or {},
                 state=RAW_STATE_PENDING,
                 dedup_hash=item.dedup_hash(),
-            ))
+            )
+            db.add(raw)
+            await db.flush()
+            new_raw_info_ids.append(raw.id)
             new_count += 1
-        await db.flush()
-        return new_count, dup_count
+        return new_count, dup_count, new_raw_info_ids
+
+    def _dispatch_commercial_detection(self, raw_info_ids: List[int]) -> None:
+        """Fan out commercial detection without making scraping depend on Celery."""
+        if not raw_info_ids:
+            return
+        try:
+            from app.tasks.commercial_tasks import detect_commercial_task
+
+            for raw_info_id in raw_info_ids:
+                detect_commercial_task.delay(raw_info_id)
+        except Exception as exc:
+            logger.warning("商单检测任务派发失败，抓取结果已保留: %s", exc)
 
 
 # 全局单例，adapter 在模块导入时自注册

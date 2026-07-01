@@ -62,6 +62,7 @@ class UserProfile(BaseModel):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
     bio = Column(Text, nullable=True)
+    persona = Column(Text, nullable=True)
     wechat_id = Column(String(100), nullable=True)
     target_audience = Column(String(200), nullable=True)
     content_style = Column(String(200), nullable=True)
@@ -83,6 +84,7 @@ class UserProfile(BaseModel):
             "id": self.id,
             "user_id": self.user_id,
             "bio": self.bio,
+            "persona": self.persona,
             "wechat_id": self.wechat_id,
             "target_audience": self.target_audience,
             "content_style": self.content_style,

@@ -67,6 +67,13 @@
             {{ opt.label }}
           </button>
         </div>
+        <span class="filter-label-sep">|</span>
+        <button
+          @click="toggleCommercialOnly"
+          :class="['type-chip', filters.commercial_only && 'type-chip-active', 'type-chip-commercial']"
+        >
+          疑似商单
+        </button>
       </div>
     </div>
 
@@ -120,6 +127,9 @@
               <span v-if="cluster.direction" class="tag-direction">{{ cluster.direction }}</span>
               <span v-if="cluster.freshness" class="tag-freshness">{{ formatFreshness(cluster.freshness) }}</span>
               <span v-if="cluster.low_fan_hit" class="tag-hot">🔥 低粉爆款</span>
+              <span v-if="cluster.commercial_count > 0" class="tag-commercial">
+                商单 {{ cluster.commercial_count }}
+              </span>
               <span v-if="cluster.mined && !cluster.needs_update" class="tag-mined">已挖掘</span>
               <span v-else-if="cluster.needs_update" class="tag-needs-update">待更新</span>
               <span v-else class="tag-unmined">待挖掘</span>
@@ -239,6 +249,7 @@ const filters = reactive({
   direction: '',
   freshness: '',
   mined: '',
+  commercial_only: false,
   keyword: '',
   sort_by: defaultSortBy,    // 综合/实操=价值分；资讯型=时间倒序
   sort_order: 'desc',
@@ -306,11 +317,17 @@ const quickFilterByMined = (val) => {
   reloadFromStart()
 }
 
+const toggleCommercialOnly = () => {
+  filters.commercial_only = !filters.commercial_only
+  reloadFromStart()
+}
+
 const resetAllFilters = () => {
   filters.info_type = ''
   filters.direction = ''
   filters.freshness = ''
   filters.mined = ''
+  filters.commercial_only = false
   filters.keyword = ''
   reloadFromStart()
 }
@@ -337,6 +354,7 @@ const restoreFromQuery = () => {
   filters.direction   = q.direction   ?? ''
   filters.freshness   = q.freshness   ?? ''
   filters.mined       = q.mined       ?? ''
+  filters.commercial_only = q.commercial_only === 'true'
   filters.keyword     = q.keyword     ?? ''
   filters.sort_by     = q.sort_by     ?? defaultSortBy
   filters.sort_order  = q.sort_order  ?? 'desc'
@@ -353,6 +371,7 @@ const syncToQuery = () => {
   if (filters.direction)                q.direction = filters.direction
   if (filters.freshness)                q.freshness = filters.freshness
   if (filters.mined)                    q.mined = filters.mined
+  if (filters.commercial_only)          q.commercial_only = 'true'
   if (filters.keyword)                  q.keyword = filters.keyword
   router.replace({ query: q })
 }
@@ -454,6 +473,7 @@ const loadClusters = async (restoreScroll = false) => {
       params.mined = filters.mined
     }
     if (filters.keyword) params.keyword = filters.keyword
+    if (filters.commercial_only) params.commercial_only = true
 
     const res = await get('/topic-clusters', params)
     clusters.value = res.data.items || []
@@ -494,6 +514,7 @@ const loadNextPage = async () => {
       params.mined = filters.mined
     }
     if (filters.keyword) params.keyword = filters.keyword
+    if (filters.commercial_only) params.commercial_only = true
 
     const res = await get('/topic-clusters', params)
     const newItems = res.data.items || []
@@ -694,6 +715,16 @@ const formatFreshness = (val) => {
   color: #fff;
   border-color: var(--clay);
 }
+.type-chip-commercial {
+  border-color: #E6A23C;
+  color: #7A5200;
+  background: #FFF7E6;
+}
+.type-chip-commercial.type-chip-active {
+  background: #D68B16;
+  color: #fff;
+  border-color: #D68B16;
+}
 .chip-tip {
   font-size: 11px;
   opacity: 0.8;
@@ -727,6 +758,17 @@ const formatFreshness = (val) => {
   font-weight: 500;
   background: var(--crimson);
   color: var(--paper);
+}
+
+.tag-commercial {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #FFE3B3;
+  color: #7A3E00;
+  border: 1px solid #F1C77F;
 }
 
 .tag-mined {

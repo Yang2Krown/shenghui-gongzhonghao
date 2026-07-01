@@ -20,6 +20,7 @@ from app.services.content_generation.schemas import (
     SectionBrief,
     StyleParams,
 )
+from app.services.content_generation.persona import normalize_persona
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,13 @@ def _build_input_from_db(
             sample_articles=style_params.get("sample_articles", []),
         )
 
+    persona = None
+    if user_id:
+        from app.models.user import UserProfile
+
+        profile = db.query(UserProfile.persona).filter(UserProfile.user_id == user_id).first()
+        persona = normalize_persona(profile[0] if profile else None)
+
     return ContentGenerationInput(
         topic_title=candidate.title,
         topic_direction=candidate.direction,
@@ -84,6 +92,7 @@ def _build_input_from_db(
         outline_id=outline_id,
         sections=sections,
         style_params=sp,
+        persona=persona,
         candidate_id=candidate_id,
         user_id=user_id,
     )

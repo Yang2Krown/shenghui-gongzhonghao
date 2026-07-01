@@ -23,10 +23,31 @@
           </div>
           <!-- 表单 -->
           <div class="profile-form-area">
-            <div class="nickname-row">
-              <el-input v-model="profileForm.name" placeholder="请输入昵称" style="flex: 1;" />
-              <el-button type="primary" @click="saveProfile" :loading="saving">保存</el-button>
-            </div>
+            <el-form
+              ref="profileFormRef"
+              :model="profileForm"
+              :rules="profileRules"
+              label-position="top"
+              class="profile-form profile-form-main"
+            >
+              <el-form-item label="昵称" prop="name">
+                <div class="nickname-row">
+                  <el-input v-model="profileForm.name" placeholder="请输入昵称" />
+                  <el-button type="primary" @click="saveProfile" :loading="saving">保存</el-button>
+                </div>
+              </el-form-item>
+              <el-form-item label="创作者人设" prop="persona">
+                <el-input
+                  v-model="profileForm.persona"
+                  type="textarea"
+                  :rows="5"
+                  maxlength="2000"
+                  show-word-limit
+                  resize="none"
+                  placeholder="例如：我是长期深度使用 AI 编程工具的创作者，熟悉 Claude Code、Cursor、Agent 工作流。文章中不要把我写成刚入门的新手；涉及个人经历时，只能基于这里写明的背景。"
+                />
+              </el-form-item>
+            </el-form>
           </div>
         </div>
         <!-- 积分卡片 -->
@@ -283,11 +304,14 @@ const user = computed(() => userStore.user)
 const userName = computed(() => userStore.userName)
 const userAvatar = computed(() => userStore.userAvatar)
 
-const profileForm = reactive({ name: '' })
+const profileForm = reactive({ name: '', persona: '' })
 const profileRules = {
   name: [
     { required: true, message: '请输入昵称', trigger: 'blur' },
     { min: 2, max: 20, message: '昵称长度在 2 到 20 个字符', trigger: 'blur' },
+  ],
+  persona: [
+    { max: 2000, message: '人设最多 2000 个字符', trigger: 'blur' },
   ],
 }
 
@@ -412,6 +436,7 @@ loadWechatAccounts().then(() => migrateLocalCredentials())
 const loadUserProfile = () => {
   if (user.value) {
     profileForm.name = user.value.full_name || user.value.username || ''
+    profileForm.persona = user.value.profile?.persona || ''
   }
 }
 
@@ -424,8 +449,19 @@ const saveProfile = async () => {
   try {
     await profileFormRef.value.validate()
     saving.value = true
-    await updateProfile({ full_name: profileForm.name })
-    userStore.updateUser({ full_name: profileForm.name })
+    const response = await updateProfile({
+      full_name: profileForm.name,
+      persona: profileForm.persona,
+    })
+    const updated = response.data || {}
+    userStore.updateUser({
+      full_name: updated.full_name ?? profileForm.name,
+      profile: {
+        ...(userStore.user?.profile || {}),
+        ...(updated.profile || {}),
+        persona: profileForm.persona,
+      },
+    })
     ElMessage.success('保存成功')
   } catch (error) {
     if (error !== false) ElMessage.error('保存失败')
@@ -641,12 +677,14 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 
 .nickname-row {
   display: flex;
   gap: 12px;
   align-items: center;
+  width: 100%;
 }
 
 .credit-card {
@@ -743,6 +781,16 @@ onMounted(() => {
 
 .profile-form {
   max-width: 280px;
+}
+
+.profile-form-main {
+  width: 100%;
+  max-width: none;
+}
+
+.profile-form-main :deep(.el-form-item__label) {
+  color: var(--ink-3, #666);
+  font-size: 13px;
 }
 
 /* ── 风格训练区 ── */

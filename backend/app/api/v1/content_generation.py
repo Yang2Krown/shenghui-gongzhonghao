@@ -523,6 +523,7 @@ async def stream_content_progress(
 @router.post("/generate/sync", response_model=dict)
 async def generate_content_sync(
     req: ContentGenerationSyncRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
     """同步正文生成（直接传入数据，不查库，适合预览/调试）。
@@ -571,7 +572,7 @@ async def generate_content_sync(
     )
 
     try:
-        output = await generate_content(inp)
+        output = await generate_content(inp, db_session=db)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
