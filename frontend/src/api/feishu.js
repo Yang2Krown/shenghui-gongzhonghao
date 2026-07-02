@@ -10,6 +10,9 @@ export const feishuAuthStatus = () => api.get('/feishu/auth/status')
 // 解除绑定
 export const feishuAuthLogout = () => api.delete('/feishu/auth')
 
+// 取消进行中的授权
+export const feishuAuthCancel = () => api.delete('/feishu/auth')
+
 // ── brief 读取 / 总结 ──────────────────────────────
 // 读取原文：source_type = 'feishu_link' | 'text'
 export const feishuBriefRead = (sourceType, value) =>

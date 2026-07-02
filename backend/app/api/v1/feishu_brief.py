@@ -69,6 +69,9 @@ async def _complete_auth_bg(user_id: int, device_code: str, interval: int, expir
         info = await feishu_client.get_user_info(tok["access_token"])
         async with AsyncSessionLocal() as db:
             auth = await _get_or_create_auth(db, user_id)
+            if auth.status != "pending" or auth.device_code != device_code:
+                logger.info(f"飞书授权已取消或被新授权替代，忽略旧轮询结果 user={user_id}")
+                return
             _apply_tokens(auth, tok)
             auth.feishu_user_name = info.get("name")
             auth.feishu_open_id = info.get("open_id")
@@ -82,6 +85,9 @@ async def _complete_auth_bg(user_id: int, device_code: str, interval: int, expir
         logger.error(f"飞书授权完成失败 user={user_id}: {e}", exc_info=True)
         async with AsyncSessionLocal() as db:
             auth = await _get_or_create_auth(db, user_id)
+            if auth.status != "pending" or auth.device_code != device_code:
+                logger.info(f"飞书授权已取消或被新授权替代，忽略旧轮询错误 user={user_id}")
+                return
             auth.status = "none"
             auth.device_code = None
             auth.last_error = str(e)[:500]
@@ -165,7 +171,7 @@ async def auth_logout(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    """解除飞书绑定。"""
+    """解除飞书绑定，或取消进行中的授权。"""
     result = await db.execute(select(FeishuAuth).where(FeishuAuth.user_id == current_user.id))
     auth = result.scalar_one_or_none()
     if auth:
@@ -178,6 +184,7 @@ async def auth_logout(
         auth.token_expires_at = None
         auth.refresh_expires_at = None
         auth.authorized_at = None
+        auth.last_error = None
         await db.commit()
     return {"code": 200, "message": "已解除飞书绑定"}
 

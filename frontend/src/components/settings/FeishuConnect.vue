@@ -31,7 +31,7 @@
         <p class="feishu-tip">如果没自动弹出授权页，点下面按钮打开（链接 10 分钟内有效）：</p>
         <div class="feishu-actions">
           <el-button size="small" type="primary" @click="openVerifyUrl" :disabled="!verifyUrl">打开授权页</el-button>
-          <el-button size="small" text @click="cancelPending">取消</el-button>
+          <el-button size="small" text @click="cancelPending" :loading="cancelling">取消</el-button>
         </div>
       </div>
 
@@ -48,7 +48,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { CircleCheck, Loading } from '@element-plus/icons-vue'
-import { feishuAuthStart, feishuAuthStatus, feishuAuthLogout } from '@/api/feishu'
+import { feishuAuthStart, feishuAuthStatus, feishuAuthLogout, feishuAuthCancel } from '@/api/feishu'
 
 const unwrap = (res) => (res && res.data !== undefined ? res.data : res)
 
@@ -59,6 +59,7 @@ const lastError = ref('')
 const verifyUrl = ref('')
 const connecting = ref(false)
 const loggingOut = ref(false)
+const cancelling = ref(false)
 
 let pollTimer = null
 let pollDeadline = 0
@@ -84,9 +85,13 @@ const startPolling = () => {
     if (s === 'valid') {
       stopPolling()
       ElMessage.success(`飞书绑定成功：${feishuUserName.value || ''}`)
-    } else if (s !== 'pending' || Date.now() > pollDeadline) {
+    } else if (Date.now() > pollDeadline) {
       stopPolling()
-      if (s !== 'valid') status.value = s || 'none'
+      await cancelPending({ silent: true })
+      ElMessage.warning('飞书授权已超时，请重新连接')
+    } else if (s !== 'pending') {
+      stopPolling()
+      status.value = s || 'none'
     }
   }, 3000)
 }
@@ -114,17 +119,33 @@ const connect = async () => {
   }
 }
 
-const cancelPending = () => {
+const resetPendingState = () => {
+  status.value = 'none'
+  verifyUrl.value = ''
+  feishuUserName.value = ''
+  authorizedAt.value = ''
+}
+
+const cancelPending = async ({ silent = false } = {}) => {
   stopPolling()
-  refreshStatus()
+  cancelling.value = true
+  try {
+    await feishuAuthCancel()
+    resetPendingState()
+    if (!silent) ElMessage.success('已取消飞书授权')
+  } catch (e) {
+    ElMessage.error('取消授权失败')
+    await refreshStatus()
+  } finally {
+    cancelling.value = false
+  }
 }
 
 const logout = async () => {
   loggingOut.value = true
   try {
     await feishuAuthLogout()
-    status.value = 'none'
-    feishuUserName.value = ''
+    resetPendingState()
     ElMessage.success('已解除飞书绑定')
   } catch (e) {
     ElMessage.error('解除绑定失败')
