@@ -70,7 +70,7 @@
         <span class="filter-label-sep">|</span>
         <button
           @click="toggleCommercialOnly"
-          :class="['type-chip', filters.commercial_only && 'type-chip-active', 'type-chip-commercial']"
+          :class="['type-chip', filters.commercial_only && 'type-chip-active', 'type-chip-commercial', FORCE_COMMERCIAL && 'type-chip-locked']"
         >
           疑似商单
         </button>
@@ -193,14 +193,24 @@ const route = useRoute()
 
 // 预设页面：'资讯型' / '实操案例型' / ''(综合)。靠 route.meta 区分，并锁定类型筛选。
 const PRESET = route.meta?.preset || ''
+const FORCE_COMMERCIAL = route.meta?.commercialOnly === true
+const WECHAT_ONLY = route.meta?.wechatOnly === true
 const defaultSortBy = PRESET === '资讯型' ? 'created_at' : 'display_score'  // 资讯型按时间排，其余按价值分
-const scrollKey = `topic-list-scroll-${PRESET || 'all'}`
-const pageTitle = PRESET === '资讯型' ? '资讯型' : PRESET === '实操案例型' ? '实操案例' : '内容资讯'
-const pageSubtitle = PRESET === '资讯型'
-  ? '聚合各平台的资讯型信息，按时间倒序排列'
-  : PRESET === '实操案例型'
-    ? '聚合各平台的实操案例，按创作价值排序'
-    : '聚合各平台的热点资讯，点击任意一条查看详情与原文来源'
+const scrollKey = `topic-list-scroll-${route.name || PRESET || 'all'}`
+const pageTitle = FORCE_COMMERCIAL
+  ? '疑似商单'
+  : PRESET === '资讯型'
+    ? '资讯型'
+    : PRESET === '实操案例型'
+      ? '实操案例'
+      : '内容资讯'
+const pageSubtitle = FORCE_COMMERCIAL
+  ? '基于信息选题结果，筛出公众号来源中命中商单结构的内容'
+  : PRESET === '资讯型'
+    ? '聚合各平台的资讯型信息，按时间倒序排列'
+    : PRESET === '实操案例型'
+      ? '聚合各平台的实操案例，按创作价值排序'
+      : '聚合各平台的热点资讯，点击任意一条查看详情与原文来源'
 
 const loading = ref(false)
 const refreshing = ref(false)
@@ -249,7 +259,7 @@ const filters = reactive({
   direction: '',
   freshness: '',
   mined: '',
-  commercial_only: false,
+  commercial_only: FORCE_COMMERCIAL,
   keyword: '',
   sort_by: defaultSortBy,    // 综合/实操=价值分；资讯型=时间倒序
   sort_order: 'desc',
@@ -318,6 +328,7 @@ const quickFilterByMined = (val) => {
 }
 
 const toggleCommercialOnly = () => {
+  if (FORCE_COMMERCIAL) return
   filters.commercial_only = !filters.commercial_only
   reloadFromStart()
 }
@@ -327,7 +338,7 @@ const resetAllFilters = () => {
   filters.direction = ''
   filters.freshness = ''
   filters.mined = ''
-  filters.commercial_only = false
+  filters.commercial_only = FORCE_COMMERCIAL
   filters.keyword = ''
   reloadFromStart()
 }
@@ -354,7 +365,7 @@ const restoreFromQuery = () => {
   filters.direction   = q.direction   ?? ''
   filters.freshness   = q.freshness   ?? ''
   filters.mined       = q.mined       ?? ''
-  filters.commercial_only = q.commercial_only === 'true'
+  filters.commercial_only = FORCE_COMMERCIAL || q.commercial_only === 'true'
   filters.keyword     = q.keyword     ?? ''
   filters.sort_by     = q.sort_by     ?? defaultSortBy
   filters.sort_order  = q.sort_order  ?? 'desc'
@@ -371,7 +382,7 @@ const syncToQuery = () => {
   if (filters.direction)                q.direction = filters.direction
   if (filters.freshness)                q.freshness = filters.freshness
   if (filters.mined)                    q.mined = filters.mined
-  if (filters.commercial_only)          q.commercial_only = 'true'
+  if (!FORCE_COMMERCIAL && filters.commercial_only) q.commercial_only = 'true'
   if (filters.keyword)                  q.keyword = filters.keyword
   router.replace({ query: q })
 }
@@ -445,7 +456,7 @@ onActivated(() => {
 // 只有"筛选/排序真正变化"才重载；从详情返回时 query 和上次加载的一样 → 不重载
 watch(() => route.query, (newQ) => {
   if (!isActive.value) return
-  if (!['TopicClusters', 'Home', 'ContentInfo', 'ContentInfoNews', 'ContentInfoCases'].includes(route.name)) return
+  if (!['TopicClusters', 'Home', 'ContentInfo', 'ContentInfoNews', 'ContentInfoCases', 'ContentInfoCommercial'].includes(route.name)) return
   const s = JSON.stringify(newQ)
   if (s === lastLoadedQueryStr) return
   lastLoadedQueryStr = s
@@ -474,6 +485,7 @@ const loadClusters = async (restoreScroll = false) => {
     }
     if (filters.keyword) params.keyword = filters.keyword
     if (filters.commercial_only) params.commercial_only = true
+    if (WECHAT_ONLY) params.wechat_only = true
 
     const res = await get('/topic-clusters', params)
     clusters.value = res.data.items || []
@@ -515,6 +527,7 @@ const loadNextPage = async () => {
     }
     if (filters.keyword) params.keyword = filters.keyword
     if (filters.commercial_only) params.commercial_only = true
+    if (WECHAT_ONLY) params.wechat_only = true
 
     const res = await get('/topic-clusters', params)
     const newItems = res.data.items || []
@@ -724,6 +737,9 @@ const formatFreshness = (val) => {
   background: #D68B16;
   color: #fff;
   border-color: #D68B16;
+}
+.type-chip-locked {
+  cursor: default;
 }
 .chip-tip {
   font-size: 11px;

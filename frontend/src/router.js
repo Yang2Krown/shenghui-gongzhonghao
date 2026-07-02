@@ -37,9 +37,9 @@ const routes = [
       },
       {
         path: 'content-info/commercial',
-        name: 'CommercialRawInfos',
-        component: () => import('@/pages/topics/CommercialRawInfoList.vue'),
-        meta: { title: '疑似商单' }
+        name: 'ContentInfoCommercial',
+        component: () => import('@/pages/topics/TopicClusterList.vue'),
+        meta: { title: '疑似商单', commercialOnly: true, wechatOnly: true }
       },
       // 话题库（保留旧路由，兼容）
       {

@@ -115,6 +115,7 @@ async def get_topic_clusters(
     freshness: Optional[str] = Query(None),
     keyword: Optional[str] = Query(None),
     commercial_only: bool = Query(False, description="True=仅显示含疑似商单原文的话题"),
+    wechat_only: bool = Query(False, description="True=仅按公众号来源过滤/统计疑似商单"),
     sort_by: str = Query("display_score", description="display_score / heat_score / created_at / source_count"),
     sort_order: str = Query("desc"),
     balanced: bool = Query(True, description="True=每类保底配额，False=纯分数排序"),
@@ -180,14 +181,17 @@ async def get_topic_clusters(
             )
         )
     if commercial_only:
-        commercial_raw_exists = (
-            select(RawInfo.id)
-            .where(
-                RawInfo.info_cluster_id == InfoCluster.id,
-                RawInfo.commercial_level.in_(["suspected", "likely"]),
-            )
-            .exists()
+        commercial_raw_q = select(RawInfo.id).where(
+            RawInfo.info_cluster_id == InfoCluster.id,
+            RawInfo.commercial_level.in_(["suspected", "likely"]),
         )
+        if wechat_only:
+            commercial_raw_q = (
+                commercial_raw_q
+                .join(SourceRegistry, RawInfo.source_registry_id == SourceRegistry.id)
+                .where(SourceRegistry.source_type.in_(["exa_wechat", "sogou_wechat", "gzh_explosive"]))
+            )
+        commercial_raw_exists = commercial_raw_q.exists()
         base_filter.append(commercial_raw_exists)
 
     # display_score 表达式（与 SQL CASE 保持一致）
@@ -293,13 +297,21 @@ async def get_topic_clusters(
         )
         candidate_counts = {row[0]: row[1] for row in count_result.all()}
 
-        commercial_count_result = await db.execute(
+        commercial_count_q = (
             select(RawInfo.info_cluster_id, func.count(RawInfo.id))
             .where(
                 RawInfo.info_cluster_id.in_(cluster_ids),
                 RawInfo.commercial_level.in_(["suspected", "likely"]),
             )
-            .group_by(RawInfo.info_cluster_id)
+        )
+        if wechat_only:
+            commercial_count_q = (
+                commercial_count_q
+                .join(SourceRegistry, RawInfo.source_registry_id == SourceRegistry.id)
+                .where(SourceRegistry.source_type.in_(["exa_wechat", "sogou_wechat", "gzh_explosive"]))
+            )
+        commercial_count_result = await db.execute(
+            commercial_count_q.group_by(RawInfo.info_cluster_id)
         )
         commercial_counts = {row[0]: row[1] for row in commercial_count_result.all()}
 
