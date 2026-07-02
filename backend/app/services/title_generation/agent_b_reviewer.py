@@ -2,11 +2,12 @@
 Agent B - 标题评审员
 
 角色定位: 公众号运营专家
-核心任务: 一票否决扫描 + 6维度评分 + 筛选Top 5
+核心任务: 一票否决扫描 + 8维度评分 + 筛选Top 5
 """
 
 from typing import Dict, Any, List
 import logging
+import re
 from pathlib import Path
 
 from app.services.title_generation.base import BaseAgent
@@ -56,15 +57,16 @@ def _robust_id_map(items: List[Dict[str, Any]], candidates: List[Dict[str, Any]]
 # 获取当前文件所在目录
 CURRENT_DIR = Path(__file__).parent
 
-# 7维度评分权重
+# 8维度评分权重
 SCORE_WEIGHTS = {
-    "three_eyes": 0.20,  # 三个一眼达标度
+    "three_eyes": 0.17,  # 三个一眼达标度
     "emotion_trigger": 0.18,  # 情绪触发力度
-    "afeng_style_fit": 0.15,  # 阿枫科技式真人实测口语感
-    "specificity": 0.14,  # 具体性
-    "outline_consistency": 0.15,  # 与大纲一致性
-    "method_maturity": 0.10,  # 套路成熟度
-    "length_compliance": 0.08,  # 长度合规
+    "infectiousness": 0.16,  # 感染力/传播冲动
+    "afeng_style_fit": 0.14,  # 阿枫科技式真人实测口语感
+    "specificity": 0.12,  # 具体性
+    "outline_consistency": 0.13,  # 与大纲一致性
+    "method_maturity": 0.06,  # 套路成熟度
+    "length_compliance": 0.04,  # 长度合规
 }
 
 # 一票否决条件
@@ -73,7 +75,11 @@ VETO_CONDITIONS = [
     "涉及政治/监管敏感",
     "人身攻击具体个人/团队",
     "虚假承诺（包过/100%保证等）",
+    "标题包含中英文冒号",
 ]
+
+
+COLON_PATTERN = re.compile(r"[：:]")
 
 
 class TitleReviewerAgent(BaseAgent):
@@ -81,7 +87,7 @@ class TitleReviewerAgent(BaseAgent):
     Agent B - 标题评审员
     
     角色: 公众号运营专家
-    任务: 一票否决扫描 + 6维度评分 + 筛选Top 5
+    任务: 一票否决扫描 + 8维度评分 + 筛选Top 5
     """
     
     def __init__(self):
@@ -119,7 +125,7 @@ class TitleReviewerAgent(BaseAgent):
         
         执行4步流程:
         1. 一票否决扫描
-        2. 6维度评分
+        2. 8维度评分
         3. 与大纲一致性交叉验证
         4. 筛选Top 5
         
@@ -148,7 +154,7 @@ class TitleReviewerAgent(BaseAgent):
                 "eliminated_count": len(eliminated),
             }
         
-        # Step 2 & 3: 6维度评分 + 大纲一致性验证
+        # Step 2 & 3: 8维度评分 + 大纲一致性验证
         scored_candidates = await self._score_candidates(survived, topic, outline)
         
         # Step 4: 筛选Top 5
@@ -228,6 +234,9 @@ class TitleReviewerAgent(BaseAgent):
         for promise in false_promises:
             if promise in title:
                 return f"虚假承诺: '{promise}'"
+
+        if COLON_PATTERN.search(title or ""):
+            return "标题包含中英文冒号"
         
         # 政治敏感词（简化版）
         political_words = ["政府", "政治", "敏感词1", "敏感词2"]
@@ -244,17 +253,19 @@ class TitleReviewerAgent(BaseAgent):
         outline: OutlineInfo,
     ) -> List[Dict[str, Any]]:
         """
-        对候选进行6维度评分
+        对候选进行8维度评分
 
         Schema 校验失败时自动重试，最多 3 次。
 
         维度:
-        1. 三个一眼达标度 (25%)
-        2. 情绪触发力度 (20%)
-        3. 具体性 (15%)
-        4. 长度合规 (10%)
-        5. 套路成熟度 (15%)
-        6. 与大纲一致性 (15%)
+        1. 三个一眼达标度 (17%)
+        2. 情绪触发力度 (18%)
+        3. 感染力/传播冲动 (16%)
+        4. 阿枫科技式真人实测口语感 (14%)
+        5. 具体性 (12%)
+        6. 与大纲一致性 (13%)
+        7. 套路成熟度 (6%)
+        8. 长度合规 (4%)
 
         Args:
             candidates: 候选列表
@@ -275,7 +286,7 @@ class TitleReviewerAgent(BaseAgent):
                 extra_hint = (
                     "\n\n【重要】上一次输出格式不符合要求。"
                     "请严格输出 JSON，必须包含 scores 数组，每个元素含 candidate_id、"
-                    "three_eyes、emotion_trigger、afeng_style_fit、specificity、"
+                    "three_eyes、emotion_trigger、infectiousness、afeng_style_fit、specificity、"
                     "outline_consistency、method_maturity、length_compliance、explanation 字段。"
                     "不要输出任何 markdown 标记或解释文字。"
                 )
@@ -328,6 +339,7 @@ class TitleReviewerAgent(BaseAgent):
                     "b_score_details": {
                         "three_eyes": score_data.get("three_eyes", 5),
                         "emotion_trigger": score_data.get("emotion_trigger", 5),
+                        "infectiousness": score_data.get("infectiousness", 5),
                         "afeng_style_fit": score_data.get("afeng_style_fit", 5),
                         "specificity": score_data.get("specificity", 5),
                         "outline_consistency": score_data.get("outline_consistency", 5),
@@ -346,8 +358,8 @@ class TitleReviewerAgent(BaseAgent):
         """
         计算加权总分
         
-        B评分总分 = 0.20×一眼 + 0.18×情绪 + 0.15×阿枫风格 + 0.14×具体性
-                  + 0.15×大纲一致 + 0.10×套路 + 0.08×长度
+        B评分总分 = 0.17×一眼 + 0.18×情绪 + 0.16×感染力 + 0.14×阿枫风格
+                  + 0.12×具体性 + 0.13×大纲一致 + 0.06×套路 + 0.04×长度
         
         Args:
             score_data: 评分数据
@@ -400,7 +412,7 @@ class TitleReviewerAgent(BaseAgent):
 
 你的核心能力：
 1. 从一堆候选中识别"哪些是真正有打开潜力的"
-2. 精通7维度评分体系
+2. 精通8维度评分体系
 3. 能准确判断标题与大纲的一致性
 
 你的评分原则：
@@ -447,10 +459,10 @@ class TitleReviewerAgent(BaseAgent):
 - 关键信息点: {', '.join(outline.key_points)}
 
 【你的任务】
-对每个候选进行7维度评分:
+对每个候选进行8维度评分:
 
 维度说明:
-1. 三个一眼达标度 (20%): 1秒内看出"讲什么"、"对我有什么用"、"跟我什么关系"
+1. 三个一眼达标度 (17%): 1秒内看出"讲什么"、"对我有什么用"、"跟我什么关系"
    - 9-10: 三个一眼全到位
    - 7-8: 达成2个，第3个隐含
    - 4-6: 只达成1个
@@ -462,36 +474,47 @@ class TitleReviewerAgent(BaseAgent):
    - 4-6: 弱触发1个情绪
    - 1-3: 无明显情绪触发
 
-3. 阿枫科技式真人实测口语感 (15%): 是否像 AI 科技博主刚测完后的口语判断
+3. 感染力/传播冲动 (16%): 读者看完是否产生"真的假的/这不就是我/我是不是错过了/它凭什么这么说"的冲动
+   - 9-10: 有明确情绪核，读者会想点开验证；不是概括，而是在表达强判断
+   - 7-8: 有态度、有悬念，但爆点还可以更锋利
+   - 4-6: 只是轻微吸引，更多是在描述内容
+   - 1-3: 平铺直叙、像摘要、像栏目标题
+
+4. 阿枫科技式真人实测口语感 (14%): 是否像 AI 科技博主刚测完后的口语判断
    - 9-10: 同时有新鲜感、实测感、反差/情绪判断、低门槛或具体收益，像真人分享
    - 7-8: 有明显实测/口语判断，略少一点反差或收益
    - 4-6: 有工具名和情绪词，但仍偏通用公众号标题
    - 1-3: 新闻稿、产品公告、论文题目、课程标题感很重
 
-4. 具体性 (14%): 数字/工具名/身份/场景/具体动作
+5. 具体性 (12%): 数字/工具名/身份/场景/具体动作
    - 9-10: 含3个及以上具体元素
    - 7-8: 含2个具体元素
    - 4-6: 含1个具体元素
    - 1-3: 无具体元素
 
-5. 与大纲一致性 (15%):
+6. 与大纲一致性 (13%):
    - 9-10: 标题承诺被大纲完美兑现
    - 7-8: 标题承诺被大纲兑现，但对应弱化
    - 4-6: 标题承诺被大纲部分兑现
    - 1-3: 标题与大纲明显脱节
    - 0: 标题承诺无法被大纲兑现
 
-6. 套路成熟度 (10%):
+7. 套路成熟度 (6%):
    - 9-10: 命中高爆款模式，使用准确
    - 7-8: 命中套路，使用基本到位
    - 4-6: 命中套路但生硬
    - 1-3: 不属于已知套路
 
-7. 长度合规 (8%):
+8. 长度合规 (4%):
    - 10: 标题长度适中，阅读流畅
    - 7-8: 稍长或稍短，但不影响理解
    - 4-6: 偏长或偏短，影响阅读体验
    - 1-3: 过短缺乏信息量，或过长影响传播
+
+【强降权/淘汰规则】
+- 如果标题只是介绍功能、没有作者态度、没有反差、没有具体动作，感染力最多 4 分。
+- 如果标题像"一文看懂/深度解析/全面盘点/正式发布/功能体验与应用场景分析"，感染力和阿枫风格最多 3 分。
+- 如果标题出现任何中英文冒号（`：` 或 `:`），包括"实测：..."、"某某工具：..."、"xxx: ..."，应一票否决。
 
 【输出格式】
 请严格按照以下JSON格式输出:
@@ -501,6 +524,7 @@ class TitleReviewerAgent(BaseAgent):
       "candidate_id": "1",
       "three_eyes": 8,
       "emotion_trigger": 7,
+      "infectiousness": 8,
       "afeng_style_fit": 8,
       "specificity": 9,
       "outline_consistency": 9,

@@ -3,7 +3,7 @@ Agent B - 标题评审员 单元测试
 
 测试覆盖:
 1. 一票否决扫描
-2. 7维度评分权重验证
+2. 8维度评分权重验证
 3. 加权总分计算
 4. Top 5筛选逻辑
 """
@@ -17,7 +17,7 @@ from tests.conftest import make_candidate, make_candidates
 
 
 class TestScoreWeights:
-    """测试7维度评分权重配置"""
+    """测试8维度评分权重配置"""
 
     def test_weight_sum_equals_1(self):
         """权重总和应等于1.0"""
@@ -26,25 +26,26 @@ class TestScoreWeights:
 
     def test_weight_values_match_design(self):
         """权重值应与设计文档一致"""
-        assert SCORE_WEIGHTS["three_eyes"] == 0.20
+        assert SCORE_WEIGHTS["three_eyes"] == 0.17
         assert SCORE_WEIGHTS["emotion_trigger"] == 0.18
-        assert SCORE_WEIGHTS["afeng_style_fit"] == 0.15
-        assert SCORE_WEIGHTS["specificity"] == 0.14
-        assert SCORE_WEIGHTS["outline_consistency"] == 0.15
-        assert SCORE_WEIGHTS["method_maturity"] == 0.10
-        assert SCORE_WEIGHTS["length_compliance"] == 0.08
+        assert SCORE_WEIGHTS["infectiousness"] == 0.16
+        assert SCORE_WEIGHTS["afeng_style_fit"] == 0.14
+        assert SCORE_WEIGHTS["specificity"] == 0.12
+        assert SCORE_WEIGHTS["outline_consistency"] == 0.13
+        assert SCORE_WEIGHTS["method_maturity"] == 0.06
+        assert SCORE_WEIGHTS["length_compliance"] == 0.04
 
-    def test_7_dimensions_defined(self):
-        """应定义7个评分维度"""
-        assert len(SCORE_WEIGHTS) == 7
+    def test_8_dimensions_defined(self):
+        """应定义8个评分维度"""
+        assert len(SCORE_WEIGHTS) == 8
 
 
 class TestVetoConditions:
     """测试一票否决条件"""
 
-    def test_4_veto_conditions(self):
-        """应定义4个一票否决条件，长度交给评分维度处理"""
-        assert len(VETO_CONDITIONS) == 4
+    def test_5_veto_conditions(self):
+        """应定义5个一票否决条件，长度交给评分维度处理"""
+        assert len(VETO_CONDITIONS) == 5
 
     def test_conditions_match_design(self):
         """条件应与设计文档一致"""
@@ -53,6 +54,7 @@ class TestVetoConditions:
         assert "政治" in conditions_text
         assert "人身攻击" in conditions_text
         assert "虚假承诺" in conditions_text
+        assert "冒号" in conditions_text
 
 
 class TestCheckVetoWords:
@@ -96,6 +98,21 @@ class TestCheckVetoWords:
         """正常标题应返回空字符串"""
         result = self.agent._check_veto_words("用了一周Claude Goal的体验")
         assert result == ""
+
+    def test_colon_feature_list_rejected(self):
+        """冒号后堆功能点结构应被否决"""
+        result = self.agent._check_veto_words("腾讯Marvis实测：OS操控、本地隐私、远程控制")
+        assert "冒号" in result
+
+    def test_single_colon_without_list_rejected(self):
+        """单个冒号也应否决"""
+        result = self.agent._check_veto_words("真实病例测评4款AI：搜索不等于临床思维")
+        assert "冒号" in result
+
+    def test_user_reported_colon_title_rejected(self):
+        """用户反馈的实测冒号结构应否决"""
+        result = self.agent._check_veto_words("QoderWork终于来了，实测：它居然会自己检查自己改")
+        assert "冒号" in result
 
     def test_empty_title_returns_empty(self):
         """空标题应返回空字符串"""
@@ -170,6 +187,28 @@ class TestVetoScan:
         assert len(survived) == 0
         assert len(eliminated) == 2
 
+    def test_colon_feature_list_eliminated(self):
+        """冒号后堆多个功能点的标题应被淘汰"""
+        candidates = [
+            make_candidate("c1", "腾讯Marvis实测：OS操控、本地隐私、远程控制", 24),
+            make_candidate("c2", "腾讯Marvis实测，终于有点贾维斯那味了", 21),
+        ]
+        eliminated, survived = self.agent._veto_scan(candidates)
+        assert len(eliminated) == 1
+        assert len(survived) == 1
+        assert "冒号" in eliminated[0]["elimination_reason"]
+
+    def test_single_colon_eliminated(self):
+        """单个冒号结构也应被淘汰"""
+        candidates = [
+            make_candidate("c1", "QoderWork终于来了，实测：它居然会自己检查自己改", 28),
+            make_candidate("c2", "QoderWork终于来了，它居然会自己检查自己改", 25),
+        ]
+        eliminated, survived = self.agent._veto_scan(candidates)
+        assert len(eliminated) == 1
+        assert len(survived) == 1
+        assert "冒号" in eliminated[0]["elimination_reason"]
+
     def test_boundary_length_10_survives(self):
         """恰好10字的标题应存活"""
         candidates = [
@@ -218,6 +257,7 @@ class TestCalculateWeightedScore:
         score_data = {
             "three_eyes": 10,
             "emotion_trigger": 10,
+            "infectiousness": 10,
             "afeng_style_fit": 10,
             "specificity": 10,
             "length_compliance": 10,
@@ -232,6 +272,7 @@ class TestCalculateWeightedScore:
         score_data = {
             "three_eyes": 0,
             "emotion_trigger": 0,
+            "infectiousness": 0,
             "afeng_style_fit": 0,
             "specificity": 0,
             "length_compliance": 0,
@@ -244,15 +285,16 @@ class TestCalculateWeightedScore:
     def test_weighted_calculation(self):
         """验证加权计算公式正确"""
         score_data = {
-            "three_eyes": 8,       # 8 * 0.20 = 1.6
+            "three_eyes": 8,       # 8 * 0.17 = 1.36
             "emotion_trigger": 7,   # 7 * 0.18 = 1.26
-            "afeng_style_fit": 8,   # 8 * 0.15 = 1.2
-            "specificity": 9,       # 9 * 0.14 = 1.26
-            "outline_consistency": 9, # 9 * 0.15 = 1.35
-            "method_maturity": 8,   # 8 * 0.10 = 0.8
-            "length_compliance": 10, # 10 * 0.08 = 0.8
+            "infectiousness": 8,   # 8 * 0.16 = 1.28
+            "afeng_style_fit": 8,   # 8 * 0.14 = 1.12
+            "specificity": 9,       # 9 * 0.12 = 1.08
+            "outline_consistency": 9, # 9 * 0.13 = 1.17
+            "method_maturity": 8,   # 8 * 0.06 = 0.48
+            "length_compliance": 10, # 10 * 0.04 = 0.4
         }
-        expected = 1.6 + 1.26 + 1.2 + 1.26 + 1.35 + 0.8 + 0.8  # = 8.27
+        expected = 1.36 + 1.26 + 1.28 + 1.12 + 1.08 + 1.17 + 0.48 + 0.4  # = 8.15
         result = self.agent._calculate_weighted_score(score_data)
         assert abs(result - expected) < 0.01
 
@@ -263,14 +305,14 @@ class TestCalculateWeightedScore:
             # 缺失其他维度
         }
         result = self.agent._calculate_weighted_score(score_data)
-        # 10*0.20 + 5*0.18 + 5*0.15 + 5*0.14 + 5*0.15 + 5*0.10 + 5*0.08
-        expected = 2.0 + 0.9 + 0.75 + 0.7 + 0.75 + 0.5 + 0.4  # = 6.0
+        # 10*0.17 + 5*0.18 + 5*0.16 + 5*0.14 + 5*0.12 + 5*0.13 + 5*0.06 + 5*0.04
+        expected = 1.7 + 0.9 + 0.8 + 0.7 + 0.6 + 0.65 + 0.3 + 0.2  # = 5.85
         assert abs(result - expected) < 0.01
 
-    def test_three_eyes_has_highest_weight(self):
-        """三个一眼应有最高权重"""
+    def test_emotion_trigger_has_highest_weight(self):
+        """情绪触发应有最高权重，避免标题过平"""
         max_weight_key = max(SCORE_WEIGHTS, key=SCORE_WEIGHTS.get)
-        assert max_weight_key == "three_eyes"
+        assert max_weight_key == "emotion_trigger"
 
 
 class TestSelectTop5:

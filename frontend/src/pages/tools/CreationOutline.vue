@@ -340,6 +340,8 @@ const handleGenerate = async () => {
       return
     }
 
+    sessionStorage.setItem('creation_outline_auto_candidate_id', String(candidateId))
+
     router.push({
       path: '/creation/new',
       query: {

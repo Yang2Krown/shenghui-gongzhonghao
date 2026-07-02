@@ -121,7 +121,11 @@
 
       <!-- 右侧：Agent 反馈 -->
       <div class="result-right">
-        <AgentFeedbackPanel :agents="agentFeedback" subtitle="标题流水线：A 创作 → B 评分 → C 点击预测 → D 综合判定 Top 5" />
+        <AgentFeedbackPanel
+          :agents="agentFeedback"
+          subtitle="标题流水线：A 创作 → B 评分 → C 点击预测 → D 综合判定 Top 5"
+          compact
+        />
       </div>
     </div>
 
@@ -422,13 +426,14 @@ watch(() => reevaluateProgress.error.value, (newError) => {
 
 // ── Agent 反馈数据组装 ────────────────────────────
 const B_DIMENSIONS = [
-  { key: 'three_eyes', label: '三个一眼达标度', weight: 0.20 },
+  { key: 'three_eyes', label: '三个一眼达标度', weight: 0.17 },
   { key: 'emotion_trigger', label: '情绪触发力度', weight: 0.18 },
-  { key: 'afeng_style_fit', label: '实测口语感', weight: 0.15 },
-  { key: 'specificity', label: '具体性', weight: 0.14 },
-  { key: 'outline_consistency', label: '与大纲一致性', weight: 0.15 },
-  { key: 'method_maturity', label: '套路成熟度', weight: 0.10 },
-  { key: 'length_compliance', label: '长度合规', weight: 0.08 },
+  { key: 'infectiousness', label: '感染力', weight: 0.16 },
+  { key: 'afeng_style_fit', label: '实测口语感', weight: 0.14 },
+  { key: 'specificity', label: '具体性', weight: 0.12 },
+  { key: 'outline_consistency', label: '与大纲一致性', weight: 0.13 },
+  { key: 'method_maturity', label: '套路成熟度', weight: 0.06 },
+  { key: 'length_compliance', label: '长度合规', weight: 0.04 },
 ]
 
 const agentFeedback = computed(() => {

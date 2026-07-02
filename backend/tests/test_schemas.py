@@ -120,6 +120,7 @@ class TestBScoreDetails:
         scores = BScoreDetails(
             three_eyes=8.0,
             emotion_trigger=7.0,
+            infectiousness=8.0,
             afeng_style_fit=8.0,
             specificity=9.0,
             length_compliance=10.0,
@@ -133,6 +134,7 @@ class TestBScoreDetails:
         scores = BScoreDetails(
             three_eyes=0,
             emotion_trigger=0,
+            infectiousness=0,
             afeng_style_fit=0,
             specificity=0,
             length_compliance=0,
@@ -146,6 +148,7 @@ class TestBScoreDetails:
         scores = BScoreDetails(
             three_eyes=10,
             emotion_trigger=10,
+            infectiousness=10,
             afeng_style_fit=10,
             specificity=10,
             length_compliance=10,
@@ -160,6 +163,7 @@ class TestBScoreDetails:
             BScoreDetails(
                 three_eyes=11,
                 emotion_trigger=7,
+                infectiousness=8,
                 afeng_style_fit=8,
                 specificity=9,
                 length_compliance=10,
@@ -173,6 +177,7 @@ class TestBScoreDetails:
             BScoreDetails(
                 three_eyes=-1,
                 emotion_trigger=7,
+                infectiousness=8,
                 afeng_style_fit=8,
                 specificity=9,
                 length_compliance=10,

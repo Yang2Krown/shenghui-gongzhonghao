@@ -202,6 +202,7 @@ const props = defineProps({
   agents: { type: Array, default: () => [] },
   subtitle: { type: String, default: '' },
   defaultExpand: { type: Boolean, default: true },
+  compact: { type: Boolean, default: false },
 })
 
 const expandedSet = ref(new Set())
@@ -226,9 +227,18 @@ watch(
   () => props.agents,
   () => {
     if (props.defaultExpand) {
-      expandedSet.value = new Set(
-        (props.agents || []).map((a, i) => agentKey(a, i))
-      )
+      const agents = props.agents || []
+      if (props.compact) {
+        const scoredIndex = agents.findIndex(a => a.dimensions && a.dimensions.length)
+        const firstIndex = scoredIndex >= 0 ? scoredIndex : 0
+        expandedSet.value = agents[firstIndex]
+          ? new Set([agentKey(agents[firstIndex], firstIndex)])
+          : new Set()
+      } else {
+        expandedSet.value = new Set(
+          agents.map((a, i) => agentKey(a, i))
+        )
+      }
     }
   },
   { immediate: true }
@@ -269,11 +279,11 @@ function barWidth(s, max = 10) {
 }
 
 // ── 雷达图 ──
-const svgWidth = 520
-const svgHeight = 380
-const radarRadius = 120
+const svgWidth = 360
+const svgHeight = 240
+const radarRadius = 72
 const cx = svgWidth / 2
-const cy = svgHeight / 2 + 10
+const cy = svgHeight / 2 + 4
 const gridLevels = [2, 4, 6, 8, 10]
 
 // 多边形顶点（n 边形，从正上方顺时针）
@@ -333,7 +343,7 @@ const dataPolygon = computed(() => {
 function labelPoint(idx) {
   const n = currentDimCount.value
   if (!n) return { x: 0, y: 0 }
-  const r = radarRadius + 46
+  const r = radarRadius + 32
   const angle = (Math.PI * 2 * idx) / n - Math.PI / 2
   return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) }
 }
@@ -347,7 +357,7 @@ function scoreBubble(dim) {
   const n = agent.dimensions.length
   if (idx < 0 || !n) return { x: 0, y: 0 }
   const ratio = Math.min(1, (Number(dim.score) || 0) / (dim.max || 10))
-  const r = radarRadius * ratio + 22
+  const r = radarRadius * ratio + 15
   const angle = (Math.PI * 2 * idx) / n - Math.PI / 2
   return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) }
 }
@@ -379,13 +389,12 @@ function shortLabel(label) {
 
 <style scoped>
 .agent-feedback-panel {
-  height: 100%;
   display: flex;
   flex-direction: column;
 }
 
 .panel-header {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 /* ── 空状态 ── */
@@ -411,7 +420,8 @@ function shortLabel(label) {
 
 .pipeline-step {
   display: flex;
-  gap: 16px;
+  align-items: flex-start;
+  gap: 14px;
   position: relative;
 }
 
@@ -485,8 +495,7 @@ function shortLabel(label) {
 
 .timeline-line {
   width: 2px;
-  flex: 1;
-  min-height: 16px;
+  height: 14px;
   background: var(--line);
   margin: 4px 0;
 }
@@ -522,7 +531,7 @@ function shortLabel(label) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 11px 16px;
+  padding: 10px 14px;
   cursor: pointer;
   user-select: none;
   gap: 12px;
@@ -649,10 +658,10 @@ function shortLabel(label) {
 
 /* ── 卡片内容 ── */
 .card-body {
-  padding: 0 16px 14px;
+  padding: 0 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 /* 折叠动画 */
@@ -672,7 +681,7 @@ function shortLabel(label) {
 
 /* ── 内容区块 ── */
 .section {
-  padding-top: 12px;
+  padding-top: 10px;
   border-top: 1px solid var(--line);
 }
 
@@ -682,7 +691,7 @@ function shortLabel(label) {
   color: var(--ink-3);
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 /* ── 综述 ── */
@@ -694,8 +703,8 @@ function shortLabel(label) {
 .summary-text {
   font-size: 13px;
   color: var(--ink-2);
-  line-height: 1.7;
-  padding: 10px 14px;
+  line-height: 1.55;
+  padding: 9px 12px;
   background: var(--ivory);
   border-radius: var(--r-md);
   border-left: 3px solid var(--line);
@@ -707,11 +716,13 @@ function shortLabel(label) {
   display: flex;
   justify-content: center;
   padding: 0;
+  max-height: 250px;
 }
 
 .radar-svg {
   width: 100%;
-  max-width: 520px;
+  max-width: 360px;
+  height: auto;
 }
 
 .radar-grid-line {

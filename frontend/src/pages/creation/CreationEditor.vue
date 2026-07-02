@@ -131,37 +131,62 @@ const clusterId = computed(() => route.query.cluster_id || null)
 const topicTitle = computed(() => route.query.topic_title || '')
 const topicDirection = computed(() => route.query.topic_direction || '')
 const isEditing = computed(() => !!route.params.id)
-const autoGenerateOutline = computed(() => route.query.auto_generate === 'true')
+const autoGenerateOutlineFromQuery = computed(() => route.query.auto_generate === 'true')
 const autoGenerateContentFromQuery = computed(() => route.query.auto_generate_content === 'true')
 const autoGenerateTitleFromQuery = computed(() => route.query.auto_generate_title === 'true')
+const outlineEntryCandidateId = ref('')
+const contentEntryOutlineText = ref('')
+const titleEntrySourceText = ref('')
+
+if (route.query.auto_generate === 'true') {
+  outlineEntryCandidateId.value = sessionStorage.getItem('creation_outline_auto_candidate_id') || ''
+  if (outlineEntryCandidateId.value) {
+    sessionStorage.removeItem('creation_outline_auto_candidate_id')
+  }
+}
+
+if (route.query.auto_generate_content === 'true') {
+  contentEntryOutlineText.value = sessionStorage.getItem('creation_body_outline_text') || ''
+  if (contentEntryOutlineText.value) {
+    sessionStorage.removeItem('creation_body_outline_text')
+  }
+}
+
+if (route.query.auto_generate_title === 'true') {
+  titleEntrySourceText.value = sessionStorage.getItem('creation_title_content_text') || ''
+  if (titleEntrySourceText.value) {
+    sessionStorage.removeItem('creation_title_content_text')
+  }
+}
+
+const hasFreshOutlineEntry = computed(() => {
+  return autoGenerateOutlineFromQuery.value
+    && !!candidateId.value
+    && outlineEntryCandidateId.value === String(candidateId.value)
+})
+const hasStaleOutlineEntry = computed(() => autoGenerateOutlineFromQuery.value && !hasFreshOutlineEntry.value)
+const autoGenerateOutline = computed(() => hasFreshOutlineEntry.value)
+const hasFreshContentEntry = computed(() => autoGenerateContentFromQuery.value && !!contentEntryOutlineText.value)
+const hasStaleContentEntry = computed(() => autoGenerateContentFromQuery.value && !contentEntryOutlineText.value)
+const hasFreshTitleEntry = computed(() => autoGenerateTitleFromQuery.value && !!titleEntrySourceText.value)
+const hasStaleTitleEntry = computed(() => autoGenerateTitleFromQuery.value && !titleEntrySourceText.value)
 
 // 从 sessionStorage 读取正文生成入口传来的大纲文本
 const outlineTextFromQuery = computed(() => {
-  if (autoGenerateContentFromQuery.value) {
-    const text = sessionStorage.getItem('creation_body_outline_text') || ''
-    // 读取后清除，避免刷新页面重复使用
-    if (text) sessionStorage.removeItem('creation_body_outline_text')
-    return text
-  }
-  return ''
+  return hasFreshContentEntry.value ? contentEntryOutlineText.value : ''
 })
 
 // 从 sessionStorage 读取标题生成入口传来的正文文本
 const contentTextForTitle = computed(() => {
-  if (autoGenerateTitleFromQuery.value) {
-    const text = sessionStorage.getItem('creation_title_content_text') || ''
-    if (text) sessionStorage.removeItem('creation_title_content_text')
-    return text
-  }
-  return ''
+  return hasFreshTitleEntry.value ? titleEntrySourceText.value : ''
 })
 
 // 状态：根据 query 参数决定初始步骤
-const initialStep = autoGenerateTitleFromQuery.value ? 'title' : (autoGenerateContentFromQuery.value ? 'content' : 'outline')
+const initialStep = hasFreshTitleEntry.value ? 'title' : (hasFreshContentEntry.value ? 'content' : 'outline')
 const activeTab = ref(initialStep)
 const activeWorkflowStep = ref(initialStep)
-const autoGenerateContent = ref(autoGenerateContentFromQuery.value)
-const autoGenerateTitle = ref(autoGenerateTitleFromQuery.value)
+const autoGenerateContent = ref(hasFreshContentEntry.value)
+const autoGenerateTitle = ref(hasFreshTitleEntry.value)
 const saving = ref(false)
 const publishing = ref(false)
 const showPublishChoice = ref(false)
@@ -189,13 +214,13 @@ const contentStatus = ref('idle')
 const titleStatus = ref('idle')
 
 const steps = computed(() => {
-  if (autoGenerateTitleFromQuery.value) {
+  if (hasFreshTitleEntry.value) {
     // 从标题生成入口进来，只显示标题
     return [
       { key: 'title', label: '标题', status: titleStatus.value },
     ]
   }
-  if (autoGenerateContentFromQuery.value) {
+  if (hasFreshContentEntry.value) {
     // 从正文生成入口进来，跳过大纲，只显示正文和标题
     return [
       { key: 'content', label: '正文', status: contentStatus.value },
@@ -217,8 +242,8 @@ const stepToTab = {
 
 const canOpenStep = (key) => {
   if (key === 'outline') return true
-  if (key === 'content') return outlineStatus.value === 'completed' || autoGenerateContentFromQuery.value
-  if (key === 'title') return contentStatus.value === 'completed' || autoGenerateTitleFromQuery.value
+  if (key === 'content') return outlineStatus.value === 'completed' || hasFreshContentEntry.value
+  if (key === 'title') return contentStatus.value === 'completed' || hasFreshTitleEntry.value
   return false
 }
 
@@ -347,10 +372,23 @@ const restoreFromHistory = async (recordId) => {
 
 // 加载已有创作数据
 onMounted(async () =>  {
+  if (hasStaleOutlineEntry.value) {
+    router.replace({ name: 'CreationOutline' })
+    return
+  }
+  if (hasStaleContentEntry.value) {
+    router.replace({ name: 'CreationBody' })
+    return
+  }
+  if (hasStaleTitleEntry.value) {
+    router.replace({ name: 'CreationTitle' })
+    return
+  }
+
   // 捕获任意入口传入的输入文本（在 computed 清除 sessionStorage 之前）
   sourceText.value =
-    sessionStorage.getItem('creation_title_content_text') ||
-    sessionStorage.getItem('creation_body_outline_text') ||
+    titleEntrySourceText.value ||
+    contentEntryOutlineText.value ||
     ''
 
   // 优先：从历史记录恢复
