@@ -125,6 +125,13 @@ const routes = [
         component: () => import('@/pages/tools/WechatEditor.vue'),
         meta: { title: '公众号编辑器' }
       },
+      // ⚠️ 临时：公众号抓取测试页（feature 验证后整段删除）
+      {
+        path: 'tools/gzh-test',
+        name: 'GzhTest',
+        component: () => import('@/pages/tools/GzhTest.vue'),
+        meta: { title: '公众号抓取测试' }
+      },
       // ===== 我的创作已下线 → 重定向到选题列表 =====
       {
         path: 'creation',

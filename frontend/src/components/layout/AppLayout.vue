@@ -142,8 +142,8 @@ import { useUserStore } from '@/stores/user'
 import { useCreditStore } from '@/stores/credit'
 import InsufficientCreditsDialog from '@/components/credit/InsufficientCreditsDialog.vue'
 import {
-  Edit, Setting, ArrowRight, Expand, Fold,
-  Document, ChatDotSquare, Switch, EditPen, Clock
+  Edit, Setting, ArrowRight, Expand, Fold, User,
+  Document, ChatDotSquare, Switch, EditPen, Clock, View
 } from '@element-plus/icons-vue'
 
 // 自定义图标组件
@@ -256,6 +256,12 @@ const navItems = [
     label: '个人信息',
     icon: 'User',
   },
+  // ⚠️ 临时：公众号抓取测试（验证完后整段 + 路由 + 页面 + 后端 _test_gzh_fetch 一起删）
+  {
+    id: 'gzh-test',
+    label: '公众号抓取测试',
+    icon: 'View',
+  },
 ]
 
 // 当前激活路由
@@ -282,6 +288,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/content-imitate')) return 'content-imitate'
   if (path.startsWith('/history') || path.startsWith('/creation-history')) return 'creation-history'
   if (path.startsWith('/settings') || path.startsWith('/profile')) return 'profile'
+  if (path.startsWith('/tools/gzh-test')) return 'gzh-test'
   return 'content-info'
 })
 
@@ -337,6 +344,7 @@ const routeMap = {
   'creation-history': '/creation-history',
   'profile': '/profile',
   'creation': '/creation',
+  'gzh-test': '/tools/gzh-test',
 }
 
 // 导航

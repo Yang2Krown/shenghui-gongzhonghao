@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate, wechat_draft, content_continuation, content_polish, wechat_accounts, credits, credit_purchase, practical, feishu_brief, images, commercial
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate, wechat_draft, content_continuation, content_polish, wechat_accounts, credits, credit_purchase, practical, feishu_brief, images, commercial,_test_gzh_fetch
 
 api_router = APIRouter()
 
@@ -226,3 +226,16 @@ api_router.include_router(
     prefix="/images",
     tags=["图片上传"]
 )
+
+
+# ──── ⚠️ 临时测试路由：公众号抓取可视化 ────────────────────────
+# 实验性：只是让你看"公众号抓到了什么"，feature 验证完后：
+#   ① 删 backend/app/api/v1/_test_gzh_fetch.py
+#   ② 从这里移除这两行 include_router
+# 不动模型 / 不动表 / 不动 preprocess / 不动 Agent 流水线
+api_router.include_router(
+    _test_gzh_fetch.router,
+    prefix="/_test_gzh_fetch",
+    tags=["⚠️临时·公众号抓取测试"]
+)
+
