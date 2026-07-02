@@ -78,3 +78,5 @@ landing*.html
 
 # Docker compose override (local dev)
 docker-compose.override.yml
+
+docs/
