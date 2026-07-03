@@ -22,6 +22,7 @@ class FetchedItem:
     url: str
     summary: Optional[str] = None
     content: Optional[str] = None
+    content_html: Optional[str] = None
     author: Optional[str] = None
     published_at: Optional[datetime] = None
     engagement: Dict[str, Any] = field(default_factory=dict)

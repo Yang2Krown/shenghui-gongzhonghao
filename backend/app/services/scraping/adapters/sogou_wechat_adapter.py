@@ -177,9 +177,11 @@ class SogouWechatAdapter(SourceAdapter):
             async def _resolve(it: FetchedItem) -> FetchedItem:
                 async with sem:
                     mp_url = await _sogou_link_to_wechat(it.url, client)
-                    it.url, content = await resolve_wechat_permalink(mp_url)
+                    it.url, content, content_html = await resolve_wechat_permalink(mp_url)
                     if content:
                         it.content = content
+                    if content_html:
+                        it.content_html = content_html
                 return it
 
             resolved = await asyncio.gather(*[_resolve(it) for it in all_items], return_exceptions=True)
@@ -215,7 +217,7 @@ class SogouWechatAdapter(SourceAdapter):
                 async with sem:
                     try:
                         mp_url = await _sogou_link_to_wechat(it.url, client)
-                        url, content = await resolve_wechat_permalink(mp_url)
+                        url, content, _ = await resolve_wechat_permalink(mp_url)
                         if content:
                             return {"title": it.title, "url": url, "content": content}
                     except Exception as e:

@@ -32,6 +32,7 @@ class RawInfo(BaseModel):
     author = Column(String(200), nullable=True)
     summary = Column(Text, nullable=True)                              # 摘要 / 卡片文本
     content = Column(Text, nullable=True)                              # 全文（adapter 可选填，按需）
+    content_html = Column(Text, nullable=True)                             # 文章HTML快照（图片base64嵌入，自包含，永不过期）
     published_at = Column(DateTime, nullable=True, index=True)
     scraped_at = Column(DateTime, nullable=True, index=True)
 

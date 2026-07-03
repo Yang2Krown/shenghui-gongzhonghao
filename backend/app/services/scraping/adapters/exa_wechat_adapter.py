@@ -64,15 +64,16 @@ def _extract_wechat_article_body(html: str) -> Optional[str]:
 
 async def resolve_wechat_permalink(
     url: str, *, timeout: float = 10.0
-) -> tuple[str, Optional[str]]:
-    """把临时签名链接解析成永久链接，并尽量带回正文。
+) -> tuple[str, Optional[str], Optional[str]]:
+    """把临时签名链接解析成永久链接，并尽量带回正文和HTML快照。
 
-    返回 (permalink, content)。永久链/非微信链不抓页面，content 为 None
-    （它们不会过期，留到选题后再补抓，省成本）；临时链必须现在抓（signature
-    会过期），顺手把正文也抽出来一并落库——这是链接失效前唯一能拿到正文的时刻。
+    返回 (permalink, content, content_html)。永久链/非微信链不抓页面，
+    content 和 content_html 为 None（它们不会过期，留到选题后再补抓，省成本）；
+    临时链必须现在抓（signature 会过期），顺手把正文和HTML快照也抽出来一并落库——
+    这是链接失效前唯一能拿到正文的时刻。
     """
     if "mp.weixin.qq.com" not in url or _is_permanent_wechat_url(url):
-        return url, None
+        return url, None, None
     try:
         async with httpx.AsyncClient(
             follow_redirects=True, timeout=timeout,
@@ -82,7 +83,7 @@ async def resolve_wechat_permalink(
         body = resp.text
         if "已过期" in body:
             logger.warning(f"微信链接抓取时已过期，无法解析永久地址: {url[:80]}")
-            return url, None
+            return url, None, None
 
         # 解析永久链接：302 落地 → og:url → 正文 /s/<token> → biz/mid/idx/sn 拼接
         permalink = url
@@ -107,11 +108,31 @@ async def resolve_wechat_permalink(
             else:
                 logger.warning(f"未能从微信文章页提取永久链接，保留原链接: {url[:80]}")
 
-        # 趁页面已在手，顺手抽正文（临时链失效前唯一能拿到正文的时刻）
-        return permalink, _extract_wechat_article_body(body)
+        # 趁页面已在手，顺手抽正文纯文本 + HTML快照（临时链失效前唯一能拿到正文的时刻）
+        content = _extract_wechat_article_body(body)
+
+        # HTML快照：提取正文HTML + 图片base64嵌入 + 公众号风格CSS包装
+        content_html = None
+        try:
+            from app.services.scraping.link_extractor import (
+                _extract_wechat_content_html, _embed_images_as_base64,
+                _wrap_snapshot_html, _extract_wechat_var,
+            )
+            raw_html = _extract_wechat_content_html(body)
+            if raw_html:
+                snap_title = _extract_wechat_var(body, 'msg_title') or ''
+                snap_author = _extract_wechat_var(body, 'nickname') or ''
+                embedded = await _embed_images_as_base64(raw_html, _BROWSER_UA)
+                content_html = _wrap_snapshot_html(
+                    embedded, snap_title.strip(), snap_author.strip(),
+                )
+        except Exception as e:
+            logger.debug(f"HTML快照提取失败（不影响主流程）: {e}")
+
+        return permalink, content, content_html
     except Exception as e:
         logger.warning(f"微信永久链接解析失败，保留原链接: {type(e).__name__}: {e}")
-    return url, None
+    return url, None, None
 
 
 async def resolve_items_permalinks(
@@ -125,9 +146,11 @@ async def resolve_items_permalinks(
 
     async def _one(it: FetchedItem) -> FetchedItem:
         async with sem:
-            it.url, content = await resolve_wechat_permalink(it.url)
+            it.url, content, content_html = await resolve_wechat_permalink(it.url)
             if content:
                 it.content = content
+            if content_html:
+                it.content_html = content_html
         return it
 
     resolved = await asyncio.gather(*[_one(it) for it in items], return_exceptions=True)

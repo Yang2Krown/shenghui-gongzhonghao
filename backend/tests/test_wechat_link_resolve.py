@@ -78,20 +78,20 @@ async def test_resolve_permalink():
         exa.httpx.AsyncClient = lambda *a, **k: _FakeClient(resp)
 
     # 永久链：不抓页面，content=None
-    u, c = await resolve_wechat_permalink("https://mp.weixin.qq.com/s/AbC")
+    u, c, _ = await resolve_wechat_permalink("https://mp.weixin.qq.com/s/AbC")
     assert (u, c) == ("https://mp.weixin.qq.com/s/AbC", None), (u, c)
 
     # 临时链 + 302 落地永久链 + 正文页：永久链 + 抽到正文
     art = ('<div id="js_content"><p>' + ("正文段落很长。" * 30) + "</p></div><div class=\"rich_media_tool\">")
     patch(_FakeResp(art, "https://mp.weixin.qq.com/s/Final123"))
-    u, c = await resolve_wechat_permalink("https://mp.weixin.qq.com/s?src=11&timestamp=1&signature=sig")
+    u, c, _ = await resolve_wechat_permalink("https://mp.weixin.qq.com/s?src=11&timestamp=1&signature=sig")
     assert u == "https://mp.weixin.qq.com/s/Final123", u
     assert c and len(c) >= 100, c
 
     # 临时链已过期：content=None，保留原链
     patch(_FakeResp("页面已过期，请重新打开", "https://mp.weixin.qq.com/s?signature=sig"))
     orig = "https://mp.weixin.qq.com/s?src=11&signature=sig"
-    u, c = await resolve_wechat_permalink(orig)
+    u, c, _ = await resolve_wechat_permalink(orig)
     assert u == orig and c is None, (u, c)
     print("✅ resolve_wechat_permalink 永久链不抓/临时链抓正文/过期兜底")
 

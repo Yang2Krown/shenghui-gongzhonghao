@@ -70,7 +70,7 @@
                   <a
                     v-for="raw in cluster.raw_infos"
                     :key="raw.id"
-                    :href="raw.url"
+                    :href="raw.has_snapshot ? '/api/v1/article-snapshots/' + raw.id : raw.url"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="source-card"

@@ -178,6 +178,7 @@ class ScrapingOrchestrator:
                 author=(item.author or "")[:200] or None,
                 summary=item.summary,
                 content=item.content,
+                content_html=item.content_html,
                 published_at=item.published_at,
                 scraped_at=utcnow(),
                 engagement=item.engagement or {},
