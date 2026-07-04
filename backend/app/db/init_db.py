@@ -51,6 +51,30 @@ async def _ensure_schema_compatibility(conn):
         "ON monitoring_alerts (handled_by_user_id)"
     ))
 
+    if not await conn.run_sync(has_column, "raw_infos", "content_html"):
+        await conn.execute(text("ALTER TABLE raw_infos ADD COLUMN content_html TEXT"))
+    if not await conn.run_sync(has_column, "raw_infos", "commercial_brand"):
+        await conn.execute(text("ALTER TABLE raw_infos ADD COLUMN commercial_brand VARCHAR(100)"))
+    if not await conn.run_sync(has_column, "raw_infos", "commercial_category"):
+        await conn.execute(text("ALTER TABLE raw_infos ADD COLUMN commercial_category VARCHAR(50)"))
+    if not await conn.run_sync(has_column, "raw_infos", "commercial_level"):
+        await conn.execute(text(
+            "ALTER TABLE raw_infos ADD COLUMN commercial_level VARCHAR(20) NOT NULL DEFAULT 'none'"
+        ))
+        await conn.execute(text("ALTER TABLE raw_infos ALTER COLUMN commercial_level DROP DEFAULT"))
+    if not await conn.run_sync(has_column, "raw_infos", "commercial_meta"):
+        await conn.execute(text("ALTER TABLE raw_infos ADD COLUMN commercial_meta JSONB"))
+
+    await conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_raw_infos_commercial_level ON raw_infos (commercial_level)"
+    ))
+    await conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_raw_infos_commercial_brand ON raw_infos (commercial_brand)"
+    ))
+    await conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_raw_infos_commercial_category ON raw_infos (commercial_category)"
+    ))
+
 
 async def create_initial_data():
     """创建初始数据"""

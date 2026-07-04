@@ -11,10 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.timezone import utcnow
 from app.models.api_request_log import ApiRequestLog
-from app.models.credit import CreditTransaction
+from app.models.credit import CreditTransaction, UserCredit
 from app.models.llm_monitoring import LlmCallLog, LlmModelPricing
+from app.models.payment import PaymentOrder
 from app.models.raw_info import RawInfo
 from app.models.source_registry import SourceRegistry
+from app.models.user import User
 from app.services.llm.monitoring import ensure_default_pricing
 
 
@@ -413,4 +415,215 @@ async def collect_api_health(db: AsyncSession) -> dict[str, Any]:
             for row in rows
             if row.status_code >= 500
         ][:50],
+    }
+
+
+async def collect_user_stats(db: AsyncSession) -> dict[str, Any]:
+    """用户统计：用户增长、充值、积分消耗、AI 成本和风险用户。"""
+    now = utcnow()
+    last_24h = now - timedelta(hours=24)
+    last_7d = now - timedelta(days=7)
+    last_30d = now - timedelta(days=30)
+
+    total_users = (await db.execute(select(func.count(User.id)))).scalar_one() or 0
+    active_24h = (await db.execute(
+        select(func.count(User.id)).where(User.last_login >= last_24h)
+    )).scalar_one() or 0
+    new_7d = (await db.execute(
+        select(func.count(User.id)).where(User.created_at >= last_7d)
+    )).scalar_one() or 0
+    paid_users = (await db.execute(
+        select(func.count(func.distinct(PaymentOrder.user_id))).where(PaymentOrder.status == "PAID")
+    )).scalar_one() or 0
+    low_balance_users = (await db.execute(
+        select(func.count(UserCredit.id)).where(UserCredit.balance < 20)
+    )).scalar_one() or 0
+
+    async def payment_sum_since(since):
+        return _money((await db.execute(
+            select(func.coalesce(func.sum(PaymentOrder.amount_fen), 0)).where(
+                PaymentOrder.status == "PAID",
+                PaymentOrder.paid_at >= since,
+            )
+        )).scalar_one()) / 100
+
+    consumed_30d = _int((await db.execute(
+        select(func.coalesce(func.sum(CreditTransaction.amount), 0)).where(
+            CreditTransaction.type == "consume",
+            CreditTransaction.created_at >= last_30d,
+        )
+    )).scalar_one())
+    llm_30d = (await db.execute(
+        select(
+            func.count(LlmCallLog.id),
+            func.coalesce(func.sum(LlmCallLog.cost_yuan), 0),
+            func.coalesce(func.sum(LlmCallLog.total_tokens), 0),
+        ).where(LlmCallLog.created_at >= last_30d)
+    )).one()
+
+    daily_seed = {
+        _date_key(now - timedelta(days=offset)): {
+            "date": _date_key(now - timedelta(days=offset)),
+            "new_users": 0,
+            "revenue_yuan": 0.0,
+            "credits_consumed": 0,
+            "llm_calls": 0,
+            "llm_cost_yuan": 0.0,
+        }
+        for offset in range(29, -1, -1)
+    }
+
+    for created_at, count in (await db.execute(
+        select(func.date(User.created_at), func.count(User.id))
+        .where(User.created_at >= last_30d)
+        .group_by(func.date(User.created_at))
+    )).all():
+        key = str(created_at)
+        if key in daily_seed:
+            daily_seed[key]["new_users"] = _int(count)
+
+    for paid_at, amount_fen in (await db.execute(
+        select(func.date(PaymentOrder.paid_at), func.coalesce(func.sum(PaymentOrder.amount_fen), 0))
+        .where(PaymentOrder.status == "PAID", PaymentOrder.paid_at >= last_30d)
+        .group_by(func.date(PaymentOrder.paid_at))
+    )).all():
+        key = str(paid_at)
+        if key in daily_seed:
+            daily_seed[key]["revenue_yuan"] = round(_money(amount_fen) / 100, 2)
+
+    for created_at, amount in (await db.execute(
+        select(func.date(CreditTransaction.created_at), func.coalesce(func.sum(CreditTransaction.amount), 0))
+        .where(CreditTransaction.type == "consume", CreditTransaction.created_at >= last_30d)
+        .group_by(func.date(CreditTransaction.created_at))
+    )).all():
+        key = str(created_at)
+        if key in daily_seed:
+            daily_seed[key]["credits_consumed"] = abs(_int(amount))
+
+    for created_at, calls, cost in (await db.execute(
+        select(
+            func.date(LlmCallLog.created_at),
+            func.count(LlmCallLog.id),
+            func.coalesce(func.sum(LlmCallLog.cost_yuan), 0),
+        )
+        .where(LlmCallLog.created_at >= last_30d)
+        .group_by(func.date(LlmCallLog.created_at))
+    )).all():
+        key = str(created_at)
+        if key in daily_seed:
+            daily_seed[key]["llm_calls"] = _int(calls)
+            daily_seed[key]["llm_cost_yuan"] = round(_money(cost), 4)
+
+    user_rows = (await db.execute(
+        select(
+            User,
+            UserCredit.balance,
+            UserCredit.total_purchased,
+            UserCredit.total_consumed,
+            func.coalesce(func.sum(case((PaymentOrder.status == "PAID", PaymentOrder.amount_fen), else_=0)), 0).label("paid_fen_30d"),
+        )
+        .outerjoin(UserCredit, UserCredit.user_id == User.id)
+        .outerjoin(
+            PaymentOrder,
+            (PaymentOrder.user_id == User.id) & (PaymentOrder.paid_at >= last_30d),
+        )
+        .group_by(User.id, UserCredit.balance, UserCredit.total_purchased, UserCredit.total_consumed)
+    )).all()
+
+    consumed_rows = (await db.execute(
+        select(CreditTransaction.user_id, func.coalesce(func.sum(CreditTransaction.amount), 0))
+        .where(CreditTransaction.type == "consume", CreditTransaction.created_at >= last_30d)
+        .group_by(CreditTransaction.user_id)
+    )).all()
+    consumed_by_user = {uid: abs(_int(amount)) for uid, amount in consumed_rows}
+
+    llm_rows = (await db.execute(
+        select(
+            LlmCallLog.user_id,
+            func.count(LlmCallLog.id),
+            func.coalesce(func.sum(LlmCallLog.cost_yuan), 0),
+            func.coalesce(func.sum(LlmCallLog.total_tokens), 0),
+        )
+        .where(LlmCallLog.created_at >= last_30d, LlmCallLog.user_id.is_not(None))
+        .group_by(LlmCallLog.user_id)
+    )).all()
+    llm_by_user = {
+        uid: {"calls": _int(calls), "cost_yuan": round(_money(cost), 4), "total_tokens": _int(tokens)}
+        for uid, calls, cost, tokens in llm_rows
+    }
+
+    items = []
+    for user, balance, total_purchased, total_consumed, paid_fen_30d in user_rows:
+        llm = llm_by_user.get(user.id, {"calls": 0, "cost_yuan": 0.0, "total_tokens": 0})
+        item = {
+            "id": user.id,
+            "username": user.username,
+            "phone": user.phone,
+            "role": user.role,
+            "is_active": user.is_active,
+            "balance": _int(balance),
+            "total_purchased": _int(total_purchased),
+            "total_consumed": _int(total_consumed),
+            "paid_yuan_30d": round(_money(paid_fen_30d) / 100, 2),
+            "credits_consumed_30d": consumed_by_user.get(user.id, 0),
+            "llm_calls_30d": llm["calls"],
+            "llm_cost_yuan_30d": llm["cost_yuan"],
+            "llm_tokens_30d": llm["total_tokens"],
+            "created_at": _iso(user.created_at),
+            "last_login": _iso(user.last_login),
+        }
+        item["risk_flags"] = []
+        if balance is not None and item["balance"] < 20:
+            item["risk_flags"].append("low_balance")
+        if item["llm_cost_yuan_30d"] >= 10 and item["paid_yuan_30d"] <= 0:
+            item["risk_flags"].append("high_cost_no_payment")
+        items.append(item)
+
+    top_cost_users = sorted(items, key=lambda x: (x["llm_cost_yuan_30d"], x["credits_consumed_30d"]), reverse=True)[:30]
+    low_balance_list = sorted(
+        [item for item in items if "low_balance" in item["risk_flags"]],
+        key=lambda x: (x["balance"], -x["credits_consumed_30d"]),
+    )[:50]
+
+    recent_payments = (await db.execute(
+        select(PaymentOrder, User.username, User.phone)
+        .join(User, User.id == PaymentOrder.user_id)
+        .order_by(PaymentOrder.created_at.desc())
+        .limit(50)
+    )).all()
+
+    return {
+        "generated_at": _iso(now),
+        "summary": {
+            "total_users": _int(total_users),
+            "active_users_24h": _int(active_24h),
+            "new_users_7d": _int(new_7d),
+            "paid_users": _int(paid_users),
+            "low_balance_users": _int(low_balance_users),
+            "revenue_24h": round(await payment_sum_since(last_24h), 2),
+            "revenue_7d": round(await payment_sum_since(last_7d), 2),
+            "revenue_30d": round(await payment_sum_since(last_30d), 2),
+            "credits_consumed_30d": abs(consumed_30d),
+            "llm_calls_30d": _int(llm_30d[0]),
+            "llm_cost_yuan_30d": round(_money(llm_30d[1]), 4),
+            "llm_tokens_30d": _int(llm_30d[2]),
+        },
+        "daily": list(daily_seed.values()),
+        "top_cost_users": top_cost_users,
+        "low_balance_users": low_balance_list,
+        "recent_payments": [
+            {
+                "id": order.id,
+                "user_id": order.user_id,
+                "username": username,
+                "phone": phone,
+                "package_name": order.package_name,
+                "amount_yuan": order.amount_yuan,
+                "credits": order.credits,
+                "status": order.status,
+                "created_at": _iso(order.created_at),
+                "paid_at": _iso(order.paid_at),
+            }
+            for order, username, phone in recent_payments
+        ],
     }

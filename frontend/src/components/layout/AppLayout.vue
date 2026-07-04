@@ -271,6 +271,7 @@ const navItems = [
       { id: 'admin-source-health', label: '数据源健康' },
       { id: 'admin-ai-costs', label: 'AI 成本' },
       { id: 'admin-api-health', label: '接口健康' },
+      { id: 'admin-user-stats', label: '用户统计' },
       { id: 'gzh-test', label: '公众号抓取测试' },
     ],
   },
@@ -305,6 +306,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/admin/source-health')) return 'admin-source-health'
   if (path.startsWith('/admin/ai-costs')) return 'admin-ai-costs'
   if (path.startsWith('/admin/api-health')) return 'admin-api-health'
+  if (path.startsWith('/admin/user-stats')) return 'admin-user-stats'
   if (path.startsWith('/admin')) return 'admin-dashboard'
   if (path.startsWith('/tools/gzh-test')) return 'gzh-test'
   return 'content-info'
@@ -366,6 +368,7 @@ const routeMap = {
   'admin-source-health': '/admin/source-health',
   'admin-ai-costs': '/admin/ai-costs',
   'admin-api-health': '/admin/api-health',
+  'admin-user-stats': '/admin/user-stats',
   'gzh-test': '/tools/gzh-test',
 }
 

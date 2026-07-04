@@ -161,6 +161,12 @@ const routes = [
         component: () => import('@/pages/admin/ApiHealth.vue'),
         meta: { title: '接口健康', requiresAdmin: true }
       },
+      {
+        path: 'admin/user-stats',
+        name: 'AdminUserStats',
+        component: () => import('@/pages/admin/UserStats.vue'),
+        meta: { title: '用户统计', requiresAdmin: true }
+      },
       // ===== 我的创作已下线 → 重定向到选题列表 =====
       {
         path: 'creation',

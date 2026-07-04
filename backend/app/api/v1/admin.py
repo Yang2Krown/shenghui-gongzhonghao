@@ -18,7 +18,7 @@ from app.models.monitoring import MonitoringAlert, MonitoringSnapshot
 from app.models.task import Task, TaskStatus
 from app.models.user import User
 from app.services.monitoring.checks import build_alert_specs, collect_admin_monitoring
-from app.services.monitoring.modules import collect_ai_costs, collect_api_health, collect_source_health
+from app.services.monitoring.modules import collect_ai_costs, collect_api_health, collect_source_health, collect_user_stats
 
 router = APIRouter()
 
@@ -257,6 +257,16 @@ async def monitoring_api_health(
     """接口 500/P95 独立监测。"""
     data = await collect_api_health(db)
     return {"code": 200, "message": "获取接口健康成功", "data": data}
+
+
+@router.get("/monitoring/user-stats", response_model=dict)
+async def monitoring_user_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+) -> Any:
+    """用户统计独立监测。"""
+    data = await collect_user_stats(db)
+    return {"code": 200, "message": "获取用户统计成功", "data": data}
 
 
 @router.get("/monitoring/snapshots", response_model=dict)
