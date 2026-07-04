@@ -40,5 +40,6 @@ import app.tasks.preprocess_tasks  # noqa: F401
 import app.tasks.topic_mining_tasks  # noqa: F401
 import app.tasks.commercial_tasks  # noqa: F401
 import app.tasks.cleanup_tasks  # noqa: F401
+import app.tasks.monitoring_tasks  # noqa: F401
 
 __all__ = ["celery_app"]

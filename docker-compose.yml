@@ -39,6 +39,7 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-here}
+      - SUPER_ADMIN_PHONE=${SUPER_ADMIN_PHONE:-18021751281}
       - OSS_ACCESS_KEY_ID=${OSS_ACCESS_KEY_ID:-}
       - OSS_ACCESS_KEY_SECRET=${OSS_ACCESS_KEY_SECRET:-}
       - OSS_ENDPOINT=${OSS_ENDPOINT:-}
@@ -91,6 +92,7 @@ services:
       - REDIS_PORT=6379
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - SUPER_ADMIN_PHONE=${SUPER_ADMIN_PHONE:-18021751281}
     depends_on:
       - backend
       - redis
@@ -115,6 +117,7 @@ services:
       - REDIS_PORT=6379
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - SUPER_ADMIN_PHONE=${SUPER_ADMIN_PHONE:-18021751281}
     depends_on:
       - backend
       - redis

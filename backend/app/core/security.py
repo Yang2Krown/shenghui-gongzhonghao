@@ -156,6 +156,30 @@ async def get_current_active_superuser(
     return current_user
 
 
+async def get_current_admin_user(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """获取当前管理员用户。"""
+    if current_user.role != "admin" and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="权限不足"
+        )
+    return current_user
+
+
+async def get_current_super_admin_user(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """获取当前最高管理员用户。"""
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="仅最高管理员可操作"
+        )
+    return current_user
+
+
 def decode_token(token: str) -> Optional[dict]:
     """解码令牌"""
     try:

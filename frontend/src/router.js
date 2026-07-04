@@ -135,7 +135,13 @@ const routes = [
         path: 'tools/gzh-test',
         name: 'GzhTest',
         component: () => import('@/pages/tools/GzhTest.vue'),
-        meta: { title: '公众号抓取测试' }
+        meta: { title: '公众号抓取测试', requiresAdmin: true }
+      },
+      {
+        path: 'admin',
+        name: 'AdminDashboard',
+        component: () => import('@/pages/admin/AdminDashboard.vue'),
+        meta: { title: '后台监测', requiresAdmin: true }
       },
       // ===== 我的创作已下线 → 重定向到选题列表 =====
       {
@@ -332,6 +338,8 @@ router.beforeEach((to, from, next) => {
       name: 'Landing',
       query: { redirect: to.fullPath }
     })
+  } else if (to.meta.requiresAdmin && !userStore.isAdmin) {
+    next({ path: '/' })
   } else if (isPublic && userStore.isAuthenticated && (to.name === 'Login' || to.name === 'Landing')) {
     next({ path: '/' })
   } else {

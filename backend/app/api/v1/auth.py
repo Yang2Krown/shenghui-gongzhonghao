@@ -31,6 +31,19 @@ from app.services.credit_service import CreditService
 router = APIRouter()
 
 
+async def _ensure_super_admin_by_phone(user: User, db: AsyncSession) -> User:
+    """手机号命中配置的最高管理员时，自动授予最高管理员权限。"""
+    if user.phone == settings.SUPER_ADMIN_PHONE and (
+        not user.is_superuser or user.role != "admin"
+    ):
+        user.is_superuser = True
+        user.role = "admin"
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    return user
+
+
 @router.post("/register", response_model=dict)
 async def register(
     user_in: UserCreate,
@@ -233,6 +246,8 @@ async def login_by_phone(
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f"新用户积分赠送失败: {e}")
+
+    user = await _ensure_super_admin_by_phone(user, db)
 
     if not user.is_active:
         raise HTTPException(

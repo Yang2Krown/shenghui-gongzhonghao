@@ -33,6 +33,12 @@ from app.models.credit import UserCredit, CreditTransaction, CreditPackage
 # 支付订单
 from app.models.payment import PaymentOrder
 
+# 管理员后台监测
+from app.models.monitoring import MonitoringAlert, MonitoringSnapshot
+
+# 管理员审计
+from app.models.admin_audit import AdminAuditLog
+
 __all__ = [
     # 旧模型（过渡期保留）
     "User",
@@ -67,4 +73,7 @@ __all__ = [
     "CreditTransaction",
     "CreditPackage",
     "PaymentOrder",
+    "MonitoringSnapshot",
+    "MonitoringAlert",
+    "AdminAuditLog",
 ]

@@ -16,7 +16,7 @@
 
         <!-- 导航菜单 -->
         <nav class="flex-1 overflow-y-auto" style="padding: 14px 12px; display: flex; flex-direction: column; gap: 3px; border-top: 1px solid var(--line);">
-          <template v-for="item in navItems" :key="item.id">
+          <template v-for="item in visibleNavItems" :key="item.id">
             <!-- 普通菜单项 -->
             <button
               v-if="!item.children"
@@ -207,6 +207,7 @@ const openGroups = reactive({
   'topic-info': true,
   create: true,
   rewrite: true,
+  admin: true,
 })
 
 // 导航结构
@@ -260,13 +261,19 @@ const navItems = [
     label: '个人信息',
     icon: 'User',
   },
-  // ⚠️ 临时：公众号抓取测试（验证完后整段 + 路由 + 页面 + 后端 _test_gzh_fetch 一起删）
   {
-    id: 'gzh-test',
-    label: '公众号抓取测试',
-    icon: 'View',
+    id: 'admin',
+    label: '后台管理',
+    icon: 'Setting',
+    adminOnly: true,
+    children: [
+      { id: 'admin-dashboard', label: '后台监测' },
+      { id: 'gzh-test', label: '公众号抓取测试' },
+    ],
   },
 ]
+
+const visibleNavItems = computed(() => navItems.filter(item => !item.adminOnly || userStore.isAdmin))
 
 // 当前激活路由
 const activeRoute = computed(() => {
@@ -292,6 +299,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/content-imitate')) return 'content-imitate'
   if (path.startsWith('/history') || path.startsWith('/creation-history')) return 'creation-history'
   if (path.startsWith('/settings') || path.startsWith('/profile')) return 'profile'
+  if (path.startsWith('/admin')) return 'admin-dashboard'
   if (path.startsWith('/tools/gzh-test')) return 'gzh-test'
   return 'content-info'
 })
@@ -299,7 +307,7 @@ const activeRoute = computed(() => {
 // 当前分组名
 const currentGroup = computed(() => {
   const id = activeRoute.value
-  for (const item of navItems) {
+  for (const item of visibleNavItems.value) {
     if (item.id === id) return null
     if (item.children?.some(c => c.id === id)) return item.label
   }
@@ -309,7 +317,7 @@ const currentGroup = computed(() => {
 // 当前标签
 const currentLabel = computed(() => {
   const id = activeRoute.value
-  for (const item of navItems) {
+  for (const item of visibleNavItems.value) {
     if (item.id === id) return item.label
     if (item.children) {
       const child = item.children.find(c => c.id === id)
@@ -348,6 +356,7 @@ const routeMap = {
   'creation-history': '/creation-history',
   'profile': '/profile',
   'creation': '/creation',
+  'admin-dashboard': '/admin',
   'gzh-test': '/tools/gzh-test',
 }
 

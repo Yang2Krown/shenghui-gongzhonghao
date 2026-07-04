@@ -99,4 +99,10 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute=10, hour=4),
         "kwargs": {"days": 14},
     },
+
+    # ── 管理员后台监测：内容供给链路、任务失败、用户健康概览 ──
+    "monitor-system": {
+        "task": "monitoring.system_check",
+        "schedule": crontab(minute="*/10"),
+    },
 }

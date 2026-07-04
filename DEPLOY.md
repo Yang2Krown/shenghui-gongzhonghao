@@ -48,6 +48,7 @@ vim backend/.env.production   # 填真实 password / API keys
 - `POSTGRES_PASSWORD` —— 强密码（数据库容器密码，别人猜不到的）
 - `DEEPSEEK_API_KEY` / `EMBEDDING_API_KEY` / `TOPHUB_API_KEY` —— 真实 key
 - `BACKEND_CORS_ORIGINS` —— 改成你的域名或 IP
+- `SUPER_ADMIN_PHONE` —— 超级管理员手机号，默认 `18021751281`。这个手机号登录后会自动成为超级管理员，可以进入后台并授权/取消其他管理员。
 
 ### Step 3：起服务
 
@@ -77,6 +78,23 @@ docker compose -f docker-compose.prod.yml logs -f celery-worker
 http://你的服务器IP/                  # 前端
 http://你的服务器IP/api/v1/topic-clusters?page_size=5  # 后端 API（要登录 token）
 ```
+
+后台验证：
+- 用 `SUPER_ADMIN_PHONE` 配置的手机号登录，左侧应该能看到「后台管理」。
+- 访问 `/admin` 能看到后台监测页；普通用户访问 `/admin` 和 `/tools/gzh-test` 应该被拦回首页。
+- 后台「管理员」区域可以授权/取消其他管理员；只有超级管理员可以做这个操作。
+
+监测任务验证：
+
+```bash
+# Celery beat 应该能看到 monitor-system 调度
+docker compose -f docker-compose.prod.yml logs --tail=200 celery-beat
+
+# Celery worker 应该能看到 monitoring.system_check 执行
+docker compose -f docker-compose.prod.yml logs --tail=200 celery-worker
+```
+
+监测相关表会随迁移自动创建：`monitoring_snapshots`、`monitoring_alerts`、`admin_audit_logs`。
 
 ### Step 5：触发一次手动抓取（确认管道通了）
 
@@ -124,6 +142,25 @@ docker compose -f docker-compose.prod.yml logs --tail=200 celery-beat
 # Celery worker 输出（实际执行）
 docker compose -f docker-compose.prod.yml logs --tail=200 celery-worker
 ```
+
+### 后台监测重点看什么
+
+后台监测分成两类：一类是系统有没有正常跑，另一类是面向用户的业务状态是否健康。
+
+系统运行：
+- 采集新鲜度：最近 2 小时是否有 `raw_infos` 入库。
+- 内容管道：最近 24 小时是否有 `info_clusters` 产出。
+- 预处理积压：`raw_infos.pending` 是否持续升高。
+- 任务失败：最近 24 小时失败任务数量和错误信息。
+- 定时任务：`celery-beat` 是否还在调度，`celery-worker` 是否还在消费。
+
+用户和运营：
+- 活跃用户：最近 24 小时登录用户数。
+- 用户余额：积分低于 10 的用户数量。
+- 管理员变更：谁授权/取消了管理员、谁处理了告警。
+- 失败任务归因：失败是否集中在某个用户、某类生成任务或某个外部 API。
+
+第一版后台已经覆盖以上核心项。后续如果用户量上来，可以继续加：登录失败次数、接口 4xx/5xx、API 耗时 P95、用户留存、充值/积分消耗、AI 调用成本、外部数据源成功率。
 
 ### 数据库备份
 

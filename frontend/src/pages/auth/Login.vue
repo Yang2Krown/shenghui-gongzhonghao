@@ -155,6 +155,7 @@ const handlePhoneLogin = async () => {
     userStore.refreshToken = refresh_token
     localStorage.setItem('token', access_token)
     localStorage.setItem('refreshToken', refresh_token)
+    localStorage.setItem('tokenSavedAt', String(Date.now()))
     await userStore.fetchUser()
     ElMessage.success('登录成功')
     router.push(route.query.redirect || '/')

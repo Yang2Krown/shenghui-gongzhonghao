@@ -14,12 +14,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_user
+from app.api.deps import get_current_admin_user
 from app.db.session import get_db
 from app.models.raw_info import RawInfo
 from app.models.source_registry import SourceRegistry, SourceAccount
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_admin_user)])
 
 # 当前被视为"公众号"的 source_type 集合 — 要加新类型直接展开这行
 GZH_SOURCE_TYPES = ("exa_wechat", "sogou_wechat", "gzh_explosive")
@@ -74,7 +74,6 @@ async def _ping() -> Any:
 @router.get("/summary", response_model=dict)
 async def gzh_summary(
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),  # 占位鉴权，保留登录态；可改成 admin 校验
 ) -> Any:
     """公众号抓取总览：每个号抓了多少篇、最早最新什么时候。
 
@@ -149,13 +148,6 @@ async def gzh_summary(
     )
     return {"code": 200, "ok": True, "data": resp.dict()}
 
-    resp = TestGzhFetchResponse(
-        total_accounts=len(accounts_info),
-        total_articles=total_articles,
-        accounts=accounts_info,
-    )
-    return {"code": 200, "ok": True, "data": resp.dict()}
-
 
 @router.get("/articles", response_model=dict)
 async def gzh_articles(
@@ -165,7 +157,6 @@ async def gzh_articles(
     limit: int = Query(50, ge=1, le=500, description="返回条数上限"),
     offset: int = Query(0, ge=0, description="偏移量"),
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
 ) -> Any:
     """看某个公众号（或全平台）抓到的具体文章列表，按 scraped_at 倒序."""
 
@@ -228,7 +219,6 @@ async def gzh_single_account(
     account_id: int = Path(..., ge=1, description="SourceAccount.id；>0"),
     limit: int = Query(200, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
 ) -> Any:
     """单个公众号详情：账号元信息 + 最近 N 篇文章."""
 
@@ -281,7 +271,6 @@ async def gzh_ungrouped_registry(
     offset: int = Query(0, ge=0),
     keyword: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
 ) -> Any:
     """查某个平台上「未匹配到订阅号」的文章（source_account_id IS NULL）。
 

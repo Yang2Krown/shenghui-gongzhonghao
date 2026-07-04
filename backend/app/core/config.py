@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # Celery配置
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+
+    # 管理员配置
+    SUPER_ADMIN_PHONE: str = "18021751281"
     
     # ====== LLM 配置 ======
     OPENAI_API_KEY: Optional[str] = None
