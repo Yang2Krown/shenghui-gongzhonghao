@@ -66,11 +66,11 @@ api_router.include_router(
     tags=["话题库"]
 )
 
-# 疑似商单审核路由
+# 潜在商单路由
 api_router.include_router(
     commercial.router,
     prefix="/commercial",
-    tags=["疑似商单"]
+    tags=["潜在商单"]
 )
 
 # 大纲路由

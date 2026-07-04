@@ -82,7 +82,7 @@
                         class="source-commercial-badge"
                         :title="raw.commercial_meta?.reason || '命中商业推广结构信号'"
                       >
-                        {{ raw.commercial_level === 'likely' ? '高可能商单' : '疑似商单' }}
+                        {{ raw.commercial_level === 'likely' ? '高概率商单' : '潜在商单' }}
                       </span>
                       <span v-if="raw.published_at" class="source-time">
                         {{ formatRelativeTime(raw.published_at) }}

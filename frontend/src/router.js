@@ -37,9 +37,14 @@ const routes = [
       },
       {
         path: 'content-info/commercial',
-        name: 'ContentInfoCommercial',
-        component: () => import('@/pages/topics/TopicClusterList.vue'),
-        meta: { title: '疑似商单', commercialOnly: true, wechatOnly: true }
+        redirect: '/potential-commercial'
+      },
+      // 潜在商单（顶级页面，时间轴视图）
+      {
+        path: 'potential-commercial',
+        name: 'PotentialCommercial',
+        component: () => import('@/pages/topics/PotentialCommercial.vue'),
+        meta: { title: '潜在商单' }
       },
       // 话题库（保留旧路由，兼容）
       {

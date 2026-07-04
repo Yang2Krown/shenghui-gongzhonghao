@@ -72,7 +72,7 @@
           @click="toggleCommercialOnly"
           :class="['type-chip', filters.commercial_only && 'type-chip-active', 'type-chip-commercial', FORCE_COMMERCIAL && 'type-chip-locked']"
         >
-          疑似商单
+          潜在商单
         </button>
       </div>
     </div>
@@ -198,7 +198,7 @@ const WECHAT_ONLY = route.meta?.wechatOnly === true
 const defaultSortBy = PRESET === '资讯型' ? 'created_at' : 'display_score'  // 资讯型按时间排，其余按价值分
 const scrollKey = `topic-list-scroll-${route.name || PRESET || 'all'}`
 const pageTitle = FORCE_COMMERCIAL
-  ? '疑似商单'
+  ? '潜在商单'
   : PRESET === '资讯型'
     ? '资讯型'
     : PRESET === '实操案例型'

@@ -48,6 +48,8 @@ class RawInfo(BaseModel):
     # 商单/商业软文检测结果（抓取落库后异步填充）
     commercial_level = Column(String(20), default="none", nullable=False, index=True)  # none/suspected/likely
     commercial_meta = Column(JSONField, default=dict)                                  # {product, reason, signals}
+    commercial_brand = Column(String(100), nullable=True, index=True)                  # 甲方/品牌方 (腾讯/字节/阿里/...)
+    commercial_category = Column(String(50), nullable=True, index=True)                 # 功能方向 (编程开发/效率提升/...)
 
     # 语义向量（用于聚类，pgvector）
     embedding = Column(Vector(settings.EMBEDDING_DIM), nullable=True)
