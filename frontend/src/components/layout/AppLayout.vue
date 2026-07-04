@@ -267,7 +267,10 @@ const navItems = [
     icon: 'Setting',
     adminOnly: true,
     children: [
-      { id: 'admin-dashboard', label: '后台监测' },
+      { id: 'admin-dashboard', label: '监测总览' },
+      { id: 'admin-source-health', label: '数据源健康' },
+      { id: 'admin-ai-costs', label: 'AI 成本' },
+      { id: 'admin-api-health', label: '接口健康' },
       { id: 'gzh-test', label: '公众号抓取测试' },
     ],
   },
@@ -299,6 +302,9 @@ const activeRoute = computed(() => {
   if (path.startsWith('/content-imitate')) return 'content-imitate'
   if (path.startsWith('/history') || path.startsWith('/creation-history')) return 'creation-history'
   if (path.startsWith('/settings') || path.startsWith('/profile')) return 'profile'
+  if (path.startsWith('/admin/source-health')) return 'admin-source-health'
+  if (path.startsWith('/admin/ai-costs')) return 'admin-ai-costs'
+  if (path.startsWith('/admin/api-health')) return 'admin-api-health'
   if (path.startsWith('/admin')) return 'admin-dashboard'
   if (path.startsWith('/tools/gzh-test')) return 'gzh-test'
   return 'content-info'
@@ -357,6 +363,9 @@ const routeMap = {
   'profile': '/profile',
   'creation': '/creation',
   'admin-dashboard': '/admin',
+  'admin-source-health': '/admin/source-health',
+  'admin-ai-costs': '/admin/ai-costs',
+  'admin-api-health': '/admin/api-health',
   'gzh-test': '/tools/gzh-test',
 }
 

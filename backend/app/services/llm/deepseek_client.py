@@ -1,12 +1,14 @@
 """DeepSeek 客户端实现：基于 OpenAI SDK（DeepSeek 兼容 OpenAI API）。"""
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from openai import AsyncOpenAI, APIError
 
 from app.core.config import settings
 from app.services.llm.llm_client import ChatMessage, ChatResult, LLMClient, parse_json_loose
+from app.services.llm.monitoring import record_llm_call
 from app.services.llm.retry import with_retry
 
 logger = logging.getLogger(__name__)
@@ -48,12 +50,23 @@ class DeepSeekClient(LLMClient):
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
-        # 设计文档 4.2 节：API 失败重试最多 3 次
-        resp = await with_retry(
-            lambda: self._client.chat.completions.create(**kwargs),
-            max_attempts=3,
-            description=f"DeepSeek chat ({kwargs['model']})",
-        )
+        started_at = time.perf_counter()
+        try:
+            # 设计文档 4.2 节：API 失败重试最多 3 次
+            resp = await with_retry(
+                lambda: self._client.chat.completions.create(**kwargs),
+                max_attempts=3,
+                description=f"DeepSeek chat ({kwargs['model']})",
+            )
+        except Exception as exc:
+            await record_llm_call(
+                provider=self.provider,
+                model=kwargs["model"],
+                status="failed",
+                duration_ms=(time.perf_counter() - started_at) * 1000,
+                error_message=str(exc),
+            )
+            raise
 
         choice = resp.choices[0]
         text = choice.message.content or ""
@@ -86,10 +99,19 @@ class DeepSeekClient(LLMClient):
                 "total_tokens": resp.usage.total_tokens,
             }
 
-        return ChatResult(
+        result = ChatResult(
             text=text,
             parsed=parsed,
             usage=usage,
             model=resp.model,
             finish_reason=choice.finish_reason,
         )
+        await record_llm_call(
+            provider=self.provider,
+            model=result.model or kwargs["model"],
+            usage=usage,
+            duration_ms=(time.perf_counter() - started_at) * 1000,
+            status="success",
+            finish_reason=result.finish_reason,
+        )
+        return result

@@ -143,6 +143,24 @@ const routes = [
         component: () => import('@/pages/admin/AdminDashboard.vue'),
         meta: { title: '后台监测', requiresAdmin: true }
       },
+      {
+        path: 'admin/source-health',
+        name: 'AdminSourceHealth',
+        component: () => import('@/pages/admin/SourceHealth.vue'),
+        meta: { title: '数据源健康', requiresAdmin: true }
+      },
+      {
+        path: 'admin/ai-costs',
+        name: 'AdminAiCosts',
+        component: () => import('@/pages/admin/AiCostMonitor.vue'),
+        meta: { title: 'AI 调用成本', requiresAdmin: true }
+      },
+      {
+        path: 'admin/api-health',
+        name: 'AdminApiHealth',
+        component: () => import('@/pages/admin/ApiHealth.vue'),
+        meta: { title: '接口健康', requiresAdmin: true }
+      },
       // ===== 我的创作已下线 → 重定向到选题列表 =====
       {
         path: 'creation',

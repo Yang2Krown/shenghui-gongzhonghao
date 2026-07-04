@@ -6,12 +6,14 @@ Moonshot API 兼容 OpenAI 格式，额外支持 $web_search 工具调用。
 
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from openai import AsyncOpenAI, APIError
 
 from app.core.config import settings
 from app.services.llm.llm_client import ChatMessage, ChatResult, LLMClient, parse_json_loose
+from app.services.llm.monitoring import record_llm_call
 from app.services.llm.retry import with_retry
 
 logger = logging.getLogger(__name__)
@@ -70,11 +72,22 @@ class MoonshotClient(LLMClient):
         if web_search:
             kwargs["tools"] = [WEB_SEARCH_TOOL]
 
-        resp = await with_retry(
-            lambda: self._client.chat.completions.create(**kwargs),
-            max_attempts=3,
-            description=f"Moonshot chat ({kwargs['model']})",
-        )
+        started_at = time.perf_counter()
+        try:
+            resp = await with_retry(
+                lambda: self._client.chat.completions.create(**kwargs),
+                max_attempts=3,
+                description=f"Moonshot chat ({kwargs['model']})",
+            )
+        except Exception as exc:
+            await record_llm_call(
+                provider=self.provider,
+                model=kwargs["model"],
+                status="failed",
+                duration_ms=(time.perf_counter() - started_at) * 1000,
+                error_message=str(exc),
+            )
+            raise
 
         choice = resp.choices[0]
         message = choice.message
@@ -96,13 +109,23 @@ class MoonshotClient(LLMClient):
                 "total_tokens": resp.usage.total_tokens,
             }
 
-        return ChatResult(
+        result = ChatResult(
             text=text,
             parsed=parsed,
             usage=usage,
             model=resp.model,
             finish_reason=choice.finish_reason,
         )
+        await record_llm_call(
+            provider=self.provider,
+            model=result.model or kwargs["model"],
+            usage=usage,
+            duration_ms=(time.perf_counter() - started_at) * 1000,
+            status="success",
+            finish_reason=result.finish_reason,
+            metadata={"web_search": web_search},
+        )
+        return result
 
     async def _handle_search_tool_calls(
         self,

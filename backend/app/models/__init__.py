@@ -39,6 +39,12 @@ from app.models.monitoring import MonitoringAlert, MonitoringSnapshot
 # 管理员审计
 from app.models.admin_audit import AdminAuditLog
 
+# API 请求监测
+from app.models.api_request_log import ApiRequestLog
+
+# LLM 调用成本监测
+from app.models.llm_monitoring import LlmCallLog, LlmModelPricing
+
 __all__ = [
     # 旧模型（过渡期保留）
     "User",
@@ -76,4 +82,7 @@ __all__ = [
     "MonitoringSnapshot",
     "MonitoringAlert",
     "AdminAuditLog",
+    "ApiRequestLog",
+    "LlmCallLog",
+    "LlmModelPricing",
 ]

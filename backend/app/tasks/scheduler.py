@@ -105,4 +105,18 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitoring.system_check",
         "schedule": crontab(minute="*/10"),
     },
+
+    # ── 接口健康日志清理：保留 30 天，避免线上请求日志无限增长 ──
+    "cleanup-api-request-logs": {
+        "task": "monitoring.cleanup_api_request_logs",
+        "schedule": crontab(minute=35, hour=4),
+        "kwargs": {"days": 30},
+    },
+
+    # ── LLM 成本日志清理：保留 90 天，兼顾趋势分析和库体积 ──
+    "cleanup-llm-call-logs": {
+        "task": "monitoring.cleanup_llm_call_logs",
+        "schedule": crontab(minute=45, hour=4),
+        "kwargs": {"days": 90},
+    },
 }

@@ -1,6 +1,7 @@
 """创作工具文件上传和链接提取路由。"""
 
 import logging
+import time
 from fastapi import APIRouter, File, UploadFile, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -9,6 +10,7 @@ from app.core.config import settings
 
 from app.utils.file_extractor import extract_text, UnsupportedFileType
 from app.services.scraping.link_extractor import extract_link_content
+from app.services.llm.monitoring import record_llm_call
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -98,6 +100,7 @@ async def format_paragraphs(req: FormatParagraphsRequest):
     # 短文不需要换行处理
     if len(content) < 120:
         return {"content": content}
+    started_at = time.perf_counter()
     try:
         client = AsyncOpenAI(
             api_key=settings.DEEPSEEK_API_KEY,
@@ -112,9 +115,32 @@ async def format_paragraphs(req: FormatParagraphsRequest):
             temperature=0.2,
             max_tokens=8192,
         )
+        usage = None
+        if resp.usage:
+            usage = {
+                "prompt_tokens": resp.usage.prompt_tokens,
+                "completion_tokens": resp.usage.completion_tokens,
+                "total_tokens": resp.usage.total_tokens,
+            }
+        await record_llm_call(
+            provider="deepseek",
+            model=getattr(resp, "model", None) or settings.DEEPSEEK_MODEL,
+            usage=usage,
+            duration_ms=(time.perf_counter() - started_at) * 1000,
+            operation="wechat_format_paragraphs",
+            finish_reason=resp.choices[0].finish_reason,
+        )
         result = resp.choices[0].message.content or ""
         return {"content": result.strip()}
     except Exception as e:
+        await record_llm_call(
+            provider="deepseek",
+            model=settings.DEEPSEEK_MODEL,
+            status="failed",
+            duration_ms=(time.perf_counter() - started_at) * 1000,
+            operation="wechat_format_paragraphs",
+            error_message=str(e),
+        )
         logger.error(f"[format-paragraphs] LLM 调用失败: {e}", exc_info=True)
         # 降级：返回原文不处理
         return {"content": content}

@@ -10,8 +10,10 @@ import uvicorn
 
 from app.core.config import settings
 from app.api.v1 import api_router
-from app.db.session import engine
+from app.core.security import decode_token
+from app.db.session import AsyncSessionLocal, engine
 from app.db.init_db import init_db
+from app.models.api_request_log import ApiRequestLog
 
 # 配置日志
 logging.basicConfig(
@@ -72,10 +74,52 @@ app.add_middleware(
 async def add_process_time_header(request: Request, call_next):
     """添加请求处理时间头"""
     start_time = time.time()
-    response = await call_next(request)
-    process_time = time.time() - start_time
-    response.headers["X-Process-Time"] = str(process_time)
-    return response
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        process_time = time.time() - start_time
+        if "response" in locals():
+            response.headers["X-Process-Time"] = str(process_time)
+        await _record_api_request(request, status_code, process_time * 1000)
+
+
+async def _record_api_request(request: Request, status_code: int, duration_ms: float) -> None:
+    """记录后台接口健康监测日志，失败不影响业务请求。"""
+    try:
+        path = request.url.path
+        if (
+            path in {"/", "/health"}
+            or path.startswith("/docs")
+            or path.startswith("/redoc")
+            or path.startswith("/uploads")
+            or path.endswith("/openapi.json")
+        ):
+            return
+
+        user_id = None
+        auth = request.headers.get("authorization") or ""
+        if auth.lower().startswith("bearer "):
+            payload = decode_token(auth.split(" ", 1)[1])
+            if payload and payload.get("sub"):
+                try:
+                    user_id = int(payload["sub"])
+                except (TypeError, ValueError):
+                    user_id = None
+
+        async with AsyncSessionLocal() as db:
+            db.add(ApiRequestLog(
+                method=request.method[:10],
+                path=path[:500],
+                status_code=status_code,
+                duration_ms=round(duration_ms, 2),
+                user_id=user_id,
+            ))
+            await db.commit()
+    except Exception as exc:
+        logger.warning("记录 API 请求监测失败: %s", exc)
 
 
 @app.exception_handler(Exception)

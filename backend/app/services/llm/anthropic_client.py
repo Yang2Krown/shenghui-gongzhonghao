@@ -5,10 +5,12 @@ Phase 2 暂时只留接口签名，让 LLMClient 抽象闭合。
 """
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 from app.services.llm.llm_client import ChatMessage, ChatResult, LLMClient, parse_json_loose
+from app.services.llm.monitoring import record_llm_call
 from app.services.llm.retry import with_retry
 
 logger = logging.getLogger(__name__)
@@ -64,12 +66,23 @@ class AnthropicClient(LLMClient):
         if json_mode and "system" in kwargs:
             kwargs["system"] += "\n\n请仅输出严格的 JSON，不要包含 markdown fence 或解释文字。"
 
-        # 设计文档 4.2 节：API 失败重试最多 3 次
-        resp = await with_retry(
-            lambda: self._client.messages.create(**kwargs),
-            max_attempts=3,
-            description=f"Anthropic chat ({kwargs['model']})",
-        )
+        started_at = time.perf_counter()
+        try:
+            # 设计文档 4.2 节：API 失败重试最多 3 次
+            resp = await with_retry(
+                lambda: self._client.messages.create(**kwargs),
+                max_attempts=3,
+                description=f"Anthropic chat ({kwargs['model']})",
+            )
+        except Exception as exc:
+            await record_llm_call(
+                provider=self.provider,
+                model=kwargs["model"],
+                status="failed",
+                duration_ms=(time.perf_counter() - started_at) * 1000,
+                error_message=str(exc),
+            )
+            raise
         text = "".join(block.text for block in resp.content if hasattr(block, "text"))
         parsed = parse_json_loose(text) if json_mode else None
 
@@ -81,10 +94,19 @@ class AnthropicClient(LLMClient):
                 "total_tokens": resp.usage.input_tokens + resp.usage.output_tokens,
             }
 
-        return ChatResult(
+        result = ChatResult(
             text=text,
             parsed=parsed,
             usage=usage,
             model=resp.model,
             finish_reason=resp.stop_reason,
         )
+        await record_llm_call(
+            provider=self.provider,
+            model=result.model or kwargs["model"],
+            usage=usage,
+            duration_ms=(time.perf_counter() - started_at) * 1000,
+            status="success",
+            finish_reason=result.finish_reason,
+        )
+        return result

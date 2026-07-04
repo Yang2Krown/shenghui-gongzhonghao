@@ -4,10 +4,12 @@
 """
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 from app.services.llm.llm_client import ChatMessage, ChatResult, LLMClient, parse_json_loose
+from app.services.llm.monitoring import record_llm_call
 from app.services.llm.retry import with_retry
 
 logger = logging.getLogger(__name__)
@@ -77,11 +79,22 @@ class AIGoCodeClient(LLMClient):
             async with self._client.messages.stream(**kwargs) as stream:
                 return await stream.get_final_message()
 
-        resp = await with_retry(
-            _create,
-            max_attempts=3,
-            description=f"AIGoCode chat ({kwargs['model']})",
-        )
+        started_at = time.perf_counter()
+        try:
+            resp = await with_retry(
+                _create,
+                max_attempts=3,
+                description=f"AIGoCode chat ({kwargs['model']})",
+            )
+        except Exception as exc:
+            await record_llm_call(
+                provider=self.provider,
+                model=kwargs["model"],
+                status="failed",
+                duration_ms=(time.perf_counter() - started_at) * 1000,
+                error_message=str(exc),
+            )
+            raise
         text = "".join(block.text for block in resp.content if getattr(block, "text", None))
         parsed = parse_json_loose(text) if json_mode else None
 
@@ -98,10 +111,19 @@ class AIGoCodeClient(LLMClient):
         if finish_reason == "max_tokens":
             finish_reason = "length"
 
-        return ChatResult(
+        result = ChatResult(
             text=text,
             parsed=parsed,
             usage=usage,
             model=resp.model,
             finish_reason=finish_reason,
         )
+        await record_llm_call(
+            provider=self.provider,
+            model=result.model or kwargs["model"],
+            usage=usage,
+            duration_ms=(time.perf_counter() - started_at) * 1000,
+            status="success",
+            finish_reason=result.finish_reason,
+        )
+        return result

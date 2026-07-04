@@ -13,10 +13,12 @@ from app.core.timezone import utcnow
 from app.db.session import get_db
 from app.models.admin_audit import AdminAuditLog
 from app.models.credit import UserCredit
+from app.models.llm_monitoring import LlmModelPricing
 from app.models.monitoring import MonitoringAlert, MonitoringSnapshot
 from app.models.task import Task, TaskStatus
 from app.models.user import User
 from app.services.monitoring.checks import build_alert_specs, collect_admin_monitoring
+from app.services.monitoring.modules import collect_ai_costs, collect_api_health, collect_source_health
 
 router = APIRouter()
 
@@ -29,6 +31,26 @@ class AdminGrantRequest(BaseModel):
 class AlertUpdateRequest(BaseModel):
     note: Optional[str] = Field(None, max_length=1000, description="处理备注")
     resolve: bool = Field(False, description="是否手动标记已恢复")
+
+
+class LlmPricingRequest(BaseModel):
+    provider: str = Field(..., min_length=1, max_length=50)
+    model: str = Field(..., min_length=1, max_length=120)
+    display_name: Optional[str] = Field(None, max_length=160)
+    input_price_per_million: float = Field(..., ge=0)
+    output_price_per_million: float = Field(..., ge=0)
+    currency: str = Field("CNY", min_length=1, max_length=10)
+    enabled: bool = True
+    note: Optional[str] = Field(None, max_length=1000)
+
+
+class LlmPricingUpdateRequest(BaseModel):
+    display_name: Optional[str] = Field(None, max_length=160)
+    input_price_per_million: Optional[float] = Field(None, ge=0)
+    output_price_per_million: Optional[float] = Field(None, ge=0)
+    currency: Optional[str] = Field(None, min_length=1, max_length=10)
+    enabled: Optional[bool] = None
+    note: Optional[str] = Field(None, max_length=1000)
 
 
 def _mask_phone(phone: Optional[str]) -> Optional[str]:
@@ -142,6 +164,99 @@ async def monitoring_overview(
     data = await collect_admin_monitoring(db)
     data["current_alerts"] = [_public_alert_spec(spec) for spec in build_alert_specs(data)]
     return {"code": 200, "message": "获取监测数据成功", "data": data}
+
+
+@router.get("/monitoring/source-health", response_model=dict)
+async def monitoring_source_health(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+) -> Any:
+    """数据源健康独立监测。"""
+    data = await collect_source_health(db)
+    return {"code": 200, "message": "获取数据源健康成功", "data": data}
+
+
+@router.get("/monitoring/ai-costs", response_model=dict)
+async def monitoring_ai_costs(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+) -> Any:
+    """AI 调用成本独立监测。"""
+    data = await collect_ai_costs(db)
+    return {"code": 200, "message": "获取 AI 成本监测成功", "data": data}
+
+
+@router.post("/monitoring/ai-costs/pricing", response_model=dict)
+async def create_llm_pricing(
+    req: LlmPricingRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+) -> Any:
+    """新增模型单价配置。"""
+    exists = (await db.execute(
+        select(LlmModelPricing).where(
+            LlmModelPricing.provider == req.provider,
+            LlmModelPricing.model == req.model,
+        )
+    )).scalar_one_or_none()
+    if exists:
+        raise HTTPException(status_code=400, detail="该 provider/model 已存在")
+    row = LlmModelPricing(**req.model_dump())
+    db.add(row)
+    _add_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="llm_pricing.create",
+        target_type="llm_model_pricing",
+        summary=f"新增模型单价 {req.provider}/{req.model}",
+        metadata=req.model_dump(),
+    )
+    await db.commit()
+    await db.refresh(row)
+    return {"code": 200, "message": "新增模型单价成功", "data": {"id": row.id}}
+
+
+@router.patch("/monitoring/ai-costs/pricing/{pricing_id}", response_model=dict)
+async def update_llm_pricing(
+    pricing_id: int,
+    req: LlmPricingUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+) -> Any:
+    """修改模型单价配置。"""
+    row = await db.get(LlmModelPricing, pricing_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="模型单价配置不存在")
+    before = {
+        "input_price_per_million": float(row.input_price_per_million or 0),
+        "output_price_per_million": float(row.output_price_per_million or 0),
+        "enabled": row.enabled,
+    }
+    for key, value in req.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    row.updated_at = utcnow()
+    _add_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="llm_pricing.update",
+        target_type="llm_model_pricing",
+        target_id=str(pricing_id),
+        summary=f"修改模型单价 {row.provider}/{row.model}",
+        metadata={"before": before, "after": req.model_dump(exclude_unset=True)},
+    )
+    await db.commit()
+    await db.refresh(row)
+    return {"code": 200, "message": "修改模型单价成功", "data": {"id": row.id}}
+
+
+@router.get("/monitoring/api-health", response_model=dict)
+async def monitoring_api_health(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+) -> Any:
+    """接口 500/P95 独立监测。"""
+    data = await collect_api_health(db)
+    return {"code": 200, "message": "获取接口健康成功", "data": data}
 
 
 @router.get("/monitoring/snapshots", response_model=dict)

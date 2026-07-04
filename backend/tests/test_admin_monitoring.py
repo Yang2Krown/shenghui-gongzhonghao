@@ -7,9 +7,13 @@ from app.api.deps import get_current_admin_user, get_current_super_admin_user
 from app.core.config import settings
 from app.core.security import get_current_super_admin_user as get_core_current_super_admin_user
 from app.models.admin_audit import AdminAuditLog
+from app.models.api_request_log import ApiRequestLog
+from app.models.llm_monitoring import LlmCallLog, LlmModelPricing
 from app.models.monitoring import MonitoringAlert
 from app.models.user import User
 from app.services.monitoring.checks import build_alert_specs
+from app.services.llm.monitoring import calculate_cost_yuan
+from app.services.monitoring.modules import _safe_time
 
 
 @pytest.mark.asyncio
@@ -103,3 +107,44 @@ def test_admin_audit_log_uses_safe_metadata_column():
     columns = AdminAuditLog.__table__.columns
     assert "metadata_json" in columns
     assert "metadata" not in columns
+
+
+def test_api_request_log_fields_exist():
+    columns = ApiRequestLog.__table__.columns
+    assert "method" in columns
+    assert "path" in columns
+    assert "status_code" in columns
+    assert "duration_ms" in columns
+    assert "user_id" in columns
+
+
+def test_source_health_accepts_string_last_fetched_at():
+    assert _safe_time("2026-07-04T10:59:00") == "2026-07-04T10:59:00"
+
+
+def test_llm_monitoring_fields_exist():
+    pricing_columns = LlmModelPricing.__table__.columns
+    assert "provider" in pricing_columns
+    assert "model" in pricing_columns
+    assert "input_price_per_million" in pricing_columns
+    assert "output_price_per_million" in pricing_columns
+
+    log_columns = LlmCallLog.__table__.columns
+    assert "prompt_tokens" in log_columns
+    assert "completion_tokens" in log_columns
+    assert "cost_yuan" in log_columns
+    assert "pricing_snapshot" in log_columns
+
+
+def test_calculate_llm_cost_yuan():
+    pricing = LlmModelPricing(
+        provider="deepseek",
+        model="deepseek-v4-flash",
+        input_price_per_million=2,
+        output_price_per_million=8,
+    )
+    cost = calculate_cost_yuan(
+        {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500},
+        pricing,
+    )
+    assert float(cost) == 0.006
