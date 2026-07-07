@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
+from app.core.upload_security import UploadSecurityError, validate_image_upload
 from app.crud.user import user as user_crud
 from app.crud.style import style as style_crud
 from app.crud.article import article as article_crud
@@ -234,38 +235,27 @@ async def upload_avatar(
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """上传头像"""
-    # 检查文件类型
-    if not avatar.content_type.startswith("image/"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="只支持图片文件"
-        )
-    
-    # 检查文件大小 (10MB)
-    if avatar.size is not None and avatar.size > 10 * 1024 * 1024:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="文件大小不能超过10MB"
-        )
-    
     try:
-        # 保存文件
-        from datetime import datetime
+        content = await avatar.read()
+        safe = validate_image_upload(
+            filename=avatar.filename,
+            data=content,
+            max_size=10 * 1024 * 1024,
+            allowed_types={"jpeg", "png", "webp"},
+            reencode=True,
+        )
 
         # 使用绝对路径，与 static files mount 保持一致
         base_dir = os.path.abspath("./uploads")
         upload_dir = os.path.join(base_dir, "avatars")
         os.makedirs(upload_dir, exist_ok=True)
 
-        # 生成文件名
-        file_ext = avatar.filename.split(".")[-1]
-        filename = f"{current_user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{file_ext}"
+        filename = f"{current_user.id}_{safe.filename}"
         file_path = os.path.join(upload_dir, filename)
 
         # 保存文件
         with open(file_path, "wb") as buffer:
-            content = await avatar.read()
-            buffer.write(content)
+            buffer.write(safe.data)
 
         # 更新用户头像URL（用原生 SQL 确保写入数据库，绕过 ORM 缓存）
         from sqlalchemy import text
@@ -283,7 +273,11 @@ async def upload_avatar(
                 "avatar_url": avatar_url
             }
         }
-        
+    except UploadSecurityError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

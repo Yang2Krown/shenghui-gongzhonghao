@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 from app.core.config import settings
 from app.core.security import get_current_user
 from app.core.rate_limit import enforce_rate_limit, rule_from_setting, user_actor
+from app.core.upload_security import UploadSecurityError, validate_document_upload
 from app.models.user import User
 
 from app.utils.file_extractor import extract_text, UnsupportedFileType
@@ -41,14 +42,20 @@ async def upload_file(
         raise HTTPException(status_code=400, detail="文件名不能为空")
 
     data = await file.read()
-    if len(data) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail="文件大小不能超过 20MB")
+    try:
+        safe = validate_document_upload(
+            filename=file.filename,
+            data=data,
+            max_size=MAX_FILE_SIZE,
+        )
+    except UploadSecurityError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     try:
         text = await extract_text(
             filename=file.filename,
-            data=data,
-            content_type=file.content_type,
+            data=safe.data,
+            content_type=safe.content_type,
         )
     except UnsupportedFileType as e:
         raise HTTPException(status_code=400, detail=str(e))

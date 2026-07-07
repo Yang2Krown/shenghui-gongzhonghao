@@ -268,16 +268,30 @@ const navItems = [
     adminOnly: true,
     children: [
       { id: 'admin-dashboard', label: '监测总览' },
-      { id: 'admin-source-health', label: '数据源健康' },
-      { id: 'admin-ai-costs', label: 'AI 成本' },
-      { id: 'admin-api-health', label: '接口健康' },
-      { id: 'admin-user-stats', label: '用户统计' },
-      { id: 'gzh-test', label: '公众号抓取测试' },
+      { id: 'admin-source-health', label: '数据源健康', roles: ['admin', 'ops', 'support', 'auditor'] },
+      { id: 'admin-ai-costs', label: 'AI 成本', roles: ['admin', 'finance'] },
+      { id: 'admin-api-health', label: '接口健康', roles: ['admin', 'ops', 'support', 'auditor'] },
+      { id: 'admin-user-stats', label: '用户统计', roles: ['admin', 'ops', 'support', 'finance'] },
+      { id: 'gzh-test', label: '公众号抓取测试', roles: ['admin', 'ops'] },
     ],
   },
 ]
 
-const visibleNavItems = computed(() => navItems.filter(item => !item.adminOnly || userStore.isAdmin))
+const canSeeAdminChild = (child) => {
+  if (userStore.isSuperAdmin) return true
+  if (!child.roles) return true
+  return child.roles.includes(userStore.user?.role)
+}
+
+const visibleNavItems = computed(() => navItems
+  .filter(item => !item.adminOnly || userStore.isAdmin)
+  .map(item => {
+    if (!item.adminOnly || !item.children) return item
+    return {
+      ...item,
+      children: item.children.filter(canSeeAdminChild),
+    }
+  }))
 
 // 当前激活路由
 const activeRoute = computed(() => {

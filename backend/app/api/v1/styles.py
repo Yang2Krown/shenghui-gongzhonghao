@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 from app.core.security import get_current_user
 from app.core.rate_limit import limit_ai_generation, limit_file_upload, limit_link_extract
+from app.core.upload_security import UploadSecurityError, validate_document_upload
 from app.db.session import get_db
 from app.models.user import User
 from app.models.style import StyleProfile
@@ -265,18 +266,24 @@ async def upload_source_file(
 
     # 读取文件
     data = await file.read()
-    if len(data) > MAX_FILE_SIZE:
+    try:
+        safe = validate_document_upload(
+            filename=file.filename,
+            data=data,
+            max_size=MAX_FILE_SIZE,
+        )
+    except UploadSecurityError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"文件 {file.filename} 超过 10MB 限制"
+            detail=str(e)
         )
 
     # 提取文本
     try:
         extracted = await extract_text(
             filename=file.filename or "",
-            data=data,
-            content_type=file.content_type,
+            data=safe.data,
+            content_type=safe.content_type,
         )
     except UnsupportedFileType as e:
         raise HTTPException(
@@ -530,16 +537,22 @@ async def analyze_uploaded_style(
 
     for f in files:
         data = await f.read()
-        if len(data) > MAX_FILE_SIZE:
+        try:
+            safe = validate_document_upload(
+                filename=f.filename,
+                data=data,
+                max_size=MAX_FILE_SIZE,
+            )
+        except UploadSecurityError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"文件 {f.filename} 超过 10MB 限制",
+                detail=str(e),
             )
         try:
             extracted = await extract_text(
                 filename=f.filename or "",
-                data=data,
-                content_type=f.content_type,
+                data=safe.data,
+                content_type=safe.content_type,
             )
         except UnsupportedFileType as e:
             raise HTTPException(

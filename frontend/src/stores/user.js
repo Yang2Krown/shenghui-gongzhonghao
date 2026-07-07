@@ -29,7 +29,8 @@ export const useUserStore = defineStore('user', () => {
   const isAuthenticated = computed(() => !!token.value)
   const userName = computed(() => user.value?.full_name || user.value?.username || '未登录用户')
   const userAvatar = computed(() => user.value?.avatar_url || '')
-  const isAdmin = computed(() => user.value?.role === 'admin' || !!user.value?.is_superuser)
+  const adminRoles = ['admin', 'ops', 'support', 'finance', 'auditor']
+  const isAdmin = computed(() => adminRoles.includes(user.value?.role) || !!user.value?.is_superuser)
   const isSuperAdmin = computed(() => !!user.value?.is_superuser)
 
   // 初始化 - 从本地存储恢复token

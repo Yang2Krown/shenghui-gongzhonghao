@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Any, Union, Optional
+from uuid import uuid4
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
@@ -61,7 +62,8 @@ def create_refresh_token(
     to_encode = {
         "exp": expire,
         "sub": str(subject),
-        "type": "refresh"
+        "type": "refresh",
+        "jti": uuid4().hex,
     }
     encoded_jwt = jwt.encode(
         to_encode,

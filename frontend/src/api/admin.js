@@ -56,6 +56,10 @@ export const getAdminAuditLogs = (limit = 50) => {
   return get('/admin/audit-logs', { limit })
 }
 
-export const setAdminByPhone = (phone, isAdmin = true) => {
-  return post('/admin/admins', { phone, is_admin: isAdmin })
+export const setAdminByPhone = (phone, role = 'admin') => {
+  return post('/admin/admins', { phone, is_admin: role !== 'user', role })
+}
+
+export const updateAdminUserStatus = (id, data) => {
+  return patch(`/admin/users/${id}/status`, data)
 }

@@ -35,25 +35,64 @@
           </div>
         </div>
         <div class="chart-wrap">
-          <svg viewBox="0 0 860 260" role="img" aria-label="AI 调用成本 30 天趋势">
-            <line x1="44" y1="30" x2="44" y2="214" class="axis" />
-            <line x1="44" y1="214" x2="824" y2="214" class="axis" />
-            <line v-for="tick in yTicks" :key="tick.y" x1="44" :y1="tick.y" x2="824" :y2="tick.y" class="grid-line" />
+          <svg
+            viewBox="0 0 860 300"
+            role="img"
+            aria-label="AI 调用成本 30 天趋势"
+            @mouseleave="trendHover = null"
+          >
+            <line :x1="chart.left" :y1="chart.top" :x2="chart.left" :y2="chart.bottom" class="axis" />
+            <line :x1="chart.left" :y1="chart.bottom" :x2="chart.right" :y2="chart.bottom" class="axis" />
+            <g v-for="tick in yTicks" :key="tick.value">
+              <line :x1="chart.left" :y1="tick.y" :x2="chart.right" :y2="tick.y" class="grid-line" />
+              <text :x="chart.left - 10" :y="tick.y + 4" text-anchor="end" class="axis-label">{{ tick.label }}</text>
+            </g>
+            <g v-for="tick in xTicks" :key="tick.date">
+              <line :x1="tick.x" :y1="chart.bottom" :x2="tick.x" :y2="chart.bottom + 5" class="axis-tick" />
+              <text :x="tick.x" :y="chart.bottom + 24" text-anchor="middle" class="axis-label">{{ tick.label }}</text>
+            </g>
             <polyline v-if="trendPoints.length" :points="trendPolyline" class="trend-line" />
             <circle v-for="point in trendPoints" :key="point.date" :cx="point.x" :cy="point.y" r="3.5" class="trend-dot">
-              <title>{{ point.date }}：{{ point.value }}{{ activeTrend.unit }}</title>
+              <title>{{ point.date }}：{{ formatTrendValue(point.value) }}{{ activeTrend.unit }}</title>
             </circle>
-            <text x="44" y="238" class="axis-label">{{ firstTrendDate }}</text>
-            <text x="824" y="238" text-anchor="end" class="axis-label">{{ lastTrendDate }}</text>
-            <text x="44" y="22" class="axis-label">max {{ maxTrendValue }}{{ activeTrend.unit }}</text>
+            <g v-if="trendHover" class="hover-layer">
+              <line :x1="trendHover.x" :y1="chart.top" :x2="trendHover.x" :y2="chart.bottom" class="hover-line" />
+              <line :x1="chart.left" :y1="trendHover.y" :x2="chart.right" :y2="trendHover.y" class="hover-line" />
+              <circle :cx="trendHover.x" :cy="trendHover.y" r="5.5" class="hover-dot" />
+              <g :transform="tooltipTransform">
+                <rect width="154" height="92" rx="8" class="chart-tooltip-box" />
+                <text x="12" y="22" class="tooltip-title">{{ trendHover.date }}</text>
+                <text x="12" y="43" class="tooltip-line">{{ activeTrend.label }}：{{ formatTrendValue(trendHover.value) }}{{ activeTrend.unit }}</text>
+                <text x="12" y="62" class="tooltip-line">Token：{{ formatTrendValue(trendHover.row.total_tokens || 0) }}</text>
+                <text x="12" y="81" class="tooltip-line">成本：¥{{ formatMoney(trendHover.row.cost_yuan || 0) }}</text>
+              </g>
+            </g>
+            <rect
+              v-for="area in trendHitAreas"
+              :key="area.point.date"
+              :x="area.x"
+              :y="chart.top"
+              :width="area.width"
+              :height="chart.height"
+              class="trend-hit-area"
+              @mouseenter="setTrendHover(area.point)"
+              @mousemove="setTrendHover(area.point)"
+            />
+            <text :x="chart.left" y="18" class="axis-label">
+              纵轴：{{ activeTrend.label }}，上限 {{ formatTrendValue(maxTrendValue) }}{{ activeTrend.unit }}
+            </text>
           </svg>
           <div v-if="!daily.length" class="empty-chart">暂无趋势数据</div>
         </div>
       </section>
 
-      <section class="panel panel-main">
-        <div class="panel-title">按功能统计（30 天）</div>
-        <table class="admin-table">
+      <section class="panel panel-main panel-collapsible">
+        <div class="panel-title panel-title-clickable" @click="togglePanel('operation')">
+          <span>按功能统计（30 天）</span>
+          <span class="panel-meta">{{ byOperation.length }} 项 · {{ openPanels.operation ? '收起' : '展开' }}</span>
+        </div>
+        <div v-show="openPanels.operation" class="table-scroll compact-scroll">
+          <table class="admin-table">
           <thead><tr><th>功能</th><th>调用</th><th>Token</th><th>成本</th><th>失败率</th></tr></thead>
           <tbody>
             <tr v-for="item in byOperation" :key="item.operation">
@@ -65,12 +104,17 @@
             </tr>
             <tr v-if="!byOperation.length"><td colspan="5" class="empty-cell">暂无已记录 AI 成本</td></tr>
           </tbody>
-        </table>
+          </table>
+        </div>
       </section>
 
-      <section class="panel panel-main">
-        <div class="panel-title">按模型统计（30 天）</div>
-        <table class="admin-table">
+      <section class="panel panel-main panel-collapsible">
+        <div class="panel-title panel-title-clickable" @click="togglePanel('model')">
+          <span>按模型统计（30 天）</span>
+          <span class="panel-meta">{{ byModel.length }} 个模型 · {{ openPanels.model ? '收起' : '展开' }}</span>
+        </div>
+        <div v-show="openPanels.model" class="table-scroll">
+          <table class="admin-table">
           <thead><tr><th>Provider</th><th>模型</th><th>调用</th><th>Token</th><th>成本</th><th>失败率</th><th>平均耗时</th></tr></thead>
           <tbody>
             <tr v-for="item in byModel" :key="`${item.provider}:${item.model}`">
@@ -84,17 +128,20 @@
             </tr>
             <tr v-if="!byModel.length"><td colspan="7" class="empty-cell">暂无模型调用记录</td></tr>
           </tbody>
-        </table>
+          </table>
+        </div>
       </section>
 
-      <section class="panel panel-main">
-        <div class="panel-row">
+      <section class="panel panel-main panel-collapsible">
+        <div class="panel-row panel-title-clickable" @click="togglePanel('pricing')">
           <div>
             <div class="panel-title">模型单价配置</div>
             <div class="muted">单位：人民币 / 百万 token。修改后影响新调用，历史成本保留调用时快照。</div>
           </div>
+          <span class="panel-meta">{{ pricingDrafts.length }} 条 · {{ openPanels.pricing ? '收起' : '展开' }}</span>
         </div>
-        <table class="admin-table">
+        <div v-show="openPanels.pricing" class="table-scroll">
+          <table class="admin-table">
           <thead><tr><th>Provider</th><th>模型</th><th>显示名</th><th>输入价</th><th>输出价</th><th>启用</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="item in pricingDrafts" :key="item.id">
@@ -108,12 +155,17 @@
             </tr>
             <tr v-if="!pricingDrafts.length"><td colspan="7" class="empty-cell">暂无模型单价配置</td></tr>
           </tbody>
-        </table>
+          </table>
+        </div>
       </section>
 
-      <section class="panel panel-main">
-        <div class="panel-title">最近调用成本记录</div>
-        <table class="admin-table">
+      <section class="panel panel-main panel-collapsible">
+        <div class="panel-title panel-title-clickable" @click="togglePanel('recent')">
+          <span>最近调用成本记录</span>
+          <span class="panel-meta">{{ recent.length }} 条 · {{ openPanels.recent ? '收起' : '展开' }}</span>
+        </div>
+        <div v-show="openPanels.recent" class="table-scroll">
+          <table class="admin-table">
           <thead><tr><th>时间</th><th>状态</th><th>模型</th><th>功能</th><th>Token</th><th>成本</th><th>耗时</th></tr></thead>
           <tbody>
             <tr v-for="item in recent" :key="item.id">
@@ -127,14 +179,15 @@
             </tr>
             <tr v-if="!recent.length"><td colspan="7" class="empty-cell">暂无记录</td></tr>
           </tbody>
-        </table>
+          </table>
+        </div>
       </section>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getAiCosts, updateLlmPricing } from '@/api/admin'
 
@@ -143,6 +196,21 @@ const savingPricingId = ref(null)
 const data = ref({ summary: {}, by_operation: [], by_model: [], daily: [], pricing: [], recent: [] })
 const pricingDrafts = ref([])
 const trendMode = ref('calls')
+const trendHover = ref(null)
+const chart = {
+  left: 58,
+  right: 824,
+  top: 32,
+  bottom: 222,
+  width: 766,
+  height: 190,
+}
+const openPanels = reactive({
+  operation: true,
+  model: true,
+  pricing: false,
+  recent: true,
+})
 const trendModes = [
   { key: 'calls', label: '调用', unit: ' 次' },
   { key: 'total_tokens', label: 'Token', unit: '' },
@@ -160,29 +228,63 @@ const daily = computed(() => data.value.daily || [])
 const recent = computed(() => data.value.recent || [])
 const activeTrend = computed(() => trendModes.find(item => item.key === trendMode.value) || trendModes[0])
 const trendValues = computed(() => daily.value.map(item => Number(item[trendMode.value] || 0)))
-const maxTrendValue = computed(() => Math.max(1, ...trendValues.value))
+const maxTrendValue = computed(() => niceCeil(Math.max(1, ...trendValues.value)))
 const trendPoints = computed(() => {
   const rows = daily.value
   if (!rows.length) return []
-  const left = 44
-  const top = 30
-  const width = 780
-  const height = 184
-  const gap = rows.length > 1 ? width / (rows.length - 1) : 0
+  const gap = rows.length > 1 ? chart.width / (rows.length - 1) : 0
   return rows.map((item, index) => {
     const value = Number(item[trendMode.value] || 0)
     return {
       date: item.date,
+      row: item,
       value,
-      x: left + gap * index,
-      y: top + height - (value / maxTrendValue.value) * height,
+      x: chart.left + gap * index,
+      y: chart.top + chart.height - (value / maxTrendValue.value) * chart.height,
     }
   })
 })
 const trendPolyline = computed(() => trendPoints.value.map(point => `${point.x},${point.y}`).join(' '))
-const yTicks = computed(() => [30, 76, 122, 168, 214].map(y => ({ y })))
-const firstTrendDate = computed(() => daily.value[0]?.date?.slice(5) || '-')
-const lastTrendDate = computed(() => daily.value[daily.value.length - 1]?.date?.slice(5) || '-')
+const trendHitAreas = computed(() => {
+  const points = trendPoints.value
+  return points.map((point, index) => {
+    const previous = points[index - 1]
+    const next = points[index + 1]
+    const left = previous ? (previous.x + point.x) / 2 : chart.left
+    const right = next ? (point.x + next.x) / 2 : chart.right
+    return { point, x: left, width: Math.max(1, right - left) }
+  })
+})
+const yTicks = computed(() => {
+  return [1, 0.75, 0.5, 0.25, 0].map(ratio => {
+    const value = maxTrendValue.value * ratio
+    return {
+      value,
+      label: formatAxisValue(value),
+      y: chart.top + (1 - ratio) * chart.height,
+    }
+  })
+})
+const xTicks = computed(() => {
+  const points = trendPoints.value
+  if (!points.length) return []
+  const indexes = new Set([0, points.length - 1])
+  const step = Math.max(1, Math.ceil(points.length / 6))
+  for (let index = step; index < points.length - 1; index += step) {
+    indexes.add(index)
+  }
+  return [...indexes].sort((a, b) => a - b).map(index => ({
+    date: points[index].date,
+    label: points[index].date?.slice(5) || '-',
+    x: points[index].x,
+  }))
+})
+const tooltipTransform = computed(() => {
+  if (!trendHover.value) return ''
+  const x = trendHover.value.x > chart.right - 170 ? trendHover.value.x - 166 : trendHover.value.x + 12
+  const y = trendHover.value.y < chart.top + 102 ? trendHover.value.y + 14 : trendHover.value.y - 106
+  return `translate(${x}, ${y})`
+})
 
 async function load() {
   loading.value = true
@@ -236,6 +338,39 @@ function pct(value) {
   return `${Math.round(Number(value || 0) * 10000) / 100}%`
 }
 
+function togglePanel(key) {
+  openPanels[key] = !openPanels[key]
+}
+
+function setTrendHover(point) {
+  trendHover.value = point
+}
+
+function niceCeil(value) {
+  if (value <= 0) return 1
+  const magnitude = 10 ** Math.floor(Math.log10(value))
+  const scaled = value / magnitude
+  const niceStep = [1, 2, 5, 10].find(step => scaled <= step) || 10
+  return niceStep * magnitude
+}
+
+function formatAxisValue(value) {
+  if (trendMode.value === 'cost_yuan') return `¥${formatMoney(value)}`
+  return formatTrendValue(value)
+}
+
+function formatTrendValue(value) {
+  const number = Number(value || 0)
+  if (trendMode.value === 'cost_yuan') return formatMoney(number)
+  if (Math.abs(number) >= 1000000) return `${Math.round(number / 10000) / 100}M`
+  if (Math.abs(number) >= 1000) return `${Math.round(number / 100) / 10}K`
+  return `${Math.round(number * 100) / 100}`
+}
+
+function formatMoney(value) {
+  return (Math.round(Number(value || 0) * 100) / 100).toFixed(2)
+}
+
 function fmtDate(value) {
   if (!value) return '-'
   return new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16)
@@ -253,7 +388,13 @@ h1 { margin: 4px 0 0; font-family: var(--serif); font-size: 34px; color: var(--i
 .panel { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md); padding: 18px; }
 .panel-main { grid-column: 1 / -1; }
 .panel-title { margin-bottom: 14px; font-weight: 700; color: var(--ink); }
+.panel-collapsible { padding-bottom: 14px; }
+.panel-collapsible .panel-title { margin-bottom: 0; }
+.panel-title-clickable { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
+.panel-title-clickable:hover { color: var(--clay-deep); }
+.panel-meta { margin-left: auto; color: var(--ink-4); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .panel-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.panel-collapsible .panel-row { margin-bottom: 0; }
 .panel-row .panel-title { margin-bottom: 4px; }
 .metric { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--ink-3); }
 .metric strong { color: var(--ink); font-size: 22px; font-variant-numeric: tabular-nums; }
@@ -261,15 +402,27 @@ h1 { margin: 4px 0 0; font-family: var(--serif); font-size: 34px; color: var(--i
 .segmented { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--ivory); }
 .segmented button { min-width: 64px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); font-size: 13px; cursor: pointer; }
 .segmented button.active { background: var(--paper); color: var(--ink); box-shadow: 0 1px 4px rgba(31, 38, 35, 0.08); font-weight: 700; }
-.chart-wrap { position: relative; min-height: 260px; overflow-x: auto; }
-.chart-wrap svg { display: block; width: 100%; min-width: 720px; height: 260px; }
+.chart-wrap { position: relative; min-height: 300px; overflow-x: auto; }
+.chart-wrap svg { display: block; width: 100%; min-width: 760px; height: 300px; }
 .axis { stroke: var(--ink-4); stroke-width: 1; }
+.axis-tick { stroke: var(--ink-4); stroke-width: 1; }
 .grid-line { stroke: var(--line); stroke-width: 1; }
 .trend-line { fill: none; stroke: var(--clay-deep); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
 .trend-dot { fill: var(--paper); stroke: var(--clay-deep); stroke-width: 2; }
+.trend-dot:hover { fill: var(--clay-deep); }
 .axis-label { fill: var(--ink-4); font-size: 12px; }
+.hover-layer { pointer-events: none; }
+.hover-line { stroke: rgba(176, 91, 63, 0.42); stroke-width: 1; stroke-dasharray: 4 4; pointer-events: none; }
+.hover-dot { fill: var(--paper); stroke: var(--clay-deep); stroke-width: 3; pointer-events: none; }
+.trend-hit-area { fill: transparent; cursor: crosshair; }
+.chart-tooltip-box { fill: var(--paper); stroke: var(--line); filter: drop-shadow(0 8px 18px rgba(31, 38, 35, 0.14)); }
+.tooltip-title { fill: var(--ink); font-size: 13px; font-weight: 700; }
+.tooltip-line { fill: var(--ink-3); font-size: 12px; }
 .empty-chart { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-4); font-size: 13px; pointer-events: none; }
-.admin-table { width: 100%; border-collapse: collapse; }
+.table-scroll { margin-top: 14px; max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--paper); }
+.table-scroll.compact-scroll { max-height: 300px; }
+.table-scroll .admin-table th { position: sticky; top: 0; z-index: 1; }
+.admin-table { width: 100%; min-width: 760px; border-collapse: collapse; }
 .admin-table th, .admin-table td { text-align: left; padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .admin-table th { font-size: 12px; color: var(--ink-4); font-weight: 700; background: var(--ivory); }
 .table-input { width: 100%; height: 32px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink); padding: 0 9px; font-size: 13px; box-sizing: border-box; }
@@ -283,6 +436,8 @@ h1 { margin: 4px 0 0; font-family: var(--serif); font-size: 34px; color: var(--i
 @media (max-width: 900px) {
   .monitor-grid { grid-template-columns: 1fr; }
   .panel-row { display: block; }
+  .panel-row.panel-title-clickable { display: flex; }
   .segmented { margin-top: 12px; }
+  .table-scroll { max-height: 360px; }
 }
 </style>

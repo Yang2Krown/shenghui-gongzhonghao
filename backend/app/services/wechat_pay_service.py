@@ -139,6 +139,7 @@ class WechatPayService:
             logger.warning("[WechatPay] 回调订单不存在 out_trade_no=%s", out_trade_no)
             return None
 
+        self._validate_transaction_matches_order(transaction, order)
         order.notify_raw = body
         if order.status == "PAID":
             return order
@@ -158,6 +159,29 @@ class WechatPayService:
         await self.db.flush()
         logger.info("[WechatPay] 积分到账 out_trade_no=%s user_id=%s credits=%s", out_trade_no, order.user_id, order.credits)
         return order
+
+    def _validate_transaction_matches_order(self, transaction: Dict[str, Any], order: PaymentOrder) -> None:
+        """确保微信回调交易和本地订单完全一致后再入账。"""
+        amount = transaction.get("amount") or {}
+        checks = [
+            (transaction.get("out_trade_no") == order.out_trade_no, "订单号不匹配"),
+            (transaction.get("mchid") == settings.WXPAY_MCH_ID, "商户号不匹配"),
+            (transaction.get("appid") == settings.WXPAY_APP_ID, "appid 不匹配"),
+            (amount.get("total") == order.amount_fen, "支付金额不匹配"),
+        ]
+        currency = amount.get("currency")
+        if currency is not None:
+            checks.append((currency == "CNY", "支付币种不匹配"))
+
+        for ok, message in checks:
+            if not ok:
+                logger.warning(
+                    "[WechatPay] 回调校验失败 out_trade_no=%s reason=%s transaction_id=%s",
+                    order.out_trade_no,
+                    message,
+                    transaction.get("transaction_id"),
+                )
+                raise ValueError(f"微信支付回调校验失败：{message}")
 
     def _wechat_headers(self, method: str, url_path: str, payload: Dict[str, Any]) -> Dict[str, str]:
         timestamp = str(int(time.time()))

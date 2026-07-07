@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.deps import get_current_admin_user, get_current_super_admin_user
+from app.core.admin_permissions import has_permission, is_backoffice_user, require_admin_permission
 from app.core.config import settings
 from app.core.security import get_current_super_admin_user as get_core_current_super_admin_user
 from app.models.admin_audit import AdminAuditLog
@@ -60,6 +61,33 @@ async def test_core_super_admin_dependency_requires_superuser():
 
 def test_super_admin_phone_default():
     assert settings.SUPER_ADMIN_PHONE == "18021751281"
+
+
+def test_admin_role_permissions_are_scoped():
+    finance = User(id=1, username="finance", role="finance", is_superuser=False, is_active=True)
+    support = User(id=2, username="support", role="support", is_superuser=False, is_active=True)
+    auditor = User(id=3, username="auditor", role="auditor", is_superuser=False, is_active=True)
+    root = User(id=4, username="root", role="user", is_superuser=True, is_active=True)
+
+    assert has_permission(finance, "credits:gift") is True
+    assert has_permission(finance, "pricing:write") is True
+    assert has_permission(support, "credits:gift") is False
+    assert has_permission(support, "alerts:write") is True
+    assert has_permission(auditor, "audit:read") is True
+    assert has_permission(auditor, "pricing:write") is False
+    assert has_permission(root, "pricing:write") is True
+    assert is_backoffice_user(finance) is True
+
+
+@pytest.mark.asyncio
+async def test_permission_dependency_rejects_wrong_role():
+    dependency = require_admin_permission("credits:gift")
+    support = User(id=2, username="support", role="support", is_superuser=False, is_active=True)
+
+    with pytest.raises(HTTPException) as exc:
+        await dependency(support)
+
+    assert exc.value.status_code == 403
 
 
 def test_build_alert_specs_for_unhealthy_pipeline():

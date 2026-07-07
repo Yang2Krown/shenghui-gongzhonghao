@@ -1,10 +1,13 @@
 """积分系统 API 路由。"""
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.core.admin_permissions import require_admin_permission
 from app.core.security import get_current_user
+from app.core.timezone import utcnow
+from app.models.admin_audit import AdminAuditLog
 from app.models.user import User
 from app.services.credit_service import CreditService, get_available_packages, get_operation_costs
 from app.core.credit_config import estimate_monthly_cost, FULL_CREATION_FLOW
@@ -170,14 +173,13 @@ async def estimate_cost(
 async def admin_gift_credits(
     user_id: int,
     amount: int,
+    request: Request,
     description: str = "管理员赠送",
-    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin_permission("credits:gift")),
     credit_service: CreditService = Depends(get_credit_service),
 ):
     """管理员赠送积分"""
-    if not current_user.is_superuser:
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-
     if amount <= 0:
         raise HTTPException(status_code=400, detail="赠送积分必须大于0")
 
@@ -186,6 +188,25 @@ async def admin_gift_credits(
         amount=amount,
         description=description,
     )
+    db.add(AdminAuditLog(
+        actor_user_id=current_user.id,
+        action="credits.gift",
+        target_type="user",
+        target_id=str(user_id),
+        summary=f"赠送积分 {amount} 给用户 {user_id}",
+        detail=description,
+        metadata_json={
+            "target_user_id": user_id,
+            "amount": amount,
+            "transaction_id": transaction.id,
+            "ip": (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
+            or (request.client.host if request.client else None),
+            "user_agent": request.headers.get("user-agent"),
+        },
+        occurred_at=utcnow(),
+    ))
+    await db.commit()
+    await db.refresh(transaction)
 
     return {
         "code": 200,

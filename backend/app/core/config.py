@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
     REDIS_PASSWORD: Optional[str] = None
     REDIS_DB: int = 0
+    REDIS_CONNECT_TIMEOUT_SECONDS: float = 2.0
+    REDIS_SOCKET_TIMEOUT_SECONDS: float = 2.0
 
     # 限流配置
     RATE_LIMIT_ENABLED: bool = True
@@ -146,6 +148,7 @@ class Settings(BaseSettings):
     ALIYUN_SMS_ACCESS_KEY_SECRET: Optional[str] = None
     ALIYUN_SMS_SIGN_NAME: Optional[str] = None
     ALIYUN_SMS_TEMPLATE_CODE: Optional[str] = None
+    SMS_SEND_TIMEOUT_SECONDS: float = 8.0
 
     # Exa API（微信公众号搜索，替代 mcporter CLI）
     EXA_API_KEY: Optional[str] = None

@@ -184,4 +184,6 @@ def _get_redis() -> aioredis.Redis:
         password=settings.REDIS_PASSWORD or None,
         db=settings.REDIS_DB,
         decode_responses=True,
+        socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
+        socket_timeout=settings.REDIS_SOCKET_TIMEOUT_SECONDS,
     )

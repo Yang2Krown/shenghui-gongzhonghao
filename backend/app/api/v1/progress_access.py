@@ -1,5 +1,7 @@
 """Helpers for protecting progress polling and SSE streams."""
 
+from typing import Optional
+
 from fastapi import HTTPException, status
 
 from app.core.progress import ProgressStore
@@ -9,7 +11,7 @@ from app.core.security import decode_token
 def ensure_run_owner_from_token(
     progress_store: ProgressStore,
     run_id: str,
-    token: str | None,
+    token: Optional[str],
 ) -> int:
     """Validate EventSource query token and ensure it owns the progress run."""
     if not token:

@@ -116,6 +116,7 @@ class TokenPayload(BaseModel):
     sub: Optional[int] = None
     type: str = "access"
     exp: Optional[datetime] = None
+    jti: Optional[str] = None
 
 
 class TokenRefresh(BaseModel):

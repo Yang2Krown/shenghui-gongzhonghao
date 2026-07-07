@@ -2,12 +2,13 @@
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_admin_user, get_current_super_admin_user
+from app.api.deps import get_current_super_admin_user
+from app.core.admin_permissions import ADMIN_ROLES, allowed_roles_text, require_admin_permission
 from app.core.config import settings
 from app.core.timezone import utcnow
 from app.db.session import get_db
@@ -26,11 +27,20 @@ router = APIRouter()
 class AdminGrantRequest(BaseModel):
     phone: str = Field(..., min_length=6, max_length=20, description="用户手机号")
     is_admin: bool = Field(True, description="true=设为管理员，false=取消管理员")
+    role: Optional[str] = Field(
+        None,
+        description="细分后台角色：admin/ops/support/finance/auditor；为空时兼容 is_admin",
+    )
 
 
 class AlertUpdateRequest(BaseModel):
     note: Optional[str] = Field(None, max_length=1000, description="处理备注")
     resolve: bool = Field(False, description="是否手动标记已恢复")
+
+
+class UserStatusUpdateRequest(BaseModel):
+    is_active: bool = Field(..., description="true=启用用户，false=禁用用户")
+    reason: Optional[str] = Field(None, max_length=1000, description="操作原因")
 
 
 class LlmPricingRequest(BaseModel):
@@ -130,6 +140,17 @@ def _public_alert_spec(spec: dict) -> dict:
     return {key: value for key, value in spec.items() if key != "payload"}
 
 
+def _request_metadata(request: Request) -> dict:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    ip = forwarded_for.split(",", 1)[0].strip() if forwarded_for else None
+    if not ip and request.client:
+        ip = request.client.host
+    return {
+        "ip": ip,
+        "user_agent": request.headers.get("user-agent"),
+    }
+
+
 def _add_audit_log(
     db: AsyncSession,
     *,
@@ -158,7 +179,7 @@ def _add_audit_log(
 @router.get("/monitoring/overview", response_model=dict)
 async def monitoring_overview(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("monitoring:read")),
 ) -> Any:
     """管理员后台监测总览。"""
     data = await collect_admin_monitoring(db)
@@ -169,7 +190,7 @@ async def monitoring_overview(
 @router.get("/monitoring/source-health", response_model=dict)
 async def monitoring_source_health(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("monitoring:read")),
 ) -> Any:
     """数据源健康独立监测。"""
     data = await collect_source_health(db)
@@ -179,7 +200,7 @@ async def monitoring_source_health(
 @router.get("/monitoring/ai-costs", response_model=dict)
 async def monitoring_ai_costs(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("payments:read")),
 ) -> Any:
     """AI 调用成本独立监测。"""
     data = await collect_ai_costs(db)
@@ -189,8 +210,9 @@ async def monitoring_ai_costs(
 @router.post("/monitoring/ai-costs/pricing", response_model=dict)
 async def create_llm_pricing(
     req: LlmPricingRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("pricing:write")),
 ) -> Any:
     """新增模型单价配置。"""
     exists = (await db.execute(
@@ -209,7 +231,7 @@ async def create_llm_pricing(
         action="llm_pricing.create",
         target_type="llm_model_pricing",
         summary=f"新增模型单价 {req.provider}/{req.model}",
-        metadata=req.model_dump(),
+        metadata={**req.model_dump(), **_request_metadata(request)},
     )
     await db.commit()
     await db.refresh(row)
@@ -220,8 +242,9 @@ async def create_llm_pricing(
 async def update_llm_pricing(
     pricing_id: int,
     req: LlmPricingUpdateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("pricing:write")),
 ) -> Any:
     """修改模型单价配置。"""
     row = await db.get(LlmModelPricing, pricing_id)
@@ -242,7 +265,7 @@ async def update_llm_pricing(
         target_type="llm_model_pricing",
         target_id=str(pricing_id),
         summary=f"修改模型单价 {row.provider}/{row.model}",
-        metadata={"before": before, "after": req.model_dump(exclude_unset=True)},
+        metadata={"before": before, "after": req.model_dump(exclude_unset=True), **_request_metadata(request)},
     )
     await db.commit()
     await db.refresh(row)
@@ -252,7 +275,7 @@ async def update_llm_pricing(
 @router.get("/monitoring/api-health", response_model=dict)
 async def monitoring_api_health(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("monitoring:read")),
 ) -> Any:
     """接口 500/P95 独立监测。"""
     data = await collect_api_health(db)
@@ -262,7 +285,7 @@ async def monitoring_api_health(
 @router.get("/monitoring/user-stats", response_model=dict)
 async def monitoring_user_stats(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("monitoring:read")),
 ) -> Any:
     """用户统计独立监测。"""
     data = await collect_user_stats(db)
@@ -273,7 +296,7 @@ async def monitoring_user_stats(
 async def monitoring_snapshots(
     limit: int = Query(24, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("monitoring:read")),
 ) -> Any:
     """最近监测快照历史。"""
     rows = (await db.execute(
@@ -293,7 +316,7 @@ async def monitoring_alerts(
     status_filter: str = Query("open", alias="status", description="open/resolved/all"),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("monitoring:read")),
 ) -> Any:
     """监测告警列表。"""
     stmt = select(MonitoringAlert).order_by(MonitoringAlert.last_triggered_at.desc()).limit(limit)
@@ -311,8 +334,9 @@ async def monitoring_alerts(
 async def update_monitoring_alert(
     alert_id: int,
     req: AlertUpdateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("alerts:write")),
 ) -> Any:
     """更新告警处理备注，必要时手动标记已恢复。"""
     alert = await db.get(MonitoringAlert, alert_id)
@@ -336,7 +360,7 @@ async def update_monitoring_alert(
         target_id=str(alert.id),
         summary=f"处理告警：{alert.title}",
         detail=req.note,
-        metadata={"resolve": req.resolve, "alert_key": alert.key, "alert_level": alert.level},
+        metadata={"resolve": req.resolve, "alert_key": alert.key, "alert_level": alert.level, **_request_metadata(request)},
     )
     await db.commit()
     await db.refresh(alert)
@@ -352,7 +376,7 @@ async def update_monitoring_alert(
 async def list_audit_logs(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("audit:read")),
 ) -> Any:
     """最近管理员操作记录。"""
     rows = (await db.execute(
@@ -370,12 +394,12 @@ async def list_audit_logs(
 @router.get("/admins", response_model=dict)
 async def list_admins(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("admin:manage")),
 ) -> Any:
     """查看当前管理员列表。"""
     rows = (await db.execute(
         select(User)
-        .where(or_(User.role == "admin", User.is_superuser.is_(True)))
+        .where(or_(User.role.in_(ADMIN_ROLES), User.is_superuser.is_(True)))
         .order_by(User.is_superuser.desc(), User.id.asc())
     )).scalars().all()
     return {
@@ -384,6 +408,7 @@ async def list_admins(
         "data": {
             "items": [_user_payload(u) for u in rows],
             "super_admin_phone": _mask_phone(settings.SUPER_ADMIN_PHONE),
+            "roles": sorted(ADMIN_ROLES),
         },
     }
 
@@ -394,7 +419,7 @@ async def list_users(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("users:read")),
 ) -> Any:
     """管理员查看用户概览。"""
     conditions = []
@@ -437,7 +462,7 @@ async def list_users(
 async def list_failed_tasks(
     limit: int = Query(30, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_admin_permission("monitoring:read")),
 ) -> Any:
     """最近失败任务列表。"""
     rows = (await db.execute(
@@ -453,9 +478,48 @@ async def list_failed_tasks(
     }
 
 
+@router.patch("/users/{user_id}/status", response_model=dict)
+async def update_user_status(
+    user_id: int,
+    req: UserStatusUpdateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin_permission("users:status")),
+) -> Any:
+    """启用或禁用用户账号。"""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    if user.is_superuser and not req.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能禁用最高管理员")
+
+    before = {"is_active": user.is_active}
+    user.is_active = req.is_active
+    db.add(user)
+    _add_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="user.status.update",
+        target_type="user",
+        target_id=str(user.id),
+        summary=("启用用户" if req.is_active else "禁用用户") + f"：{user.id}",
+        detail=req.reason,
+        metadata={
+            "target_user_id": user.id,
+            "before": before,
+            "after": {"is_active": user.is_active},
+            **_request_metadata(request),
+        },
+    )
+    await db.commit()
+    await db.refresh(user)
+    return {"code": 200, "message": "用户状态已更新", "data": _user_payload(user)}
+
+
 @router.post("/admins", response_model=dict)
 async def set_admin(
     req: AdminGrantRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_super_admin_user),
 ) -> Any:
@@ -464,27 +528,35 @@ async def set_admin(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该手机号用户")
 
-    if user.phone == settings.SUPER_ADMIN_PHONE and not req.is_admin:
+    target_role = (req.role or ("admin" if req.is_admin else "user")).strip().lower()
+    if target_role != "user" and target_role not in ADMIN_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"无效后台角色，可选：user, {allowed_roles_text()}",
+        )
+    if user.phone == settings.SUPER_ADMIN_PHONE and target_role == "user":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能取消最高管理员权限")
 
-    user.role = "admin" if req.is_admin else "user"
+    before = {"role": user.role, "is_superuser": user.is_superuser}
+    user.role = target_role
     if user.phone == settings.SUPER_ADMIN_PHONE:
         user.is_superuser = True
-    elif not req.is_admin:
+    elif target_role == "user":
         user.is_superuser = False
     db.add(user)
     _add_audit_log(
         db,
         actor_user_id=current_user.id,
-        action="admin.grant" if req.is_admin else "admin.revoke",
+        action="admin.role.update",
         target_type="user",
         target_id=str(user.id),
-        summary=("设为管理员" if req.is_admin else "取消管理员") + f"：{_mask_phone(user.phone)}",
+        summary=f"更新后台角色为 {target_role}：{_mask_phone(user.phone)}",
         metadata={
             "target_user_id": user.id,
             "target_phone_masked": _mask_phone(user.phone),
-            "is_admin": req.is_admin,
-            "is_superuser": user.is_superuser,
+            "before": before,
+            "after": {"role": user.role, "is_superuser": user.is_superuser},
+            **_request_metadata(request),
         },
     )
     await db.commit()

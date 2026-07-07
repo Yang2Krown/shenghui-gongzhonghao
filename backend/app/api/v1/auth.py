@@ -13,6 +13,13 @@ from app.core.security import (
     decode_token,
     get_current_user
 )
+from app.core.refresh_tokens import (
+    RefreshTokenStoreUnavailable,
+    is_refresh_token_active,
+    register_refresh_token,
+    revoke_refresh_token,
+    revoke_user_refresh_tokens,
+)
 from app.crud.user import user as user_crud
 from app.db.session import get_db
 from app.models.user import User
@@ -49,6 +56,29 @@ async def _ensure_super_admin_by_phone(user: User, db: AsyncSession) -> User:
         await db.commit()
         await db.refresh(user)
     return user
+
+
+async def _issue_token_pair(user_id: int) -> dict:
+    access_token = create_access_token(subject=user_id)
+    refresh_token = create_refresh_token(subject=user_id)
+    payload = decode_token(refresh_token)
+    if not payload or not payload.get("jti") or not payload.get("exp"):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="刷新令牌生成失败",
+        )
+    try:
+        await register_refresh_token(payload["jti"], user_id, payload["exp"])
+    except RefreshTokenStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="刷新令牌服务暂不可用，请稍后重试",
+        ) from exc
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+    }
 
 
 @router.post("/register", response_model=dict)
@@ -94,18 +124,14 @@ async def register(
         import logging
         logging.getLogger(__name__).warning(f"新用户积分赠送失败: {e}")
     
-    # 生成令牌
-    access_token = create_access_token(subject=user.id)
-    refresh_token = create_refresh_token(subject=user.id)
+    token_pair = await _issue_token_pair(user.id)
     
     return {
         "code": 200,
         "message": "注册成功",
         "data": {
             "user": UserResponse.from_orm(user).dict(),
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer"
+            **token_pair,
         }
     }
 
@@ -152,18 +178,14 @@ async def login(
             detail="用户未激活"
         )
     
-    # 生成令牌
-    access_token = create_access_token(subject=user.id)
-    refresh_token = create_refresh_token(subject=user.id)
+    token_pair = await _issue_token_pair(user.id)
     
     return {
         "code": 200,
         "message": "登录成功",
         "data": {
             "user": UserResponse.from_orm(user).dict(),
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer"
+            **token_pair,
         }
     }
 
@@ -188,6 +210,11 @@ async def refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="无效的令牌类型"
         )
+    if not payload.get("jti"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无效的刷新令牌",
+        )
     
     # 获取用户
     user_id = payload.get("sub")
@@ -197,20 +224,68 @@ async def refresh_token(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="用户不存在"
         )
-    
-    # 生成新令牌
-    access_token = create_access_token(subject=user.id)
-    refresh_token = create_refresh_token(subject=user.id)
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="用户未激活",
+        )
+
+    try:
+        active = await is_refresh_token_active(payload["jti"], user.id)
+    except RefreshTokenStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="刷新令牌服务暂不可用，请稍后重试",
+        ) from exc
+    if not active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="刷新令牌已失效，请重新登录",
+        )
+
+    try:
+        await revoke_refresh_token(payload["jti"])
+    except RefreshTokenStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="刷新令牌服务暂不可用，请稍后重试",
+        ) from exc
+
+    token_pair = await _issue_token_pair(user.id)
     
     return {
         "code": 200,
         "message": "令牌刷新成功",
-        "data": {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer"
-        }
+        "data": token_pair,
     }
+
+
+@router.post("/logout", response_model=dict)
+async def logout(token_data: TokenRefresh) -> Any:
+    """登出当前设备：撤销提交的 refresh token。"""
+    payload = decode_token(token_data.refresh_token)
+    if payload and payload.get("type") == "refresh" and payload.get("jti"):
+        try:
+            await revoke_refresh_token(payload["jti"])
+        except RefreshTokenStoreUnavailable as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="刷新令牌服务暂不可用，请稍后重试",
+            ) from exc
+    return {"code": 200, "message": "已登出", "data": None}
+
+
+@router.post("/logout-all", response_model=dict)
+async def logout_all(current_user: User = Depends(get_current_user)) -> Any:
+    """全端登出：撤销当前用户所有 refresh token。"""
+    try:
+        await revoke_user_refresh_tokens(current_user.id)
+    except RefreshTokenStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="刷新令牌服务暂不可用，请稍后重试",
+        ) from exc
+    return {"code": 200, "message": "已全端登出", "data": None}
 
 
 @router.get("/me", response_model=dict)
@@ -250,8 +325,13 @@ async def send_sms_code_endpoint(
             detail=f"验证码服务异常: {type(e).__name__}: {e}",
         )
     if not result["ok"]:
+        status_code = (
+            status.HTTP_429_TOO_MANY_REQUESTS
+            if "频繁" in result["message"]
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        )
         raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            status_code=status_code,
             detail=result["message"],
         )
     return {"code": 200, "message": result["message"], "data": None}
@@ -298,17 +378,14 @@ async def login_by_phone(
             detail="用户已被禁用",
         )
 
-    access_token = create_access_token(subject=user.id)
-    refresh_token = create_refresh_token(subject=user.id)
+    token_pair = await _issue_token_pair(user.id)
 
     return {
         "code": 200,
         "message": "登录成功",
         "data": {
             "user": UserResponse.from_orm(user).dict(),
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
+            **token_pair,
         },
     }
 

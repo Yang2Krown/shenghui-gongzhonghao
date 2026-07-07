@@ -11,6 +11,7 @@ from typing import Optional
 
 from app.core.security import get_current_user
 from app.core.rate_limit import limit_file_upload
+from app.core.upload_security import UploadSecurityError, validate_image_upload
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ router = APIRouter()
 
 # 配置项
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
-ALLOWED_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+ALLOWED_IMAGE_TYPES = {"jpeg", "png", "gif", "webp"}
 MAX_IMAGES_PER_USER = 500  # 每用户最多 500 张图片
 IMAGE_EXPIRY_DAYS = 30  # 图片保留 30 天
 
@@ -106,13 +107,6 @@ async def upload_image(
     最大尺寸：10MB
     每用户最多：100 张图片
     """
-    # 验证文件类型
-    if not file.content_type or file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支持的图片格式: {file.content_type}，支持: JPEG, PNG, GIF, WebP"
-        )
-
     # 检查用户上传数量限制
     from app.core.oss_uploader import _bucket_name, _dir
     user_prefix = f"{_dir}/{current_user.id}/"
@@ -123,15 +117,17 @@ async def upload_image(
             detail=f"已达到上传上限（{MAX_IMAGES_PER_USER} 张），请删除部分图片后再上传"
         )
 
-    # 读取文件内容
     data = await file.read()
-
-    # 验证文件大小
-    if len(data) > MAX_IMAGE_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"图片大小超过限制: {len(data) / 1024 / 1024:.1f}MB，最大: 10MB"
+    try:
+        safe = validate_image_upload(
+            filename=file.filename,
+            data=data,
+            max_size=MAX_IMAGE_SIZE,
+            allowed_types=ALLOWED_IMAGE_TYPES,
+            reencode=True,
         )
+    except UploadSecurityError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     # 上传到 OSS
     from app.core.oss_uploader import upload_bytes, is_oss_configured, _dir
@@ -146,9 +142,9 @@ async def upload_image(
         # 按用户 ID 分目录存储，便于管理和清理
         user_dir = f"{_dir}/{current_user.id}"
         url = upload_bytes(
-            data=data,
-            filename=file.filename or "image.jpg",
-            content_type=file.content_type,
+            data=safe.data,
+            filename=safe.filename,
+            content_type=safe.content_type,
             dir_prefix=user_dir,
         )
 
@@ -162,8 +158,8 @@ async def upload_image(
 
         return ImageUploadResponse(
             url=url,
-            filename=file.filename or "image.jpg",
-            size=len(data),
+            filename=safe.filename,
+            size=safe.size,
             expires_at=expires_at,
         )
 
@@ -191,15 +187,17 @@ async def upload_image_to_wechat(
     from app.db.session import get_db
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    # 验证文件类型
-    if not file.content_type or file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支持的图片格式: {file.content_type}"
-        )
-
-    # 读取文件内容
     data = await file.read()
+    try:
+        safe = validate_image_upload(
+            filename=file.filename,
+            data=data,
+            max_size=MAX_IMAGE_SIZE,
+            allowed_types=ALLOWED_IMAGE_TYPES,
+            reencode=True,
+        )
+    except UploadSecurityError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     # 获取数据库会话
     async for db in get_db():
@@ -215,8 +213,8 @@ async def upload_image_to_wechat(
             # 上传到微信
             url = await upload_content_image(
                 access_token=access_token,
-                image_data=data,
-                filename=file.filename or "image.jpg",
+                image_data=safe.data,
+                filename=safe.filename,
             )
 
             logger.info(f"图片上传到微信成功: {file.filename} -> {url[:50]}...")
@@ -225,8 +223,8 @@ async def upload_image_to_wechat(
                 "code": 200,
                 "data": {
                     "url": url,
-                    "filename": file.filename,
-                    "size": len(data),
+                    "filename": safe.filename,
+                    "size": safe.size,
                 },
             }
 

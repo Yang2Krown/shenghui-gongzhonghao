@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
 from app.core.rate_limit import limit_ai_generation, limit_file_upload, limit_link_extract
+from app.core.upload_security import UploadSecurityError, validate_document_upload
 from app.core.background import spawn
 from app.core.timezone import utcnow
 from app.db.session import get_db, AsyncSessionLocal
@@ -225,10 +226,18 @@ async def brief_upload(
     """上传 brief 文件（docx/pdf/txt 等），提取纯文本。"""
     data = await file.read()
     try:
+        safe = validate_document_upload(
+            filename=file.filename,
+            data=data,
+            max_size=10 * 1024 * 1024,
+        )
+    except UploadSecurityError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    try:
         text = await extract_text(
             filename=file.filename or "upload",
-            data=data,
-            content_type=file.content_type,
+            data=safe.data,
+            content_type=safe.content_type,
         )
     except UnsupportedFileType as e:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型：{e}")
