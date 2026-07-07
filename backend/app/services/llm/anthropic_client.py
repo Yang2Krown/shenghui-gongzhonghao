@@ -9,6 +9,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
+from app.services.llm.cost_guard import ensure_llm_call_allowed
 from app.services.llm.llm_client import ChatMessage, ChatResult, LLMClient, parse_json_loose
 from app.services.llm.monitoring import record_llm_call
 from app.services.llm.retry import with_retry
@@ -67,6 +68,7 @@ class AnthropicClient(LLMClient):
             kwargs["system"] += "\n\n请仅输出严格的 JSON，不要包含 markdown fence 或解释文字。"
 
         started_at = time.perf_counter()
+        await ensure_llm_call_allowed(self.provider, kwargs["model"])
         try:
             # 设计文档 4.2 节：API 失败重试最多 3 次
             resp = await with_retry(

@@ -271,6 +271,7 @@ const navItems = [
       { id: 'admin-source-health', label: '数据源健康', roles: ['admin', 'ops', 'support', 'auditor'] },
       { id: 'admin-ai-costs', label: 'AI 成本', roles: ['admin', 'finance'] },
       { id: 'admin-api-health', label: '接口健康', roles: ['admin', 'ops', 'support', 'auditor'] },
+      { id: 'admin-security-health', label: '安全健康', roles: ['admin', 'ops', 'auditor'] },
       { id: 'admin-user-stats', label: '用户统计', roles: ['admin', 'ops', 'support', 'finance'] },
       { id: 'gzh-test', label: '公众号抓取测试', roles: ['admin', 'ops'] },
     ],
@@ -320,6 +321,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/admin/source-health')) return 'admin-source-health'
   if (path.startsWith('/admin/ai-costs')) return 'admin-ai-costs'
   if (path.startsWith('/admin/api-health')) return 'admin-api-health'
+  if (path.startsWith('/admin/security-health')) return 'admin-security-health'
   if (path.startsWith('/admin/user-stats')) return 'admin-user-stats'
   if (path.startsWith('/admin')) return 'admin-dashboard'
   if (path.startsWith('/tools/gzh-test')) return 'gzh-test'
@@ -382,6 +384,7 @@ const routeMap = {
   'admin-source-health': '/admin/source-health',
   'admin-ai-costs': '/admin/ai-costs',
   'admin-api-health': '/admin/api-health',
+  'admin-security-health': '/admin/security-health',
   'admin-user-stats': '/admin/user-stats',
   'gzh-test': '/tools/gzh-test',
 }

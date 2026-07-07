@@ -9,6 +9,7 @@ import time
 import uvicorn
 
 from app.core.config import settings
+from app.core.logging_security import install_sensitive_log_filter
 from app.api.v1 import api_router
 from app.core.security import decode_token
 from app.db.session import AsyncSessionLocal, engine
@@ -21,6 +22,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+install_sensitive_log_filter()
 
 
 @asynccontextmanager
@@ -83,7 +85,23 @@ async def add_process_time_header(request: Request, call_next):
         process_time = time.time() - start_time
         if "response" in locals():
             response.headers["X-Process-Time"] = str(process_time)
+            _apply_security_headers(response)
         await _record_api_request(request, status_code, process_time * 1000)
+
+
+def _apply_security_headers(response) -> None:
+    """写入基础安全响应头。"""
+    if not settings.SECURITY_HEADERS_ENABLED:
+        return
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", settings.SECURITY_REFERRER_POLICY)
+    response.headers.setdefault("X-Frame-Options", settings.SECURITY_X_FRAME_OPTIONS)
+    response.headers.setdefault("Content-Security-Policy", settings.SECURITY_CONTENT_SECURITY_POLICY)
+    if settings.security_hsts_enabled:
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            f"max-age={settings.SECURITY_HSTS_MAX_AGE_SECONDS}; includeSubDomains",
+        )
 
 
 async def _record_api_request(request: Request, status_code: int, duration_ms: float) -> None:

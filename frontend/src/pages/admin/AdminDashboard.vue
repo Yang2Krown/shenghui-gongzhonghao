@@ -80,6 +80,32 @@
         <div v-else class="alert-empty">最近敏感操作和系统告警未发现异常峰值</div>
       </section>
 
+      <section class="panel panel-main">
+        <div class="panel-title">
+          <span>P2 安全基线</span>
+          <button class="btn-ghost btn-sm" type="button" @click="router.push('/admin/security-health')">查看详情</button>
+        </div>
+        <div class="baseline-grid">
+          <div :class="['baseline-card', securityHealth.overall?.level || 'ok']">
+            <div class="baseline-name">总体状态</div>
+            <strong>{{ securityHealth.overall?.message || '加载中' }}</strong>
+            <div class="muted">环境：{{ securityHealth.environment || '-' }}</div>
+          </div>
+          <div class="baseline-card ok">
+            <div class="baseline-name">正常</div>
+            <strong>{{ securityHealth.counts?.ok || 0 }}</strong>
+          </div>
+          <div class="baseline-card warn">
+            <div class="baseline-name">待关注</div>
+            <strong>{{ securityHealth.counts?.warn || 0 }}</strong>
+          </div>
+          <div class="baseline-card critical">
+            <div class="baseline-name">高风险</div>
+            <strong>{{ securityHealth.counts?.critical || 0 }}</strong>
+          </div>
+        </div>
+      </section>
+
       <section class="panel panel-main panel-collapsible">
         <div class="panel-title panel-title-clickable" @click="togglePanel('roles')">
           <div>
@@ -358,6 +384,7 @@ import {
   getMonitoringAlerts,
   getMonitoringOverview,
   getMonitoringSnapshots,
+  getSecurityHealth,
   setAdminByPhone,
   updateAdminUserStatus,
   updateMonitoringAlert,
@@ -381,6 +408,7 @@ const alertRows = ref([])
 const userRows = ref([])
 const failedTasks = ref([])
 const auditRows = ref([])
+const securityHealth = ref({})
 const openPanels = reactive({
   roles: true,
   history: false,
@@ -443,7 +471,7 @@ const signalLabels = {
 async function loadAll() {
   loading.value = true
   try {
-    const [monitorResp, adminResp, snapshotResp, alertResp, userResp, failedResp, auditResp] = await Promise.allSettled([
+    const [monitorResp, adminResp, snapshotResp, alertResp, userResp, failedResp, auditResp, securityResp] = await Promise.allSettled([
       getMonitoringOverview(),
       getAdmins(),
       getMonitoringSnapshots(24),
@@ -451,6 +479,7 @@ async function loadAll() {
       getAdminUsers({ limit: 30, keyword: userKeyword.value || undefined }),
       getFailedTasks(30),
       getAdminAuditLogs(50),
+      getSecurityHealth(),
     ])
     Object.assign(overview, settledData(monitorResp) || {})
     admins.value = settledData(adminResp)?.items || []
@@ -459,6 +488,7 @@ async function loadAll() {
     userRows.value = settledData(userResp)?.items || []
     failedTasks.value = settledData(failedResp)?.items || []
     auditRows.value = settledData(auditResp)?.items || []
+    securityHealth.value = settledData(securityResp) || {}
   } finally {
     loading.value = false
   }
@@ -629,6 +659,12 @@ h1 { margin: 4px 0 0; font-family: var(--serif); font-size: 34px; color: var(--i
 .security-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--ink); }
 .security-desc { margin-top: 6px; color: var(--ink-3); font-size: 13px; line-height: 1.5; }
 .security-meta { margin-top: 8px; color: var(--ink-4); font-size: 12px; }
+.baseline-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(120px, 1fr)); gap: 10px; }
+.baseline-card { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 12px 14px; background: var(--ivory); }
+.baseline-card.warn { border-color: #e3b665; background: #fff8e8; }
+.baseline-card.critical { border-color: #dfa29a; background: #fff0ef; }
+.baseline-name { color: var(--ink-4); font-size: 12px; margin-bottom: 6px; }
+.baseline-card strong { display: block; color: var(--ink); font-size: 20px; font-variant-numeric: tabular-nums; }
 .grant-row { display: grid; grid-template-columns: minmax(220px, 1fr) 180px auto; gap: 10px; margin-bottom: 14px; }
 .table-scroll { margin-top: 14px; max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--paper); }
 .table-scroll.compact-scroll { max-height: 300px; }
@@ -643,7 +679,7 @@ h1 { margin: 4px 0 0; font-family: var(--serif); font-size: 34px; color: var(--i
 .ua-cell { max-width: 260px; overflow-wrap: anywhere; }
 .action-cell { display: flex; gap: 6px; flex-wrap: wrap; }
 @media (max-width: 900px) {
-  .admin-grid, .signal-grid, .alert-strip, .security-grid { grid-template-columns: 1fr; }
+  .admin-grid, .signal-grid, .alert-strip, .security-grid, .baseline-grid { grid-template-columns: 1fr; }
   .grant-row { grid-template-columns: 1fr; }
   .panel-title-clickable, .panel-actions { align-items: stretch; }
   .panel-title-clickable { flex-direction: column; }

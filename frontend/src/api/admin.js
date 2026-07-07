@@ -28,6 +28,10 @@ export const getUserStats = () => {
   return get('/admin/monitoring/user-stats')
 }
 
+export const getSecurityHealth = () => {
+  return get('/admin/monitoring/security-health')
+}
+
 export const getMonitoringSnapshots = (limit = 24) => {
   return get('/admin/monitoring/snapshots', { limit })
 }

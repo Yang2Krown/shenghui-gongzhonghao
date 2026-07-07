@@ -162,6 +162,12 @@ const routes = [
         meta: { title: '接口健康', requiresAdmin: true }
       },
       {
+        path: 'admin/security-health',
+        name: 'AdminSecurityHealth',
+        component: () => import('@/pages/admin/SecurityHealth.vue'),
+        meta: { title: '安全健康', requiresAdmin: true }
+      },
+      {
         path: 'admin/user-stats',
         name: 'AdminUserStats',
         component: () => import('@/pages/admin/UserStats.vue'),

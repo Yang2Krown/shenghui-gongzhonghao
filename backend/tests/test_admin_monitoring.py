@@ -6,7 +6,10 @@ from fastapi import HTTPException
 from app.api.deps import get_current_admin_user, get_current_super_admin_user
 from app.core.admin_permissions import has_permission, is_backoffice_user, require_admin_permission
 from app.core.config import settings
+from app.core.logging_security import mask_sensitive_data
 from app.core.security import get_current_super_admin_user as get_core_current_super_admin_user
+from app.core.timezone import utcnow
+from app.main import _apply_security_headers
 from app.models.admin_audit import AdminAuditLog
 from app.models.api_request_log import ApiRequestLog
 from app.models.llm_monitoring import LlmCallLog, LlmModelPricing
@@ -14,7 +17,9 @@ from app.models.monitoring import MonitoringAlert
 from app.models.user import User
 from app.services.monitoring.checks import build_alert_specs
 from app.services.llm.monitoring import calculate_cost_yuan
+from app.services.llm.cost_guard import _provider_state
 from app.services.monitoring.modules import _safe_time
+from app.services.monitoring.security_health import collect_security_health
 
 
 @pytest.mark.asyncio
@@ -176,3 +181,72 @@ def test_calculate_llm_cost_yuan():
         pricing,
     )
     assert float(cost) == 0.006
+
+
+def test_security_health_reports_p2_baseline():
+    payload = collect_security_health()
+
+    assert "overall" in payload
+    assert "groups" in payload
+    assert any(group["key"] == "runtime" for group in payload["groups"])
+    assert any(group["key"] == "perimeter" for group in payload["groups"])
+    assert any(group["key"] == "governance" for group in payload["groups"])
+    assert "secret_presence" in payload
+
+
+def test_sensitive_log_masking():
+    text = "phone=13800138000 Authorization: Bearer abc.def token=secret-value"
+    masked = mask_sensitive_data(text)
+
+    assert "13800138000" not in masked
+    assert "abc.def" not in masked
+    assert "secret-value" not in masked
+    assert "138****8000" in masked
+
+
+def test_security_headers_are_applied():
+    class DummyResponse:
+        def __init__(self):
+            self.headers = {}
+
+    response = DummyResponse()
+    _apply_security_headers(response)
+
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Referrer-Policy"]
+    assert response.headers["X-Frame-Options"]
+    assert response.headers["Content-Security-Policy"]
+
+
+def test_llm_cost_guard_provider_budget_blocks(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER_DAILY_BUDGET_YUAN", 10.0)
+    state = _provider_state(
+        "deepseek",
+        calls_24h=12,
+        cost_24h=10.1,
+        failure={"calls": 0, "failures": 0, "latest_at": None},
+        now=utcnow(),
+    )
+
+    assert state["blocked"] is True
+    assert state["reason"] == "provider_daily_budget_exceeded"
+
+
+def test_llm_cost_guard_failure_breaker_blocks(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER_DAILY_BUDGET_YUAN", 0.0)
+    monkeypatch.setattr(settings, "LLM_FAILURE_BREAKER_ENABLED", True)
+    monkeypatch.setattr(settings, "LLM_FAILURE_BREAKER_MIN_CALLS", 5)
+    monkeypatch.setattr(settings, "LLM_FAILURE_BREAKER_FAILURE_RATE", 0.6)
+    monkeypatch.setattr(settings, "LLM_FAILURE_BREAKER_COOLDOWN_MINUTES", 10)
+    now = utcnow()
+    state = _provider_state(
+        "aigocode",
+        calls_24h=6,
+        cost_24h=0,
+        failure={"calls": 5, "failures": 3, "latest_at": now},
+        now=now,
+    )
+
+    assert state["blocked"] is True
+    assert state["reason"] == "provider_failure_breaker"
+    assert state["retry_after_seconds"] > 0

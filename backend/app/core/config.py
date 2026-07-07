@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7天
     ALGORITHM: str = "HS256"
     API_DOCS_ENABLED: Optional[bool] = None
+    SECURITY_HEADERS_ENABLED: bool = True
+    SECURITY_CONTENT_SECURITY_POLICY: str = "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+    SECURITY_REFERRER_POLICY: str = "strict-origin-when-cross-origin"
+    SECURITY_X_FRAME_OPTIONS: str = "DENY"
+    SECURITY_HSTS_ENABLED: Optional[bool] = None
+    SECURITY_HSTS_MAX_AGE_SECONDS: int = 15552000
     
     # 数据库配置
     SQLITE_DATABASE_URL: str = "sqlite+aiosqlite:///./sql_app.db"
@@ -55,6 +61,16 @@ class Settings(BaseSettings):
     RATE_LIMIT_LINK_EXTRACT_USER: str = "60/3600"
     RATE_LIMIT_AI_GENERATION_USER: str = "20/3600"
     RATE_LIMIT_PAYMENT_ORDER_USER: str = "10/600"
+
+    # 成本防护 / 熔断配置
+    COST_GUARD_ENABLED: bool = True
+    LLM_DAILY_BUDGET_YUAN: float = 200.0
+    LLM_PROVIDER_DAILY_BUDGET_YUAN: float = 100.0
+    LLM_FAILURE_BREAKER_ENABLED: bool = True
+    LLM_FAILURE_BREAKER_WINDOW_MINUTES: int = 15
+    LLM_FAILURE_BREAKER_MIN_CALLS: int = 5
+    LLM_FAILURE_BREAKER_FAILURE_RATE: float = 0.6
+    LLM_FAILURE_BREAKER_COOLDOWN_MINUTES: int = 10
     
     # Celery配置
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
@@ -205,6 +221,16 @@ class Settings(BaseSettings):
         elif isinstance(v, (list, str)):
             return v
         raise ValueError(v)
+
+    @validator("BACKEND_CORS_ORIGINS")
+    def validate_production_cors(cls, v: List[AnyHttpUrl], values: dict) -> List[AnyHttpUrl]:
+        """生产环境禁止保留本地 CORS 源。"""
+        environment = str(values.get("ENVIRONMENT") or "development").lower()
+        if environment in {"prod", "production"}:
+            local_markers = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]")
+            if any(any(marker in str(origin).lower() for marker in local_markers) for origin in v):
+                raise ValueError("生产环境 BACKEND_CORS_ORIGINS 只能配置正式前端域名")
+        return v
     
     @validator("ALLOWED_HOSTS", pre=True)
     def assemble_allowed_hosts(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
@@ -214,6 +240,16 @@ class Settings(BaseSettings):
         elif isinstance(v, (list, str)):
             return v
         raise ValueError(v)
+
+    @validator("ALLOWED_HOSTS")
+    def validate_production_allowed_hosts(cls, v: List[str], values: dict) -> List[str]:
+        """生产环境禁止本地主机和通配 Host。"""
+        environment = str(values.get("ENVIRONMENT") or "development").lower()
+        if environment in {"prod", "production"}:
+            weak_hosts = {"*", "localhost", "127.0.0.1", "0.0.0.0"}
+            if any(str(host).lower() in weak_hosts for host in v):
+                raise ValueError("生产环境 ALLOWED_HOSTS 只能配置正式 API 域名")
+        return v
 
     @validator("SECRET_KEY")
     def validate_secret_key(cls, v: str, values: dict) -> str:
@@ -239,6 +275,12 @@ class Settings(BaseSettings):
         if self.RATE_LIMIT_FAIL_OPEN is not None:
             return self.RATE_LIMIT_FAIL_OPEN
         return not self.is_production
+
+    @property
+    def security_hsts_enabled(self) -> bool:
+        if self.SECURITY_HSTS_ENABLED is not None:
+            return self.SECURITY_HSTS_ENABLED
+        return self.is_production
     
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:

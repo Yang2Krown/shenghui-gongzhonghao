@@ -8,6 +8,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
+from app.services.llm.cost_guard import ensure_llm_call_allowed
 from app.services.llm.llm_client import ChatMessage, ChatResult, LLMClient, parse_json_loose
 from app.services.llm.monitoring import record_llm_call
 from app.services.llm.retry import with_retry
@@ -80,6 +81,7 @@ class AIGoCodeClient(LLMClient):
                 return await stream.get_final_message()
 
         started_at = time.perf_counter()
+        await ensure_llm_call_allowed(self.provider, kwargs["model"])
         try:
             resp = await with_retry(
                 _create,

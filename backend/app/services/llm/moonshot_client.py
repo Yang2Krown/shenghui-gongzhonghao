@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from openai import AsyncOpenAI, APIError
 
 from app.core.config import settings
+from app.services.llm.cost_guard import ensure_llm_call_allowed
 from app.services.llm.llm_client import ChatMessage, ChatResult, LLMClient, parse_json_loose
 from app.services.llm.monitoring import record_llm_call
 from app.services.llm.retry import with_retry
@@ -73,6 +74,7 @@ class MoonshotClient(LLMClient):
             kwargs["tools"] = [WEB_SEARCH_TOOL]
 
         started_at = time.perf_counter()
+        await ensure_llm_call_allowed(self.provider, kwargs["model"])
         try:
             resp = await with_retry(
                 lambda: self._client.chat.completions.create(**kwargs),

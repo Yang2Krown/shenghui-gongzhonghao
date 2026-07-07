@@ -20,6 +20,8 @@ from app.models.task import Task, TaskStatus
 from app.models.user import User
 from app.services.monitoring.checks import build_alert_specs, collect_admin_monitoring
 from app.services.monitoring.modules import collect_ai_costs, collect_api_health, collect_source_health, collect_user_stats
+from app.services.monitoring.security_health import collect_security_health
+from app.services.llm.cost_guard import collect_llm_guard_status
 
 router = APIRouter()
 
@@ -290,6 +292,17 @@ async def monitoring_user_stats(
     """用户统计独立监测。"""
     data = await collect_user_stats(db)
     return {"code": 200, "message": "获取用户统计成功", "data": data}
+
+
+@router.get("/monitoring/security-health", response_model=dict)
+async def monitoring_security_health(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin_permission("monitoring:read")),
+) -> Any:
+    """P2 安全基线与部署健康检查。"""
+    cost_guard_status = await collect_llm_guard_status(db)
+    data = collect_security_health(cost_guard_status)
+    return {"code": 200, "message": "获取安全健康成功", "data": data}
 
 
 @router.get("/monitoring/snapshots", response_model=dict)
