@@ -13,8 +13,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.core.progress import progress_store
+from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation
 from app.models.user import User
 from app.core.generation_tracker import track_start, track_complete, track_fail
 from app.core.credit_guard import ensure_credits_or_402, deduct_credits_safe
@@ -162,6 +164,7 @@ async def _run_standalone_title_background(content: str, run_id: str, user_id: i
         async with AsyncSessionLocal() as db:
             task = Task(
                 id=str(uuid.uuid4()),
+                user_id=user_id,
                 title=f"独立标题生成 - {topic.title[:50]}",
                 description="基于文章内容的独立标题生成",
                 status=TaskStatus.PENDING,
@@ -301,7 +304,7 @@ async def _run_standalone_title_background(content: str, run_id: str, user_id: i
 @router.post("/generate", response_model=StandaloneTitleResponse)
 async def standalone_title_generate(
     request: StandaloneTitleRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ):
     """
     独立标题生成
@@ -311,7 +314,7 @@ async def standalone_title_generate(
     """
     await ensure_credits_or_402(current_user.id, "title_generation")
 
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,
@@ -342,14 +345,7 @@ async def stream_standalone_title_progress(
     token: str = Query(None, description="认证 token"),
 ) -> StreamingResponse:
     """SSE 端点：实时推送标题生成进度。"""
-    if token:
-        from app.core.security import decode_token
-        payload = decode_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="无效的 token")
-
-    if not progress_store.exists(run_id):
-        raise HTTPException(status_code=404, detail=f"run {run_id} 不存在或已过期")
+    ensure_run_owner_from_token(progress_store, run_id, token)
 
     return StreamingResponse(
         progress_store.stream(run_id),
@@ -509,7 +505,7 @@ async def _run_multi_model_title_background(
 @router.post("/compare", response_model=MultiModelTitleResponse)
 async def compare_multi_model_titles(
     request: MultiModelTitleRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ):
     """
     多模型对比生成标题
@@ -518,7 +514,7 @@ async def compare_multi_model_titles(
     """
     await ensure_credits_or_402(current_user.id, "title_generation")
 
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,
@@ -553,14 +549,7 @@ async def stream_multi_model_title_progress(
     token: str = Query(None, description="认证 token"),
 ) -> StreamingResponse:
     """SSE 端点：实时推送多模型对比生成进度。"""
-    if token:
-        from app.core.security import decode_token
-        payload = decode_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="无效的 token")
-
-    if not progress_store.exists(run_id):
-        raise HTTPException(status_code=404, detail=f"run {run_id} 不存在或已过期")
+    ensure_run_owner_from_token(progress_store, run_id, token)
 
     return StreamingResponse(
         progress_store.stream(run_id),

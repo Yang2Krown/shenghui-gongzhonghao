@@ -6,7 +6,7 @@
 
 from datetime import datetime
 from typing import Optional, Dict, Any
-from sqlalchemy import Column, String, DateTime, Enum, JSON, Text
+from sqlalchemy import Column, String, DateTime, Enum, JSON, Text, Integer, ForeignKey
 from sqlalchemy.sql import func
 import enum
 
@@ -33,6 +33,7 @@ class Task(Base):
     
     # 主键
     id = Column(String(36), primary_key=True, index=True, comment="任务ID")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True, comment="任务所属用户ID")
     
     # 任务信息
     title = Column(String(255), nullable=False, comment="任务标题")

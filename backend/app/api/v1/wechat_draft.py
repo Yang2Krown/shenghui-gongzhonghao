@@ -15,11 +15,26 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation
+from app.core.url_security import resolve_redirect_url, validate_public_http_url
 from app.db.session import get_db
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _get_checked(client: httpx.AsyncClient, url: str) -> httpx.Response:
+    current_url = validate_public_http_url(url)
+    for _ in range(6):
+        resp = await client.get(current_url)
+        if resp.status_code not in {301, 302, 303, 307, 308}:
+            return resp
+        location = resp.headers.get("location")
+        if not location:
+            return resp
+        current_url = resolve_redirect_url(current_url, location)
+    raise HTTPException(status_code=400, detail="图片链接重定向次数过多")
 
 
 async def _upload_images_to_wechat(access_token: str, html_content: str) -> str:
@@ -57,7 +72,7 @@ async def _upload_images_to_wechat(access_token: str, html_content: str) -> str:
 
             try:
                 # 下载图片
-                resp = await client.get(fixed_url, follow_redirects=True)
+                resp = await _get_checked(client, fixed_url)
                 resp.raise_for_status()
                 logger.info(f"[WeChatDraft] 图片下载成功, 大小: {len(resp.content)} bytes, url: {fixed_url[:80]}...")
 
@@ -174,7 +189,7 @@ class GenerateCoverRequest(BaseModel):
 async def create_wechat_draft(
     request: WechatDraftRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ) -> dict:
     """发布文章到微信公众号草稿箱"""
     from app.services.wechat.wechat_draft_service import (

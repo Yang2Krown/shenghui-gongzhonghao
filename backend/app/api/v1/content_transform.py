@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation
 from app.models.user import User
 from app.services.content_generation.content_transform_service import transform_content
 from app.services.credit_service import CreditService
@@ -27,7 +28,7 @@ class ContentTransformRequest(BaseModel):
 @router.post("/transform")
 async def transform(
     req: ContentTransformRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ):
     """
     将内容从一个平台转写成另一个平台的风格

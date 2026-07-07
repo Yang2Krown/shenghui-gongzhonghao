@@ -75,6 +75,10 @@ async def _ensure_schema_compatibility(conn):
         "CREATE INDEX IF NOT EXISTS ix_raw_infos_commercial_category ON raw_infos (commercial_category)"
     ))
 
+    if not await conn.run_sync(has_column, "tasks", "user_id"):
+        await conn.execute(text("ALTER TABLE tasks ADD COLUMN user_id INTEGER"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_user_id ON tasks (user_id)"))
+
 
 async def create_initial_data():
     """创建初始数据"""
@@ -85,7 +89,9 @@ async def create_initial_data():
             from app.core.config import settings
             admin_user = await user_crud.get_by_email(db, email="admin@example.com")
             
-            if not admin_user:
+            if not admin_user and settings.is_production:
+                logger.info("生产环境跳过默认管理员账号创建")
+            elif not admin_user:
                 # 创建管理员用户
                 from app.schemas.user import UserCreate
                 admin_data = UserCreate(
@@ -129,6 +135,12 @@ async def create_initial_data():
             default_style = await style_crud.get_by_name(db, name="默认风格")
             
             if not default_style:
+                owner_user = super_admin or admin_user
+                if not owner_user:
+                    logger.info("未找到可用管理员用户，跳过默认风格模板创建")
+                    logger.info("初始数据创建完成")
+                    return
+
                 from app.schemas.style import StyleProfileCreate
                 style_data = StyleProfileCreate(
                     name="默认风格",
@@ -142,7 +154,7 @@ async def create_initial_data():
                         "paragraph_length": "3-5句"
                     }
                 )
-                await style_crud.create(db, obj_in=style_data, user_id=admin_user.id)
+                await style_crud.create(db, obj_in=style_data, user_id=owner_user.id)
                 logger.info("默认风格模板创建完成")
             
             logger.info("初始数据创建完成")

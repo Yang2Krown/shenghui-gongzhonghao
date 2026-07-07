@@ -13,6 +13,7 @@ from urllib.parse import urlparse, unquote
 
 import httpx
 from bs4 import BeautifulSoup, NavigableString, Tag
+from app.core.url_security import UnsafeURL, resolve_redirect_url, validate_public_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -80,15 +81,30 @@ async def fetch_html(url: str, cookie: str = None, ua: str = None, referer: str 
 
     logger.info(f"正在获取链接: {url}")
 
-    async with httpx.AsyncClient(
-        timeout=20.0,
-        follow_redirects=True,
-        verify=False
-    ) as client:
-        resp = await client.get(url, headers=headers)
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, verify=False) as client:
+        resp = await _get_with_checked_redirects(client, url, headers=headers)
         logger.info(f"响应状态码: {resp.status_code}")
         resp.raise_for_status()
         return resp.text
+
+
+async def _get_with_checked_redirects(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: Optional[dict] = None,
+    max_redirects: int = 5,
+) -> httpx.Response:
+    """GET a URL while validating the initial URL and every redirect target."""
+    current_url = validate_public_http_url(url)
+    for _ in range(max_redirects + 1):
+        resp = await client.get(current_url, headers=headers)
+        if resp.status_code not in {301, 302, 303, 307, 308}:
+            return resp
+        location = resp.headers.get("location")
+        if not location:
+            return resp
+        current_url = resolve_redirect_url(current_url, location)
+    raise UnsafeURL("链接重定向次数过多")
 
 
 # ========== 小红书提取 ==========
@@ -803,8 +819,8 @@ async def _extract_via_jina(url: str) -> Dict[str, Any]:
             "User-Agent": "Mozilla/5.0",
         }
 
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(jina_url, headers=headers)
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
+            resp = await _get_with_checked_redirects(client, jina_url, headers=headers)
             resp.raise_for_status()
             markdown = resp.text
 
@@ -861,10 +877,10 @@ async def _extract_via_api(url: str, cookie: str = None) -> Dict[str, Any]:
             "x-api-version": "3.0.91",
         }
 
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, verify=False) as client:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=False, verify=False) as client:
             if ids['type'] == 'answer' and ids.get('answer_id'):
                 api_url = f"https://api.zhihu.com/answers/{ids['answer_id']}?include=content,excerpt,author"
-                resp = await client.get(api_url, headers=headers)
+                resp = await _get_with_checked_redirects(client, api_url, headers=headers)
                 resp.raise_for_status()
                 data = resp.json()
                 title = data.get('question', {}).get('title', '')
@@ -874,7 +890,7 @@ async def _extract_via_api(url: str, cookie: str = None) -> Dict[str, Any]:
 
             elif ids['type'] == 'article' and ids.get('article_id'):
                 api_url = f"https://api.zhihu.com/articles/{ids['article_id']}?include=content,excerpt,author"
-                resp = await client.get(api_url, headers=headers)
+                resp = await _get_with_checked_redirects(client, api_url, headers=headers)
                 resp.raise_for_status()
                 data = resp.json()
                 title = data.get('title', '')
@@ -944,8 +960,8 @@ async def _extract_zhihu_page(url: str, cookie: str = None) -> Dict[str, Any]:
         if cookie:
             headers["Cookie"] = cookie
 
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, verify=False) as client:
-            resp = await client.get(clean_url, headers=headers)
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, verify=False) as client:
+            resp = await _get_with_checked_redirects(client, clean_url, headers=headers)
             resp.raise_for_status()
             html = resp.text
 
@@ -1012,6 +1028,7 @@ async def extract_link_content(url: str, cookie: str = None) -> Dict[str, Any]:
     """
     # 提取实际 URL
     actual_url = extract_url_from_text(url) or url
+    actual_url = validate_public_http_url(actual_url)
 
     platform = detect_platform(actual_url)
 

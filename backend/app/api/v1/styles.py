@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation, limit_file_upload, limit_link_extract
 from app.db.session import get_db
 from app.models.user import User
 from app.models.style import StyleProfile
@@ -183,7 +184,7 @@ async def delete_style(
 async def add_source(
     source_in: StyleSourceCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(limit_link_extract)
 ):
     """添加训练素材（文字/链接）"""
     # 获取用户的风格档案
@@ -255,7 +256,7 @@ async def upload_source_file(
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(limit_file_upload)
 ):
     """上传文件素材"""
     # 获取用户的风格档案
@@ -365,7 +366,7 @@ async def delete_source(
 async def train_style_endpoint(
     request: TrainStyleRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(limit_ai_generation)
 ):
     """训练风格"""
     # 获取用户的所有素材
@@ -443,7 +444,7 @@ async def train_style_endpoint(
 async def preview_style_endpoint(
     request: PreviewStyleRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(limit_ai_generation)
 ):
     """风格预览"""
     # 获取用户的风格档案
@@ -483,7 +484,7 @@ async def preview_style_endpoint(
 async def analyze_article_style(
     analysis_in: StyleAnalysisRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(limit_ai_generation)
 ):
     """分析文章风格"""
     try:
@@ -504,7 +505,7 @@ async def analyze_uploaded_style(
     files: List[UploadFile] = File(default_factory=list),
     text: Optional[str] = Form(None),
     title: Optional[str] = Form(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_file_upload),
 ):
     """上传文件与/或粘贴文本，分析个人写作风格"""
     files = files or []

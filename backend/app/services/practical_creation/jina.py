@@ -11,6 +11,7 @@ from typing import List
 import httpx
 
 from app.core.config import settings
+from app.core.url_security import validate_public_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +24,9 @@ async def jina_read(url: str, max_chars: int = 3000, timeout: int = 25) -> str:
     if settings.JINA_API_KEY:
         headers["Authorization"] = f"Bearer {settings.JINA_API_KEY}"
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as c:
-            r = await c.get(f"https://r.jina.ai/{url}", headers=headers)
+        safe_url = validate_public_http_url(url)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as c:
+            r = await c.get(f"https://r.jina.ai/{safe_url}", headers=headers)
             r.raise_for_status()
             return r.text[:max_chars]
     except Exception as e:

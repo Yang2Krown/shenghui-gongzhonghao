@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation, limit_link_extract
+from app.core.url_security import resolve_redirect_url, validate_public_http_url
 from app.models.user import User
 from app.services.wechat.wechat_to_xhs_service import generate_xhs_content
 from app.services.scraping.link_extractor import extract_wechat, extract_wechat_with_images
@@ -20,6 +22,19 @@ from app.core.generation_tracker import track_start, track_complete, track_fail
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+async def _get_checked(client: httpx.AsyncClient, url: str, headers: dict) -> httpx.Response:
+    current_url = validate_public_http_url(url)
+    for _ in range(6):
+        resp = await client.get(current_url, headers=headers)
+        if resp.status_code not in {301, 302, 303, 307, 308}:
+            return resp
+        location = resp.headers.get("location")
+        if not location:
+            return resp
+        current_url = resolve_redirect_url(current_url, location)
+    raise HTTPException(status_code=400, detail="图片链接重定向次数过多")
+
 
 UPLOAD_BASE = os.path.abspath("./uploads")
 
@@ -81,7 +96,7 @@ class ExtractPreviewRequest(BaseModel):
 @router.post("/convert-content")
 async def convert_content(
     request: ContentConvertRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ):
     """
     将粘贴的公众号内容转换为小红书风格
@@ -126,7 +141,7 @@ async def convert_content(
 @router.post("/convert-link")
 async def convert_link(
     request: LinkConvertRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ):
     """
     从公众号链接提取内容并转换为小红书风格
@@ -200,7 +215,7 @@ async def convert_link(
 @router.post("/extract-link-preview")
 async def extract_link_preview(
     request: ExtractPreviewRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_link_extract),
 ):
     """
     提取公众号链接的图文内容（含图片位置），下载图片到本地代理。
@@ -243,10 +258,10 @@ async def extract_link_preview(
 
         # 先并发下载所有微信图片
         downloaded = {}  # img_url -> (content, content_type)
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, verify=False) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False, verify=False) as client:
             async def download_one(idx, img_url):
                 try:
-                    resp = await client.get(img_url, headers=headers)
+                    resp = await _get_checked(client, img_url, headers=headers)
                     resp.raise_for_status()
                     ct = resp.headers.get("content-type", "")
                     ext = ".jpg"

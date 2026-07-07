@@ -1,6 +1,6 @@
 from datetime import timedelta
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,13 @@ from app.schemas.user import (
 )
 from app.core.sms_service import send_sms_code, verify_sms_code
 from app.services.credit_service import CreditService
+from app.core.rate_limit import (
+    account_actor,
+    enforce_rate_limit,
+    ip_actor,
+    phone_actor,
+    rule_from_setting,
+)
 
 router = APIRouter()
 
@@ -47,9 +54,18 @@ async def _ensure_super_admin_by_phone(user: User, db: AsyncSession) -> User:
 @router.post("/register", response_model=dict)
 async def register(
     user_in: UserCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     """用户注册"""
+    await enforce_rate_limit(
+        [
+            rule_from_setting("auth:register:ip", settings.RATE_LIMIT_AUTH_REGISTER_IP, ip_actor(request)),
+            rule_from_setting("auth:register:account", settings.RATE_LIMIT_AUTH_REGISTER_ACCOUNT, account_actor(user_in.email)),
+        ],
+        request=request,
+    )
+
     # 检查用户名是否已存在
     existing_user = await user_crud.get_by_username(db, username=user_in.username)
     if existing_user:
@@ -97,9 +113,18 @@ async def register(
 @router.post("/login", response_model=dict)
 async def login(
     login_data: LoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     """用户登录"""
+    await enforce_rate_limit(
+        [
+            rule_from_setting("auth:login:ip", settings.RATE_LIMIT_AUTH_LOGIN_IP, ip_actor(request)),
+            rule_from_setting("auth:login:account", settings.RATE_LIMIT_AUTH_LOGIN_ACCOUNT, account_actor(login_data.username)),
+        ],
+        request=request,
+    )
+
     # 支持用户名或邮箱登录
     user = None
     if "@" in login_data.username:
@@ -203,8 +228,17 @@ async def get_current_user_info(
 @router.post("/send-sms-code", response_model=dict)
 async def send_sms_code_endpoint(
     req: SendSmsCodeRequest,
+    request: Request,
 ) -> Any:
     """发送手机短信验证码"""
+    await enforce_rate_limit(
+        [
+            rule_from_setting("auth:sms:ip", settings.RATE_LIMIT_SMS_IP, ip_actor(request)),
+            rule_from_setting("auth:sms:phone", settings.RATE_LIMIT_SMS_PHONE, phone_actor(req.phone)),
+        ],
+        request=request,
+    )
+
     import logging
     logger = logging.getLogger(__name__)
     try:
@@ -226,9 +260,18 @@ async def send_sms_code_endpoint(
 @router.post("/login-by-phone", response_model=dict)
 async def login_by_phone(
     req: PhoneLoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """手机验证码登录（不存在则自动注册）"""
+    await enforce_rate_limit(
+        [
+            rule_from_setting("auth:login:ip", settings.RATE_LIMIT_AUTH_LOGIN_IP, ip_actor(request)),
+            rule_from_setting("auth:login:phone", settings.RATE_LIMIT_AUTH_LOGIN_ACCOUNT, phone_actor(req.phone)),
+        ],
+        request=request,
+    )
+
     valid = await verify_sms_code(req.phone, req.code)
     if not valid:
         raise HTTPException(

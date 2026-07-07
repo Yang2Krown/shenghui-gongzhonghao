@@ -20,7 +20,7 @@ async def get_progress(
     run_id: str,
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    snap = progress_store.snapshot(run_id)
+    snap = progress_store.snapshot(run_id, user_id=current_user.id)
     if snap is None:
         return {"code": 404, "message": "run 不存在或已过期", "data": {"exists": False}}
     return {"code": 200, "message": "ok", "data": snap}

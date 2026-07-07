@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.ai import (
@@ -23,7 +24,7 @@ router = APIRouter()
 async def analyze_style(
     request: StyleAnalysisRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(limit_ai_generation)
 ) -> Any:
     """分析写作风格"""
     try:
@@ -79,7 +80,7 @@ async def analyze_style(
 async def generate_content(
     request: ContentGenerationRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(limit_ai_generation)
 ) -> Any:
     """生成内容"""
     try:
@@ -126,7 +127,7 @@ async def generate_content(
 async def summarize_content(
     request: ContentSummaryRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(limit_ai_generation)
 ) -> Any:
     """内容摘要"""
     try:
@@ -161,7 +162,7 @@ async def summarize_content(
 async def suggest_titles(
     request: TitleSuggestionRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(limit_ai_generation)
 ) -> Any:
     """标题建议"""
     try:

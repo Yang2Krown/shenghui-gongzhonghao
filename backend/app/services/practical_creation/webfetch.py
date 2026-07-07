@@ -12,6 +12,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.core.config import settings
+from app.core.url_security import resolve_redirect_url, validate_public_http_url
 from app.services.practical_creation.jina import jina_read
 
 logger = logging.getLogger(__name__)
@@ -41,8 +42,18 @@ async def fetch_article_text(url: str, max_chars: int = 3000, timeout: float = 8
         return ""
     try:
         tmo = httpx.Timeout(timeout, connect=5.0)
-        async with httpx.AsyncClient(timeout=tmo, follow_redirects=True, trust_env=False) as c:
-            r = await c.get(url, headers={"User-Agent": _UA})
+        current_url = validate_public_http_url(url)
+        async with httpx.AsyncClient(timeout=tmo, follow_redirects=False, trust_env=False) as c:
+            for _ in range(6):
+                r = await c.get(current_url, headers={"User-Agent": _UA})
+                if r.status_code not in {301, 302, 303, 307, 308}:
+                    break
+                location = r.headers.get("location")
+                if not location:
+                    break
+                current_url = resolve_redirect_url(current_url, location)
+            else:
+                return ""
             r.raise_for_status()
             return _extract_text(r.text)[:max_chars]
     except Exception as e:

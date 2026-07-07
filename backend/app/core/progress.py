@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 class _RunState:
     """单个 run 的状态：事件列表 + 完成标记 + 通知条件。"""
 
-    def __init__(self) -> None:
+    def __init__(self, user_id: Optional[int] = None) -> None:
+        self.user_id = user_id
         self.events: list[dict] = []
         self.done: bool = False
         self.created_at: float = time.time()
@@ -39,11 +40,11 @@ class ProgressStore:
 
     # ── 生命周期 ──────────────────────────────────────
 
-    def create_run(self, run_id: Optional[str] = None) -> str:
+    def create_run(self, run_id: Optional[str] = None, user_id: Optional[int] = None) -> str:
         """创建一个新的进度流，返回 run_id。"""
         run_id = run_id or str(uuid.uuid4())
-        self._runs[run_id] = _RunState()
-        logger.info(f"[ProgressStore] 创建 run: {run_id}")
+        self._runs[run_id] = _RunState(user_id=user_id)
+        logger.info(f"[ProgressStore] 创建 run: {run_id} user_id={user_id}")
         return run_id
 
     def cleanup(self, run_id: str) -> None:
@@ -54,14 +55,22 @@ class ProgressStore:
     def exists(self, run_id: str) -> bool:
         return run_id in self._runs
 
-    def snapshot(self, run_id: str) -> Optional[dict]:
+    def can_access(self, run_id: str, user_id: Optional[int]) -> bool:
+        """Return whether the user owns the run.
+
+        Legacy runs without owner are treated as inaccessible to avoid cross-user reads.
+        """
+        run = self._runs.get(run_id)
+        return run is not None and run.user_id is not None and run.user_id == user_id
+
+    def snapshot(self, run_id: str, user_id: Optional[int] = None) -> Optional[dict]:
         """返回某个 run 的当前进度快照（供轮询接口用，绕开 SSE）。
 
         从事件列表里推导出：最近一个 step_start 的步骤/Agent 信息、是否完成、
         result / error。run 不存在（未创建或已清理）返回 None。
         """
         run = self._runs.get(run_id)
-        if run is None:
+        if run is None or run.user_id is None or run.user_id != user_id:
             return None
 
         step_map: dict[int, dict] = {}

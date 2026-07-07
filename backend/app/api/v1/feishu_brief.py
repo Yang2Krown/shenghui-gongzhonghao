@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation, limit_file_upload, limit_link_extract
 from app.core.background import spawn
 from app.core.timezone import utcnow
 from app.db.session import get_db, AsyncSessionLocal
@@ -195,7 +196,7 @@ async def auth_logout(
 async def brief_read(
     body: BriefReadRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_link_extract),
 ) -> Any:
     """读取 brief 原文：飞书链接（需已授权）或直接粘贴文本。"""
     if body.source_type == "text":
@@ -219,7 +220,7 @@ async def brief_read(
 @router.post("/brief/upload", response_model=BriefReadResponse)
 async def brief_upload(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_file_upload),
 ) -> Any:
     """上传 brief 文件（docx/pdf/txt 等），提取纯文本。"""
     data = await file.read()
@@ -242,7 +243,7 @@ async def brief_upload(
 @router.post("/brief/summarize", response_model=StructuredBrief)
 async def brief_summarize(
     body: BriefSummarizeRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ) -> Any:
     """把 brief 原文总结成结构化 StructuredBrief。"""
     data = await summarize_brief(body.raw_text, title=body.title)

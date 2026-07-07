@@ -9,8 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.core.progress import progress_store
+from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation
 from app.models.user import User
 from app.core.generation_tracker import track_start, track_complete, track_fail
 from app.services.credit_service import CreditService
@@ -98,7 +100,7 @@ async def _run_continuation_background(
 @router.post("/generate", response_model=ContentContinuationResponse)
 async def generate_continuation(
     request: ContentContinuationRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ):
     """
     正文续写
@@ -120,7 +122,7 @@ async def generate_continuation(
                 },
             )
     
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,
@@ -155,14 +157,7 @@ async def stream_continuation_progress(
     token: str = Query(None, description="认证 token"),
 ) -> StreamingResponse:
     """SSE 端点：实时推送续写进度。"""
-    if token:
-        from app.core.security import decode_token
-        payload = decode_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="无效的 token")
-
-    if not progress_store.exists(run_id):
-        raise HTTPException(status_code=404, detail=f"run {run_id} 不存在或已过期")
+    ensure_run_owner_from_token(progress_store, run_id, token)
 
     return StreamingResponse(
         progress_store.stream(run_id),
@@ -292,7 +287,7 @@ async def _run_continuation_compare_background(
 @router.post("/compare", response_model=MultiModelContinuationResponse)
 async def compare_multi_model_continuation(
     request: MultiModelContinuationRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ):
     """多模型对比续写
 
@@ -300,7 +295,7 @@ async def compare_multi_model_continuation(
     """
     await ensure_credits_or_402(current_user.id, "content_continuation")
 
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,
@@ -336,14 +331,7 @@ async def stream_continuation_compare_progress(
     token: str = Query(None, description="认证 token"),
 ) -> StreamingResponse:
     """SSE 端点：实时推送多模型对比续写进度。"""
-    if token:
-        from app.core.security import decode_token
-        payload = decode_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="无效的 token")
-
-    if not progress_store.exists(run_id):
-        raise HTTPException(status_code=404, detail=f"run {run_id} 不存在或已过期")
+    ensure_run_owner_from_token(progress_store, run_id, token)
 
     return StreamingResponse(
         progress_store.stream(run_id),

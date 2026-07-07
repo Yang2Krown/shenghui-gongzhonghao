@@ -12,6 +12,8 @@ import uuid
 
 from app.db.session import get_db
 from app.models.task import Task, TaskStatus
+from app.core.security import get_current_user
+from app.models.user import User
 from app.schemas.task import (
     TaskCreate,
     TaskResponse,
@@ -26,6 +28,7 @@ router = APIRouter()
 async def create_task(
     task_data: TaskCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     创建新的标题生成任务
@@ -39,6 +42,7 @@ async def create_task(
     """
     task = Task(
         id=str(uuid.uuid4()),
+        user_id=current_user.id,
         title=task_data.title,
         description=task_data.description,
         status=TaskStatus.PENDING,
@@ -58,6 +62,7 @@ async def list_tasks(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     status: Optional[TaskStatus] = Query(None, description="状态筛选"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     获取任务列表
@@ -72,8 +77,8 @@ async def list_tasks(
         任务列表
     """
     # 构建查询
-    query = select(Task)
-    count_query = select(func.count()).select_from(Task)
+    query = select(Task).where(Task.user_id == current_user.id)
+    count_query = select(func.count()).select_from(Task).where(Task.user_id == current_user.id)
     
     if status:
         query = query.where(Task.status == status)
@@ -103,6 +108,7 @@ async def list_tasks(
 async def get_task(
     task_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     获取单个任务详情
@@ -114,7 +120,7 @@ async def get_task(
     Returns:
         任务详情
     """
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == current_user.id))
     task = result.scalar_one_or_none()
     
     if not task:
@@ -128,6 +134,7 @@ async def update_task(
     task_id: str,
     task_data: TaskUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     更新任务信息
@@ -140,7 +147,7 @@ async def update_task(
     Returns:
         更新后的任务信息
     """
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == current_user.id))
     task = result.scalar_one_or_none()
     
     if not task:
@@ -161,6 +168,7 @@ async def update_task(
 async def delete_task(
     task_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     删除任务
@@ -172,7 +180,7 @@ async def delete_task(
     Returns:
         删除确认信息
     """
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == current_user.id))
     task = result.scalar_one_or_none()
     
     if not task:

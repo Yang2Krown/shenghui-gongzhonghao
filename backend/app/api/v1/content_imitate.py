@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation
 from app.models.user import User
 from app.services.content_generation.content_imitate_service import imitate_content
 from app.services.credit_service import CreditService
@@ -25,7 +26,7 @@ class ContentImitateRequest(BaseModel):
 @router.post("/imitate")
 async def imitate(
     req: ContentImitateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ):
     """
     学习参考内容的风格，创作原创内容

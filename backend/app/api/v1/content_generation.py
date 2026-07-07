@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation
 from app.core.progress import progress_store
+from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.db.session import get_db
 from app.models.user import User
@@ -90,7 +92,7 @@ class ContentGenerationResponse(BaseModel):
 async def generate_content_async(
     req: ContentGenerationRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ) -> Any:
     """正文生成（SSE 实时进度）。
 
@@ -111,7 +113,7 @@ async def generate_content_async(
             },
         )
     
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,
@@ -138,14 +140,21 @@ async def generate_content_async(
             try:
                 # 查询选题和大纲
                 candidate_result = await bg_db.execute(
-                    select(TopicCandidate).where(TopicCandidate.id == req.candidate_id)
+                    select(TopicCandidate).where(
+                        TopicCandidate.id == req.candidate_id,
+                        TopicCandidate.user_id == current_user.id,
+                    )
                 )
                 candidate = candidate_result.scalar_one_or_none()
                 if not candidate:
                     raise ValueError(f"选题候选 {req.candidate_id} 不存在")
 
                 outline_result = await bg_db.execute(
-                    select(Outline).where(Outline.id == req.outline_id)
+                    select(Outline).where(
+                        Outline.id == req.outline_id,
+                        Outline.candidate_id == req.candidate_id,
+                        Outline.candidate.has(TopicCandidate.user_id == current_user.id),
+                    )
                 )
                 outline = outline_result.scalar_one_or_none()
                 if not outline:
@@ -379,7 +388,7 @@ async def generate_content_adhoc(
     await db.commit()
     await db.refresh(outline)
 
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,
@@ -399,10 +408,17 @@ async def generate_content_adhoc(
             try:
                 # 重新加载
                 bg_candidate = (await bg_db.execute(
-                    sa_select(TopicCandidate).where(TopicCandidate.id == candidate.id)
+                    sa_select(TopicCandidate).where(
+                        TopicCandidate.id == candidate.id,
+                        TopicCandidate.user_id == current_user.id,
+                    )
                 )).scalar_one_or_none()
                 bg_outline = (await bg_db.execute(
-                    sa_select(Outline).where(Outline.id == outline.id)
+                    sa_select(Outline).where(
+                        Outline.id == outline.id,
+                        Outline.candidate_id == candidate.id,
+                        Outline.candidate.has(TopicCandidate.user_id == current_user.id),
+                    )
                 )).scalar_one_or_none()
 
                 if not bg_candidate or not bg_outline:
@@ -496,18 +512,7 @@ async def stream_content_progress(
     token: str = Query(None, description="认证 token（EventSource 不支持 header）"),
 ) -> StreamingResponse:
     """SSE 端点：实时推送正文生成进度。"""
-    # 验证 token
-    if token:
-        from app.core.security import decode_token
-        payload = decode_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="无效的 token")
-
-    if not progress_store.exists(run_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"run {run_id} 不存在或已过期",
-        )
+    ensure_run_owner_from_token(progress_store, run_id, token)
 
     return StreamingResponse(
         progress_store.stream(run_id),
@@ -524,7 +529,7 @@ async def stream_content_progress(
 async def generate_content_sync(
     req: ContentGenerationSyncRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ) -> Any:
     """同步正文生成（直接传入数据，不查库，适合预览/调试）。
 
@@ -640,7 +645,7 @@ class ContentReevaluateRequest(BaseModel):
 async def reevaluate_content(
     req: ContentReevaluateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ) -> Any:
     """重新评估正文（只跑 Agent D 诊断，与生成流水线完全解耦）。
 
@@ -650,7 +655,7 @@ async def reevaluate_content(
     from app.services.llm import get_llm_client
     from app.services.llm.llm_client import ChatMessage, parse_json_loose
 
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,

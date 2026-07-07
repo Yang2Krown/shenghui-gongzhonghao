@@ -1,4 +1,3 @@
-import secrets
 from typing import List, Optional, Union
 from pydantic import AnyHttpUrl, validator
 try:
@@ -15,15 +14,17 @@ class Settings(BaseSettings):
     PROJECT_DESCRIPTION: str = "基于AI的公众号内容运营辅助平台"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
+    ENVIRONMENT: str = "development"
     
     # 调试配置
     DEBUG: bool = False
     
     # 安全配置
-    SECRET_KEY: str = secrets.token_urlsafe(32)
+    SECRET_KEY: str = "dev-insecure-change-me"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24小时
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7天
     ALGORITHM: str = "HS256"
+    API_DOCS_ENABLED: Optional[bool] = None
     
     # 数据库配置
     SQLITE_DATABASE_URL: str = "sqlite+aiosqlite:///./sql_app.db"
@@ -38,6 +39,20 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
     REDIS_PASSWORD: Optional[str] = None
     REDIS_DB: int = 0
+
+    # 限流配置
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_FAIL_OPEN: Optional[bool] = None
+    RATE_LIMIT_AUTH_LOGIN_IP: str = "20/900"
+    RATE_LIMIT_AUTH_LOGIN_ACCOUNT: str = "8/900"
+    RATE_LIMIT_AUTH_REGISTER_IP: str = "10/3600"
+    RATE_LIMIT_AUTH_REGISTER_ACCOUNT: str = "3/3600"
+    RATE_LIMIT_SMS_IP: str = "10/3600"
+    RATE_LIMIT_SMS_PHONE: str = "5/3600"
+    RATE_LIMIT_FILE_UPLOAD_USER: str = "30/3600"
+    RATE_LIMIT_LINK_EXTRACT_USER: str = "60/3600"
+    RATE_LIMIT_AI_GENERATION_USER: str = "20/3600"
+    RATE_LIMIT_PAYMENT_ORDER_USER: str = "10/600"
     
     # Celery配置
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
@@ -196,6 +211,31 @@ class Settings(BaseSettings):
         elif isinstance(v, (list, str)):
             return v
         raise ValueError(v)
+
+    @validator("SECRET_KEY")
+    def validate_secret_key(cls, v: str, values: dict) -> str:
+        """生产环境必须显式提供强随机密钥。"""
+        environment = str(values.get("ENVIRONMENT") or "development").lower()
+        if environment in {"prod", "production"}:
+            if not v or v == "dev-insecure-change-me" or len(v) < 32:
+                raise ValueError("生产环境必须配置长度不少于 32 位的 SECRET_KEY")
+        return v
+
+    @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT.lower() in {"prod", "production"}
+
+    @property
+    def api_docs_enabled(self) -> bool:
+        if self.API_DOCS_ENABLED is not None:
+            return self.API_DOCS_ENABLED
+        return not self.is_production
+
+    @property
+    def rate_limit_fail_open(self) -> bool:
+        if self.RATE_LIMIT_FAIL_OPEN is not None:
+            return self.RATE_LIMIT_FAIL_OPEN
+        return not self.is_production
     
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:

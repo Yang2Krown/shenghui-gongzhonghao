@@ -15,7 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation
 from app.core.progress import progress_store
+from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.db.session import get_db
 from app.services.credit_service import CreditService
@@ -38,6 +40,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _owned_outline_filter(user_id: int):
+    return Outline.candidate.has(TopicCandidate.user_id == user_id)
+
+
+def _owned_candidate_filter(user_id: int):
+    return TopicCandidate.user_id == user_id
+
+
 @router.post("/inspect-angle", response_model=dict)
 async def trigger_angle_inspection(
     body: dict,
@@ -54,7 +64,7 @@ async def trigger_angle_inspection(
         )
 
     model = body.get("model")
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,
@@ -76,7 +86,7 @@ async def trigger_angle_inspection(
                 result = await bg_db.execute(
                     select(TopicCandidate)
                     .options(selectinload(TopicCandidate.score))
-                    .where(TopicCandidate.id == int(candidate_id))
+                    .where(TopicCandidate.id == int(candidate_id), _owned_candidate_filter(current_user.id))
                 )
                 candidate = result.scalar_one_or_none()
                 if not candidate:
@@ -157,7 +167,19 @@ async def trigger_outline_generation(
     model = body.get("model")
     angle_report = body.get("angle_report")
     target_words = body.get("target_words")
-    run_id = progress_store.create_run()
+
+    owned_candidate = (
+        await db.execute(
+            select(TopicCandidate.id).where(
+                TopicCandidate.id == int(candidate_id),
+                _owned_candidate_filter(current_user.id),
+            )
+        )
+    ).scalar_one_or_none()
+    if not owned_candidate:
+        raise HTTPException(status_code=404, detail="选题候选不存在")
+
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,
@@ -311,7 +333,7 @@ async def trigger_adhoc_outline_generation(
 
     await db.commit()
 
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     # 记录到 generation tracker
     await track_start(
@@ -336,10 +358,16 @@ async def trigger_adhoc_outline_generation(
 
                 # 重新加载 candidate 和 outline
                 bg_candidate = (await bg_db.execute(
-                    select(TopicCandidate).where(TopicCandidate.id == candidate.id)
+                    select(TopicCandidate).where(
+                        TopicCandidate.id == candidate.id,
+                        _owned_candidate_filter(current_user.id),
+                    )
                 )).scalar_one_or_none()
                 bg_outline = (await bg_db.execute(
-                    select(Outline).where(Outline.id == outline.id)
+                    select(Outline).where(
+                        Outline.id == outline.id,
+                        _owned_outline_filter(current_user.id),
+                    )
                 )).scalar_one_or_none()
 
                 if not bg_candidate or not bg_outline:
@@ -534,18 +562,7 @@ async def stream_outline_progress(
 
     EventSource 不支持自定义 header，所以 token 通过 query param 传递。
     """
-    # 验证 token
-    if token:
-        from app.core.security import decode_token
-        payload = decode_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="无效的 token")
-
-    if not progress_store.exists(run_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"run {run_id} 不存在或已过期",
-        )
+    ensure_run_owner_from_token(progress_store, run_id, token)
 
     return StreamingResponse(
         progress_store.stream(run_id),
@@ -579,7 +596,7 @@ async def get_outlines(
         joinedload(Outline.candidate),
         joinedload(Outline.review),
         joinedload(Outline.inspection),
-    )
+    ).where(_owned_outline_filter(current_user.id))
     
     # 筛选
     if passed:
@@ -592,7 +609,7 @@ async def get_outlines(
         query = query.where(Outline.title.ilike(f"%{keyword}%"))
     
     # 总数
-    count_query = select(func.count(Outline.id))
+    count_query = select(func.count(Outline.id)).where(_owned_outline_filter(current_user.id))
     if passed:
         count_query = count_query.where(Outline.passed == passed)
     if direction:
@@ -644,7 +661,7 @@ async def get_outline(
             joinedload(Outline.criticism),
             joinedload(Outline.inspection),
         )
-        .where(Outline.id == outline_id)
+        .where(Outline.id == outline_id, _owned_outline_filter(current_user.id))
     )
     outline = result.unique().scalar_one_or_none()
     
@@ -704,7 +721,7 @@ async def update_outline(
     outline_id: int,
     body: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ) -> Any:
     """保存编辑后的大纲。
 
@@ -723,7 +740,7 @@ async def update_outline(
     }
     """
     result = await db.execute(
-        select(Outline).where(Outline.id == outline_id)
+        select(Outline).where(Outline.id == outline_id, _owned_outline_filter(current_user.id))
     )
     outline = result.scalar_one_or_none()
     if not outline:
@@ -751,7 +768,7 @@ async def update_outline(
 async def reevaluate_outline(
     outline_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ) -> Any:
     """重新评估大纲（只跑 B→C→D，不重新生成）。
 
@@ -764,7 +781,7 @@ async def reevaluate_outline(
             joinedload(Outline.candidate),
             joinedload(Outline.candidates),
         )
-        .where(Outline.id == outline_id)
+        .where(Outline.id == outline_id, _owned_outline_filter(current_user.id))
     )
     outline = result.unique().scalar_one_or_none()
     if not outline:
@@ -773,7 +790,7 @@ async def reevaluate_outline(
     if not outline.sections:
         raise HTTPException(status_code=400, detail="大纲内容为空，无法重新评估")
 
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,
@@ -953,27 +970,28 @@ async def get_stats_overview(
     current_user: User = Depends(get_current_user),
 ) -> Any:
     """获取大纲统计概览。"""
-    total = (await db.execute(select(func.count(Outline.id)))).scalar()
+    owner_filter = _owned_outline_filter(current_user.id)
+    total = (await db.execute(select(func.count(Outline.id)).where(owner_filter))).scalar()
     passed = (await db.execute(
-        select(func.count(Outline.id)).where(Outline.passed == "passed")
+        select(func.count(Outline.id)).where(owner_filter, Outline.passed == "passed")
     )).scalar()
     failed = (await db.execute(
-        select(func.count(Outline.id)).where(Outline.passed == "failed")
+        select(func.count(Outline.id)).where(owner_filter, Outline.passed == "failed")
     )).scalar()
     pending = (await db.execute(
-        select(func.count(Outline.id)).where(Outline.passed == "pending")
+        select(func.count(Outline.id)).where(owner_filter, Outline.passed == "pending")
     )).scalar()
     
     # 平均分数
     avg_score_result = (await db.execute(
-        select(func.avg(Outline.total_score)).where(Outline.passed != "pending")
+        select(func.avg(Outline.total_score)).where(owner_filter, Outline.passed != "pending")
     )).scalar()
     avg_score = round(avg_score_result, 2) if avg_score_result else 0.0
     
     # 按方向统计
     direction_result = await db.execute(
         select(Outline.direction, func.count(Outline.id))
-        .where(Outline.direction.is_not(None))
+        .where(owner_filter, Outline.direction.is_not(None))
         .group_by(Outline.direction)
     )
     direction_stats = {d: c for d, c in direction_result.all()}

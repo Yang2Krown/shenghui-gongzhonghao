@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.security import get_current_user
+from app.core.url_security import resolve_redirect_url, validate_public_http_url
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,19 @@ class BatchDownloadRequest(BaseModel):
 
 class BatchDownloadResponse(BaseModel):
     images: List[dict]
+
+
+async def _get_checked(client: httpx.AsyncClient, url: str, headers: dict) -> httpx.Response:
+    current_url = validate_public_http_url(url)
+    for _ in range(6):
+        resp = await client.get(current_url, headers=headers)
+        if resp.status_code not in {301, 302, 303, 307, 308}:
+            return resp
+        location = resp.headers.get("location")
+        if not location:
+            return resp
+        current_url = resolve_redirect_url(current_url, location)
+    raise HTTPException(status_code=400, detail="图片链接重定向次数过多")
 
 
 def _guess_ext(url: str, content_type: str = "") -> str:
@@ -64,10 +78,10 @@ async def download_batch(
         "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
     }
 
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, verify=False) as client:
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=False, verify=False) as client:
         for i, url in enumerate(request.urls):
             try:
-                resp = await client.get(url, headers=headers)
+                resp = await _get_checked(client, url, headers=headers)
                 resp.raise_for_status()
                 ext = _guess_ext(url, resp.headers.get("content-type", ""))
                 filename = f"{i:03d}_{uuid.uuid4().hex[:8]}{ext}"

@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation
 from app.core.progress import progress_store
+from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.db.session import get_db
 from app.models.user import User
@@ -33,7 +35,7 @@ router = APIRouter()
 async def trigger_mining(
     body: dict = {},
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ) -> Any:
     """触发选题挖掘任务。
 
@@ -55,7 +57,7 @@ async def trigger_mining(
 async def trigger_adhoc_mining(
     body: dict = {},
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ) -> Any:
     """从自由输入的信息源触发选题挖掘，写入数据库。
 
@@ -140,8 +142,8 @@ async def trigger_adhoc_mining(
     await db.commit()
     await db.refresh(cluster)
 
-    run_id = progress_store.create_run()
     owner_id = current_user.id  # 背景任务里没有 request 上下文，先抓出来
+    run_id = progress_store.create_run(user_id=owner_id)
 
     async def _run():
         from app.db.session import AsyncSessionLocal
@@ -454,7 +456,7 @@ async def get_mining_progress(
 
     前端每隔 1-2 秒查一次，返回当前步骤 / Agent / 是否完成 / 结果。
     """
-    snap = progress_store.snapshot(run_id)
+    snap = progress_store.snapshot(run_id, user_id=current_user.id)
     if snap is None:
         return {"code": 404, "message": "run 不存在或已过期", "data": {"exists": False}}
     return {"code": 200, "message": "ok", "data": snap}
@@ -466,17 +468,7 @@ async def stream_mining_progress(
     token: str = Query(None, description="认证 token（EventSource 不支持 header）"),
 ) -> StreamingResponse:
     """SSE 端点：实时推送选题挖掘进度。"""
-    if token:
-        from app.core.security import decode_token
-        payload = decode_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="无效的 token")
-
-    if not progress_store.exists(run_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"run {run_id} 不存在或已过期",
-        )
+    ensure_run_owner_from_token(progress_store, run_id, token)
 
     return StreamingResponse(
         progress_store.stream(run_id),
@@ -523,7 +515,7 @@ async def _mine_one(db: AsyncSession, cluster_id: int, user_id: int) -> dict:
             detail="该话题与 AI 无关，跳过挖掘"
         )
 
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     async def _run():
         from app.db.session import AsyncSessionLocal

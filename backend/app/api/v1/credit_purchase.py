@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.credit_config import CREDIT_PACKAGES
+from app.core.rate_limit import limit_payment_order
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.user import User
@@ -25,7 +26,8 @@ def _find_package(package_name: str):
 @router.post("/purchase", response_model=dict)
 async def purchase_credits(
     package_name: str,
-    current_user: User = Depends(get_current_user),
+    request: Request,
+    current_user: User = Depends(limit_payment_order),
     db: AsyncSession = Depends(get_db),
 ):
     """创建微信支付订单，返回扫码支付链接。"""

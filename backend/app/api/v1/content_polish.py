@@ -12,7 +12,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation
 from app.core.progress import progress_store
+from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.models.user import User
 from app.core.generation_tracker import track_start, track_complete, track_fail
@@ -46,7 +48,7 @@ class PolishResponse(BaseModel):
 @router.post("/generate", response_model=dict)
 async def generate_polish(
     req: PolishRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ) -> Any:
     """文案润色（SSE 实时进度）。
 
@@ -69,7 +71,7 @@ async def generate_polish(
                 },
             )
     
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,
@@ -162,18 +164,7 @@ async def stream_polish_progress(
     token: str = Query(None, description="认证 token（EventSource 不支持 header）"),
 ) -> StreamingResponse:
     """SSE 端点：实时推送文案润色进度。"""
-    # 验证 token
-    if token:
-        from app.core.security import decode_token
-        payload = decode_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="无效的 token")
-
-    if not progress_store.exists(run_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"run {run_id} 不存在或已过期",
-        )
+    ensure_run_owner_from_token(progress_store, run_id, token)
 
     return StreamingResponse(
         progress_store.stream(run_id),
@@ -354,7 +345,7 @@ async def _run_polish_compare_background(
 @router.post("/compare", response_model=MultiModelPolishResponse)
 async def compare_multi_model_polish(
     request: MultiModelPolishRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ):
     """多模型对比润色
 
@@ -363,7 +354,7 @@ async def compare_multi_model_polish(
     """
     await ensure_credits_or_402(current_user.id, "content_polish")
 
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,
@@ -399,14 +390,7 @@ async def stream_polish_compare_progress(
     token: str = Query(None, description="认证 token"),
 ) -> StreamingResponse:
     """SSE 端点：实时推送多模型对比润色进度。"""
-    if token:
-        from app.core.security import decode_token
-        payload = decode_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="无效的 token")
-
-    if not progress_store.exists(run_id):
-        raise HTTPException(status_code=404, detail=f"run {run_id} 不存在或已过期")
+    ensure_run_owner_from_token(progress_store, run_id, token)
 
     return StreamingResponse(
         progress_store.stream(run_id),

@@ -15,8 +15,10 @@ import logging
 
 from app.db.session import get_db, AsyncSessionLocal
 from app.core.progress import progress_store
+from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation
 from app.models.user import User
 from app.models.task import Task, TaskStatus
 from app.models.title import TitleGenerationResult, TitleCandidate, FinalRecommendation
@@ -34,6 +36,36 @@ from app.db.session import AsyncSessionLocal
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _get_owned_task(db: AsyncSession, task_id: str, user_id: int) -> Task:
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == user_id))
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return task
+
+
+async def _get_owned_result_by_task(db: AsyncSession, task_id: str, user_id: int) -> tuple[Task, TitleGenerationResult]:
+    task = await _get_owned_task(db, task_id, user_id)
+    result_query = await db.execute(
+        select(TitleGenerationResult).where(TitleGenerationResult.task_id == task_id)
+    )
+    generation_result = result_query.scalar_one_or_none()
+    if not generation_result:
+        raise HTTPException(status_code=404, detail="结果数据不存在")
+    return task, generation_result
+
+
+async def _get_owned_result_by_id(db: AsyncSession, result_id: int, user_id: int) -> tuple[Task, TitleGenerationResult]:
+    result_query = await db.execute(
+        select(TitleGenerationResult).where(TitleGenerationResult.id == result_id)
+    )
+    generation_result = result_query.scalar_one_or_none()
+    if not generation_result:
+        raise HTTPException(status_code=404, detail="结果数据不存在")
+    task = await _get_owned_task(db, generation_result.task_id, user_id)
+    return task, generation_result
 
 
 async def _run_title_generation_background(task_id: str, request_data: dict, run_id: str = None, user_id: int = None):
@@ -240,6 +272,7 @@ async def create_title_generation(
     # 创建任务记录
     task = Task(
         id=str(uuid.uuid4()),
+        user_id=current_user.id,
         title=f"标题生成任务 - {request.topic.title if request.topic else '未命名'}",
         description="基于选题和大纲生成标题候选",
         status=TaskStatus.PENDING,
@@ -254,7 +287,7 @@ async def create_title_generation(
     await db.refresh(task)
 
     # 创建进度流
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     # 序列化请求数据，传给后台任务（避免传递ORM session）
     request_data = request.dict()
@@ -293,7 +326,7 @@ async def create_title_generation(
 async def compare_multi_model_titles(
     request: TitleGenerationRequest,
     providers: Optional[List[str]] = Query(default=["deepseek", "aigocode"], description="要对比的模型列表"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ):
     """
     多模型对比生成标题
@@ -335,15 +368,7 @@ async def stream_title_progress(
     token: str = Query(None, description="认证 token（EventSource 不支持 header）"),
 ) -> StreamingResponse:
     """SSE 端点：实时推送标题生成进度。"""
-    # 验证 token
-    if token:
-        from app.core.security import decode_token
-        payload = decode_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="无效的 token")
-
-    if not progress_store.exists(run_id):
-        raise HTTPException(status_code=404, detail=f"run {run_id} 不存在或已过期")
+    ensure_run_owner_from_token(progress_store, run_id, token)
 
     return StreamingResponse(
         progress_store.stream(run_id),
@@ -360,6 +385,7 @@ async def stream_title_progress(
 async def get_title_generation_result(
     task_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     获取标题生成结果
@@ -377,13 +403,7 @@ async def get_title_generation_result(
         - Top 3最终推荐
         - 生成过程归档
     """
-    # 查询任务
-    from sqlalchemy import select
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
+    task = await _get_owned_task(db, task_id, current_user.id)
     
     if task.status == TaskStatus.PENDING or task.status == TaskStatus.PROCESSING:
         return TitleGenerationResultResponse(
@@ -399,14 +419,7 @@ async def get_title_generation_result(
             message=task.error_message or "任务处理失败",
         )
     
-    # 查询结果
-    result_query = await db.execute(
-        select(TitleGenerationResult).where(TitleGenerationResult.task_id == task_id)
-    )
-    generation_result = result_query.scalar_one_or_none()
-    
-    if not generation_result:
-        raise HTTPException(status_code=500, detail="结果数据不存在")
+    _, generation_result = await _get_owned_result_by_task(db, task_id, current_user.id)
     
     return TitleGenerationResultResponse(
         task_id=task.id,
@@ -420,6 +433,7 @@ async def get_title_generation_result(
 async def get_candidates(
     task_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     获取候选标题列表
@@ -432,22 +446,7 @@ async def get_candidates(
     Returns:
         候选标题列表
     """
-    # 查询任务
-    from sqlalchemy import select
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    
-    # 查询结果
-    result_query = await db.execute(
-        select(TitleGenerationResult).where(TitleGenerationResult.task_id == task_id)
-    )
-    generation_result = result_query.scalar_one_or_none()
-    
-    if not generation_result:
-        raise HTTPException(status_code=404, detail="结果数据不存在")
+    _, generation_result = await _get_owned_result_by_task(db, task_id, current_user.id)
 
     # to_dict() 已将 "0"/"1" 转为 bool
     return [c.to_dict() for c in generation_result.candidates]
@@ -457,6 +456,7 @@ async def get_candidates(
 async def get_recommendations(
     task_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     获取最终推荐标题
@@ -469,21 +469,7 @@ async def get_recommendations(
     Returns:
         Top 3推荐标题列表
     """
-    # 查询任务
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-
-    # 查询结果
-    result_query = await db.execute(
-        select(TitleGenerationResult).where(TitleGenerationResult.task_id == task_id)
-    )
-    generation_result = result_query.scalar_one_or_none()
-
-    if not generation_result:
-        raise HTTPException(status_code=404, detail="结果数据不存在")
+    _, generation_result = await _get_owned_result_by_task(db, task_id, current_user.id)
 
     return generation_result.final_recommendations
 
@@ -493,6 +479,7 @@ async def update_title_candidate(
     candidate_id: str,
     body: dict,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """保存编辑后的标题文本。
 
@@ -507,6 +494,7 @@ async def update_title_candidate(
     candidate = result.scalar_one_or_none()
     if not candidate:
         raise HTTPException(status_code=404, detail="标题候选不存在")
+    await _get_owned_result_by_id(db, candidate.result_id, current_user.id)
 
     if "title" in body and body["title"]:
         candidate.title = body["title"]
@@ -527,6 +515,7 @@ async def update_recommendation(
     recommendation_id: str,
     body: dict,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """保存编辑后的推荐标题。
 
@@ -541,6 +530,7 @@ async def update_recommendation(
     rec = result.scalar_one_or_none()
     if not rec:
         raise HTTPException(status_code=404, detail="推荐标题不存在")
+    await _get_owned_result_by_id(db, rec.result_id, current_user.id)
 
     if "title" in body and body["title"]:
         rec.title = body["title"]
@@ -560,7 +550,7 @@ async def update_recommendation(
 async def reevaluate_title_candidate(
     candidate_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_ai_generation),
 ):
     """重新评估单个标题候选（只跑 B 评分 + C 点击预测）。
 
@@ -581,10 +571,9 @@ async def reevaluate_title_candidate(
     if not gen_result:
         raise HTTPException(status_code=404, detail="标题生成结果不存在")
 
-    task_row = await db.execute(select(Task).where(Task.id == gen_result.task_id))
-    task = task_row.scalar_one_or_none()
+    task = await _get_owned_task(db, gen_result.task_id, current_user.id)
 
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
 
     await track_start(
         user_id=current_user.id,

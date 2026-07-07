@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_file_upload
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ async def _cleanup_old_images():
 @router.post("/upload", response_model=ImageUploadResponse)
 async def upload_image(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_file_upload),
 ):
     """
     上传图片到 OSS
@@ -175,7 +176,7 @@ async def upload_image(
 async def upload_image_to_wechat(
     file: UploadFile = File(...),
     account_id: Optional[int] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(limit_file_upload),
 ):
     """
     上传图片到微信公众号（临时素材）

@@ -2,11 +2,14 @@
 
 import logging
 import time
-from fastapi import APIRouter, File, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import Optional
 from openai import AsyncOpenAI
 from app.core.config import settings
+from app.core.security import get_current_user
+from app.core.rate_limit import enforce_rate_limit, rule_from_setting, user_actor
+from app.models.user import User
 
 from app.utils.file_extractor import extract_text, UnsupportedFileType
 from app.services.scraping.link_extractor import extract_link_content
@@ -23,8 +26,17 @@ class LinkExtractRequest(BaseModel):
 
 
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
     """上传文件并提取文本内容。支持 PDF / DOCX / TXT / MD。"""
+    await enforce_rate_limit(
+        [rule_from_setting("file:upload:user", settings.RATE_LIMIT_FILE_UPLOAD_USER, user_actor(current_user.id))],
+        request=request,
+    )
+
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名不能为空")
 
@@ -52,8 +64,17 @@ async def upload_file(file: UploadFile = File(...)):
 
 
 @router.post("/extract-link")
-async def extract_link(req: LinkExtractRequest):
+async def extract_link(
+    req: LinkExtractRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
     """提取链接内容（公众号/小红书/抖音等平台文章）。"""
+    await enforce_rate_limit(
+        [rule_from_setting("link:extract:user", settings.RATE_LIMIT_LINK_EXTRACT_USER, user_actor(current_user.id))],
+        request=request,
+    )
+
     if not req.url.strip():
         raise HTTPException(status_code=400, detail="链接不能为空")
 
@@ -92,8 +113,17 @@ _FORMAT_SYSTEM = """你是一个排版助手。你的唯一任务是在输入文
 
 
 @router.post("/format-paragraphs")
-async def format_paragraphs(req: FormatParagraphsRequest):
+async def format_paragraphs(
+    req: FormatParagraphsRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
     """调用 LLM 对正文做智能换行，保证原文内容不变。"""
+    await enforce_rate_limit(
+        [rule_from_setting("ai:generation:user", settings.RATE_LIMIT_AI_GENERATION_USER, user_actor(current_user.id))],
+        request=request,
+    )
+
     content = req.content.strip()
     if not content:
         return {"content": ""}

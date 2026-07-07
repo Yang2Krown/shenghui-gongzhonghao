@@ -14,8 +14,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.core.progress import progress_store
+from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.core.security import get_current_user
+from app.core.rate_limit import limit_ai_generation, limit_link_extract
 from app.models.user import User
 from app.core.generation_tracker import track_start, track_complete, track_fail
 from app.services.credit_service import CreditService
@@ -109,9 +111,9 @@ async def _run_research(product: str, brief: str, reference_links: List[str], ru
 
 
 @router.post("/research", response_model=RunResponse)
-async def start_research(req: ResearchRequest, current_user: User = Depends(get_current_user)):
+async def start_research(req: ResearchRequest, current_user: User = Depends(limit_ai_generation)):
     await _ensure_credits(current_user.id, "practical_research")
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
     await track_start(
         user_id=current_user.id, type="practical_research", run_id=run_id,
         input_snapshot={"product": req.product, "brief_len": len(req.brief), "reference_links_count": len(req.reference_links)},
@@ -144,9 +146,9 @@ async def _run_re_analyze(req: ReAnalyzeRequest, run_id: str, user_id: int):
 
 
 @router.post("/re-analyze", response_model=RunResponse)
-async def re_analyze(req: ReAnalyzeRequest, current_user: User = Depends(get_current_user)):
+async def re_analyze(req: ReAnalyzeRequest, current_user: User = Depends(limit_ai_generation)):
     """补充参考链接后重新分析（不额外扣积分）"""
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
     await track_start(
         user_id=current_user.id, type="practical_research", run_id=run_id,
         input_snapshot={
@@ -180,9 +182,9 @@ async def _run_analyze_features(req: AnalyzeFeaturesRequest, run_id: str, user_i
 
 
 @router.post("/analyze-features", response_model=RunResponse)
-async def analyze_features_endpoint(req: AnalyzeFeaturesRequest, current_user: User = Depends(get_current_user)):
+async def analyze_features_endpoint(req: AnalyzeFeaturesRequest, current_user: User = Depends(limit_ai_generation)):
     """基于用户确认的研究结果分析功能点（不额外扣积分）"""
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
     product = req.research.get("product", "")
     await track_start(
         user_id=current_user.id, type="practical_research", run_id=run_id,
@@ -195,7 +197,7 @@ async def analyze_features_endpoint(req: AnalyzeFeaturesRequest, current_user: U
 
 
 @router.post("/validate-link", response_model=ValidateLinkResponse)
-async def validate_link(req: ValidateLinkRequest, current_user: User = Depends(get_current_user)):
+async def validate_link(req: ValidateLinkRequest, current_user: User = Depends(limit_link_extract)):
     """验证参考链接是否可访问，并返回平台和标题"""
     from app.services.scraping.link_extractor import extract_link_content, detect_platform, extract_url_from_text
 
@@ -265,9 +267,9 @@ async def _run_draft(req: DraftRequest, run_id: str, user_id: int):
 
 
 @router.post("/draft", response_model=RunResponse)
-async def start_draft(req: DraftRequest, current_user: User = Depends(get_current_user)):
+async def start_draft(req: DraftRequest, current_user: User = Depends(limit_ai_generation)):
     await _ensure_credits(current_user.id, "practical_draft")
-    run_id = progress_store.create_run()
+    run_id = progress_store.create_run(user_id=current_user.id)
     product = (req.research or {}).get("product", "")
     await track_start(
         user_id=current_user.id, type="practical_draft", run_id=run_id,
@@ -282,12 +284,7 @@ async def start_draft(req: DraftRequest, current_user: User = Depends(get_curren
 # ────────────── 共用 SSE ──────────────
 @router.get("/stream/{run_id}")
 async def stream_progress(run_id: str, token: str = Query(None)) -> StreamingResponse:
-    if token:
-        from app.core.security import decode_token
-        if not decode_token(token):
-            raise HTTPException(status_code=401, detail="无效的 token")
-    if not progress_store.exists(run_id):
-        raise HTTPException(status_code=404, detail=f"run {run_id} 不存在或已过期")
+    ensure_run_owner_from_token(progress_store, run_id, token)
     return StreamingResponse(
         progress_store.stream(run_id),
         media_type="text/event-stream",
