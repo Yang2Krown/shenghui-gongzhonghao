@@ -5,12 +5,12 @@
       <div class="flex flex-col h-full">
         <!-- Logo区域 -->
         <div class="flex items-center" style="padding: 13px 20px 13px;">
-          <div style="width: 34px; height: 34px; border-radius: 8px 3px 8px 8px; background: var(--clay); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; font-family: var(--serif); flex-shrink: 0;">
-            公
+          <div class="brand-mark">
+            <img src="/brand/ip-compass.svg" alt="IP罗盘" />
           </div>
-          <div v-if="!isCollapsed" style="margin-left: 11px; min-width: 0;">
-            <div class="font-semibold text-ink" style="font-size: 16px; line-height: 1.1;">公众号创作台</div>
-            <div class="text-xs text-ink-4" style="letter-spacing: .04em;">AI Content Studio</div>
+          <div v-if="!isCollapsed" class="brand-copy">
+            <div class="brand-title">IP罗盘</div>
+            <div class="brand-subtitle">Creator Compass</div>
           </div>
         </div>
 
@@ -383,6 +383,46 @@ const navigateTo = (id) => {
 </script>
 
 <style scoped>
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  overflow: hidden;
+  box-shadow: 0 8px 18px rgba(204, 120, 92, .22);
+}
+
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.brand-copy {
+  margin-left: 11px;
+  min-width: 0;
+  transform: translateY(-1px);
+}
+
+.brand-title {
+  font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', ui-serif, Georgia, serif;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.02;
+  color: var(--ink);
+  letter-spacing: .01em;
+}
+
+.brand-subtitle {
+  margin-top: 3px;
+  font-family: 'Fraunces', ui-serif, Georgia, serif;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--ink-4);
+  letter-spacing: .075em;
+}
+
 .app-sidebar {
   position: fixed;
   left: 0;

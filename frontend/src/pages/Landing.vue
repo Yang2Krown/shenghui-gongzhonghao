@@ -3,7 +3,10 @@
     <!-- Nav -->
     <nav :class="['nav', { scrolled: navScrolled }]">
       <div class="nav-inner">
-        <a href="#" class="brand"><span class="brand-name">公众号智能体</span></a>
+        <a href="#" class="brand">
+          <img class="brand-logo" src="/brand/ip-compass.svg" alt="IP罗盘" />
+          <span class="brand-name">IP罗盘</span>
+        </a>
         <div class="nav-links">
           <a href="#features">产品功能</a>
           <a href="#tools">创作工具箱</a>
@@ -32,24 +35,24 @@
       <div class="container">
         <div class="hero-grid">
           <div>
-            <div class="eyebrow"><span class="dot"></span><span>AI 全链路 · 公众号内容创作平台</span></div>
+            <div class="eyebrow"><span class="dot"></span><span>创作者内容经营 · 商业合作导航</span></div>
             <h1 class="hero-title">
-              <BlurText text="点击生成，" :delay="60" /><br>
-              等文章<RotatingText :words="['出炉','定稿','成文','落地','交付']" />。
+              <BlurText text="创作不迷路，" :delay="60" /><br>
+              商单有<RotatingText :words="['方向','判断','线索','节奏','交付']" />。
             </h1>
             <p class="hero-sub">
-              从海量信息里挖选题，AI 写出不像 AI 的公众号文章——你只需审稿和点击发布。每天省下 3 小时，把时间留给更重要的事。
+              陪创作者从内容经营走向商业合作：从信息选题、内容生产到潜在商单识别，把每一次创作都校准到更清晰的增长方向。
             </p>
             <div class="hero-actions">
               <MagnetButton @click="openLogin">
                 <button class="star-btn"><span>立即开始使用 <span class="btn-arrow">→</span></span></button>
               </MagnetButton>
-              <a href="#features" class="btn btn-ghost btn-lg">看产品怎么跑</a>
+              <a href="#features" class="btn btn-ghost btn-lg">看罗盘怎么跑</a>
             </div>
             <div class="hero-meta">
               <span style="display:flex;align-items:center;gap:6px"><CountUp :end="20" suffix="+" :duration="1800" /><span style="font-size:13px;color:var(--ink-3)">信息源覆盖</span></span>
-              <span style="display:flex;align-items:center;gap:6px"><CountUp :end="5" :duration="1500" /><span style="font-size:13px;color:var(--ink-3)">步生成流水线</span></span>
-              <span style="display:flex;align-items:center;gap:6px"><CountUp :end="30" suffix="min" :duration="2000" /><span style="font-size:13px;color:var(--ink-3)">出一篇稿</span></span>
+              <span style="display:flex;align-items:center;gap:6px"><CountUp :end="5" :duration="1500" /><span style="font-size:13px;color:var(--ink-3)">步内容流水线</span></span>
+              <span style="display:flex;align-items:center;gap:6px"><CountUp :end="30" suffix="min" :duration="2000" /><span style="font-size:13px;color:var(--ink-3)">完成一篇稿</span></span>
             </div>
           </div>
           <HeroCardStack />
@@ -287,10 +290,13 @@
     <footer class="footer">
       <div class="container">
         <div class="footer-inner">
-          <div class="brand">公众号智能体</div>
+          <div class="brand">
+            <img class="brand-logo" src="/brand/ip-compass.svg" alt="IP罗盘" />
+            <span>IP罗盘</span>
+          </div>
           <div class="footer-meta">
-            <span>© 2026 公众号智能体</span>
-            <span>AI 驱动的公众号内容创作平台</span>
+            <span>© 2026 IP罗盘</span>
+            <span>创作不迷路，商单有方向</span>
           </div>
         </div>
       </div>
@@ -440,18 +446,18 @@ const goToDashboard = () => {
 
 /* ── Pain Points data ── */
 const painPoints = [
-  ['AI 新闻刷不完，选题追到心累', '每天几十条模型更新、融资新闻、开源发布，看完就忘，选题全靠直觉，写出来的东西总比别人慢半拍。'],
-  ['技术文章写了 4 小时，读起来还是像论文', '查论文、读文档、理逻辑——写完一看，通篇术语，读者根本看不懂，白费力气。'],
-  ['标题想破头，最后选了个没人点的', 'AI 领域的标题要么太专业劝退小白，要么太标题党丢信任，怎么选都不对。'],
-  ['发了 100 篇，粉丝还是那几个', '不知道内容哪里有问题，没有反馈机制，写了删删了写，一直在原地踏步。'],
+  ['内容天天更，定位却越来越散', '热点、案例、观点都想写，最后账号没有清晰识别度，读者记不住，品牌方也不知道你适合什么合作。'],
+  ['选题能涨粉，但不一定能接单', '很多内容有阅读量，却沉淀不出商业信号，不知道哪些方向更容易连接产品、预算和合作场景。'],
+  ['商单线索藏在信息流里', '竞品投放、品牌动作、行业需求每天都在发生，但靠人工翻找太慢，常常等别人合作了才发现机会。'],
+  ['从内容到报价，总缺一张地图', '写什么、怎么包装、适合谁投、如何交付，没有连续判断，只能凭感觉试错。'],
 ]
 
 /* ── Feature mockup data ── */
 const topicRows = [
-  { color: '#CC785C', rank: '01', text: 'DeepSeek v4 发布：开源模型首次超越闭源', score: '9.6' },
-  { color: '#C49B5C', rank: '02', text: 'OpenAI 的 o3 模型到底强在哪', score: '9.3' },
-  { color: '#3F5C52', rank: '03', text: 'AI Agent 落地这一年，踩了哪些坑', score: '9.1' },
-  { color: '#6B6862', rank: '04', text: '为什么你的 AI 应用 demo 跑得通上线就崩', score: '8.7' },
+  { color: '#CC785C', rank: '01', text: 'AI 会议助手密集投放，内容切入点怎么选', score: '9.6' },
+  { color: '#C49B5C', rank: '02', text: '知识管理工具更新：适合做哪类商单内容', score: '9.3' },
+  { color: '#3F5C52', rank: '03', text: 'Agent 落地案例升温，品牌合作机会在哪里', score: '9.1' },
+  { color: '#6B6862', rank: '04', text: '创作者如何把测评内容升级成合作资产', score: '8.7' },
 ]
 const agentRows = [
   { status: 'done', name: '正文创作', desc: '✓ 已完成 · 2,847 字' },
@@ -461,13 +467,13 @@ const agentRows = [
   { status: 'active', name: '去除 AI 痕迹', desc: '打磨中…' },
 ]
 const titleRows = [
-  { top: true, rank: '1', text: '你的工作会在三年内被 AI 取代吗？', score: '9.4' },
-  { top: false, rank: '2', text: '调研了 100 家公司后，我发现了 AI 替代的规律', score: '9.1' },
-  { top: false, rank: '3', text: '不是 AI 太强，是你还没意识到自己有多弱', score: '8.8' },
+  { top: true, rank: '1', text: 'AI 工具商单，为什么总找不到你？', score: '9.4' },
+  { top: false, rank: '2', text: '我复盘了 30 个创作者合作案例，发现机会都藏在这里', score: '9.1' },
+  { top: false, rank: '3', text: '不是内容不够好，是你的商业方向太模糊', score: '8.8' },
 ]
 const platformRows = [
   { color: '#07C160', icon: '公', name: '公众号 · 长文版', desc: '2,847 字 + 排版完成' },
-  { color: '#FF2442', icon: '小', name: '小红书 · 图文版', desc: '9 张图 + 清单体正文' },
+  { color: '#FF2442', icon: '小', name: '小红书 · 种草版', desc: '9 张图 + 合作卖点' },
 ]
 
 /* ── Tools data ── */
@@ -623,36 +629,36 @@ const HeroCardStack = defineComponent({
 
     const cards = [
       {
-        id: 'info', cls: 'hc-1 hc-info', icon: '📡', title: '全网信息自动推送',
-        desc: '覆盖 20+ 信息源，每天自动采集、智能去重、归类整理，打开就能看到今日热点。',
-        tag: '微信 · 知乎 · GitHub · RSS…',
+        id: 'info', cls: 'hc-1 hc-info', icon: '🧭', title: '内容方向自动校准',
+        desc: '覆盖 20+ 信息源，每天自动采集、智能去重、归类整理，打开就能看到值得经营的方向。',
+        tag: '趋势 · 选题 · 品牌动作 · 合作线索',
         rows: [
-          { icon: '💬', label: '微信公众号', status: '已同步', scls: 'cr-ok' },
-          { icon: '🔍', label: '知乎热榜', status: '已同步', scls: 'cr-ok' },
-          { icon: '📰', label: 'RSS 订阅', status: '采集中…', scls: 'cr-run' },
-          { icon: '🐙', label: 'GitHub Trending', status: '已同步', scls: 'cr-ok' },
+          { icon: '💬', label: '公众号趋势', status: '已同步', scls: 'cr-ok' },
+          { icon: '🔍', label: '用户问题', status: '已同步', scls: 'cr-ok' },
+          { icon: '📰', label: '品牌动态', status: '采集中…', scls: 'cr-run' },
+          { icon: '💼', label: '商单线索', status: '已同步', scls: 'cr-ok' },
         ]
       },
       {
-        id: 'pipe', cls: 'hc-2 hc-pipe', icon: '⚙️', title: 'AI 创作流',
-        desc: '从选题到成稿，5 步 AI 流水线自动推进，每步独立 Agent 协作完成。',
-        tag: '选题 → 大纲 → 正文 → 标题 → 成稿',
+        id: 'pipe', cls: 'hc-2 hc-pipe', icon: '⚙️', title: '内容经营流',
+        desc: '从方向判断到成稿交付，5 步 AI 流水线自动推进，每步独立 Agent 协作完成。',
+        tag: '方向 → 选题 → 大纲 → 正文 → 合作角度',
         pipe: true
       },
       {
-        id: 'xform', cls: 'hc-3 hc-xform', icon: '🔀', title: '多平台内容互转',
-        desc: '一键将公众号文章改写为小红书风格，或根据对标账号仿写，保持你的个人风格。',
-        tag: '公众号 → 小红书 · 风格仿写',
+        id: 'xform', cls: 'hc-3 hc-xform', icon: '🔀', title: '多平台商业表达',
+        desc: '一键将公众号长文改写为小红书种草表达，或根据对标账号仿写，保持你的个人风格。',
+        tag: '公众号 → 小红书 · 合作卖点',
         rows: [
           { icon: '📝', label: '公众号原文', status: '2,400 字', scls: 'cr-blue' },
-          { icon: '➡️', label: '转写为小红书风格', status: '转写中…', scls: 'cr-run' },
-          { icon: '✅', label: '适配表情 + 标签', status: '已完成', scls: 'cr-ok' },
+          { icon: '➡️', label: '提炼合作卖点', status: '转写中…', scls: 'cr-run' },
+          { icon: '✅', label: '适配标签 + CTA', status: '已完成', scls: 'cr-ok' },
         ]
       },
       {
-        id: 'pub', cls: 'hc-4 hc-pub', icon: '🚀', title: '一键发布',
-        desc: '文章写好后直接推送到微信公众号草稿箱，或发布到小红书，不用复制粘贴。',
-        tag: '公众号 · 小红书 · 草稿箱',
+        id: 'pub', cls: 'hc-4 hc-pub', icon: '🚀', title: '合作内容交付',
+        desc: '文章写好后直接推送到微信公众号草稿箱，或整理成跨平台发布素材，不用复制粘贴。',
+        tag: '公众号 · 小红书 · 商稿交付',
         rows: [
           { icon: '📱', label: '微信公众号草稿', status: '已推送', scls: 'cr-ok' },
           { icon: '📕', label: '小红书', status: '待发布', scls: 'cr-blue' },
@@ -923,6 +929,7 @@ export default {
   display: flex; align-items: center; gap: 32px;
 }
 .brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-weight: 700; font-size: 18px; color: var(--ink); letter-spacing: .02em; }
+.brand-logo { width: 28px; height: 28px; border-radius: 8px; display: block; box-shadow: 0 8px 18px rgba(204, 120, 92, .18); flex-shrink: 0; }
 .brand-name { transition: color .15s; }
 .brand:hover .brand-name { color: var(--clay); }
 .nav-links { display: flex; gap: 28px; margin-left: 24px; }
@@ -1256,6 +1263,7 @@ export default {
 .footer { padding: 48px 0 36px; border-top: 1px solid var(--line); background: var(--ivory); color: var(--ink-3); font-size: 13px; }
 .footer-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px; }
 .footer .brand { font-size: 15px; }
+.footer .brand-logo { width: 24px; height: 24px; border-radius: 7px; }
 .footer-meta { display: flex; gap: 20px; flex-wrap: wrap; font-size: 12.5px; }
 
 /* Modal */

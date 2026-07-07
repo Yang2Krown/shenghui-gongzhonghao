@@ -1,11 +1,13 @@
 <template>
   <div class="login-page min-h-screen flex flex-col justify-center py-12 sm:px-6 lg:px-8">
     <div class="sm:mx-auto sm:w-full sm:max-w-md">
+      <img class="login-brand-mark" src="/brand/ip-compass.svg" alt="IP罗盘" />
+      <p class="text-center text-sm font-semibold text-clay-deep" style="letter-spacing: .08em;">IP罗盘</p>
       <h2 class="text-center text-h2 font-serif text-ink">
-        欢迎回来
+        创作不迷路，商单有方向
       </h2>
       <p class="mt-2 text-center text-sm text-ink-3">
-        让专业的人，做出更专业的内容
+        陪创作者从内容经营走向商业合作
       </p>
       <p class="mt-4 text-center text-sm text-ink-3">
         还没有账号？
@@ -174,6 +176,15 @@ const handlePhoneLogin = async () => {
   background-image:
     radial-gradient(circle at 15% 20%, rgba(204, 120, 92, 0.08), transparent 45%),
     radial-gradient(circle at 85% 80%, rgba(63, 92, 82, 0.06), transparent 50%);
+}
+
+.login-brand-mark {
+  width: 56px;
+  height: 56px;
+  display: block;
+  margin: 0 auto 14px;
+  border-radius: 16px;
+  box-shadow: 0 14px 30px rgba(204, 120, 92, .24);
 }
 
 /* 登录卡片 —— 更纸面、更克制的阴影 */

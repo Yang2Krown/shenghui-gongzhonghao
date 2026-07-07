@@ -301,7 +301,7 @@ const routes = [
     path: '/landing',
     name: 'Landing',
     component: () => import('@/pages/Landing.vue'),
-    meta: { title: '公众号智能体 — 从选题到发布，AI 全程帮你搞定' }
+    meta: { title: 'IP罗盘 — 创作不迷路，商单有方向' }
   },
   {
     path: '/login',
@@ -351,7 +351,7 @@ const PUBLIC_ROUTES = ['Login', 'Register', 'NotFound', 'Landing', 'Terms', 'Pri
 
 // 全局前置守卫
 router.beforeEach((to, from, next) => {
-  document.title = to.meta.title ? `${to.meta.title} - 公众号创作台` : '公众号创作台'
+  document.title = to.meta.title ? `${to.meta.title} - IP罗盘` : 'IP罗盘'
 
   const userStore = useUserStore()
   const isPublic = PUBLIC_ROUTES.includes(to.name)
