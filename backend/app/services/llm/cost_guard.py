@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.timezone import utcnow
 from app.db.session import AsyncSessionLocal
 from app.models.llm_monitoring import LlmCallLog
+from app.models.user import User
 
 
 class CostGuardBlocked(RuntimeError):
@@ -101,6 +102,28 @@ async def collect_llm_guard_status(db) -> dict[str, Any]:
         .group_by(LlmCallLog.provider)
     )).all()
 
+    user_warning_threshold = float(settings.LLM_USER_DAILY_WARNING_YUAN or 0)
+    high_cost_user_rows = []
+    if user_warning_threshold > 0:
+        high_cost_user_rows = (await db.execute(
+            select(
+                LlmCallLog.user_id,
+                User.username,
+                User.phone,
+                User.email,
+                func.count(LlmCallLog.id),
+                func.coalesce(func.sum(LlmCallLog.cost_yuan), 0),
+                func.coalesce(func.sum(LlmCallLog.total_tokens), 0),
+            )
+            .select_from(LlmCallLog)
+            .outerjoin(User, User.id == LlmCallLog.user_id)
+            .where(LlmCallLog.created_at >= last_24h, LlmCallLog.user_id.is_not(None))
+            .group_by(LlmCallLog.user_id, User.username, User.phone, User.email)
+            .having(func.coalesce(func.sum(LlmCallLog.cost_yuan), 0) >= user_warning_threshold)
+            .order_by(desc(func.coalesce(func.sum(LlmCallLog.cost_yuan), 0)))
+            .limit(50)
+        )).all()
+
     failure_by_provider = {
         provider: {
             "calls": int(calls or 0),
@@ -139,6 +162,19 @@ async def collect_llm_guard_status(db) -> dict[str, Any]:
 
     return {
         "overall": overall,
+        "user_warning_yuan": user_warning_threshold,
+        "high_cost_users": [
+            {
+                "user_id": user_id,
+                "username": username,
+                "phone": _mask_phone(phone),
+                "email": email,
+                "calls_24h": int(calls or 0),
+                "cost_yuan_24h": round(_money(cost), 4),
+                "total_tokens_24h": int(tokens or 0),
+            }
+            for user_id, username, phone, email, calls, cost, tokens in high_cost_user_rows
+        ],
         "breaker": {
             "enabled": settings.LLM_FAILURE_BREAKER_ENABLED,
             "window_minutes": settings.LLM_FAILURE_BREAKER_WINDOW_MINUTES,
@@ -148,6 +184,15 @@ async def collect_llm_guard_status(db) -> dict[str, Any]:
         },
         "providers": providers,
     }
+
+
+def _mask_phone(phone: Any) -> Optional[str]:
+    if not phone:
+        return None
+    text = str(phone)
+    if len(text) < 7:
+        return text
+    return f"{text[:3]}****{text[-4:]}"
 
 
 def _provider_state(provider: str, calls_24h: int, cost_24h: float, failure: dict, now) -> dict[str, Any]:

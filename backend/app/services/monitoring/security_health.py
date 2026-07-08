@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from app.core.config import settings
@@ -9,6 +10,7 @@ from app.core.config import settings
 
 LOCAL_ORIGIN_MARKERS = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]")
 WEAK_HOSTS = {"*", "localhost", "127.0.0.1", "0.0.0.0"}
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 def _level_rank(level: str) -> int:
@@ -36,6 +38,14 @@ def _configured(value: Any) -> bool:
 
 def _masked_presence(name: str, value: Any) -> dict:
     return {"name": name, "configured": _configured(value)}
+
+
+def _file_contains(path: Path, *patterns: str) -> bool:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return all(pattern in content for pattern in patterns)
 
 
 def collect_security_health(cost_guard_status: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -99,14 +109,32 @@ def collect_security_health(cost_guard_status: Optional[dict[str, Any]] = None) 
             value=", ".join(allowed_hosts),
             actions=[] if not settings.is_production or not hosts_have_weak else ["生产环境只保留正式 API 域名"],
         ),
-        _status(
-            "warn",
-            "反向代理安全",
-            "需要在 Nginx/网关层确认 HTTPS 强制跳转、请求体限制、上传路径访问控制和边缘限流",
-            value="manual",
-            actions=["检查 Nginx / CDN / Ingress 配置", "确认上传目录不能执行脚本"],
-        ),
     ]
+    nginx_conf = REPO_ROOT / "frontend" / "nginx.conf"
+    nginx_hardened = _file_contains(
+        nginx_conf,
+        "server_tokens off",
+        "client_max_body_size",
+        "X-Content-Type-Options",
+        "limit_except GET HEAD",
+    )
+    compose_requires_hosts = _file_contains(
+        REPO_ROOT / "docker-compose.prod.yml",
+        "BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-[\"https://gzh.midonghub.com\"]}",
+        "ALLOWED_HOSTS: ${ALLOWED_HOSTS:-[\"gzh.midonghub.com\"]}",
+        "./backend/secrets:/app/secrets:ro",
+    )
+    proxy_ok = nginx_hardened and compose_requires_hosts and (hsts_enabled or not settings.is_production)
+    perimeter_items.append(
+        _status(
+            "ok" if proxy_ok else "warn",
+            "HTTPS 和反向代理安全",
+            "生产反代配置已包含基础安全头、请求体限制、上传路径方法限制和只读 secrets 挂载"
+            if nginx_hardened and compose_requires_hosts else "反代或生产 compose 仍有安全配置待确认",
+            value="configured" if nginx_hardened and compose_requires_hosts else "partial",
+            actions=[] if nginx_hardened and compose_requires_hosts else ["检查 frontend/nginx.conf", "检查 docker-compose.prod.yml"],
+        )
+    )
 
     secret_items = [
         _masked_presence("OPENAI_API_KEY", settings.OPENAI_API_KEY),
@@ -126,10 +154,27 @@ def collect_security_health(cost_guard_status: Optional[dict[str, Any]] = None) 
     if cost_guard_status:
         guard_overall = cost_guard_status.get("overall") or {}
         blocked_providers = [item for item in cost_guard_status.get("providers") or [] if item.get("blocked")]
-        cost_guard_level = "critical" if guard_overall.get("blocked") or blocked_providers else "ok"
+        high_cost_users = cost_guard_status.get("high_cost_users") or []
+        cost_guard_level = "critical" if guard_overall.get("blocked") or blocked_providers else ("warn" if high_cost_users else "ok")
         cost_guard_message = guard_overall.get("message") or "LLM 成本防护正常"
+        if high_cost_users:
+            cost_guard_message += f"；{len(high_cost_users)} 位用户 24 小时成本超过阈值"
         cost_guard_value = f"24h ¥{guard_overall.get('cost_yuan_24h', 0)} / ¥{guard_overall.get('daily_budget_yuan', 0)}"
-        cost_guard_actions = [] if cost_guard_level == "ok" else ["查看 provider 熔断状态", "提高预算或排查失败调用"]
+        cost_guard_actions = [] if cost_guard_level == "ok" else ["查看 provider 熔断状态", "排查高成本用户和失败调用"]
+
+    gitignore_ok = _file_contains(
+        REPO_ROOT / ".gitignore",
+        ".env.production",
+        "backend/secrets/",
+        "*.cookie",
+        "*.dump",
+    )
+    dependency_scan_script = REPO_ROOT / "scripts" / "security_scan.sh"
+    dependency_scan_ready = dependency_scan_script.exists() and _file_contains(
+        dependency_scan_script,
+        "pip-audit",
+        "npm audit",
+    )
 
     governance_items = [
         _status(
@@ -139,18 +184,19 @@ def collect_security_health(cost_guard_status: Optional[dict[str, Any]] = None) 
             value="strong" if len(settings.SECRET_KEY) >= 32 else "dev",
         ),
         _status(
-            "warn",
+            "ok" if gitignore_ok and compose_requires_hosts else "warn",
             "密钥轮换",
             f"已检测到 {configured_secret_count} 类外部服务密钥配置；后台只显示配置状态，不回显密钥",
             value=f"{configured_secret_count}/{len(secret_items)}",
-            actions=["确认历史泄露密钥已轮换", "生产使用环境变量或只读 secret 挂载"],
+            actions=[] if gitignore_ok and compose_requires_hosts else ["确认 .gitignore 覆盖 env/secrets", "生产使用环境变量或只读 secret 挂载"],
         ),
         _status(
-            "warn",
+            "ok" if dependency_scan_ready else "warn",
             "依赖安全扫描",
-            "需要定期运行 Python / Node 依赖漏洞扫描并处理高危项",
-            value="manual",
-            actions=["后端运行 pip-audit 或 safety", "前端运行 npm audit"],
+            "已提供 scripts/security_scan.sh，可扫描 Python 和 Node 依赖高危漏洞"
+            if dependency_scan_ready else "需要补齐 Python / Node 依赖漏洞扫描脚本",
+            value="ready" if dependency_scan_ready else "missing",
+            actions=[] if dependency_scan_ready else ["添加 pip-audit/safety 与 npm audit 扫描入口"],
         ),
         _status(
             cost_guard_level,

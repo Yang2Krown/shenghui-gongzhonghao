@@ -56,8 +56,8 @@ x-backend-env: &backend-env
   PIXUS_API_KEY: ${PIXUS_API_KEY:-}
   PIXUS_API_BASE: ${PIXUS_API_BASE:-https://pixus.dev}
   # CORS / 可信主机
-  BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-["*"]}
-  ALLOWED_HOSTS: ${ALLOWED_HOSTS:-["*"]}
+  BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-["https://gzh.midonghub.com"]}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:-["gzh.midonghub.com"]}
   # Exa API（微信公众号搜索）
   EXA_API_KEY: ${EXA_API_KEY:-}
   # 博查 Bocha（实操类爆文搜索，国内可充值）

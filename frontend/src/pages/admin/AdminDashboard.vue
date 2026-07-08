@@ -86,22 +86,23 @@
           <button class="btn-ghost btn-sm" type="button" @click="router.push('/admin/security-health')">查看详情</button>
         </div>
         <div class="baseline-grid">
-          <div :class="['baseline-card', securityHealth.overall?.level || 'ok']">
+          <div :class="['baseline-card', displayedSecurityOverall.level || 'ok']">
             <div class="baseline-name">总体状态</div>
-            <strong>{{ securityHealth.overall?.message || '加载中' }}</strong>
+            <strong>{{ displayedSecurityOverall.message || '加载中' }}</strong>
             <div class="muted">环境：{{ securityHealth.environment || '-' }}</div>
+            <div v-if="handledSecurityCount" class="muted">{{ handledSecurityCount }} 项已处理并收起</div>
           </div>
           <div class="baseline-card ok">
             <div class="baseline-name">正常</div>
-            <strong>{{ securityHealth.counts?.ok || 0 }}</strong>
+            <strong>{{ displayedSecurityCounts.ok || 0 }}</strong>
           </div>
           <div class="baseline-card warn">
             <div class="baseline-name">待关注</div>
-            <strong>{{ securityHealth.counts?.warn || 0 }}</strong>
+            <strong>{{ displayedSecurityCounts.warn || 0 }}</strong>
           </div>
           <div class="baseline-card critical">
             <div class="baseline-name">高风险</div>
-            <strong>{{ securityHealth.counts?.critical || 0 }}</strong>
+            <strong>{{ displayedSecurityCounts.critical || 0 }}</strong>
           </div>
         </div>
       </section>
@@ -393,6 +394,7 @@ import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
 const router = useRouter()
+const SECURITY_HANDLED_KEY = 'gzh-security-health-handled-v1'
 const loading = ref(false)
 const saving = ref(false)
 const alertsSection = ref(null)
@@ -409,6 +411,7 @@ const userRows = ref([])
 const failedTasks = ref([])
 const auditRows = ref([])
 const securityHealth = ref({})
+const securityHandled = ref({})
 const openPanels = reactive({
   roles: true,
   history: false,
@@ -430,6 +433,38 @@ const pipeline = computed(() => overview.content_pipeline || {})
 const tasks = computed(() => overview.tasks || {})
 const users = computed(() => overview.users || {})
 const currentAlerts = computed(() => overview.current_alerts || [])
+const visibleSecurityItems = computed(() => {
+  const items = []
+  for (const group of securityHealth.value.groups || []) {
+    for (const item of group.items || []) {
+      if (item.level === 'ok' || !isSecurityHandled(group, item)) {
+        items.push(item)
+      }
+    }
+  }
+  return items
+})
+const displayedSecurityCounts = computed(() => {
+  const result = { ok: 0, warn: 0, critical: 0 }
+  for (const item of visibleSecurityItems.value) {
+    result[item.level] = (result[item.level] || 0) + 1
+  }
+  return result
+})
+const handledSecurityCount = computed(() => {
+  let total = 0
+  for (const group of securityHealth.value.groups || []) {
+    total += (group.items || []).filter(item => item.level !== 'ok' && isSecurityHandled(group, item)).length
+  }
+  total += ((securityHealth.value.cost_guard || {}).high_cost_users || []).filter(item => isSecurityUserHandled(item)).length
+  return total
+})
+const displayedSecurityOverall = computed(() => {
+  if (displayedSecurityCounts.value.critical > 0) return { level: 'critical', message: '仍有未处理的高风险项' }
+  if (displayedSecurityCounts.value.warn > 0) return { level: 'warn', message: '仍有未处理的待关注项' }
+  if (handledSecurityCount.value > 0) return { level: 'ok', message: '未处理项已清空' }
+  return securityHealth.value.overall || {}
+})
 const securityAlerts = computed(() => {
   const items = []
   const criticalAlerts = alertRows.value
@@ -471,6 +506,7 @@ const signalLabels = {
 async function loadAll() {
   loading.value = true
   try {
+    loadSecurityHandled()
     const [monitorResp, adminResp, snapshotResp, alertResp, userResp, failedResp, auditResp, securityResp] = await Promise.allSettled([
       getMonitoringOverview(),
       getAdmins(),
@@ -500,6 +536,41 @@ function settledData(result) {
 
 function togglePanel(key) {
   openPanels[key] = !openPanels[key]
+}
+
+function securityHealthKey(group, item) {
+  return `health:${securityHealth.value.environment || 'env'}:${group.key}:${item.title}`
+}
+
+function securityHealthSignature(item) {
+  return [item.level, item.value ?? '', item.message ?? '', (item.actions || []).join('|')].join('::')
+}
+
+function securityUserKey(item) {
+  return `user-cost:${item.user_id}`
+}
+
+function securityUserSignature(item) {
+  const guard = securityHealth.value.cost_guard || {}
+  return [guard.user_warning_yuan || 0, item.cost_yuan_24h || 0, item.calls_24h || 0, item.total_tokens_24h || 0].join('::')
+}
+
+function isSecurityHandled(group, item) {
+  const record = securityHandled.value[securityHealthKey(group, item)]
+  return Boolean(record && record.signature === securityHealthSignature(item))
+}
+
+function isSecurityUserHandled(item) {
+  const record = securityHandled.value[securityUserKey(item)]
+  return Boolean(record && record.signature === securityUserSignature(item))
+}
+
+function loadSecurityHandled() {
+  try {
+    securityHandled.value = JSON.parse(localStorage.getItem(SECURITY_HANDLED_KEY) || '{}')
+  } catch {
+    securityHandled.value = {}
+  }
 }
 
 function actionLabel(action) {

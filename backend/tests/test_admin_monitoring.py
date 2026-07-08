@@ -17,7 +17,7 @@ from app.models.monitoring import MonitoringAlert
 from app.models.user import User
 from app.services.monitoring.checks import build_alert_specs
 from app.services.llm.monitoring import calculate_cost_yuan
-from app.services.llm.cost_guard import _provider_state
+from app.services.llm.cost_guard import _mask_phone, _provider_state
 from app.services.monitoring.modules import _safe_time
 from app.services.monitoring.security_health import collect_security_health
 
@@ -194,6 +194,39 @@ def test_security_health_reports_p2_baseline():
     assert "secret_presence" in payload
 
 
+def test_security_health_warns_for_high_cost_users():
+    payload = collect_security_health({
+        "overall": {
+            "blocked": False,
+            "message": "LLM 成本防护正常",
+            "cost_yuan_24h": 21.5,
+            "daily_budget_yuan": 200,
+        },
+        "providers": [],
+        "high_cost_users": [
+            {"user_id": 7, "username": "heavy", "cost_yuan_24h": 20.5},
+        ],
+    })
+    governance = next(group for group in payload["groups"] if group["key"] == "governance")
+    cost_item = next(item for item in governance["items"] if item["title"] == "成本熔断")
+
+    assert cost_item["level"] == "warn"
+    assert "1 位用户" in cost_item["message"]
+
+
+def test_security_health_reports_p2_remaining_items_ready():
+    payload = collect_security_health({
+        "overall": {"blocked": False, "message": "LLM 成本防护正常", "cost_yuan_24h": 0, "daily_budget_yuan": 200},
+        "providers": [],
+        "high_cost_users": [],
+    })
+    all_items = [item for group in payload["groups"] for item in group["items"]]
+    by_title = {item["title"]: item for item in all_items}
+
+    assert by_title["HTTPS 和反向代理安全"]["value"] == "configured"
+    assert by_title["依赖安全扫描"]["value"] == "ready"
+
+
 def test_sensitive_log_masking():
     text = "phone=13800138000 Authorization: Bearer abc.def token=secret-value"
     masked = mask_sensitive_data(text)
@@ -250,3 +283,9 @@ def test_llm_cost_guard_failure_breaker_blocks(monkeypatch):
     assert state["blocked"] is True
     assert state["reason"] == "provider_failure_breaker"
     assert state["retry_after_seconds"] > 0
+
+
+def test_llm_cost_guard_masks_phone():
+    assert _mask_phone("13800138000") == "138****8000"
+    assert _mask_phone("123456") == "123456"
+    assert _mask_phone(None) is None

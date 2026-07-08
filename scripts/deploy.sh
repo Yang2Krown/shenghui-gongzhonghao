@@ -98,6 +98,10 @@ if [ "$DEPLOY_FRONTEND" -eq 1 ]; then
   rsync -az --delete frontend/dist/ "$DEPLOY_HOST:$DEPLOY_PATH/frontend/dist/"
   echo
 
+  echo "==> [前端] 同步 compose 文件..."
+  rsync -az "$COMPOSE_FILE" "$DEPLOY_HOST:$DEPLOY_PATH/"
+  echo
+
   echo "==> [前端] 重建前端容器..."
   ssh "$DEPLOY_HOST" bash -s <<EOF
 set -e
