@@ -62,22 +62,37 @@
 
       <section class="panel panel-main">
         <div class="panel-title">
-          <span>安全预警</span>
-          <el-tag :type="securityAlerts.length ? 'danger' : 'success'">
-            {{ securityAlerts.length ? `${securityAlerts.length} 条需要关注` : '当前平稳' }}
-          </el-tag>
+          <div>
+            <span>安全预警</span>
+            <span v-if="handledSecurityAlertCount" class="muted title-note">{{ handledSecurityAlertCount }} 条已确认并收起</span>
+          </div>
+          <div class="panel-actions">
+            <button class="btn-ghost btn-sm" type="button" @click="showHandledSecurityAlerts = !showHandledSecurityAlerts">
+              {{ showHandledSecurityAlerts ? '隐藏已确认' : '显示已确认' }}
+            </button>
+            <button v-if="handledSecurityAlertCount" class="btn-ghost btn-sm" type="button" @click="clearHandledSecurityAlerts">清空确认</button>
+            <el-tag :type="visibleSecurityAlerts.length ? 'danger' : 'success'">
+              {{ visibleSecurityAlerts.length ? `${visibleSecurityAlerts.length} 条需要关注` : '当前平稳' }}
+            </el-tag>
+          </div>
         </div>
-        <div v-if="securityAlerts.length" class="security-grid">
-          <div v-for="item in securityAlerts" :key="item.key" :class="['security-card', item.level]">
+        <div v-if="visibleSecurityAlerts.length" class="security-grid">
+          <div v-for="item in visibleSecurityAlerts" :key="item.key" :class="['security-card', item.level]">
             <div class="security-top">
               <strong>{{ item.title }}</strong>
               <el-tag :type="item.level === 'critical' ? 'danger' : 'warning'" size="small">{{ item.levelLabel }}</el-tag>
             </div>
             <div class="security-desc">{{ item.message }}</div>
             <div class="security-meta">{{ item.time }}</div>
+            <div class="alert-actions">
+              <button v-if="!item.handled" class="btn-ghost btn-sm" type="button" @click="confirmSecurityAlert(item)">已确认</button>
+              <button v-else class="btn-ghost btn-sm" type="button" @click="restoreSecurityAlert(item.key)">重新显示</button>
+              <button class="btn-ghost btn-sm" type="button" @click="goSecurityAlertTarget(item)">查看相关</button>
+              <span v-if="item.handledAt" class="muted">确认于 {{ fmtDate(item.handledAt) }}</span>
+            </div>
           </div>
         </div>
-        <div v-else class="alert-empty">最近敏感操作和系统告警未发现异常峰值</div>
+        <div v-else class="alert-empty">当前没有未确认的安全预警</div>
       </section>
 
       <section class="panel panel-main">
@@ -323,7 +338,7 @@
         </div>
       </section>
 
-      <section class="panel panel-main panel-collapsible">
+      <section ref="auditSection" class="panel panel-main panel-collapsible">
         <div class="panel-title panel-title-clickable" @click="togglePanel('audit')">
           <div>
             <span>敏感操作记录</span>
@@ -395,11 +410,13 @@ import { useUserStore } from '@/stores/user'
 const userStore = useUserStore()
 const router = useRouter()
 const SECURITY_HANDLED_KEY = 'gzh-security-health-handled-v1'
+const SECURITY_ALERT_HANDLED_KEY = 'gzh-dashboard-security-alerts-handled-v1'
 const loading = ref(false)
 const saving = ref(false)
 const alertsSection = ref(null)
 const failedTasksSection = ref(null)
 const usersSection = ref(null)
+const auditSection = ref(null)
 const phone = ref('')
 const roleDraft = ref('admin')
 const userKeyword = ref('')
@@ -412,6 +429,8 @@ const failedTasks = ref([])
 const auditRows = ref([])
 const securityHealth = ref({})
 const securityHandled = ref({})
+const securityAlertHandled = ref({})
+const showHandledSecurityAlerts = ref(false)
 const openPanels = reactive({
   roles: true,
   history: false,
@@ -478,6 +497,7 @@ const securityAlerts = computed(() => {
       level: 'critical',
       levelLabel: '系统告警',
       time: fmtDate(item.last_triggered_at),
+      targetKey: item.key,
     })
   }
 
@@ -492,9 +512,16 @@ const securityAlerts = computed(() => {
       level: auditRiskLevel(item),
       levelLabel: auditRiskLevel(item) === 'critical' ? '高风险操作' : '敏感操作',
       time: fmtDate(item.occurred_at),
+      action: item.action,
     })
   }
-  return items.slice(0, 8)
+  return items.slice(0, 8).map(enrichSecurityAlert)
+})
+const visibleSecurityAlerts = computed(() => {
+  return securityAlerts.value.filter(item => showHandledSecurityAlerts.value || !item.handled)
+})
+const handledSecurityAlertCount = computed(() => {
+  return securityAlerts.value.filter(item => item.handled).length
 })
 const signalLabels = {
   data_freshness: '数据新鲜度',
@@ -507,6 +534,7 @@ async function loadAll() {
   loading.value = true
   try {
     loadSecurityHandled()
+    loadSecurityAlertHandled()
     const [monitorResp, adminResp, snapshotResp, alertResp, userResp, failedResp, auditResp, securityResp] = await Promise.allSettled([
       getMonitoringOverview(),
       getAdmins(),
@@ -570,6 +598,64 @@ function loadSecurityHandled() {
     securityHandled.value = JSON.parse(localStorage.getItem(SECURITY_HANDLED_KEY) || '{}')
   } catch {
     securityHandled.value = {}
+  }
+}
+
+function securityAlertSignature(item) {
+  return [item.title || '', item.message || '', item.level || '', item.time || ''].join('::')
+}
+
+function enrichSecurityAlert(item) {
+  const record = securityAlertHandled.value[item.key]
+  const handled = Boolean(record && record.signature === securityAlertSignature(item))
+  return {
+    ...item,
+    handled,
+    handledAt: handled ? record.handledAt : null,
+  }
+}
+
+function saveSecurityAlertHandled() {
+  localStorage.setItem(SECURITY_ALERT_HANDLED_KEY, JSON.stringify(securityAlertHandled.value))
+}
+
+function loadSecurityAlertHandled() {
+  try {
+    securityAlertHandled.value = JSON.parse(localStorage.getItem(SECURITY_ALERT_HANDLED_KEY) || '{}')
+  } catch {
+    securityAlertHandled.value = {}
+  }
+}
+
+function confirmSecurityAlert(item) {
+  securityAlertHandled.value = {
+    ...securityAlertHandled.value,
+    [item.key]: { signature: securityAlertSignature(item), handledAt: new Date().toISOString() },
+  }
+  saveSecurityAlertHandled()
+  ElMessage.success('已确认，默认视图会收起这条预警')
+}
+
+function restoreSecurityAlert(key) {
+  const next = { ...securityAlertHandled.value }
+  delete next[key]
+  securityAlertHandled.value = next
+  saveSecurityAlertHandled()
+}
+
+function clearHandledSecurityAlerts() {
+  securityAlertHandled.value = {}
+  saveSecurityAlertHandled()
+  ElMessage.success('已清空安全预警确认状态')
+}
+
+function goSecurityAlertTarget(item) {
+  if (item.key.startsWith('audit-')) {
+    scrollToSection(auditSection)
+  } else if (item.targetKey) {
+    goAlertTarget(item.targetKey)
+  } else {
+    scrollToSection(alertsSection)
   }
 }
 
