@@ -345,6 +345,62 @@
         </div>
       </div>
     </div>
+
+    <!-- Membership Modal -->
+    <div v-if="membershipOpen" class="modal-backdrop active">
+      <div class="modal" role="dialog" aria-modal="true">
+        <button class="modal-close" @click="closeMembership" aria-label="关闭">×</button>
+
+        <!-- 支付成功 -->
+        <div v-if="membershipPaid" class="modal-success active">
+          <div class="icon" style="background:var(--clay)">✓</div>
+          <h4>会员开通成功</h4>
+          <p>已赠送 6000 积分，即将进入工作台…</p>
+        </div>
+
+        <!-- 正常流程 -->
+        <div v-else>
+          <h3>开通会员</h3>
+          <p class="modal-sub">缴纳一次性入会费 ¥{{ membershipPrice }}，永久享受全部 AI 创作能力。新会员赠送 6000 积分。</p>
+
+          <div class="benefits-list">
+            <div class="benefit-item" v-for="b in membershipBenefits" :key="b">
+              <span class="benefit-check">✓</span> {{ b }}
+            </div>
+          </div>
+
+          <div class="price-row" style="text-align:center;margin-bottom:20px;padding:16px 0;border-top:1px dashed var(--line-2);border-bottom:1px dashed var(--line-2)">
+            <span style="font-size:18px;color:var(--ink-3);vertical-align:top">¥</span>
+            <span style="font-size:42px;font-weight:700;color:var(--clay)">{{ membershipPrice }}</span>
+            <span style="font-size:14px;color:var(--ink-3);margin-left:4px">/ 永久</span>
+          </div>
+
+          <div v-if="membershipOrder" style="text-align:center;margin-bottom:20px">
+            <div style="display:inline-block;padding:12px;background:#fff;border:1px solid var(--line);border-radius:var(--r-md)">
+              <img :src="membershipQrUrl" alt="微信支付二维码" style="width:200px;height:200px;display:block" />
+            </div>
+            <p style="margin-top:12px;font-size:13px;color:var(--ink-3)">
+              <span v-if="membershipPolling" class="polling-indicator" style="display:inline-flex;align-items:center;gap:6px">
+                <span class="spinner"></span> 等待微信扫码支付...
+              </span>
+            </p>
+            <p style="margin-top:6px;font-size:12.5px;color:var(--clay);line-height:1.6">
+              支付完成后请不要刷新或离开页面，系统正在自动确认支付结果。
+            </p>
+          </div>
+
+          <div v-if="membershipError" class="modal-error active"><strong>提示</strong>{{ membershipError }}</div>
+
+          <button v-if="!membershipOrder" class="btn btn-primary btn-submit" :disabled="membershipLoading" @click="createMembershipOrder">
+            {{ membershipLoading ? '创建订单中...' : `立即开通会员 ¥${membershipPrice}` }}
+          </button>
+
+          <div class="modal-foot">
+            支付即表示同意 <a href="/terms" target="_blank">《用户协议》</a> 和 <a href="/privacy" target="_blank">《隐私政策》</a>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -353,6 +409,7 @@ import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { sendSmsCode, loginByPhone } from '@/api/auth'
+import { post, get } from '@/api/api'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
@@ -428,6 +485,7 @@ const submitLogin = async () => {
     userStore.refreshToken = refresh_token
     localStorage.setItem('token', access_token)
     localStorage.setItem('refreshToken', refresh_token)
+    localStorage.setItem('tokenSavedAt', String(Date.now()))
     await userStore.fetchUser()
     if (countdownTimer) clearInterval(countdownTimer)
     ElMessage.success('登录成功')
@@ -441,8 +499,98 @@ const submitLogin = async () => {
 
 const goToDashboard = () => {
   loginOpen.value = false
+  // 非会员 → 直接打开会员弹窗（不跳路由，避免 onMounted 不重新执行）
+  if (userStore.isAuthenticated && !userStore.isMember && !userStore.isAdmin) {
+    openMembership()
+    return
+  }
   router.push(route.query.redirect || '/')
 }
+
+/* ── Membership Modal ── */
+const membershipOpen = ref(false)
+const membershipPaid = ref(false)
+const membershipOrder = ref(null)
+const membershipQrUrl = ref('')
+const membershipPrice = ref(0.01)
+const membershipLoading = ref(false)
+const membershipPolling = ref(false)
+const membershipError = ref('')
+let membershipTimer = null
+
+const membershipBenefits = [
+  'AI 选题挖掘：20+ 数据源智能推荐',
+  'AI 全流程创作：大纲→正文→标题',
+  'AI 文案润色、续写、仿写、转写',
+  '公众号编辑器 + 草稿箱发布',
+  '小红书跨平台改编与发布',
+  '商单检测与潜在客户管理',
+  '新会员赠送 6000 积分',
+]
+
+const openMembership = () => {
+  if (userStore.isAuthenticated && (userStore.isMember || userStore.isAdmin)) {
+    router.replace(route.query.redirect || '/')
+    return
+  }
+  membershipPaid.value = false
+  membershipOrder.value = null
+  membershipQrUrl.value = ''
+  membershipError.value = ''
+  membershipOpen.value = true
+}
+
+const closeMembership = () => {
+  membershipOpen.value = false
+  if (membershipTimer) { clearInterval(membershipTimer); membershipTimer = null }
+  userStore.clearAuth()
+  window.location.href = '/landing'
+}
+
+const createMembershipOrder = async () => {
+  membershipLoading.value = true
+  membershipError.value = ''
+  try {
+    const res = await post('/credits/membership')
+    membershipOrder.value = res.data
+    if (res.data.amount_yuan) membershipPrice.value = res.data.amount_yuan
+    membershipQrUrl.value = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(res.data.code_url)}`
+    startMembershipPolling(res.data.out_trade_no)
+  } catch (err) {
+    membershipError.value = err.response?.data?.detail || '创建支付订单失败，请稍后重试'
+  } finally {
+    membershipLoading.value = false
+  }
+}
+
+const startMembershipPolling = (outTradeNo) => {
+  membershipPolling.value = true
+  membershipTimer = setInterval(async () => {
+    try {
+      const res = await get(`/credits/purchase/status/${outTradeNo}`)
+      if (res.data.status === 'PAID') {
+        membershipPaid.value = true
+        membershipPolling.value = false
+        clearInterval(membershipTimer)
+        membershipTimer = null
+        await userStore.fetchUser()
+        setTimeout(() => { membershipOpen.value = false; router.push('/') }, 2000)
+      }
+    } catch { /* 静默重试 */ }
+  }, 3000)
+}
+
+// 监听路由 query 变化：从其他页面被守卫弹回 /landing?show=membership 时
+watch(() => route.query.show, (val) => {
+  if (val === 'membership' && !membershipOpen.value) {
+    openMembership()
+  }
+}, { immediate: true })
+
+// 弹窗打开时锁定 body 滚动，防止出现横向滚动条
+watch([loginOpen, membershipOpen], ([login, membership]) => {
+  document.body.style.overflow = (login || membership) ? 'hidden' : ''
+})
 
 /* ── Pain Points data ── */
 const painPoints = [
@@ -492,6 +640,11 @@ onMounted(() => {
   window.addEventListener('scroll', onScroll, { passive: true })
   onScroll()
 
+  // 检查是否需要打开会员弹窗
+  if (route.query.show === 'membership') {
+    openMembership()
+  }
+
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     fadeObserver = new IntersectionObserver(
       entries => entries.forEach(e => {
@@ -510,6 +663,7 @@ onUnmounted(() => {
   window.removeEventListener('scroll', onScroll)
   if (fadeObserver) fadeObserver.disconnect()
   if (countdownTimer) clearInterval(countdownTimer)
+  if (membershipTimer) clearInterval(membershipTimer)
 })
 </script>
 
@@ -1325,6 +1479,19 @@ export default {
 }
 .modal-success h4 { font-size: 20px; margin-bottom: 8px; }
 .modal-success p { font-size: 13.5px; color: var(--ink-3); margin: 0 0 24px; line-height: 1.65; }
+
+/* Membership modal extras */
+.benefits-list { margin-bottom: 24px; }
+.benefit-item { font-size: 13px; color: var(--ink-2); line-height: 1.8; display: flex; align-items: center; }
+.benefit-check { color: var(--clay); font-weight: 700; margin-right: 8px; flex-shrink: 0; }
+.polling-indicator { display: inline-flex; align-items: center; gap: 6px; }
+.spinner {
+  width: 14px; height: 14px;
+  border: 2px solid var(--line); border-top-color: var(--clay);
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* BlurText */
 .blur-word {

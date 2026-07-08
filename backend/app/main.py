@@ -15,6 +15,7 @@ from app.core.security import decode_token
 from app.db.session import AsyncSessionLocal, engine
 from app.db.init_db import init_db
 from app.models.api_request_log import ApiRequestLog
+from app.models.user import User
 
 # 配置日志
 logging.basicConfig(
@@ -87,6 +88,70 @@ async def add_process_time_header(request: Request, call_next):
             response.headers["X-Process-Time"] = str(process_time)
             _apply_security_headers(response)
         await _record_api_request(request, status_code, process_time * 1000)
+
+
+@app.middleware("http")
+async def enforce_membership_gate(request: Request, call_next):
+    """Block non-member normal users from paid product APIs."""
+    if not _should_check_membership(request):
+        return await call_next(request)
+
+    auth = request.headers.get("authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        return await call_next(request)
+
+    payload = decode_token(auth.split(" ", 1)[1])
+    if not payload or payload.get("type") != "access" or not payload.get("sub"):
+        return await call_next(request)
+
+    try:
+        user_id = int(payload["sub"])
+    except (TypeError, ValueError):
+        return await call_next(request)
+
+    async with AsyncSessionLocal() as db:
+        user = await db.get(User, user_id)
+
+    if not user or not user.is_active:
+        return await call_next(request)
+    if user.is_member or user.is_superuser or user.role in {"admin", "ops", "support", "finance", "auditor"}:
+        return await call_next(request)
+
+    return JSONResponse(
+        status_code=403,
+        content={
+            "code": 403,
+            "message": "请先开通会员后再使用系统",
+            "detail": "请先开通会员后再使用系统",
+            "data": {"reason": "membership_required"},
+        },
+    )
+
+
+def _should_check_membership(request: Request) -> bool:
+    path = request.url.path
+    api_prefix = settings.API_V1_STR.rstrip("/")
+    if not path.startswith(f"{api_prefix}/"):
+        return False
+
+    relative = path[len(api_prefix):]
+    if relative.startswith("/auth/"):
+        return False
+    if relative == "/users/profile":
+        return False
+    if relative.startswith("/admin/"):
+        return False
+    if relative in {"/credits/packages", "/credits/operation-costs", "/credits/estimate"}:
+        return False
+    if relative == "/credits/membership":
+        return False
+    if relative.startswith("/credits/purchase/status/"):
+        return False
+    if relative == "/credits/pay/notify":
+        return False
+    if relative.startswith("/docs") or relative.endswith("/openapi.json"):
+        return False
+    return True
 
 
 def _apply_security_headers(response) -> None:

@@ -173,6 +173,12 @@ const routes = [
         component: () => import('@/pages/admin/UserStats.vue'),
         meta: { title: '用户统计', requiresAdmin: true }
       },
+      {
+        path: 'admin/users',
+        name: 'AdminUsers',
+        component: () => import('@/pages/admin/UserManagement.vue'),
+        meta: { title: '用户管理', requiresAdmin: true }
+      },
       // ===== 我的创作已下线 → 重定向到选题列表 =====
       {
         path: 'creation',
@@ -317,9 +323,11 @@ const routes = [
   },
   {
     path: '/register',
-    name: 'Register',
-    component: () => import('@/pages/auth/Register.vue'),
-    meta: { title: '注册' }
+    redirect: '/landing'
+  },
+  {
+    path: '/membership',
+    redirect: '/landing?show=membership'
   },
   {
     path: '/terms',
@@ -353,25 +361,32 @@ const router = createRouter({
 })
 
 // 不需要登录的页面
-const PUBLIC_ROUTES = ['Login', 'Register', 'NotFound', 'Landing', 'Terms', 'Privacy']
+const PUBLIC_ROUTES = ['Login', 'NotFound', 'Landing', 'Terms', 'Privacy']
 
 // 全局前置守卫
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   document.title = to.meta.title ? `${to.meta.title} - IP罗盘` : 'IP罗盘'
 
   const userStore = useUserStore()
+  if (!userStore.initialized) {
+    await userStore.initialize()
+  }
   const isPublic = PUBLIC_ROUTES.includes(to.name)
 
   if (!isPublic && !userStore.isAuthenticated) {
     // 未登录/token过期 → 统一跳 Landing 页
-    next({
-      name: 'Landing',
-      query: { redirect: to.fullPath }
-    })
+    next({ name: 'Landing', query: { redirect: to.fullPath } })
   } else if (to.meta.requiresAdmin && !userStore.isAdmin) {
     next({ path: '/' })
-  } else if (isPublic && userStore.isAuthenticated && (to.name === 'Login' || to.name === 'Landing')) {
+  } else if (isPublic && userStore.isAuthenticated && to.name === 'Login') {
+    // 已登录用户访问登录页 → 跳首页
     next({ path: '/' })
+  } else if (to.name === 'Landing' && userStore.isAuthenticated && userStore.isMember) {
+    // 已是会员访问 Landing 页 → 跳首页
+    next({ path: '/' })
+  } else if (userStore.isAuthenticated && !userStore.isMember && !userStore.isAdmin && to.name !== 'Landing') {
+    // 已登录但不是会员（且非管理员）→ 跳 Landing 页打开会员弹窗
+    next({ name: 'Landing', query: { show: 'membership' } })
   } else {
     next()
   }

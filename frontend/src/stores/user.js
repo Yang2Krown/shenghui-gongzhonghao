@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { login as loginApi, register as registerApi, refreshToken as refreshTokenApi, getCurrentUser } from '@/api/auth'
+import { refreshToken as refreshTokenApi, getCurrentUser } from '@/api/auth'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
 
@@ -24,6 +24,7 @@ export const useUserStore = defineStore('user', () => {
   const token = ref(isTokenExpired() ? '' : (localStorage.getItem('token') || ''))
   const refreshToken = ref(isTokenExpired() ? '' : (localStorage.getItem('refreshToken') || ''))
   const loading = ref(false)
+  const initialized = ref(false)
 
   // 计算属性
   const isAuthenticated = computed(() => !!token.value)
@@ -32,73 +33,24 @@ export const useUserStore = defineStore('user', () => {
   const adminRoles = ['admin', 'ops', 'support', 'finance', 'auditor']
   const isAdmin = computed(() => adminRoles.includes(user.value?.role) || !!user.value?.is_superuser)
   const isSuperAdmin = computed(() => !!user.value?.is_superuser)
+  const isMember = computed(() => !!user.value?.is_member)
 
   // 初始化 - 从本地存储恢复token
   const initialize = async () => {
-    if (isTokenExpired()) {
-      clearAuth()
-      return
-    }
-    if (token.value) {
-      try {
-        await fetchUser()
-      } catch (error) {
+    try {
+      if (isTokenExpired()) {
         clearAuth()
+        return
       }
-    }
-  }
-
-  // 登录
-  const login = async (credentials) => {
-    loading.value = true
-    try {
-      const response = await loginApi(credentials)
-      const { access_token, refresh_token } = response.data
-      
-      // 保存token
-      token.value = access_token
-      refreshToken.value = refresh_token
-      localStorage.setItem('token', access_token)
-      localStorage.setItem('refreshToken', refresh_token)
-      localStorage.setItem('tokenSavedAt', String(Date.now()))
-      
-      // 获取用户信息
-      await fetchUser()
-      
-      ElMessage.success('登录成功')
-      return true
-    } catch (error) {
-      ElMessage.error(error.response?.data?.detail || '登录失败')
-      throw error
+      if (token.value && !user.value) {
+        try {
+          await fetchUser()
+        } catch (error) {
+          clearAuth()
+        }
+      }
     } finally {
-      loading.value = false
-    }
-  }
-
-  // 注册
-  const register = async (userData) => {
-    loading.value = true
-    try {
-      const response = await registerApi(userData)
-      const { access_token, refresh_token } = response.data
-      
-      // 保存token
-      token.value = access_token
-      refreshToken.value = refresh_token
-      localStorage.setItem('token', access_token)
-      localStorage.setItem('refreshToken', refresh_token)
-      localStorage.setItem('tokenSavedAt', String(Date.now()))
-      
-      // 获取用户信息
-      await fetchUser()
-      
-      ElMessage.success('注册成功')
-      return true
-    } catch (error) {
-      ElMessage.error(error.response?.data?.detail || '注册失败')
-      throw error
-    } finally {
-      loading.value = false
+      initialized.value = true
     }
   }
 
@@ -166,6 +118,7 @@ export const useUserStore = defineStore('user', () => {
     token,
     refreshToken,
     loading,
+    initialized,
     
     // 计算属性
     isAuthenticated,
@@ -173,11 +126,10 @@ export const useUserStore = defineStore('user', () => {
     userAvatar,
     isAdmin,
     isSuperAdmin,
+    isMember,
     
     // 方法
     initialize,
-    login,
-    register,
     fetchUser,
     refresh,
     logout,

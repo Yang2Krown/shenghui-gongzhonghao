@@ -84,37 +84,8 @@ async def create_initial_data():
     """创建初始数据"""
     async with AsyncSessionLocal() as db:
         try:
-            # 检查是否已有管理员用户
             from app.crud.user import user as user_crud
             from app.core.config import settings
-            admin_user = await user_crud.get_by_email(db, email="admin@example.com")
-            
-            if not admin_user and settings.is_production:
-                logger.info("生产环境跳过默认管理员账号创建")
-            elif not admin_user:
-                # 创建管理员用户
-                from app.schemas.user import UserCreate
-                admin_data = UserCreate(
-                    username="admin",
-                    email="admin@example.com",
-                    password="admin123456",
-                    full_name="系统管理员"
-                )
-                admin_user = await user_crud.create(db, obj_in=admin_data)
-                
-                # 默认后台账号只作为普通管理员；最高管理员由 SUPER_ADMIN_PHONE 控制
-                admin_user.is_superuser = False
-                admin_user.role = "admin"
-                await db.commit()
-                await db.refresh(admin_user)
-                
-                logger.info("管理员用户创建完成")
-            elif admin_user.phone != settings.SUPER_ADMIN_PHONE and admin_user.is_superuser:
-                admin_user.is_superuser = False
-                admin_user.role = "admin"
-                await db.commit()
-                await db.refresh(admin_user)
-                logger.info("默认管理员已降为普通管理员，最高管理员以手机号配置为准")
 
             super_admin = await user_crud.get_by_phone(db, phone=settings.SUPER_ADMIN_PHONE)
             if super_admin:
@@ -135,9 +106,9 @@ async def create_initial_data():
             default_style = await style_crud.get_by_name(db, name="默认风格")
             
             if not default_style:
-                owner_user = super_admin or admin_user
+                owner_user = super_admin
                 if not owner_user:
-                    logger.info("未找到可用管理员用户，跳过默认风格模板创建")
+                    logger.info("最高管理员手机号用户尚未创建，跳过默认风格模板创建")
                     logger.info("初始数据创建完成")
                     return
 

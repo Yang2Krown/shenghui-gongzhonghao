@@ -67,3 +67,7 @@ export const setAdminByPhone = (phone, role = 'admin') => {
 export const updateAdminUserStatus = (id, data) => {
   return patch(`/admin/users/${id}/status`, data)
 }
+
+export const updateAdminUserMembership = (id, data) => {
+  return patch(`/admin/users/${id}/membership`, data)
+}

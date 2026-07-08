@@ -13,7 +13,8 @@ class PaymentOrder(BaseModel):
 
     out_trade_no = Column(String(32), unique=True, nullable=False, index=True, comment="商户订单号")
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    package_name = Column(String(50), nullable=False, comment="积分套餐名称")
+    order_type = Column(String(20), nullable=False, default="credits", comment="订单类型：credits积分套餐 / membership会员费")
+    package_name = Column(String(50), nullable=False, comment="套餐名称或membership")
     amount_fen = Column(Integer, nullable=False, comment="支付金额（分）")
     credits = Column(Integer, nullable=False, comment="到账积分")
     status = Column(String(20), nullable=False, default="PENDING", index=True, comment="PENDING/PAID/CLOSED")
@@ -34,6 +35,7 @@ class PaymentOrder(BaseModel):
             "id": self.id,
             "out_trade_no": self.out_trade_no,
             "user_id": self.user_id,
+            "order_type": self.order_type,
             "package_name": self.package_name,
             "amount_fen": self.amount_fen,
             "amount_yuan": self.amount_yuan,

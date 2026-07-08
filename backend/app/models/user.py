@@ -20,6 +20,8 @@ class User(BaseModel):
     avatar_url = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)
+    is_member = Column(Boolean, default=False, nullable=False, comment="是否会员（已交入会费）")
+    member_since = Column(DateTime, nullable=True, comment="成为会员时间")
     role = Column(String(20), default="user")  # user, admin, editor
     
     # 时间戳
@@ -48,6 +50,8 @@ class User(BaseModel):
             "avatar_url": self.avatar_url,
             "is_active": self.is_active,
             "is_superuser": self.is_superuser,
+            "is_member": self.is_member,
+            "member_since": self.member_since.isoformat() if self.member_since else None,
             "role": self.role,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

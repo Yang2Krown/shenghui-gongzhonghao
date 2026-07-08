@@ -45,6 +45,11 @@ class UserStatusUpdateRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=1000, description="操作原因")
 
 
+class UserMembershipUpdateRequest(BaseModel):
+    is_member: bool = Field(..., description="true=设为会员，false=取消会员")
+    reason: Optional[str] = Field(None, max_length=1000, description="操作原因")
+
+
 class LlmPricingRequest(BaseModel):
     provider: str = Field(..., min_length=1, max_length=50)
     model: str = Field(..., min_length=1, max_length=120)
@@ -81,6 +86,8 @@ def _user_payload(user: User) -> dict:
         "role": user.role,
         "is_superuser": user.is_superuser,
         "is_active": user.is_active,
+        "is_member": user.is_member,
+        "member_since": user.member_since.isoformat() if user.member_since else None,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "last_login": user.last_login.isoformat() if user.last_login else None,
     }
@@ -527,6 +534,46 @@ async def update_user_status(
     await db.commit()
     await db.refresh(user)
     return {"code": 200, "message": "用户状态已更新", "data": _user_payload(user)}
+
+
+@router.patch("/users/{user_id}/membership", response_model=dict)
+async def update_user_membership(
+    user_id: int,
+    req: UserMembershipUpdateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin_permission("users:status")),
+) -> Any:
+    """管理员设置或取消用户会员资格。"""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    before = {"is_member": user.is_member}
+    user.is_member = req.is_member
+    if req.is_member and not user.member_since:
+        user.member_since = utcnow()
+    elif not req.is_member:
+        user.member_since = None
+    db.add(user)
+    _add_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="user.membership.update",
+        target_type="user",
+        target_id=str(user.id),
+        summary=("设为会员" if req.is_member else "取消会员") + f"：{user.id}",
+        detail=req.reason,
+        metadata={
+            "target_user_id": user.id,
+            "before": before,
+            "after": {"is_member": user.is_member},
+            **_request_metadata(request),
+        },
+    )
+    await db.commit()
+    await db.refresh(user)
+    return {"code": 200, "message": "会员状态已更新", "data": _user_payload(user)}
 
 
 @router.post("/admins", response_model=dict)

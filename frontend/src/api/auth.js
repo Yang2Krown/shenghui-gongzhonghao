@@ -1,20 +1,5 @@
 import { post, get, put } from './api'
 
-// 登录
-export const login = (credentials) => {
-  // 后端使用username字段，但支持邮箱登录
-  const loginData = {
-    username: credentials.email,
-    password: credentials.password
-  }
-  return post('/auth/login', loginData)
-}
-
-// 注册
-export const register = (userData) => {
-  return post('/auth/register', userData)
-}
-
 // 刷新token
 export const refreshToken = (refresh_token) => {
   return post('/auth/refresh', { refresh_token })
@@ -40,7 +25,7 @@ export const sendSmsCode = (phone) => {
   return post('/auth/send-sms-code', { phone })
 }
 
-// 手机验证码登录
+// 手机验证码登录；手机号不存在时后端会自动注册
 export const loginByPhone = (phone, code) => {
   return post('/auth/login-by-phone', { phone, code })
 }

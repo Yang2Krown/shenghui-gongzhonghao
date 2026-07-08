@@ -10,10 +10,7 @@
         陪创作者从内容经营走向商业合作
       </p>
       <p class="mt-4 text-center text-sm text-ink-3">
-        还没有账号？
-        <router-link to="/register" class="font-medium text-clay-deep hover:text-clay">
-          立即注册
-        </router-link>
+        输入手机号验证码即可登录，未注册手机号会自动创建账号。
       </p>
     </div>
 

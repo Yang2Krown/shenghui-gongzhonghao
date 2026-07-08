@@ -52,6 +52,8 @@ class UserResponse(UserBase):
     id: int
     is_active: bool = True
     is_superuser: bool = False
+    is_member: bool = False
+    member_since: Optional[datetime] = None
     role: str = "user"
     created_at: datetime
     updated_at: datetime
@@ -126,7 +128,7 @@ class TokenRefresh(BaseModel):
 
 class LoginRequest(BaseModel):
     """登录请求模型"""
-    username: str = Field(..., description="用户名或邮箱")
+    username: str = Field(..., description="用户名")
     password: str = Field(..., description="密码")
 
 

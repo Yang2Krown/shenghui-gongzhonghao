@@ -83,7 +83,13 @@ api.interceptors.response.use(
         }
       }))
     } else if (status === 403) {
-      ElMessage.error('没有权限访问')
+      const reason = error.response?.data?.data?.reason
+      if (reason === 'membership_required') {
+        ElMessage.warning('请先开通会员后再使用系统')
+        router.push({ name: 'Landing', query: { show: 'membership' } })
+      } else {
+        ElMessage.error('没有权限访问')
+      }
     } else if (status === 404) {
       ElMessage.error('请求的资源不存在')
     } else if (status === 500) {

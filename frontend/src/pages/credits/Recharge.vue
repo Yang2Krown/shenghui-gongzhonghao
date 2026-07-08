@@ -43,7 +43,7 @@
 
     <!-- 说明 -->
     <div class="tips">
-      <p>· 新用户注册即送 20 积分</p>
+      <p>· 开通会员赠送 6000 积分</p>
       <p>· 积分永不过期，操作失败不扣费</p>
       <p>· 1 积分 = ¥0.10</p>
     </div>
@@ -64,6 +64,7 @@
         <canvas ref="qrCanvasRef" class="qr-canvas"></canvas>
         <p class="qr-tip">请使用微信扫一扫完成支付</p>
         <p class="qr-sub">支付成功后页面会自动刷新余额</p>
+        <p class="qr-warn">支付完成后请不要刷新或离开页面，系统正在自动确认支付结果。</p>
       </div>
       <template #footer>
         <el-button @click="payDialogVisible = false">稍后支付</el-button>
@@ -377,5 +378,12 @@ const checkStatusOnce = async (tradeNo = activeOrder.value?.out_trade_no) => {
   margin: 14px 0 0;
   font-size: 14px;
   color: var(--ink-2);
+}
+
+.qr-warn {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--clay);
 }
 </style>

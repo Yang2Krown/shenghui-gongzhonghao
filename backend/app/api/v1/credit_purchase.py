@@ -50,8 +50,43 @@ async def purchase_credits(
             "out_trade_no": order.out_trade_no,
             "code_url": order.code_url,
             "status": order.status,
+            "order_type": order.order_type,
             "package": order.package_name,
             "credits": order.credits,
+            "amount_fen": order.amount_fen,
+            "amount_yuan": order.amount_yuan,
+            "test_mode": pay_service.configured and order.amount_fen == 1,
+        },
+    }
+
+
+@router.post("/membership", response_model=dict)
+async def purchase_membership(
+    request: Request,
+    current_user: User = Depends(limit_payment_order),
+    db: AsyncSession = Depends(get_db),
+):
+    """创建会员入会费支付订单（699 元），返回扫码支付链接。"""
+    # 已是会员则拒绝
+    if current_user.is_member:
+        raise HTTPException(status_code=400, detail="您已经是会员，无需重复缴费")
+
+    pay_service = WechatPayService(db)
+    try:
+        order = await pay_service.create_membership_order(current_user.id)
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return {
+        "code": 200,
+        "message": "会员支付订单创建成功",
+        "data": {
+            "out_trade_no": order.out_trade_no,
+            "code_url": order.code_url,
+            "status": order.status,
+            "order_type": "membership",
             "amount_fen": order.amount_fen,
             "amount_yuan": order.amount_yuan,
             "test_mode": pay_service.configured and order.amount_fen == 1,
@@ -77,6 +112,7 @@ async def purchase_status(
         "data": {
             "out_trade_no": order.out_trade_no,
             "status": order.status,
+            "order_type": order.order_type,
             "package": order.package_name,
             "credits": order.credits,
             "amount_yuan": order.amount_yuan,

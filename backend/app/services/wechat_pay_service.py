@@ -20,9 +20,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.timezone import utcnow
 from app.models.payment import PaymentOrder
+from app.models.user import User
 from app.services.credit_service import CreditService
 
 logger = logging.getLogger(__name__)
+
+# 会员入会费：699.00 元 = 69900 分（硬编码防篡改）
+MEMBERSHIP_FEE_FEN = 69900
+# 会员首次开通赠送积分
+MEMBERSHIP_GIFT_CREDITS = 6000
 
 
 class WechatPayService:
@@ -90,6 +96,7 @@ class WechatPayService:
         order = PaymentOrder(
             out_trade_no=out_trade_no,
             user_id=user_id,
+            order_type="credits",
             package_name=package["name"],
             amount_fen=amount_fen,
             credits=int(package["credits"]),
@@ -100,6 +107,80 @@ class WechatPayService:
         self.db.add(order)
         await self.db.flush()
         logger.info("[WechatPay] 下单成功 out_trade_no=%s user_id=%s", out_trade_no, user_id)
+        return order
+
+    async def create_membership_order(self, user_id: int) -> PaymentOrder:
+        """创建会员入会费支付订单（699 元）。"""
+        self.require_configured()
+
+        # 安全检查 1：已是会员则拒绝
+        user_stmt = select(User).where(User.id == user_id)
+        user = (await self.db.execute(user_stmt)).scalar_one_or_none()
+        if not user:
+            raise ValueError("用户不存在")
+        if user.is_member:
+            raise ValueError("您已经是会员，无需重复缴费")
+
+        # 安全检查 2：复用未支付的会员订单（防止刷单）
+        pending_stmt = (
+            select(PaymentOrder)
+            .where(PaymentOrder.user_id == user_id)
+            .where(PaymentOrder.order_type == "membership")
+            .where(PaymentOrder.status == "PENDING")
+            .order_by(PaymentOrder.created_at.desc())
+            .limit(1)
+        )
+        existing = (await self.db.execute(pending_stmt)).scalar_one_or_none()
+        if existing:
+            logger.info("[WechatPay] 复用待支付会员订单 out_trade_no=%s", existing.out_trade_no)
+            return existing
+
+        # 金额硬编码防篡改
+        amount_fen = 1 if settings.WXPAY_TEST_MODE else MEMBERSHIP_FEE_FEN
+
+        out_trade_no = self._generate_trade_no()
+        payload = {
+            "appid": settings.WXPAY_APP_ID,
+            "mchid": settings.WXPAY_MCH_ID,
+            "description": "IP罗盘 - 会员入会费",
+            "out_trade_no": out_trade_no,
+            "notify_url": settings.WXPAY_NOTIFY_URL,
+            "amount": {
+                "total": amount_fen,
+                "currency": "CNY",
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                self.NATIVE_PREPAY_URL,
+                content=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                headers=self._wechat_headers("POST", "/v3/pay/transactions/native", payload),
+            )
+
+        if response.status_code >= 400:
+            logger.error("[WechatPay] 会员下单失败 status=%s body=%s", response.status_code, response.text)
+            raise ValueError("微信支付下单失败")
+
+        data = response.json()
+        code_url = data.get("code_url")
+        if not code_url:
+            raise ValueError("微信支付未返回二维码链接")
+
+        order = PaymentOrder(
+            out_trade_no=out_trade_no,
+            user_id=user_id,
+            order_type="membership",
+            package_name="membership",
+            amount_fen=amount_fen,
+            credits=0,
+            status="PENDING",
+            payment_method="wechat",
+            code_url=code_url,
+        )
+        self.db.add(order)
+        await self.db.flush()
+        logger.info("[WechatPay] 会员订单创建成功 out_trade_no=%s user_id=%s", out_trade_no, user_id)
         return order
 
     async def get_order(self, out_trade_no: str, user_id: Optional[int] = None) -> Optional[PaymentOrder]:
@@ -139,6 +220,12 @@ class WechatPayService:
             logger.warning("[WechatPay] 回调订单不存在 out_trade_no=%s", out_trade_no)
             return None
 
+        # 行锁：防止并发回调重复入账
+        lock_stmt = select(PaymentOrder).where(PaymentOrder.id == order.id).with_for_update()
+        order = (await self.db.execute(lock_stmt)).scalar_one_or_none()
+        if not order:
+            return None
+
         self._validate_transaction_matches_order(transaction, order)
         order.notify_raw = body
         if order.status == "PAID":
@@ -148,16 +235,48 @@ class WechatPayService:
         order.transaction_id = transaction_id
         order.paid_at = self._parse_success_time(success_time) or utcnow()
 
-        credit_service = CreditService(self.db)
-        await credit_service.purchase_credits(
-            user_id=order.user_id,
-            package_name=order.package_name,
-            payment_amount_yuan=order.amount_yuan,
-            payment_method="wechat",
-            payment_order_id=order.out_trade_no,
-        )
+        # 根据订单类型执行不同的入账逻辑（同一事务内完成）
+        if order.order_type == "membership":
+            # 会员费订单：开通会员资格 + 赠送 6000 积分
+            user_stmt = select(User).where(User.id == order.user_id)
+            user = (await self.db.execute(user_stmt)).scalar_one_or_none()
+            if user and not user.is_member:
+                user.is_member = True
+                user.member_since = utcnow()
+                self.db.add(user)
+                # 赠送 6000 积分（同一事务内完成）
+                credit_service = CreditService(self.db)
+                await credit_service.gift_credits(
+                    user_id=order.user_id,
+                    amount=MEMBERSHIP_GIFT_CREDITS,
+                    description="会员开通赠送积分",
+                )
+                logger.info(
+                    "[WechatPay] 会员开通成功+赠送积分 out_trade_no=%s user_id=%s credits=%s",
+                    out_trade_no, order.user_id, MEMBERSHIP_GIFT_CREDITS,
+                )
+            elif user and user.is_member:
+                # 幂等：已经是会员（可能回调重复），仅记录日志
+                logger.info(
+                    "[WechatPay] 用户已是会员，跳过重复开通 out_trade_no=%s user_id=%s",
+                    out_trade_no, order.user_id,
+                )
+        else:
+            # 积分套餐订单：充值积分
+            credit_service = CreditService(self.db)
+            await credit_service.purchase_credits(
+                user_id=order.user_id,
+                package_name=order.package_name,
+                payment_amount_yuan=order.amount_yuan,
+                payment_method="wechat",
+                payment_order_id=order.out_trade_no,
+            )
+            logger.info(
+                "[WechatPay] 积分到账 out_trade_no=%s user_id=%s credits=%s",
+                out_trade_no, order.user_id, order.credits,
+            )
+
         await self.db.flush()
-        logger.info("[WechatPay] 积分到账 out_trade_no=%s user_id=%s credits=%s", out_trade_no, order.user_id, order.credits)
         return order
 
     def _validate_transaction_matches_order(self, transaction: Dict[str, Any], order: PaymentOrder) -> None:

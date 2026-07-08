@@ -1,15 +1,11 @@
-from datetime import timedelta
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import (
     create_access_token,
     create_refresh_token,
-    verify_password,
-    get_password_hash,
     decode_token,
     get_current_user
 )
@@ -26,14 +22,12 @@ from app.models.user import User
 from app.schemas.user import (
     UserCreate,
     UserResponse,
-    Token,
     TokenRefresh,
     LoginRequest,
     SendSmsCodeRequest,
     PhoneLoginRequest,
 )
 from app.core.sms_service import send_sms_code, verify_sms_code
-from app.services.credit_service import CreditService
 from app.core.rate_limit import (
     account_actor,
     enforce_rate_limit,
@@ -83,66 +77,26 @@ async def _issue_token_pair(user_id: int) -> dict:
 
 @router.post("/register", response_model=dict)
 async def register(
-    user_in: UserCreate,
+    _user_in: UserCreate,
     request: Request,
-    db: AsyncSession = Depends(get_db)
 ) -> Any:
-    """用户注册"""
+    """账号密码注册已下线；统一使用手机号验证码登录/自动注册。"""
     await enforce_rate_limit(
-        [
-            rule_from_setting("auth:register:ip", settings.RATE_LIMIT_AUTH_REGISTER_IP, ip_actor(request)),
-            rule_from_setting("auth:register:account", settings.RATE_LIMIT_AUTH_REGISTER_ACCOUNT, account_actor(user_in.email)),
-        ],
+        [rule_from_setting("auth:register:ip", settings.RATE_LIMIT_AUTH_REGISTER_IP, ip_actor(request))],
         request=request,
     )
-
-    # 检查用户名是否已存在
-    existing_user = await user_crud.get_by_username(db, username=user_in.username)
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="用户名已存在"
-        )
-    
-    # 检查邮箱是否已存在
-    existing_email = await user_crud.get_by_email(db, email=user_in.email)
-    if existing_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="邮箱已被注册"
-        )
-    
-    # 创建用户
-    user = await user_crud.create(db, obj_in=user_in)
-    
-    # 新用户赠送积分
-    try:
-        credit_service = CreditService(db)
-        await credit_service.welcome_gift(user.id)
-    except Exception as e:
-        # 赠送失败不影响注册
-        import logging
-        logging.getLogger(__name__).warning(f"新用户积分赠送失败: {e}")
-    
-    token_pair = await _issue_token_pair(user.id)
-    
-    return {
-        "code": 200,
-        "message": "注册成功",
-        "data": {
-            "user": UserResponse.from_orm(user).dict(),
-            **token_pair,
-        }
-    }
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="账号密码注册已下线，请使用手机号验证码登录/注册",
+    )
 
 
 @router.post("/login", response_model=dict)
 async def login(
     login_data: LoginRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db)
 ) -> Any:
-    """用户登录"""
+    """账号密码登录已下线；统一使用手机号验证码登录/自动注册。"""
     await enforce_rate_limit(
         [
             rule_from_setting("auth:login:ip", settings.RATE_LIMIT_AUTH_LOGIN_IP, ip_actor(request)),
@@ -150,44 +104,10 @@ async def login(
         ],
         request=request,
     )
-
-    # 支持用户名或邮箱登录
-    user = None
-    if "@" in login_data.username:
-        user = await user_crud.get_by_email(db, email=login_data.username)
-    else:
-        user = await user_crud.get_by_username(db, username=login_data.username)
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户名或密码错误"
-        )
-    
-    # 验证密码
-    if not verify_password(login_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户名或密码错误"
-        )
-    
-    # 检查用户是否激活
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="用户未激活"
-        )
-    
-    token_pair = await _issue_token_pair(user.id)
-    
-    return {
-        "code": 200,
-        "message": "登录成功",
-        "data": {
-            "user": UserResponse.from_orm(user).dict(),
-            **token_pair,
-        }
-    }
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="账号密码登录已下线，请使用手机号验证码登录/注册",
+    )
 
 
 @router.post("/refresh", response_model=dict)
@@ -362,13 +282,6 @@ async def login_by_phone(
     user = await user_crud.get_by_phone(db, phone=req.phone)
     if not user:
         user = await user_crud.create_by_phone(db, phone=req.phone)
-        # 新用户赠送积分
-        try:
-            credit_service = CreditService(db)
-            await credit_service.welcome_gift(user.id)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"新用户积分赠送失败: {e}")
 
     user = await _ensure_super_admin_by_phone(user, db)
 
