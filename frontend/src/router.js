@@ -46,6 +46,13 @@ const routes = [
         component: () => import('@/pages/topics/PotentialCommercial.vue'),
         meta: { title: '潜在商单' }
       },
+      // 课程资料（顶级页面，章节阅读）
+      {
+        path: 'courses',
+        name: 'CourseMaterials',
+        component: () => import('@/pages/courses/CourseMaterials.vue'),
+        meta: { title: '课程资料' }
+      },
       // 话题库（保留旧路由，兼容）
       {
         path: 'topic-clusters',

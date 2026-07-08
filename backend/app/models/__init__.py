@@ -45,6 +45,9 @@ from app.models.api_request_log import ApiRequestLog
 # LLM 调用成本监测
 from app.models.llm_monitoring import LlmCallLog, LlmModelPricing
 
+# 课程资料
+from app.models.course import CourseChapter
+
 __all__ = [
     # 旧模型（过渡期保留）
     "User",
@@ -85,4 +88,6 @@ __all__ = [
     "ApiRequestLog",
     "LlmCallLog",
     "LlmModelPricing",
+    # 课程资料
+    "CourseChapter",
 ]

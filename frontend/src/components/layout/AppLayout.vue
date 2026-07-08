@@ -143,7 +143,7 @@ import { useCreditStore } from '@/stores/credit'
 import InsufficientCreditsDialog from '@/components/credit/InsufficientCreditsDialog.vue'
 import {
   Edit, Setting, ArrowRight, Expand, Fold, User,
-  Document, ChatDotSquare, Switch, EditPen, Clock, View
+  Document, ChatDotSquare, Switch, EditPen, Clock, View, Reading
 } from '@element-plus/icons-vue'
 
 // 自定义图标组件
@@ -228,6 +228,11 @@ const navItems = [
     icon: 'View',
   },
   {
+    id: 'courses',
+    label: '课程资料',
+    icon: 'Reading',
+  },
+  {
     id: 'create',
     label: '创作工具',
     icon: 'EditPen',
@@ -301,6 +306,7 @@ const activeRoute = computed(() => {
   if (path === '/content-info/news') return 'content-info-news'
   if (path === '/content-info/cases') return 'content-info-cases'
   if (path === '/potential-commercial' || path === '/content-info/commercial') return 'potential-commercial'
+  if (path.startsWith('/courses')) return 'courses'
   if (path === '/' || path.startsWith('/topic-clusters') || path === '/content-info') return 'content-info'
   if (path.startsWith('/creation/angle')) return 'creation-angle'
   if (path.startsWith('/creation/outline')) return 'creation-outline'
@@ -369,6 +375,7 @@ const routeMap = {
   'content-info-news': '/content-info/news',
   'content-info-cases': '/content-info/cases',
   'potential-commercial': '/potential-commercial',
+  'courses': '/courses',
   'creation-angle': '/creation/angle',
   'creation-outline': '/creation/outline',
   'creation-body': '/creation/body',
