@@ -173,6 +173,10 @@ class Settings(BaseSettings):
     # 博查 Bocha（国内可充值的 web 搜索 API，替代 Exa/搜狗，先用于实操类爆文搜索）
     BOCHA_API_KEY: Optional[str] = None
 
+    # 极致了 API（固定公众号历史/当天发文，替代不稳定的搜狗案例源）
+    DAJIALA_API_KEY: Optional[str] = None
+    DAJIALA_VERIFYCODE: Optional[str] = None
+
     # Jina Reader（抓网页/教程全文，r.jina.ai；留空走免费档，有 key 限额更高）
     JINA_API_KEY: Optional[str] = None
 

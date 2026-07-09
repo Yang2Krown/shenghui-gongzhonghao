@@ -18,6 +18,7 @@ SOURCE_TYPE_HACKERNEWS = "hackernews"
 SOURCE_TYPE_REDDIT = "reddit"
 SOURCE_TYPE_EXA_WECHAT = "exa_wechat"     # 公众号关键词搜索流（Exa API）
 SOURCE_TYPE_SOGOU_WECHAT = "sogou_wechat"  # 公众号关键词搜索流（搜狗微信搜索，国内可用）
+SOURCE_TYPE_DAJIALA_WECHAT = "dajiala_wechat"  # 极致了公众号历史/当天发文接口（固定博主源）
 SOURCE_TYPE_TOPHUB = "tophub"             # 榜眼数据 API（36kr / 虎嗅 / 知乎 / 微信公众号 等热榜）
 SOURCE_TYPE_GZH_EXPLOSIVE = "gzh_explosive"  # 公众号低粉爆款
 SOURCE_TYPE_V2EX = "v2ex"                 # V2EX 公开 API

@@ -62,6 +62,9 @@ x-backend-env: &backend-env
   EXA_API_KEY: ${EXA_API_KEY:-}
   # 博查 Bocha（实操类爆文搜索，国内可充值）
   BOCHA_API_KEY: ${BOCHA_API_KEY:-}
+  # 极致了公众号历史/当天发文 API
+  DAJIALA_API_KEY: ${DAJIALA_API_KEY:-}
+  DAJIALA_VERIFYCODE: ${DAJIALA_VERIFYCODE:-}
   # HTTP 代理（访问境外网站）
   HTTP_PROXY: ${HTTP_PROXY:-}
   # X (Twitter) via twitterapi.io（国内直连，无需代理/cookie）。值放 backend/.env.production

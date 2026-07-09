@@ -96,10 +96,30 @@ async def create_initial_data():
                 if super_admin.role != "admin":
                     super_admin.role = "admin"
                     changed = True
-                if changed:
-                    await db.commit()
-                    await db.refresh(super_admin)
-                    logger.info("最高管理员手机号已授予权限: %s", settings.SUPER_ADMIN_PHONE)
+            if changed:
+                await db.commit()
+                await db.refresh(super_admin)
+                logger.info("最高管理员手机号已授予权限: %s", settings.SUPER_ADMIN_PHONE)
+
+            # 固定公众号博主源历史上使用搜狗，现切到极致了接口；保留 platform 和账号外键。
+            from app.models.source_registry import SourceRegistry, SOURCE_TYPE_DAJIALA_WECHAT
+            from sqlalchemy import select
+            wechat_cases = (await db.execute(
+                select(SourceRegistry).where(SourceRegistry.platform == "sogou_wechat_cases")
+            )).scalar_one_or_none()
+            if wechat_cases and wechat_cases.source_type != SOURCE_TYPE_DAJIALA_WECHAT:
+                wechat_cases.name = "公众号案例源（极致了）"
+                wechat_cases.source_type = SOURCE_TYPE_DAJIALA_WECHAT
+                wechat_cases.requires_auth = False
+                wechat_cases.auth_status = "ok"
+                wechat_cases.enabled = True
+                wechat_cases.description = (
+                    "重点案例公众号，走极致了接口。日常 post_condition 查当天发文，"
+                    "历史补库由专门任务调用 post_history。"
+                )
+                wechat_cases.fetch_config = {"concurrency": 2, "history_concurrency": 2}
+                await db.commit()
+                logger.info("公众号案例源已切换到极致了接口: platform=sogou_wechat_cases")
             
             # 创建默认风格模板
             from app.crud.style import style as style_crud

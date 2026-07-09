@@ -101,7 +101,7 @@ class ScrapingOrchestrator:
             else:
                 items: List[FetchedItem] = outcome
                 new_count, dup_count, new_raw_info_ids = await self._persist(db, src, items)
-                if src.source_type in {"exa_wechat", "sogou_wechat", "gzh_explosive"}:
+                if src.source_type in {"exa_wechat", "sogou_wechat", "dajiala_wechat", "gzh_explosive"}:
                     commercial_detection_ids.extend(new_raw_info_ids)
                 entry.update(
                     status="ok",

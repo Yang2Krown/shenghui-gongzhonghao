@@ -6,9 +6,11 @@
 
 import asyncio
 import logging
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from celery import shared_task
+from sqlalchemy import delete
 
 from app.db.session import AsyncSessionLocal, engine
 from app.services.scraping.adapters import register_adapters
@@ -110,7 +112,7 @@ DISPATCH_GAP_SECONDS = 120
 _TYPE_ORDER = {
     "rss": 0, "tophub": 1, "hackernews": 2, "v2ex": 3, "github": 4,
     "reddit": 5, "xhs_daily": 6, "gzh_explosive": 7, "web": 8,
-    "sogou_wechat": 9, "exa_wechat": 10,
+    "dajiala_wechat": 9, "sogou_wechat": 10, "exa_wechat": 11,
 }
 
 
@@ -131,8 +133,8 @@ async def _list_enabled_platforms_ordered() -> List[Dict[str, str]]:
     sources = [
         {"platform": p, "source_type": t}
         for (p, t) in rows
-        # sogou_wechat_cases 走独立高频小批量调度（见 scheduler.py），不混进 5 波大派发，
-        # 否则会和 sogou_wechat_search 在同一波里把搜狗 burst 拉高、触发 IP 风控。
+        # sogou_wechat_cases 是固定公众号博主源，现在走极致了按日调度（见 scheduler.py），
+        # 不混进 5 波全网派发，避免重复扣接口费。
         if t in _TYPE_ORDER and p != "sogou_wechat_cases"
     ]
     sources.sort(key=lambda s: (_TYPE_ORDER.get(s["source_type"], 99), s["platform"]))
@@ -159,6 +161,217 @@ def dispatch_fetch_task(self, gap_seconds: int = DISPATCH_GAP_SECONDS):
     except Exception as e:
         logger.error(f"采集派发失败: {e}")
         self.retry(exc=e, countdown=60, max_retries=2)
+
+
+async def _backfill_dajiala_wechat_history(
+    *,
+    platform: str = "sogou_wechat_cases",
+    max_pages_per_account: int = 1,
+    account_ids: Optional[List[int]] = None,
+) -> Dict[str, Any]:
+    """用极致了 post_history 给固定公众号历史补库。"""
+    from sqlalchemy import select
+    from app.models.source_registry import SourceRegistry, SourceAccount
+    from app.services.scraping.adapters.dajiala_wechat_adapter import DajialaWechatAdapter
+
+    try:
+        async with AsyncSessionLocal() as db:
+            source = (await db.execute(
+                select(SourceRegistry).where(SourceRegistry.platform == platform)
+            )).scalar_one_or_none()
+            if not source:
+                return {"status": "missing_source", "platform": platform}
+
+            accounts = (await db.execute(
+                select(SourceAccount).where(
+                    SourceAccount.source_registry_id == source.id,
+                    SourceAccount.enabled.is_(True),
+                )
+            )).scalars().all()
+
+            adapter = DajialaWechatAdapter()
+            items = await adapter.fetch_history(
+                source,
+                accounts=accounts,
+                max_pages_per_account=max_pages_per_account,
+                account_ids=account_ids,
+            )
+            new_count, dup_count, new_raw_info_ids = await orchestrator._persist(db, source, items)
+            await db.commit()
+            orchestrator._dispatch_commercial_detection(new_raw_info_ids)
+            return {
+                "status": "ok",
+                "platform": platform,
+                "accounts": len(accounts),
+                "pages_per_account": max_pages_per_account,
+                "items_fetched": len(items),
+                "items_new": new_count,
+                "items_duplicate": dup_count,
+            }
+    finally:
+        await engine.dispose()
+
+
+@shared_task(bind=True, name="scraper.backfill_dajiala_wechat_history")
+def backfill_dajiala_wechat_history_task(
+    self,
+    platform: str = "sogou_wechat_cases",
+    max_pages_per_account: int = 1,
+    account_ids: Optional[List[int]] = None,
+):
+    """手动历史补库任务：默认每个订阅公众号拉 1 页，避免一次性高额扣费。"""
+    try:
+        result = asyncio.run(_backfill_dajiala_wechat_history(
+            platform=platform,
+            max_pages_per_account=max_pages_per_account,
+            account_ids=account_ids,
+        ))
+        logger.info(
+            "极致了公众号历史补库完成：new=%s dup=%s fetched=%s",
+            result.get("items_new"), result.get("items_duplicate"), result.get("items_fetched"),
+        )
+        return result
+    except Exception as e:
+        logger.error(f"极致了公众号历史补库失败: {e}")
+        self.retry(exc=e, countdown=120, max_retries=2)
+
+
+async def _purge_dajiala_wechat_raw_infos(
+    *,
+    days: Optional[int] = None,
+) -> Dict[str, Any]:
+    """删除极致了固定公众号源入库文章，用于清掉测试数据后重跑。"""
+    from sqlalchemy import select
+    from app.models.raw_info import RawInfo
+    from app.models.source_registry import SourceRegistry
+
+    try:
+        async with AsyncSessionLocal() as db:
+            source_ids = (await db.execute(
+                select(SourceRegistry.id).where(SourceRegistry.source_type == "dajiala_wechat")
+            )).scalars().all()
+            if not source_ids:
+                return {"status": "ok", "deleted": 0, "source_ids": []}
+
+            filters = [RawInfo.source_registry_id.in_(source_ids)]
+            if days:
+                filters.append(RawInfo.scraped_at >= datetime.utcnow() - timedelta(days=max(1, int(days))))
+
+            result = await db.execute(delete(RawInfo).where(*filters))
+            await db.commit()
+            return {
+                "status": "ok",
+                "deleted": int(result.rowcount or 0),
+                "source_ids": list(source_ids),
+                "days": days,
+            }
+    finally:
+        await engine.dispose()
+
+
+@shared_task(bind=True, name="scraper.purge_dajiala_wechat_raw_infos")
+def purge_dajiala_wechat_raw_infos_task(self, days: Optional[int] = None):
+    """手动清空极致了固定公众号入库数据；days 为空则全删。"""
+    try:
+        result = asyncio.run(_purge_dajiala_wechat_raw_infos(days=days))
+        logger.warning("极致了公众号入库数据已删除：deleted=%s days=%s", result.get("deleted"), days)
+        return result
+    except Exception as e:
+        logger.error(f"极致了公众号入库数据删除失败: {e}")
+        self.retry(exc=e, countdown=60, max_retries=1)
+
+
+async def _enrich_dajiala_wechat_fulltext(
+    *,
+    limit: int = 200,
+    days: Optional[int] = None,
+    detect: bool = True,
+) -> Dict[str, Any]:
+    """给极致了已入库文章补抓公众号全文，并可立即重跑商单检测。"""
+    from sqlalchemy import or_, select
+    from app.models.raw_info import RawInfo
+    from app.models.source_registry import SourceRegistry
+    from app.services.scraping.adapters.exa_wechat_adapter import resolve_wechat_permalink
+
+    try:
+        async with AsyncSessionLocal() as db:
+            filters = [
+                SourceRegistry.source_type == "dajiala_wechat",
+                RawInfo.url.ilike("%mp.weixin.qq.com%"),
+                or_(RawInfo.content.is_(None), RawInfo.content == ""),
+            ]
+            if days:
+                filters.append(RawInfo.scraped_at >= datetime.utcnow() - timedelta(days=max(1, int(days))))
+
+            rows = (await db.execute(
+                select(RawInfo)
+                .join(SourceRegistry, RawInfo.source_registry_id == SourceRegistry.id)
+                .where(*filters)
+                .order_by(RawInfo.id.desc())
+                .limit(max(1, int(limit or 200)))
+            )).scalars().all()
+
+            if not rows:
+                return {"status": "ok", "checked": 0, "filled": 0, "detected": 0}
+
+            sem = asyncio.Semaphore(1)
+            filled_ids: List[int] = []
+
+            async def _one(raw: RawInfo) -> None:
+                async with sem:
+                    _, content, content_html = await resolve_wechat_permalink(
+                        raw.url,
+                        timeout=15.0,
+                        fetch_permanent_content=True,
+                        fetch_snapshot=False,
+                    )
+                    if content:
+                        raw.content = content
+                        if content_html:
+                            raw.content_html = content_html
+                        filled_ids.append(raw.id)
+
+            await asyncio.gather(*[_one(raw) for raw in rows], return_exceptions=True)
+            await db.commit()
+
+            if detect and filled_ids:
+                from app.tasks.commercial_tasks import detect_commercial_task
+                for raw_info_id in filled_ids:
+                    detect_commercial_task.apply_async(args=[raw_info_id], kwargs={"force_llm": True})
+
+            return {
+                "status": "ok",
+                "checked": len(rows),
+                "filled": len(filled_ids),
+                "detected": len(filled_ids) if detect else 0,
+                "raw_info_ids": filled_ids,
+            }
+    finally:
+        await engine.dispose()
+
+
+@shared_task(bind=True, name="scraper.enrich_dajiala_wechat_fulltext")
+def enrich_dajiala_wechat_fulltext_task(
+    self,
+    limit: int = 200,
+    days: Optional[int] = None,
+    detect: bool = True,
+):
+    """手动补抓极致了公众号全文；抓到后默认立刻强制 DeepSeek 重检。"""
+    try:
+        result = asyncio.run(_enrich_dajiala_wechat_fulltext(
+            limit=limit,
+            days=days,
+            detect=detect,
+        ))
+        logger.info(
+            "极致了公众号全文补抓完成：checked=%s filled=%s detected=%s",
+            result.get("checked"), result.get("filled"), result.get("detected"),
+        )
+        return result
+    except Exception as e:
+        logger.error(f"极致了公众号全文补抓失败: {e}")
+        self.retry(exc=e, countdown=120, max_retries=2)
 
 
 # ── AI HOT 独立任务（与通用 RSS 解耦）──────────────────────

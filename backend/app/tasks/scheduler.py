@@ -23,13 +23,11 @@ CELERY_BEAT_SCHEDULE = {
         "kwargs": {"gap_seconds": 90},
     },
 
-    # ── 公众号案例源：独立高频小批量（防搜狗反爬）──
-    # 不混进上面 5 波大派发——那样会和 sogou_wechat_search 在同一波里把搜狗 burst 拉高，
-    # 触发 IP 风控。改成每 30 分钟单独跑一次，每次只搜一小批账号（rotate_batch），
-    # 按时间片轮转，几小时内覆盖全部 29 个号，但单次请求量小。
-    "sogou-cases-rotate": {
+    # ── 固定公众号博主：极致了当天发文接口 ──
+    # 每天晚间查一次当天发文；历史补库不进 beat，避免 post_history 被定时误扣费。
+    "dajiala-wechat-cases-daily": {
         "task": "scraper.fetch_platform",
-        "schedule": crontab(minute="5,35"),
+        "schedule": crontab(minute=20, hour=23),
         "kwargs": {"platform": "sogou_wechat_cases"},
     },
 

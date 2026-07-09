@@ -3,11 +3,9 @@
 87 个账号：58 X/Twitter + 29 微信公众号。
 - X 账号挂在 platform='x' 的 SourceRegistry 下，走 twitterapi.io（国内直连，无需 Cookie）。
   另建 platform='x_search' 同 source_type='x'，跑中英文 AI 主题词关键词搜索。
-- 公众号账号挂在 platform='sogou_wechat_cases' 下（搜狗微信搜索，免费、国内可用）
-  抓取时把 display_name 当作搜狗搜索关键词。该源不设 fetch_config.keywords，
-  让 sogou adapter 走「账号名搜索」模式。
-  （历史上曾走 Exa，但 Exa 账户欠费 402 弃用；本 seed 幂等地把存量公众号账号
-  从旧 exa_wechat 源迁过来并禁用 exa，无需手动维护。）
+- 公众号账号挂在 platform='sogou_wechat_cases' 下（保留历史 platform 名称，避免迁移账号）
+  但 source_type 已切到 dajiala_wechat，走极致了 post_condition/post_history。
+  （历史上曾走 Exa/搜狗；本 seed 幂等地把存量公众号账号迁过来，无需手动维护。）
 """
 
 import asyncio
@@ -24,7 +22,7 @@ from app.models.source_registry import (
     SourceRegistry,
     SourceAccount,
     SOURCE_TYPE_X,
-    SOURCE_TYPE_SOGOU_WECHAT,
+    SOURCE_TYPE_DAJIALA_WECHAT,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,6 +50,26 @@ PRIORITY_KEYWORDS = {
     "深度研究": {"Anthropic", "Dario Amodei", "Sam Bowman", "Rachel Freedman", "Berkeley AI Research", "Stanford NLP Group"},
     "AI编程/Agent": {"Boris Cherny", "Claude Code Community", "Thariq", "OpenClaw", "Luyu Zhang", "Henry Heng", "PyTorch"},
     "中文内容参考": {"AYi", "开发者Hailey", "鱼总聊AI", "vigorxu", "宝玉", "优设AIGC", "路人甲TM"},
+}
+
+WECHAT_COMMERCIAL_ACCOUNT_NAMES = [
+    "苍何",
+    "袋鼠帝AI客栈",
+    "莫理",
+    "卡尔的AI沃兹",
+    "公子龙",
+    "阿枫科技",
+    "数字生命卡兹克",
+    "路人甲TM",
+    "仙人甲",
+    "网罗灯下黑",
+    "猫狸智元",
+    "软件科技汇",
+]
+
+WECHAT_COMMERCIAL_ACCOUNT_ALIASES = {
+    "路人甲 TM": "路人甲TM",
+    "卡尔的AI沃茨": "卡尔的AI沃兹",
 }
 
 
@@ -131,6 +149,70 @@ async def _upsert_account(db, *, registry_id: int, handle: Optional[str], displa
     return "created"
 
 
+async def _sync_wechat_commercial_accounts(db, registry_id: int) -> dict:
+    """Only keep the curated WeChat creators used for commercial monitoring."""
+    wanted = set(WECHAT_COMMERCIAL_ACCOUNT_NAMES)
+    existing_rows = (await db.execute(
+        select(SourceAccount).where(SourceAccount.source_registry_id == registry_id)
+    )).scalars().all()
+    by_name = {}
+    disabled = 0
+    renamed = 0
+    deduped = 0
+
+    for old_name, new_name in WECHAT_COMMERCIAL_ACCOUNT_ALIASES.items():
+        account = next((a for a in existing_rows if a.display_name == old_name), None)
+        if account:
+            account.display_name = new_name
+            account.enabled = True
+            renamed += 1
+
+    for account in sorted(existing_rows, key=lambda a: a.id or 0):
+        if account.display_name in wanted and account.display_name not in by_name:
+            by_name[account.display_name] = account
+            continue
+        if account.enabled:
+            account.enabled = False
+            if account.display_name in wanted:
+                deduped += 1
+            else:
+                disabled += 1
+
+    created = 0
+    reenabled = 0
+    for name in WECHAT_COMMERCIAL_ACCOUNT_NAMES:
+        account = by_name.get(name)
+        if account:
+            if not account.enabled:
+                account.enabled = True
+                reenabled += 1
+            account.handle = account.handle or None
+            account.category = account.category or "公众号商单监控"
+            account.priority = account.priority or "商单监控"
+            continue
+        db.add(SourceAccount(
+            source_registry_id=registry_id,
+            handle=None,
+            display_name=name,
+            verified=None,
+            category="公众号商单监控",
+            description=None,
+            suitable_for=None,
+            priority="商单监控",
+            note="固定商单监控博主",
+            enabled=True,
+        ))
+        created += 1
+
+    return {
+        "created": created,
+        "reenabled": reenabled,
+        "disabled": disabled,
+        "renamed": renamed,
+        "deduped": deduped,
+    }
+
+
 async def run(db) -> dict:
     if not Path(TABLE2_PATH).exists():
         raise FileNotFoundError(f"Seed file missing: {TABLE2_PATH}")
@@ -177,15 +259,20 @@ async def run(db) -> dict:
     wechat_reg = await _ensure_registry(
         db,
         platform="sogou_wechat_cases",
-        name="公众号案例源（搜狗）",
-        source_type=SOURCE_TYPE_SOGOU_WECHAT,
+        name="公众号案例源（极致了）",
+        source_type=SOURCE_TYPE_DAJIALA_WECHAT,
         requires_auth=False,
-        description="重点案例公众号，走免费搜狗微信搜索（账号名搜索）。独立高频小批量调度+轮转，防搜狗反爬。",
-        # 不设 keywords → 账号名搜索模式（全部 29 个号）。
-        # rotate_batch=4：每次只搜 4 个号，按时间片(30min)轮转，~8 次跑完一轮覆盖全部，
-        # 配合 scheduler 里 sogou-cases-rotate 每 30 分钟一次。单次 burst 小，不触发反爬。
-        fetch_config={"rotate_batch": 4, "rotate_period_sec": 1800, "limit_per_keyword": 10},
+        description="重点案例公众号，走极致了接口。日常 post_condition 查当天发文，历史补库由专门任务调用 post_history。",
+        fetch_config={"concurrency": 2, "history_concurrency": 2},
     )
+    # 幂等：历史上该 platform 是搜狗源。保留 platform/source_account 外键，只切换抓取实现。
+    wechat_reg.name = "公众号案例源（极致了）"
+    wechat_reg.source_type = SOURCE_TYPE_DAJIALA_WECHAT
+    wechat_reg.requires_auth = False
+    wechat_reg.auth_status = "ok"
+    wechat_reg.enabled = True
+    wechat_reg.description = "重点案例公众号，走极致了接口。日常 post_condition 查当天发文，历史补库由专门任务调用 post_history。"
+    wechat_reg.fetch_config = {"concurrency": 2, "history_concurrency": 2}
 
     # 存量迁移（幂等）：把旧 exa_wechat 源下的公众号账号整体改挂到搜狗案例源，
     # 保留 raw_infos.source_account_id 的外键引用、避免重复账号；并禁用欠费的 exa。
@@ -214,6 +301,11 @@ async def run(db) -> dict:
         if platform_label and "X" in str(platform_label):
             registry_id = x_reg.id
         elif platform_label and "公众号" in str(platform_label):
+            canonical_name = WECHAT_COMMERCIAL_ACCOUNT_ALIASES.get(str(name).strip(), str(name).strip())
+            if canonical_name not in WECHAT_COMMERCIAL_ACCOUNT_NAMES:
+                stats["skipped"] += 1
+                continue
+            name = canonical_name
             registry_id = wechat_reg.id
         else:
             stats["skipped"] += 1
@@ -231,6 +323,8 @@ async def run(db) -> dict:
             note=str(note).strip() if note else None,
         )
         stats[outcome] += 1
+
+    stats["wechat_curated"] = await _sync_wechat_commercial_accounts(db, wechat_reg.id)
 
     await db.commit()
     logger.info(f"seed_accounts_from_table2: {stats}")

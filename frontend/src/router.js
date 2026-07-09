@@ -157,6 +157,12 @@ const routes = [
         meta: { title: '数据源健康', requiresAdmin: true }
       },
       {
+        path: 'admin/commercial-diagnostics',
+        name: 'AdminCommercialDiagnostics',
+        component: () => import('@/pages/admin/CommercialDiagnostics.vue'),
+        meta: { title: '商单诊断', requiresAdmin: true }
+      },
+      {
         path: 'admin/ai-costs',
         name: 'AdminAiCosts',
         component: () => import('@/pages/admin/AiCostMonitor.vue'),

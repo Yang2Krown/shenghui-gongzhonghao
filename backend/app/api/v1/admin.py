@@ -1,5 +1,6 @@
 """管理员后台 API。"""
 
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -16,6 +17,8 @@ from app.models.admin_audit import AdminAuditLog
 from app.models.credit import UserCredit
 from app.models.llm_monitoring import LlmModelPricing
 from app.models.monitoring import MonitoringAlert, MonitoringSnapshot
+from app.models.raw_info import RawInfo
+from app.models.source_registry import SourceRegistry
 from app.models.task import Task, TaskStatus
 from app.models.user import User
 from app.services.monitoring.checks import build_alert_specs, collect_admin_monitoring
@@ -204,6 +207,71 @@ async def monitoring_source_health(
     """数据源健康独立监测。"""
     data = await collect_source_health(db)
     return {"code": 200, "message": "获取数据源健康成功", "data": data}
+
+
+@router.get("/monitoring/commercial-diagnostics", response_model=dict)
+async def monitoring_commercial_diagnostics(
+    days: int = Query(30, ge=1, le=180, description="前端当前时间范围"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin_permission("monitoring:read")),
+) -> Any:
+    """极致了公众号商单链路诊断。"""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    rows = (await db.execute(
+        select(
+            RawInfo.content,
+            RawInfo.commercial_level,
+            RawInfo.commercial_meta,
+            RawInfo.scraped_at,
+        )
+        .join(SourceRegistry, RawInfo.source_registry_id == SourceRegistry.id)
+        .where(SourceRegistry.source_type == "dajiala_wechat")
+    )).all()
+
+    data = {
+        "total": len(rows),
+        "total_in_days": 0,
+        "with_fulltext": 0,
+        "ai_done": 0,
+        "ai_none": 0,
+        "suspected": 0,
+        "likely": 0,
+        "frontend_visible": 0,
+    }
+    for content, level, meta, scraped_at in rows:
+        in_days = bool(scraped_at and scraped_at >= cutoff)
+        meta = meta or {}
+        signals = meta.get("signals") if isinstance(meta, dict) else {}
+        if in_days:
+            data["total_in_days"] += 1
+        if len(content or "") > 300:
+            data["with_fulltext"] += 1
+        if isinstance(signals, dict) and signals.get("layer") == "llm":
+            data["ai_done"] += 1
+        if level == "none":
+            data["ai_none"] += 1
+        elif level == "suspected":
+            data["suspected"] += 1
+        elif level == "likely":
+            data["likely"] += 1
+        if level in ("suspected", "likely") and in_days:
+            data["frontend_visible"] += 1
+
+    if data["total"] == 0:
+        diagnosis = "极致了文章还没有入库。先跑历史补库或等待当天发文任务。"
+    elif data["with_fulltext"] == 0:
+        diagnosis = "文章已入库，但没有抓到正文。需要跑全文补抓任务。"
+    elif data["ai_done"] == 0:
+        diagnosis = "正文已有，但还没有完成 DeepSeek 商单判断。需要触发重检。"
+    elif data["suspected"] + data["likely"] == 0:
+        diagnosis = "DeepSeek 已判断，但全部是 none。前端为空是因为没有 suspected/likely。"
+    elif data["frontend_visible"] == 0:
+        diagnosis = f"有商单结果，但不在最近 {days} 天范围内。切到 90/180 天看。"
+    else:
+        diagnosis = "后端已有可展示商单；如果前端仍为空，是页面筛选或接口请求问题。"
+
+    data["diagnosis"] = diagnosis
+    return {"code": 200, "message": "获取商单诊断成功", "data": data}
 
 
 @router.get("/monitoring/ai-costs", response_model=dict)

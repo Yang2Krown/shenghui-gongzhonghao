@@ -274,6 +274,7 @@ const navItems = [
     children: [
       { id: 'admin-dashboard', label: '监测总览' },
       { id: 'admin-source-health', label: '数据源健康', roles: ['admin', 'ops', 'support', 'auditor'] },
+      { id: 'admin-commercial-diagnostics', label: '商单诊断', roles: ['admin', 'ops', 'support', 'auditor'] },
       { id: 'admin-ai-costs', label: 'AI 成本', roles: ['admin', 'finance'] },
       { id: 'admin-api-health', label: '接口健康', roles: ['admin', 'ops', 'support', 'auditor'] },
       { id: 'admin-security-health', label: '安全健康', roles: ['admin', 'ops', 'auditor'] },
@@ -326,6 +327,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/history') || path.startsWith('/creation-history')) return 'creation-history'
   if (path.startsWith('/settings') || path.startsWith('/profile')) return 'profile'
   if (path.startsWith('/admin/source-health')) return 'admin-source-health'
+  if (path.startsWith('/admin/commercial-diagnostics')) return 'admin-commercial-diagnostics'
   if (path.startsWith('/admin/ai-costs')) return 'admin-ai-costs'
   if (path.startsWith('/admin/api-health')) return 'admin-api-health'
   if (path.startsWith('/admin/security-health')) return 'admin-security-health'
@@ -391,6 +393,7 @@ const routeMap = {
   'creation': '/creation',
   'admin-dashboard': '/admin',
   'admin-source-health': '/admin/source-health',
+  'admin-commercial-diagnostics': '/admin/commercial-diagnostics',
   'admin-ai-costs': '/admin/ai-costs',
   'admin-api-health': '/admin/api-health',
   'admin-security-health': '/admin/security-health',

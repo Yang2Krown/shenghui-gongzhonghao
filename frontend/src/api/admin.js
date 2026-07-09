@@ -8,6 +8,10 @@ export const getSourceHealth = () => {
   return get('/admin/monitoring/source-health')
 }
 
+export const getCommercialDiagnostics = (params = {}) => {
+  return get('/admin/monitoring/commercial-diagnostics', params)
+}
+
 export const getAiCosts = () => {
   return get('/admin/monitoring/ai-costs')
 }

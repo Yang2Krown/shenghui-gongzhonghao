@@ -63,7 +63,11 @@ def _extract_wechat_article_body(html: str) -> Optional[str]:
 
 
 async def resolve_wechat_permalink(
-    url: str, *, timeout: float = 10.0
+    url: str,
+    *,
+    timeout: float = 10.0,
+    fetch_permanent_content: bool = False,
+    fetch_snapshot: bool = True,
 ) -> tuple[str, Optional[str], Optional[str]]:
     """把临时签名链接解析成永久链接，并尽量带回正文和HTML快照。
 
@@ -72,7 +76,9 @@ async def resolve_wechat_permalink(
     临时链必须现在抓（signature 会过期），顺手把正文和HTML快照也抽出来一并落库——
     这是链接失效前唯一能拿到正文的时刻。
     """
-    if "mp.weixin.qq.com" not in url or _is_permanent_wechat_url(url):
+    if "mp.weixin.qq.com" not in url:
+        return url, None, None
+    if _is_permanent_wechat_url(url) and not fetch_permanent_content:
         return url, None, None
     try:
         async with httpx.AsyncClient(
@@ -111,14 +117,15 @@ async def resolve_wechat_permalink(
         # 趁页面已在手，顺手抽正文纯文本 + HTML快照（临时链失效前唯一能拿到正文的时刻）
         content = _extract_wechat_article_body(body)
 
-        # HTML快照：提取正文HTML + 图片base64嵌入 + 公众号风格CSS包装
+        # HTML快照：提取正文HTML + 图片base64嵌入 + 公众号风格CSS包装。
+        # 商单检测只需要纯文本，批量补全文时必须关掉快照，避免下载大量图片撑爆 worker 内存。
         content_html = None
         try:
             from app.services.scraping.link_extractor import (
                 _extract_wechat_content_html, _embed_images_as_base64,
                 _wrap_snapshot_html, _extract_wechat_var,
             )
-            raw_html = _extract_wechat_content_html(body)
+            raw_html = _extract_wechat_content_html(body) if fetch_snapshot else None
             if raw_html:
                 snap_title = _extract_wechat_var(body, 'msg_title') or ''
                 snap_author = _extract_wechat_var(body, 'nickname') or ''
@@ -136,7 +143,11 @@ async def resolve_wechat_permalink(
 
 
 async def resolve_items_permalinks(
-    items: List[FetchedItem], *, concurrency: int = 5
+    items: List[FetchedItem],
+    *,
+    concurrency: int = 5,
+    fetch_permanent_content: bool = False,
+    fetch_snapshot: bool = True,
 ) -> List[FetchedItem]:
     """批量把 FetchedItem.url 的微信临时签名链解析成永久链（并发，失败保原链）。
 
@@ -146,7 +157,11 @@ async def resolve_items_permalinks(
 
     async def _one(it: FetchedItem) -> FetchedItem:
         async with sem:
-            it.url, content, content_html = await resolve_wechat_permalink(it.url)
+            it.url, content, content_html = await resolve_wechat_permalink(
+                it.url,
+                fetch_permanent_content=fetch_permanent_content,
+                fetch_snapshot=fetch_snapshot,
+            )
             if content:
                 it.content = content
             if content_html:
