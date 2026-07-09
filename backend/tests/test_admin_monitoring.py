@@ -7,6 +7,7 @@ from app.api.deps import get_current_admin_user, get_current_super_admin_user
 from app.core.admin_permissions import has_permission, is_backoffice_user, require_admin_permission
 from app.core.config import settings
 from app.core.logging_security import mask_sensitive_data
+from app.core.product_access import PRODUCT_CREATION_TOOL, PRODUCT_POTENTIAL_COMMERCIAL, effective_product_access, grant_product_access, has_product_access
 from app.core.security import get_current_super_admin_user as get_core_current_super_admin_user
 from app.core.timezone import utcnow
 from app.main import _apply_security_headers
@@ -49,7 +50,7 @@ async def test_super_admin_dependency_requires_superuser():
         await get_current_super_admin_user(admin)
     assert exc.value.status_code == 403
 
-    root = User(id=2, username="root", role="admin", is_superuser=True, is_active=True)
+    root = User(id=2, username="root", phone=settings.SUPER_ADMIN_PHONE, role="admin", is_superuser=True, is_active=True)
     assert await get_current_super_admin_user(root) is root
 
 
@@ -60,7 +61,7 @@ async def test_core_super_admin_dependency_requires_superuser():
         await get_core_current_super_admin_user(admin)
     assert exc.value.status_code == 403
 
-    root = User(id=2, username="root", role="admin", is_superuser=True, is_active=True)
+    root = User(id=2, username="root", phone=settings.SUPER_ADMIN_PHONE, role="admin", is_superuser=True, is_active=True)
     assert await get_core_current_super_admin_user(root) is root
 
 
@@ -69,30 +70,41 @@ def test_super_admin_phone_default():
 
 
 def test_admin_role_permissions_are_scoped():
-    finance = User(id=1, username="finance", role="finance", is_superuser=False, is_active=True)
+    admin = User(id=1, username="admin", role="admin", is_superuser=False, is_active=True)
     support = User(id=2, username="support", role="support", is_superuser=False, is_active=True)
-    auditor = User(id=3, username="auditor", role="auditor", is_superuser=False, is_active=True)
     root = User(id=4, username="root", role="user", is_superuser=True, is_active=True)
 
-    assert has_permission(finance, "credits:gift") is True
-    assert has_permission(finance, "pricing:write") is True
-    assert has_permission(support, "credits:gift") is False
-    assert has_permission(support, "alerts:write") is True
-    assert has_permission(auditor, "audit:read") is True
-    assert has_permission(auditor, "pricing:write") is False
+    assert has_permission(admin, "monitoring:read") is True
+    assert has_permission(admin, "users:read") is True
+    assert has_permission(admin, "pricing:write") is False
+    assert has_permission(admin, "alerts:write") is False
+    assert has_permission(support, "monitoring:read") is False
     assert has_permission(root, "pricing:write") is True
-    assert is_backoffice_user(finance) is True
+    assert is_backoffice_user(admin) is True
+    assert is_backoffice_user(support) is False
 
 
 @pytest.mark.asyncio
 async def test_permission_dependency_rejects_wrong_role():
-    dependency = require_admin_permission("credits:gift")
+    dependency = require_admin_permission("monitoring:read")
     support = User(id=2, username="support", role="support", is_superuser=False, is_active=True)
 
     with pytest.raises(HTTPException) as exc:
         await dependency(support)
 
     assert exc.value.status_code == 403
+
+
+def test_product_access_allows_multi_product_and_admin_all_access():
+    user = User(id=1, username="u", role="user", is_superuser=False, product_access=[])
+    assert has_product_access(user, PRODUCT_CREATION_TOOL) is False
+    assert grant_product_access(user, PRODUCT_CREATION_TOOL) is True
+    assert grant_product_access(user, PRODUCT_POTENTIAL_COMMERCIAL) is True
+    assert has_product_access(user, PRODUCT_CREATION_TOOL) is True
+    assert has_product_access(user, PRODUCT_POTENTIAL_COMMERCIAL) is True
+
+    admin = User(id=2, username="admin", role="admin", is_superuser=False, product_access=[])
+    assert set(effective_product_access(admin)) >= {PRODUCT_CREATION_TOOL, PRODUCT_POTENTIAL_COMMERCIAL}
 
 
 def test_build_alert_specs_for_unhealthy_pipeline():

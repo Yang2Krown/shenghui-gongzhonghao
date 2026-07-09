@@ -84,9 +84,10 @@ api.interceptors.response.use(
       }))
     } else if (status === 403) {
       const reason = error.response?.data?.data?.reason
-      if (reason === 'membership_required') {
-        ElMessage.warning('请先开通会员后再使用系统')
-        router.push({ name: 'Landing', query: { show: 'membership' } })
+      if (reason === 'membership_required' || reason === 'product_required') {
+        const product = error.response?.data?.data?.product
+        ElMessage.warning(error.response?.data?.message || '请先开通对应产品后再使用系统')
+        router.push({ name: 'Landing', query: { show: 'membership', product } })
       } else {
         ElMessage.error('没有权限访问')
       }

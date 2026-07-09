@@ -114,7 +114,7 @@ async def get_current_admin_user(
     Raises:
         HTTPException: 权限不足
     """
-    if current_user.role != "admin" and not current_user.is_superuser:
+    if (current_user.role or "").strip().lower() != "admin" and not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="权限不足"
@@ -126,7 +126,7 @@ async def get_current_super_admin_user(
     current_user: User = Depends(get_current_user)
 ) -> User:
     """获取当前最高管理员用户。"""
-    if not current_user.is_superuser:
+    if not current_user.is_superuser or current_user.phone != settings.SUPER_ADMIN_PHONE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="仅最高管理员可操作"

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_super_admin_user
 from app.core.admin_permissions import ADMIN_ROLES, allowed_roles_text, require_admin_permission
 from app.core.config import settings
+from app.core.product_access import ALL_PRODUCTS, PRODUCT_LABELS, effective_product_access, normalize_product_access
 from app.core.timezone import utcnow
 from app.db.session import get_db
 from app.models.admin_audit import AdminAuditLog
@@ -53,6 +54,11 @@ class UserMembershipUpdateRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=1000, description="操作原因")
 
 
+class UserProductAccessUpdateRequest(BaseModel):
+    product_access: list[str] = Field(default_factory=list, description="已开通产品：creation_tool/potential_commercial/practical_camp")
+    reason: Optional[str] = Field(None, max_length=1000, description="操作原因")
+
+
 class LlmPricingRequest(BaseModel):
     provider: str = Field(..., min_length=1, max_length=50)
     model: str = Field(..., min_length=1, max_length=120)
@@ -91,6 +97,7 @@ def _user_payload(user: User) -> dict:
         "is_active": user.is_active,
         "is_member": user.is_member,
         "member_since": user.member_since.isoformat() if user.member_since else None,
+        "product_access": effective_product_access(user),
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "last_login": user.last_login.isoformat() if user.last_login else None,
     }
@@ -289,7 +296,7 @@ async def create_llm_pricing(
     req: LlmPricingRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_permission("pricing:write")),
+    current_user: User = Depends(get_current_super_admin_user),
 ) -> Any:
     """新增模型单价配置。"""
     exists = (await db.execute(
@@ -321,7 +328,7 @@ async def update_llm_pricing(
     req: LlmPricingUpdateRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_permission("pricing:write")),
+    current_user: User = Depends(get_current_super_admin_user),
 ) -> Any:
     """修改模型单价配置。"""
     row = await db.get(LlmModelPricing, pricing_id)
@@ -424,7 +431,7 @@ async def update_monitoring_alert(
     req: AlertUpdateRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_permission("alerts:write")),
+    current_user: User = Depends(get_current_super_admin_user),
 ) -> Any:
     """更新告警处理备注，必要时手动标记已恢复。"""
     alert = await db.get(MonitoringAlert, alert_id)
@@ -482,7 +489,7 @@ async def list_audit_logs(
 @router.get("/admins", response_model=dict)
 async def list_admins(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_permission("admin:manage")),
+    current_user: User = Depends(require_admin_permission("users:read")),
 ) -> Any:
     """查看当前管理员列表。"""
     rows = (await db.execute(
@@ -497,6 +504,7 @@ async def list_admins(
             "items": [_user_payload(u) for u in rows],
             "super_admin_phone": _mask_phone(settings.SUPER_ADMIN_PHONE),
             "roles": sorted(ADMIN_ROLES),
+            "products": [{"value": p, "label": PRODUCT_LABELS[p]} for p in sorted(ALL_PRODUCTS)],
         },
     }
 
@@ -572,7 +580,7 @@ async def update_user_status(
     req: UserStatusUpdateRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_permission("users:status")),
+    current_user: User = Depends(get_current_super_admin_user),
 ) -> Any:
     """启用或禁用用户账号。"""
     user = await db.get(User, user_id)
@@ -610,7 +618,7 @@ async def update_user_membership(
     req: UserMembershipUpdateRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_permission("users:status")),
+    current_user: User = Depends(get_current_super_admin_user),
 ) -> Any:
     """管理员设置或取消用户会员资格。"""
     user = await db.get(User, user_id)
@@ -621,8 +629,10 @@ async def update_user_membership(
     user.is_member = req.is_member
     if req.is_member and not user.member_since:
         user.member_since = utcnow()
+        user.product_access = normalize_product_access([*normalize_product_access(user.product_access), "creation_tool"])
     elif not req.is_member:
         user.member_since = None
+        user.product_access = []
     db.add(user)
     _add_audit_log(
         db,
@@ -642,6 +652,55 @@ async def update_user_membership(
     await db.commit()
     await db.refresh(user)
     return {"code": 200, "message": "会员状态已更新", "data": _user_payload(user)}
+
+
+@router.patch("/users/{user_id}/product-access", response_model=dict)
+async def update_user_product_access(
+    user_id: int,
+    req: UserProductAccessUpdateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin_user),
+) -> Any:
+    """最高管理员设置用户已购买的产品权益。"""
+    invalid = sorted(set(req.product_access) - ALL_PRODUCTS)
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"无效产品权益：{', '.join(invalid)}",
+        )
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    if user.is_superuser:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="最高管理员默认拥有全部功能，无需设置产品权益")
+
+    before = {"product_access": normalize_product_access(user.product_access)}
+    user.product_access = normalize_product_access(req.product_access)
+    user.is_member = bool(user.product_access)
+    if user.is_member and not user.member_since:
+        user.member_since = utcnow()
+    elif not user.is_member:
+        user.member_since = None
+    db.add(user)
+    _add_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="user.product_access.update",
+        target_type="user",
+        target_id=str(user.id),
+        summary=f"更新用户产品权益：{user.id}",
+        detail=req.reason,
+        metadata={
+            "target_user_id": user.id,
+            "before": before,
+            "after": {"product_access": user.product_access},
+            **_request_metadata(request),
+        },
+    )
+    await db.commit()
+    await db.refresh(user)
+    return {"code": 200, "message": "产品权益已更新", "data": _user_payload(user)}
 
 
 @router.post("/admins", response_model=dict)

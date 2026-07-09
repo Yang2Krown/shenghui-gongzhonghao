@@ -346,7 +346,7 @@
       </div>
     </div>
 
-    <!-- Membership Modal -->
+    <!-- Product Modal -->
     <div v-if="membershipOpen" class="modal-backdrop active">
       <div class="modal" role="dialog" aria-modal="true">
         <button class="modal-close" @click="closeMembership" aria-label="关闭">×</button>
@@ -354,22 +354,25 @@
         <!-- 支付成功 -->
         <div v-if="membershipPaid" class="modal-success active">
           <div class="icon" style="background:var(--clay)">✓</div>
-          <h4>会员开通成功</h4>
+          <h4>创作工具开通成功</h4>
           <p>已赠送 6000 积分，即将进入工作台…</p>
         </div>
 
         <!-- 正常流程 -->
         <div v-else>
-          <h3>开通会员</h3>
-          <p class="modal-sub">缴纳一次性入会费 ¥{{ membershipPrice }}，永久享受全部 AI 创作能力。新会员赠送 6000 积分。</p>
+          <h3>开通{{ requestedProductLabel }}</h3>
+          <p v-if="requestedProduct !== 'creation_tool'" class="modal-sub">
+            当前账号尚未开通{{ requestedProductLabel }}。该产品暂不支持页面自助开通，请联系最高管理员为手机号配置产品权益。
+          </p>
+          <p v-else class="modal-sub">一次性购买创作工具 ¥{{ membershipPrice }}，开通 AI 创作相关功能。购买后赠送 6000 积分。</p>
 
-          <div class="benefits-list">
+          <div v-if="requestedProduct === 'creation_tool'" class="benefits-list">
             <div class="benefit-item" v-for="b in membershipBenefits" :key="b">
               <span class="benefit-check">✓</span> {{ b }}
             </div>
           </div>
 
-          <div class="price-row" style="text-align:center;margin-bottom:20px;padding:16px 0;border-top:1px dashed var(--line-2);border-bottom:1px dashed var(--line-2)">
+          <div v-if="requestedProduct === 'creation_tool'" class="price-row" style="text-align:center;margin-bottom:20px;padding:16px 0;border-top:1px dashed var(--line-2);border-bottom:1px dashed var(--line-2)">
             <span style="font-size:18px;color:var(--ink-3);vertical-align:top">¥</span>
             <span style="font-size:42px;font-weight:700;color:var(--clay)">{{ membershipPrice }}</span>
             <span style="font-size:14px;color:var(--ink-3);margin-left:4px">/ 永久</span>
@@ -391,8 +394,11 @@
 
           <div v-if="membershipError" class="modal-error active"><strong>提示</strong>{{ membershipError }}</div>
 
-          <button v-if="!membershipOrder" class="btn btn-primary btn-submit" :disabled="membershipLoading" @click="createMembershipOrder">
-            {{ membershipLoading ? '创建订单中...' : `立即开通会员 ¥${membershipPrice}` }}
+          <button v-if="requestedProduct === 'creation_tool' && !membershipOrder" class="btn btn-primary btn-submit" :disabled="membershipLoading" @click="createMembershipOrder">
+            {{ membershipLoading ? '创建订单中...' : `立即开通创作工具 ¥${membershipPrice}` }}
+          </button>
+          <button v-else-if="requestedProduct !== 'creation_tool'" class="btn btn-primary btn-submit" @click="dismissMembership">
+            我知道了
           </button>
 
           <div class="modal-foot">
@@ -405,7 +411,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { sendSmsCode, loginByPhone } from '@/api/auth'
@@ -516,6 +522,7 @@ const membershipPrice = ref(0.01)
 const membershipLoading = ref(false)
 const membershipPolling = ref(false)
 const membershipError = ref('')
+const requestedProduct = ref('creation_tool')
 let membershipTimer = null
 
 const membershipBenefits = [
@@ -524,12 +531,23 @@ const membershipBenefits = [
   'AI 文案润色、续写、仿写、转写',
   '公众号编辑器 + 草稿箱发布',
   '小红书跨平台改编与发布',
-  '商单检测与潜在客户管理',
-  '新会员赠送 6000 积分',
+  '购买创作工具赠送 6000 积分',
 ]
 
+const productLabels = {
+  creation_tool: '创作工具',
+  potential_commercial: '潜在商单',
+  practical_camp: '实战营'
+}
+
+const requestedProductLabel = computed(() => productLabels[requestedProduct.value] || '对应产品')
+
 const openMembership = () => {
-  if (userStore.isAuthenticated && (userStore.isMember || userStore.isAdmin)) {
+  requestedProduct.value = route.query.product || 'creation_tool'
+  if (
+    userStore.isAuthenticated &&
+    (userStore.hasProduct(requestedProduct.value) || userStore.isAdmin)
+  ) {
     router.replace(route.query.redirect || '/')
     return
   }
@@ -545,6 +563,12 @@ const closeMembership = () => {
   if (membershipTimer) { clearInterval(membershipTimer); membershipTimer = null }
   userStore.clearAuth()
   window.location.href = '/landing'
+}
+
+const dismissMembership = () => {
+  membershipOpen.value = false
+  if (membershipTimer) { clearInterval(membershipTimer); membershipTimer = null }
+  router.replace('/landing')
 }
 
 const createMembershipOrder = async () => {

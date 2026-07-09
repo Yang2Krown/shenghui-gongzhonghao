@@ -8,12 +8,16 @@ from pydantic import Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_admin_user, get_current_user
+from app.core.security import get_current_super_admin_user, get_current_user
 from app.db.session import get_db
 from app.models.course import CourseChapter
 from app.models.user import User
 
 router = APIRouter()
+
+
+def _is_admin(user: User) -> bool:
+    return bool(user.is_superuser) or (user.role or "").strip().lower() == "admin"
 
 
 # ── Pydantic schemas ──────────────────────────────────────────
@@ -81,7 +85,7 @@ async def list_chapters(
     chapters = result.scalars().all()
 
     # 普通用户只看到已发布的
-    if current_user.role != "admin" and not current_user.is_superuser:
+    if not _is_admin(current_user):
         chapters = [ch for ch in chapters if ch.is_published]
 
     return {
@@ -112,7 +116,7 @@ async def get_chapter(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="章节不存在")
 
     # 普通用户不能看未发布章节
-    if not ch.is_published and current_user.role != "admin" and not current_user.is_superuser:
+    if not ch.is_published and not _is_admin(current_user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="章节不存在")
 
     return {
@@ -128,7 +132,7 @@ async def get_chapter(
 async def create_chapter(
     body: ChapterCreate,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin_user),
+    admin: User = Depends(get_current_super_admin_user),
 ) -> Any:
     """新建章节。"""
     # 如果 sort_order 未指定，自动放到末尾
@@ -169,7 +173,7 @@ async def create_chapter(
 async def reorder_chapters(
     body: ReorderRequest,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin_user),
+    admin: User = Depends(get_current_super_admin_user),
 ) -> Any:
     """批量更新章节排序。"""
     for item in body.items:
@@ -198,7 +202,7 @@ async def update_chapter(
     chapter_id: int,
     body: ChapterUpdate,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin_user),
+    admin: User = Depends(get_current_super_admin_user),
 ) -> Any:
     """更新章节。"""
     ch = (
@@ -231,7 +235,7 @@ async def update_chapter(
 async def delete_chapter(
     chapter_id: int,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin_user),
+    admin: User = Depends(get_current_super_admin_user),
 ) -> Any:
     """删除章节。"""
     ch = (

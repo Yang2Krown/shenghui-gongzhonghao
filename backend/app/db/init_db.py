@@ -79,6 +79,14 @@ async def _ensure_schema_compatibility(conn):
         await conn.execute(text("ALTER TABLE tasks ADD COLUMN user_id INTEGER"))
     await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_user_id ON tasks (user_id)"))
 
+    if not await conn.run_sync(has_column, "users", "product_access"):
+        await conn.execute(text("ALTER TABLE users ADD COLUMN product_access JSONB NOT NULL DEFAULT '[]'::jsonb"))
+        await conn.execute(text(
+            "UPDATE users SET product_access = product_access || '[\"creation_tool\"]'::jsonb "
+            "WHERE COALESCE(is_member, false) = true"
+        ))
+        await conn.execute(text("ALTER TABLE users ALTER COLUMN product_access DROP DEFAULT"))
+
 
 async def create_initial_data():
     """创建初始数据"""
@@ -88,13 +96,16 @@ async def create_initial_data():
             from app.core.config import settings
 
             super_admin = await user_crud.get_by_phone(db, phone=settings.SUPER_ADMIN_PHONE)
+            changed = False
             if super_admin:
-                changed = False
                 if not super_admin.is_superuser:
                     super_admin.is_superuser = True
                     changed = True
                 if super_admin.role != "admin":
                     super_admin.role = "admin"
+                    changed = True
+                if super_admin.product_access is None:
+                    super_admin.product_access = []
                     changed = True
             if changed:
                 await db.commit()

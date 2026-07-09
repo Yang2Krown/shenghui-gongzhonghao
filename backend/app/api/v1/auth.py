@@ -35,6 +35,7 @@ from app.core.rate_limit import (
     phone_actor,
     rule_from_setting,
 )
+from app.core.product_access import effective_product_access
 
 router = APIRouter()
 
@@ -42,10 +43,11 @@ router = APIRouter()
 async def _ensure_super_admin_by_phone(user: User, db: AsyncSession) -> User:
     """手机号命中配置的最高管理员时，自动授予最高管理员权限。"""
     if user.phone == settings.SUPER_ADMIN_PHONE and (
-        not user.is_superuser or user.role != "admin"
+        not user.is_superuser or user.role != "admin" or user.product_access is None
     ):
         user.is_superuser = True
         user.role = "admin"
+        user.product_access = []
         db.add(user)
         await db.commit()
         await db.refresh(user)
@@ -213,10 +215,12 @@ async def get_current_user_info(
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """获取当前用户信息"""
+    data = UserResponse.from_orm(current_user).dict()
+    data["product_access"] = effective_product_access(current_user)
     return {
         "code": 200,
         "message": "获取用户信息成功",
-        "data": UserResponse.from_orm(current_user).dict()
+        "data": data
     }
 
 

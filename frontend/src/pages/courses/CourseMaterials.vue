@@ -143,7 +143,7 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-const isAdmin = computed(() => userStore.isAdmin)
+const isAdmin = computed(() => userStore.isSuperAdmin)
 
 // ── Data ──────────────────────────────────────────────────────
 const chapters = ref([])       // 列表（不含 content_html）

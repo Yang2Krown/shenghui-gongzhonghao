@@ -66,10 +66,11 @@ async def purchase_membership(
     current_user: User = Depends(limit_payment_order),
     db: AsyncSession = Depends(get_db),
 ):
-    """创建会员入会费支付订单（699 元），返回扫码支付链接。"""
-    # 已是会员则拒绝
-    if current_user.is_member:
-        raise HTTPException(status_code=400, detail="您已经是会员，无需重复缴费")
+    """创建创作工具支付订单（699 元），返回扫码支付链接。"""
+    from app.core.product_access import PRODUCT_CREATION_TOOL, has_product_access
+
+    if has_product_access(current_user, PRODUCT_CREATION_TOOL):
+        raise HTTPException(status_code=400, detail="您已经开通创作工具，无需重复购买")
 
     pay_service = WechatPayService(db)
     try:
@@ -81,7 +82,7 @@ async def purchase_membership(
 
     return {
         "code": 200,
-        "message": "会员支付订单创建成功",
+        "message": "创作工具支付订单创建成功",
         "data": {
             "out_trade_no": order.out_trade_no,
             "code_url": order.code_url,

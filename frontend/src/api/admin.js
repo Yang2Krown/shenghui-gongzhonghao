@@ -75,3 +75,7 @@ export const updateAdminUserStatus = (id, data) => {
 export const updateAdminUserMembership = (id, data) => {
   return patch(`/admin/users/${id}/membership`, data)
 }
+
+export const updateAdminUserProductAccess = (id, data) => {
+  return patch(`/admin/users/${id}/product-access`, data)
+}

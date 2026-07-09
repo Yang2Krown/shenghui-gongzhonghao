@@ -12,28 +12,28 @@ const routes = [
         path: '',
         name: 'Home',
         component: () => import('@/pages/topics/TopicClusterList.vue'),
-        meta: { title: '内容资讯' }
+        meta: { title: '内容资讯', product: 'creation_tool' }
       },
       // 内容资讯
       {
         path: 'content-info',
         name: 'ContentInfo',
         component: () => import('@/pages/topics/TopicClusterList.vue'),
-        meta: { title: '内容资讯' }
+        meta: { title: '内容资讯', product: 'creation_tool' }
       },
       // 资讯型（仅资讯型，按时间排序）
       { 
         path: 'content-info/news',
         name: 'ContentInfoNews',
         component: () => import('@/pages/topics/TopicClusterList.vue'),
-        meta: { title: '资讯型', preset: '资讯型' }
+        meta: { title: '资讯型', preset: '资讯型', product: 'creation_tool' }
       },
       // 实操案例（仅实操案例型，按当前价值分排序）
       {
         path: 'content-info/cases',
         name: 'ContentInfoCases',
         component: () => import('@/pages/topics/TopicClusterList.vue'),
-        meta: { title: '实操案例', preset: '实操案例型' }
+        meta: { title: '实操案例', preset: '实操案例型', product: 'creation_tool' }
       },
       {
         path: 'content-info/commercial',
@@ -44,27 +44,27 @@ const routes = [
         path: 'potential-commercial',
         name: 'PotentialCommercial',
         component: () => import('@/pages/topics/PotentialCommercial.vue'),
-        meta: { title: '潜在商单' }
+        meta: { title: '潜在商单', product: 'potential_commercial' }
       },
       // 课程资料（顶级页面，章节阅读）
       {
         path: 'courses',
         name: 'CourseMaterials',
         component: () => import('@/pages/courses/CourseMaterials.vue'),
-        meta: { title: '课程资料' }
+        meta: { title: '课程资料', product: 'practical_camp' }
       },
       // 话题库（保留旧路由，兼容）
       {
         path: 'topic-clusters',
         name: 'TopicClusters',
         component: () => import('@/pages/topics/TopicClusterList.vue'),
-        meta: { title: '内容资讯' }
+        meta: { title: '内容资讯', product: 'creation_tool' }
       },
       {
         path: 'topic-clusters/:id',
         name: 'TopicClusterDetail',
         component: () => import('@/pages/topics/TopicClusterDetail.vue'),
-        meta: { title: '话题详情' }
+        meta: { title: '话题详情', product: 'creation_tool' }
       },
       // ===== Legacy 旧表入口（隐藏，但保留可访问） =====
       {
@@ -376,6 +376,43 @@ const router = createRouter({
 // 不需要登录的页面
 const PUBLIC_ROUTES = ['Login', 'NotFound', 'Landing', 'Terms', 'Privacy']
 
+const PRODUCT_LABELS = {
+  creation_tool: '创作工具',
+  potential_commercial: '潜在商单',
+  practical_camp: '实战营'
+}
+
+const requiredProductForRoute = (to) => {
+  if (to.meta.product) return to.meta.product
+  if (to.meta.requiresAdmin) return null
+  const path = to.path || ''
+  if (path.startsWith('/potential-commercial') || path.startsWith('/content-info/commercial')) {
+    return 'potential_commercial'
+  }
+  if (path.startsWith('/courses') || path.startsWith('/creation/practical')) {
+    return 'practical_camp'
+  }
+  if (
+    path === '/' ||
+    path.startsWith('/content-info') ||
+    path.startsWith('/topic-clusters') ||
+    path.startsWith('/legacy') ||
+    path.startsWith('/creation') ||
+    path.startsWith('/content-transform') ||
+    path.startsWith('/content-imitate') ||
+    path.startsWith('/creation-history') ||
+    path.startsWith('/history') ||
+    path.startsWith('/standalone-title') ||
+    path.startsWith('/munger-generation') ||
+    path.startsWith('/wechat-to-xhs') ||
+    path.startsWith('/custom-topic') ||
+    path.startsWith('/munger-scorer')
+  ) {
+    return 'creation_tool'
+  }
+  return null
+}
+
 // 全局前置守卫
 router.beforeEach(async (to, from, next) => {
   document.title = to.meta.title ? `${to.meta.title} - IP罗盘` : 'IP罗盘'
@@ -397,10 +434,12 @@ router.beforeEach(async (to, from, next) => {
   } else if (to.name === 'Landing' && userStore.isAuthenticated && userStore.isMember) {
     // 已是会员访问 Landing 页 → 跳首页
     next({ path: '/' })
-  } else if (userStore.isAuthenticated && !userStore.isMember && !userStore.isAdmin && to.name !== 'Landing') {
-    // 已登录但不是会员（且非管理员）→ 跳 Landing 页打开会员弹窗
-    next({ name: 'Landing', query: { show: 'membership' } })
   } else {
+    const requiredProduct = requiredProductForRoute(to)
+    if (userStore.isAuthenticated && requiredProduct && !userStore.hasProduct(requiredProduct)) {
+      next({ name: 'Landing', query: { show: 'membership', product: requiredProduct, productName: PRODUCT_LABELS[requiredProduct] } })
+      return
+    }
     next()
   }
 })

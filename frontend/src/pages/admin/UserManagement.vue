@@ -32,11 +32,22 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="会员" width="100">
+      <el-table-column label="已购产品" min-width="220">
         <template #default="{ row }">
-          <el-tag :type="row.is_member ? 'success' : 'info'" size="small" effect="plain">
-            {{ row.is_member ? '会员' : '非会员' }}
-          </el-tag>
+          <div class="flex flex-wrap gap-1">
+            <el-tag
+              v-for="product in row.product_access || []"
+              :key="product"
+              type="success"
+              size="small"
+              effect="plain"
+            >
+              {{ productLabels[product] || product }}
+            </el-tag>
+            <el-tag v-if="!(row.product_access || []).length" type="info" size="small" effect="plain">
+              免费版
+            </el-tag>
+          </div>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="80">
@@ -52,21 +63,21 @@
           <span class="text-sm text-slate-500">{{ formatDate(row.created_at) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="230" fixed="right">
         <template #default="{ row }">
           <el-button
             size="small"
-            :type="row.is_member ? 'warning' : 'success'"
-            @click="toggleMembership(row)"
-            :disabled="row.is_superuser"
+            type="primary"
+            @click="openProductDialog(row)"
+            :disabled="!userStore.isSuperAdmin || row.is_superuser"
           >
-            {{ row.is_member ? '取消会员' : '设为会员' }}
+            产品权益
           </el-button>
           <el-button
             size="small"
             :type="row.is_active ? 'danger' : 'primary'"
             @click="toggleStatus(row)"
-            :disabled="row.is_superuser"
+            :disabled="!userStore.isSuperAdmin || row.is_superuser"
             plain
           >
             {{ row.is_active ? '禁用' : '启用' }}
@@ -74,6 +85,23 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <el-dialog v-model="productDialogVisible" title="设置产品权益" width="420px">
+      <div v-if="editingUser" class="space-y-4">
+        <div class="text-sm text-slate-500">
+          用户：{{ editingUser.username }} / {{ editingUser.phone || '-' }}
+        </div>
+        <el-checkbox-group v-model="editingProducts">
+          <div v-for="product in productOptions" :key="product.value" class="mb-2">
+            <el-checkbox :label="product.value">{{ product.label }}</el-checkbox>
+          </div>
+        </el-checkbox-group>
+      </div>
+      <template #footer>
+        <el-button @click="productDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingProducts" @click="saveProductAccess">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 分页 -->
     <div class="flex justify-center mt-6">
@@ -91,7 +119,8 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getAdminUsers, updateAdminUserMembership, updateAdminUserStatus } from '@/api/admin'
+import { getAdminUsers, updateAdminUserProductAccess, updateAdminUserStatus } from '@/api/admin'
+import { useUserStore } from '@/stores/user'
 
 const users = ref([])
 const loading = ref(false)
@@ -99,6 +128,17 @@ const keyword = ref('')
 const page = ref(1)
 const pageSize = ref(50)
 const total = ref(0)
+const userStore = useUserStore()
+const productDialogVisible = ref(false)
+const editingUser = ref(null)
+const editingProducts = ref([])
+const savingProducts = ref(false)
+const productLabels = {
+  creation_tool: '创作工具',
+  potential_commercial: '潜在商单',
+  practical_camp: '实战营'
+}
+const productOptions = Object.entries(productLabels).map(([value, label]) => ({ value, label }))
 
 const fetchUsers = async () => {
   loading.value = true
@@ -117,19 +157,26 @@ const fetchUsers = async () => {
   }
 }
 
-const toggleMembership = async (row) => {
-  const action = row.is_member ? '取消会员' : '设为会员'
+const openProductDialog = (row) => {
+  editingUser.value = row
+  editingProducts.value = [...(row.product_access || [])]
+  productDialogVisible.value = true
+}
+
+const saveProductAccess = async () => {
+  if (!editingUser.value) return
+  savingProducts.value = true
   try {
-    await ElMessageBox.confirm(
-      `确定要${action}「${row.username}」吗？`,
-      '确认',
-      { type: 'warning' }
-    )
-    await updateAdminUserMembership(row.id, { is_member: !row.is_member })
-    ElMessage.success(`${action}成功`)
+    await updateAdminUserProductAccess(editingUser.value.id, {
+      product_access: editingProducts.value
+    })
+    ElMessage.success('产品权益已更新')
+    productDialogVisible.value = false
     fetchUsers()
   } catch {
-    // 用户取消或请求失败
+    // handled by interceptor
+  } finally {
+    savingProducts.value = false
   }
 }
 

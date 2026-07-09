@@ -1,5 +1,5 @@
 """Role-based permissions for admin backoffice actions."""
-from typing import Iterable, Set
+from typing import Iterable
 
 from fastapi import Depends, HTTPException, status
 
@@ -9,29 +9,16 @@ from app.models.user import User
 
 ROLE_SUPER_ADMIN = "super_admin"
 ROLE_ADMIN = "admin"
-ROLE_OPS = "ops"
-ROLE_SUPPORT = "support"
-ROLE_FINANCE = "finance"
-ROLE_AUDITOR = "auditor"
 
 ADMIN_ROLES = {
     ROLE_ADMIN,
-    ROLE_OPS,
-    ROLE_SUPPORT,
-    ROLE_FINANCE,
-    ROLE_AUDITOR,
 }
 
 PERMISSIONS = {
-    "monitoring:read": {ROLE_ADMIN, ROLE_OPS, ROLE_SUPPORT, ROLE_FINANCE, ROLE_AUDITOR},
-    "alerts:write": {ROLE_ADMIN, ROLE_OPS, ROLE_SUPPORT},
-    "users:read": {ROLE_ADMIN, ROLE_OPS, ROLE_SUPPORT, ROLE_FINANCE},
-    "users:status": {ROLE_ADMIN, ROLE_OPS, ROLE_SUPPORT},
-    "credits:gift": {ROLE_ADMIN, ROLE_FINANCE},
-    "payments:read": {ROLE_ADMIN, ROLE_FINANCE},
-    "pricing:write": {ROLE_ADMIN, ROLE_FINANCE},
-    "audit:read": {ROLE_ADMIN, ROLE_AUDITOR},
-    "admin:manage": {ROLE_ADMIN},
+    "monitoring:read": {ROLE_ADMIN},
+    "users:read": {ROLE_ADMIN},
+    "payments:read": {ROLE_ADMIN},
+    "audit:read": {ROLE_ADMIN},
 }
 
 

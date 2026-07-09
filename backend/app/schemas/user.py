@@ -38,6 +38,7 @@ class UserInDB(UserBase):
     hashed_password: str
     is_active: bool = True
     is_superuser: bool = False
+    product_access: List[str] = []
     role: str = "user"
     created_at: datetime
     updated_at: datetime
@@ -54,6 +55,7 @@ class UserResponse(UserBase):
     is_superuser: bool = False
     is_member: bool = False
     member_since: Optional[datetime] = None
+    product_access: List[str] = []
     role: str = "user"
     created_at: datetime
     updated_at: datetime

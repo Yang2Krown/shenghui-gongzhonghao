@@ -30,10 +30,12 @@ export const useUserStore = defineStore('user', () => {
   const isAuthenticated = computed(() => !!token.value)
   const userName = computed(() => user.value?.full_name || user.value?.username || '未登录用户')
   const userAvatar = computed(() => user.value?.avatar_url || '')
-  const adminRoles = ['admin', 'ops', 'support', 'finance', 'auditor']
+  const adminRoles = ['admin']
   const isAdmin = computed(() => adminRoles.includes(user.value?.role) || !!user.value?.is_superuser)
   const isSuperAdmin = computed(() => !!user.value?.is_superuser)
-  const isMember = computed(() => !!user.value?.is_member)
+  const productAccess = computed(() => user.value?.product_access || [])
+  const isMember = computed(() => productAccess.value.length > 0 || !!user.value?.is_member)
+  const hasProduct = (product) => isAdmin.value || productAccess.value.includes(product)
 
   // 初始化 - 从本地存储恢复token
   const initialize = async () => {
@@ -127,6 +129,8 @@ export const useUserStore = defineStore('user', () => {
     isAdmin,
     isSuperAdmin,
     isMember,
+    productAccess,
+    hasProduct,
     
     // 方法
     initialize,

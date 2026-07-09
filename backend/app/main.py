@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from typing import Optional
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -10,6 +11,14 @@ import uvicorn
 
 from app.core.config import settings
 from app.core.logging_security import install_sensitive_log_filter
+from app.core.product_access import (
+    PRODUCT_CREATION_TOOL,
+    PRODUCT_LABELS,
+    PRODUCT_POTENTIAL_COMMERCIAL,
+    PRODUCT_PRACTICAL_CAMP,
+    has_product_access,
+    is_admin_user,
+)
 from app.api.v1 import api_router
 from app.core.security import decode_token
 from app.db.session import AsyncSessionLocal, engine
@@ -92,8 +101,9 @@ async def add_process_time_header(request: Request, call_next):
 
 @app.middleware("http")
 async def enforce_membership_gate(request: Request, call_next):
-    """Block non-member normal users from paid product APIs."""
-    if not _should_check_membership(request):
+    """Block normal users from product APIs they have not purchased."""
+    required_product = _required_product_for_request(request)
+    if not required_product:
         return await call_next(request)
 
     auth = request.headers.get("authorization") or ""
@@ -114,44 +124,82 @@ async def enforce_membership_gate(request: Request, call_next):
 
     if not user or not user.is_active:
         return await call_next(request)
-    if user.is_member or user.is_superuser or user.role in {"admin", "ops", "support", "finance", "auditor"}:
+    if is_admin_user(user) or has_product_access(user, required_product):
         return await call_next(request)
 
+    label = PRODUCT_LABELS.get(required_product, "对应产品")
     return JSONResponse(
         status_code=403,
         content={
             "code": 403,
-            "message": "请先开通会员后再使用系统",
-            "detail": "请先开通会员后再使用系统",
-            "data": {"reason": "membership_required"},
+            "message": f"请先开通{label}后再使用",
+            "detail": f"请先开通{label}后再使用",
+            "data": {"reason": "product_required", "product": required_product},
         },
     )
 
 
-def _should_check_membership(request: Request) -> bool:
+def _required_product_for_request(request: Request) -> Optional[str]:
     path = request.url.path
     api_prefix = settings.API_V1_STR.rstrip("/")
     if not path.startswith(f"{api_prefix}/"):
-        return False
+        return None
 
     relative = path[len(api_prefix):]
     if relative.startswith("/auth/"):
-        return False
+        return None
     if relative == "/users/profile":
-        return False
+        return None
     if relative.startswith("/admin/"):
-        return False
+        return None
     if relative in {"/credits/packages", "/credits/operation-costs", "/credits/estimate"}:
-        return False
+        return None
     if relative == "/credits/membership":
-        return False
+        return None
     if relative.startswith("/credits/purchase/status/"):
-        return False
+        return None
     if relative == "/credits/pay/notify":
-        return False
+        return None
     if relative.startswith("/docs") or relative.endswith("/openapi.json"):
-        return False
-    return True
+        return None
+    if relative.startswith("/commercial"):
+        return PRODUCT_POTENTIAL_COMMERCIAL
+    if relative.startswith("/courses") or relative.startswith("/practical") or relative.startswith("/feishu/brief"):
+        return PRODUCT_PRACTICAL_CAMP
+    if relative.startswith((
+        "/creations",
+        "/ai",
+        "/styles",
+        "/topic-candidates",
+        "/topic-clusters",
+        "/topics",
+        "/outlines",
+        "/content-generation",
+        "/title-generation",
+        "/title-munger",
+        "/standalone-title",
+        "/wechat-to-xhs",
+        "/generation-records",
+        "/image-proxy",
+        "/xhs-publish",
+        "/xhs-debug",
+        "/creation-tools",
+        "/content-transform",
+        "/content-imitate",
+        "/wechat-draft",
+        "/content-continuation",
+        "/content-polish",
+        "/wechat-accounts",
+        "/images",
+        "/article-snapshots",
+        "/_test_gzh_fetch",
+    )):
+        return PRODUCT_CREATION_TOOL
+    if relative.startswith("/progress"):
+        return PRODUCT_CREATION_TOOL
+    if relative.startswith("/credits/"):
+        return PRODUCT_CREATION_TOOL
+    return PRODUCT_CREATION_TOOL
 
 
 def _apply_security_headers(response) -> None:
