@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getCreditBalance, getCreditPackages, purchaseCredits } from '@/api/credit'
+import { getCreditBalance, getCreditAccount, getCreditPackages, purchaseCredits } from '@/api/credit'
 import { ElMessage } from 'element-plus'
 
 // 默认套餐数据
@@ -16,8 +16,22 @@ export const useCreditStore = defineStore('credit', () => {
   const packages = ref(DEFAULT_PACKAGES)
   const loading = ref(false)
 
+  // 订阅到期信息
+  const subscriptionExpiresAt = ref(null)
+  const daysUntilExpire = ref(null)
+  const isSubscriptionActive = ref(false)
+
   const formattedBalance = computed(() => balance.value.toLocaleString())
   const balanceYuan = computed(() => (balance.value * 0.1).toFixed(2))
+
+  const expireDateText = computed(() => {
+    if (!subscriptionExpiresAt.value) return ''
+    const d = new Date(subscriptionExpiresAt.value)
+    if (Number.isNaN(d.getTime())) return ''
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    return `${d.getFullYear()}-${mm}-${dd}`
+  })
 
   const fetchBalance = async () => {
     try {
@@ -26,6 +40,19 @@ export const useCreditStore = defineStore('credit', () => {
       balance.value = data.balance || 0
     } catch (error) {
       console.error('获取积分余额失败:', error)
+    }
+  }
+
+  const fetchAccount = async () => {
+    try {
+      const res = await getCreditAccount()
+      const data = res.data || res
+      balance.value = data.balance ?? balance.value
+      subscriptionExpiresAt.value = data.subscription_expires_at || null
+      daysUntilExpire.value = data.days_until_expire ?? null
+      isSubscriptionActive.value = !!data.is_subscription_active
+    } catch (error) {
+      console.error('获取积分账户详情失败:', error)
     }
   }
 
@@ -62,9 +89,14 @@ export const useCreditStore = defineStore('credit', () => {
     balance,
     packages,
     loading,
+    subscriptionExpiresAt,
+    daysUntilExpire,
+    isSubscriptionActive,
     formattedBalance,
     balanceYuan,
+    expireDateText,
     fetchBalance,
+    fetchAccount,
     fetchPackages,
     purchase,
   }

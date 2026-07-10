@@ -66,15 +66,29 @@ async def purchase_membership(
     current_user: User = Depends(limit_payment_order),
     db: AsyncSession = Depends(get_db),
 ):
-    """创建创作工具支付订单（699 元），返回扫码支付链接。"""
-    from app.core.product_access import PRODUCT_CREATION_TOOL, has_product_access
+    """兼容旧入口：创建创作工具支付订单。"""
+    return await purchase_product("creation_tool", request, current_user, db)
 
-    if has_product_access(current_user, PRODUCT_CREATION_TOOL):
-        raise HTTPException(status_code=400, detail="您已经开通创作工具，无需重复购买")
+
+@router.post("/products/{product}", response_model=dict)
+async def purchase_product(
+    product: str,
+    request: Request,
+    current_user: User = Depends(limit_payment_order),
+    db: AsyncSession = Depends(get_db),
+):
+    """创建指定产品的微信 Native 支付订单。"""
+    from app.core.product_access import ALL_PRODUCTS, PRODUCT_CREATION_TOOL, PRODUCT_LABELS, has_product_access
+
+    if product not in ALL_PRODUCTS:
+        raise HTTPException(status_code=400, detail="未知产品")
+    # 创作工具为按月订阅，允许已开通用户续订；其它产品一次性开通不可重复购买。
+    if product != PRODUCT_CREATION_TOOL and has_product_access(current_user, product):
+        raise HTTPException(status_code=400, detail=f"您已经开通{PRODUCT_LABELS[product]}，无需重复购买")
 
     pay_service = WechatPayService(db)
     try:
-        order = await pay_service.create_membership_order(current_user.id)
+        order = await pay_service.create_product_order(current_user.id, product)
         await db.commit()
     except ValueError as exc:
         await db.rollback()
@@ -82,12 +96,13 @@ async def purchase_membership(
 
     return {
         "code": 200,
-        "message": "创作工具支付订单创建成功",
+        "message": f"{PRODUCT_LABELS[product]}支付订单创建成功",
         "data": {
             "out_trade_no": order.out_trade_no,
             "code_url": order.code_url,
             "status": order.status,
-            "order_type": "membership",
+            "order_type": order.order_type,
+            "product": product,
             "amount_fen": order.amount_fen,
             "amount_yuan": order.amount_yuan,
             "test_mode": pay_service.configured and order.amount_fen == 1,

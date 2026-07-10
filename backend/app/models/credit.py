@@ -16,6 +16,10 @@ class UserCredit(BaseModel):
     total_consumed = Column(Integer, nullable=False, default=0, comment="累计消耗")
     total_gifted = Column(Integer, nullable=False, default=0, comment="累计赠送")
 
+    # 创作工具按月订阅：到期后由定时任务移除权限并清零余额
+    subscription_expires_at = Column(DateTime, nullable=True, comment="创作工具订阅到期时间")
+    gift_credits_at = Column(DateTime, nullable=True, comment="本期赠送积分时间")
+
     # 时间戳
     created_at = Column(DateTime, default=utcnow, nullable=False)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
@@ -32,6 +36,8 @@ class UserCredit(BaseModel):
             "total_purchased": self.total_purchased,
             "total_consumed": self.total_consumed,
             "total_gifted": self.total_gifted,
+            "subscription_expires_at": self.subscription_expires_at.isoformat() if self.subscription_expires_at else None,
+            "gift_credits_at": self.gift_credits_at.isoformat() if self.gift_credits_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

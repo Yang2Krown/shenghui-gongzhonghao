@@ -42,7 +42,7 @@
         </div>
       </div>
 
-      <!-- 第三行：时效 + 挖掘状态 -->
+      <!-- 第三行：时效 + 挖掘状态（潜在商单只在独立页面展示） -->
       <div class="filter-row">
         <span class="filter-label">时效：</span>
         <div class="filter-chips">
@@ -67,13 +67,6 @@
             {{ opt.label }}
           </button>
         </div>
-        <span class="filter-label-sep">|</span>
-        <button
-          @click="toggleCommercialOnly"
-          :class="['type-chip', filters.commercial_only && 'type-chip-active', 'type-chip-commercial', FORCE_COMMERCIAL && 'type-chip-locked']"
-        >
-          潜在商单
-        </button>
       </div>
     </div>
 
@@ -90,16 +83,21 @@
       <p class="mt-1" style="color: #6B6862; font-size: 14px;">需要先通过抓取和预处理生成话题</p>
     </div>
 
-    <!-- 话题瀑布流：JS 分列 + flex 列布局，保证横向排序 + 瀑布流间距 -->
-    <div v-else class="masonry">
-      <div v-for="(col, ci) in masonryColumns" :key="ci" class="masonry-col">
+    <!-- 小时级时间轴：优先发布时间，缺失时使用抓取时间 -->
+    <div v-else class="timeline-list">
+      <section v-for="group in timelineGroups" :key="group.key" class="timeline-group">
+        <div class="timeline-aside">
+          <time>{{ group.label }}</time>
+          <span class="timeline-dot"></span>
+        </div>
+        <div class="timeline-cards">
         <div
-          v-for="cluster in col"
+          v-for="cluster in group.items"
           :key="cluster.id"
           class="cluster-card"
           @click="goToDetail(cluster.id)"
         >
-          <div class="p-5" style="position: relative;">
+          <div class="p-5 cluster-card-body" style="position: relative;">
             <!-- 标题 -->
             <h3 class="font-serif" style="font-size: 22px; font-weight: 500; color: var(--ink); line-height: 1.45;
                                           display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
@@ -119,6 +117,9 @@
               {{ cluster.summary_zh || cluster.summary }}
             </p>
 
+            <!-- 弹性占位：内容短时空隙落在摘要下方，标签+评分行始终贴底 -->
+            <div class="cluster-card-spacer"></div>
+
             <!-- 标签 -->
             <div class="flex flex-wrap gap-2 mt-4">
               <span v-if="cluster.info_type" class="tag-type">
@@ -127,9 +128,6 @@
               <span v-if="cluster.direction" class="tag-direction">{{ cluster.direction }}</span>
               <span v-if="cluster.freshness" class="tag-freshness">{{ formatFreshness(cluster.freshness) }}</span>
               <span v-if="cluster.low_fan_hit" class="tag-hot">🔥 低粉爆款</span>
-              <span v-if="cluster.commercial_count > 0" class="tag-commercial">
-                商单 {{ cluster.commercial_count }}
-              </span>
               <span v-if="cluster.mined && !cluster.needs_update" class="tag-mined">已挖掘</span>
               <span v-else-if="cluster.needs_update" class="tag-needs-update">待更新</span>
               <span v-else class="tag-unmined">待挖掘</span>
@@ -160,6 +158,7 @@
           </div>
         </div>
       </div>
+      </section>
     </div>
 
     <!-- 加载更多 / 到底了 -->
@@ -193,20 +192,15 @@ const route = useRoute()
 
 // 预设页面：'资讯型' / '实操案例型' / ''(综合)。靠 route.meta 区分，并锁定类型筛选。
 const PRESET = route.meta?.preset || ''
-const FORCE_COMMERCIAL = route.meta?.commercialOnly === true
 const WECHAT_ONLY = route.meta?.wechatOnly === true
-const defaultSortBy = PRESET === '资讯型' ? 'created_at' : 'display_score'  // 资讯型按时间排，其余按价值分
+const defaultSortBy = 'timeline_at'
 const scrollKey = `topic-list-scroll-${route.name || PRESET || 'all'}`
-const pageTitle = FORCE_COMMERCIAL
-  ? '潜在商单'
-  : PRESET === '资讯型'
+const pageTitle = PRESET === '资讯型'
     ? '资讯型'
     : PRESET === '实操案例型'
       ? '实操案例'
       : '内容资讯'
-const pageSubtitle = FORCE_COMMERCIAL
-  ? '基于信息选题结果，筛出公众号来源中命中商单结构的内容'
-  : PRESET === '资讯型'
+const pageSubtitle = PRESET === '资讯型'
     ? '聚合各平台的资讯型信息，按时间倒序排列'
     : PRESET === '实操案例型'
       ? '聚合各平台的实操案例，按创作价值排序'
@@ -216,30 +210,26 @@ const loading = ref(false)
 const refreshing = ref(false)
 const clusters = ref([])
 
-// ── 瀑布流横排：CSS columns 是竖着填的，需要重排数据模拟横向顺序 ──
-const columnCount = ref(3)
-const _updateCols = () => {
-  // 用内容区实际宽度（减去侧边栏），不用 window.innerWidth
-  const el = document.querySelector('.topic-cluster-list')
-  const w = el ? el.clientWidth : window.innerWidth
-  columnCount.value = w <= 500 ? 1 : w <= 800 ? 2 : 3
-}
-window.addEventListener('resize', _updateCols)
-onUnmounted(() => window.removeEventListener('resize', _updateCols))
-
-/**
- * 按横向顺序把数据分到各列：
- * [1,2,3,4,5,6,7,8,9] → Col0=[1,4,7] Col1=[2,5,8] Col2=[3,6,9]
- * 视觉上第一行从左到右就是 1,2,3（分数最高的前3个）
- */
-const masonryColumns = computed(() => {
-  const items = clusters.value
-  const cols = columnCount.value
-  const columns = Array.from({ length: cols }, () => [])
-  items.forEach((item, i) => {
-    columns[i % cols].push(item)
-  })
-  return columns
+const timelineGroups = computed(() => {
+  const groups = new Map()
+  for (const item of clusters.value) {
+    const date = item.timeline_at ? new Date(item.timeline_at) : null
+    const valid = date && !Number.isNaN(date.getTime())
+    const key = valid
+      ? `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}-${date.getHours()}`
+      : 'unknown'
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        label: valid
+          ? `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:00`
+          : '时间待补充',
+        items: [],
+      })
+    }
+    groups.get(key).items.push(item)
+  }
+  return [...groups.values()]
 })
 
 const manualRefresh = async () => {
@@ -259,9 +249,8 @@ const filters = reactive({
   direction: '',
   freshness: '',
   mined: '',
-  commercial_only: FORCE_COMMERCIAL,
   keyword: '',
-  sort_by: defaultSortBy,    // 综合/实操=价值分；资讯型=时间倒序
+  sort_by: defaultSortBy,
   sort_order: 'desc',
 })
 
@@ -327,18 +316,11 @@ const quickFilterByMined = (val) => {
   reloadFromStart()
 }
 
-const toggleCommercialOnly = () => {
-  if (FORCE_COMMERCIAL) return
-  filters.commercial_only = !filters.commercial_only
-  reloadFromStart()
-}
-
 const resetAllFilters = () => {
   filters.info_type = ''
   filters.direction = ''
   filters.freshness = ''
   filters.mined = ''
-  filters.commercial_only = FORCE_COMMERCIAL
   filters.keyword = ''
   reloadFromStart()
 }
@@ -365,7 +347,6 @@ const restoreFromQuery = () => {
   filters.direction   = q.direction   ?? ''
   filters.freshness   = q.freshness   ?? ''
   filters.mined       = q.mined       ?? ''
-  filters.commercial_only = FORCE_COMMERCIAL || q.commercial_only === 'true'
   filters.keyword     = q.keyword     ?? ''
   filters.sort_by     = q.sort_by     ?? defaultSortBy
   filters.sort_order  = q.sort_order  ?? 'desc'
@@ -382,7 +363,6 @@ const syncToQuery = () => {
   if (filters.direction)                q.direction = filters.direction
   if (filters.freshness)                q.freshness = filters.freshness
   if (filters.mined)                    q.mined = filters.mined
-  if (!FORCE_COMMERCIAL && filters.commercial_only) q.commercial_only = 'true'
   if (filters.keyword)                  q.keyword = filters.keyword
   router.replace({ query: q })
 }
@@ -409,7 +389,6 @@ try {
 } catch {}
 
 onMounted(() => {
-  nextTick(_updateCols)
   restoreFromQuery()
   lastLoadedQueryStr = JSON.stringify(route.query)
   loadClusters(true)
@@ -473,7 +452,7 @@ const loadClusters = async (restoreScroll = false) => {
       page_size: pagination.pageSize,
       sort_by: filters.sort_by,
       sort_order: filters.sort_order,
-      balanced: true,
+      balanced: false,
     }
     if (filters.info_type) params.info_type = filters.info_type
     if (filters.direction) params.direction = filters.direction
@@ -484,7 +463,6 @@ const loadClusters = async (restoreScroll = false) => {
       params.mined = filters.mined
     }
     if (filters.keyword) params.keyword = filters.keyword
-    if (filters.commercial_only) params.commercial_only = true
     if (WECHAT_ONLY) params.wechat_only = true
 
     const res = await get('/topic-clusters', params)
@@ -526,7 +504,6 @@ const loadNextPage = async () => {
       params.mined = filters.mined
     }
     if (filters.keyword) params.keyword = filters.keyword
-    if (filters.commercial_only) params.commercial_only = true
     if (WECHAT_ONLY) params.wechat_only = true
 
     const res = await get('/topic-clusters', params)
@@ -573,20 +550,17 @@ const formatFreshness = (val) => {
   padding: 0 8px;
 }
 
-/* 瀑布流：JS 分列 + flex 实现横向排序 + 自适应高度 */
-.masonry {
-  display: flex;
-  gap: 20px;
-}
-.masonry-col {
-  flex: 1;
-  min-width: 0;          /* 防止长文本撑宽列 */
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-@media (max-width: 900px) { .masonry-col { min-width: calc(50% - 10px); } }
-@media (max-width: 640px) { .masonry { flex-direction: column; } }
+/* 小时级时间轴：左侧时间定位，右侧保留原卡片阅读密度。 */
+.timeline-list { position: relative; }
+.timeline-group { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 24px; position: relative; padding-bottom: 28px; }
+.timeline-group::before { content: ''; position: absolute; left: 123px; top: 24px; bottom: -4px; width: 1px; background: var(--line); }
+.timeline-group:last-child::before { bottom: 38px; }
+.timeline-aside { position: relative; padding-top: 6px; text-align: right; color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; }
+.timeline-aside time { white-space: nowrap; }
+.timeline-dot { position: absolute; right: -29px; top: 11px; width: 10px; height: 10px; border-radius: 50%; background: var(--clay); border: 3px solid var(--ivory); box-sizing: content-box; z-index: 1; }
+.timeline-cards { min-width: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+@media (max-width: 1180px) { .timeline-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .timeline-group { grid-template-columns: 82px minmax(0, 1fr); gap: 16px; }.timeline-group::before { left: 81px; }.timeline-dot { right: -21px; }.timeline-cards { grid-template-columns: 1fr; } }
 
 @media (max-width: 768px) {
   .filter-row { flex-wrap: wrap; }
@@ -602,10 +576,22 @@ const formatFreshness = (val) => {
   box-shadow: 0 1px 2px rgba(31,31,30,.04), 0 0 0 1px rgba(31,31,30,.04);
   overflow: hidden;        /* 长内容不撑破卡片 */
   word-break: break-word;  /* 长单词/URL 自动换行 */
+  display: flex;           /* 让内部 body 撑满等高卡片 */
+  flex-direction: column;
 }
 .cluster-card:hover {
   box-shadow: 0 4px 12px rgba(31,31,30,.06), 0 0 0 1px rgba(31,31,30,.04);
   transform: translateY(-2px);
+}
+/* 卡片主体竖向排布，spacer 吸收多余高度，标签+评分行贴底 */
+.cluster-card-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.cluster-card-spacer {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* 评分行：价值/热度/选题/原文（克制版，纯文字 + 衬线数字）*/
@@ -728,19 +714,6 @@ const formatFreshness = (val) => {
   color: #fff;
   border-color: var(--clay);
 }
-.type-chip-commercial {
-  border-color: #E6A23C;
-  color: #7A5200;
-  background: #FFF7E6;
-}
-.type-chip-commercial.type-chip-active {
-  background: #D68B16;
-  color: #fff;
-  border-color: #D68B16;
-}
-.type-chip-locked {
-  cursor: default;
-}
 .chip-tip {
   font-size: 11px;
   opacity: 0.8;
@@ -776,16 +749,6 @@ const formatFreshness = (val) => {
   color: var(--paper);
 }
 
-.tag-commercial {
-  display: inline-block;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  background: #FFE3B3;
-  color: #7A3E00;
-  border: 1px solid #F1C77F;
-}
 
 .tag-mined {
   display: inline-block;

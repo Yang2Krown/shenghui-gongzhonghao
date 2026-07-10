@@ -1,12 +1,14 @@
 """积分服务：余额查询、扣费、充值、交易记录。"""
 import logging
 from decimal import Decimal
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.credit import UserCredit, CreditTransaction, CreditPackage
+from app.core.timezone import utcnow
 from app.core.credit_config import (
     OPERATION_COSTS,
     CREDIT_PACKAGES,
@@ -15,6 +17,20 @@ from app.core.credit_config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def add_one_month(dt: datetime) -> datetime:
+    """在给定时间上加一个自然月（跨月/跨年安全，落到月末则取该月最后一天）。"""
+    year = dt.year + (dt.month // 12)
+    month = dt.month % 12 + 1
+    # 处理目标月天数不足（如 1/31 + 1 月 → 2/28）
+    if month == 12:
+        next_month_first = dt.replace(year=year + 1, month=1, day=1)
+    else:
+        next_month_first = dt.replace(year=year, month=month + 1, day=1)
+    last_day = (next_month_first - timedelta(days=1)).day
+    day = min(dt.day, last_day)
+    return dt.replace(year=year, month=month, day=day)
 
 
 class CreditService:
@@ -51,9 +67,94 @@ class CreditService:
         return account.balance
 
     async def get_account_info(self, user_id: int) -> Dict[str, Any]:
-        """获取用户积分账户详情"""
+        """获取用户积分账户详情（含订阅到期信息）"""
         account = await self.get_or_create_account(user_id)
-        return account.to_dict()
+        info = account.to_dict()
+        info.update(self._subscription_status(account))
+        return info
+
+    def _subscription_status(self, account: UserCredit) -> Dict[str, Any]:
+        """根据到期时间计算订阅状态，供前端展示"积分还有多久过期"。"""
+        expires_at = account.subscription_expires_at
+        if not expires_at:
+            return {
+                "is_subscription_active": False,
+                "subscription_expires_at": None,
+                "days_until_expire": None,
+            }
+        now = utcnow()
+        remaining = expires_at - now
+        days = remaining.days + (1 if remaining.seconds > 0 else 0) if remaining.total_seconds() > 0 else 0
+        return {
+            "is_subscription_active": expires_at > now,
+            "subscription_expires_at": expires_at.isoformat(),
+            "days_until_expire": max(days, 0),
+        }
+
+    async def activate_subscription(
+        self,
+        user_id: int,
+        gift_amount: int,
+        description: str = "创作工具订阅赠送积分",
+    ) -> UserCredit:
+        """开通/续订创作工具：延长一个月到期时间，并发放本期赠送积分。
+
+        - 未过期续订：在原到期时间基础上 +1 个月（不损失剩余天数）
+        - 已过期或首次：从当前时间 +1 个月
+        赠送积分累加到余额，并记一条 gift 流水。
+        """
+        account = await self.get_or_create_account(user_id)
+        now = utcnow()
+
+        base = account.subscription_expires_at
+        if base and base > now:
+            account.subscription_expires_at = add_one_month(base)
+        else:
+            account.subscription_expires_at = add_one_month(now)
+
+        account.gift_credits_at = now
+
+        # 发放本期赠送积分
+        account.balance += gift_amount
+        account.total_gifted += gift_amount
+        transaction = CreditTransaction(
+            user_id=user_id,
+            credit_account_id=account.id,
+            type="gift",
+            amount=gift_amount,
+            balance_after=account.balance,
+            description=description,
+        )
+        self.db.add(transaction)
+        await self.db.flush()
+
+        logger.info(
+            f"用户 {user_id} 订阅开通/续订成功，赠送 {gift_amount} 积分，"
+            f"到期 {account.subscription_expires_at}，余额 {account.balance}"
+        )
+        return account
+
+    async def expire_and_reset(self, user_id: int, reason: str = "订阅到期，积分清零") -> Optional[CreditTransaction]:
+        """订阅到期：把余额整体清零为 0，记一条 expire 负数流水。"""
+        account = await self.get_or_create_account(user_id)
+        if account.balance <= 0:
+            account.balance = 0
+            return None
+
+        cleared = account.balance
+        account.balance = 0
+        transaction = CreditTransaction(
+            user_id=user_id,
+            credit_account_id=account.id,
+            type="expire",
+            amount=-cleared,
+            balance_after=0,
+            description=reason,
+        )
+        self.db.add(transaction)
+        await self.db.flush()
+        logger.info(f"用户 {user_id} 订阅到期清零 {cleared} 积分，余额归 0")
+        return transaction
 
     # ====== 积分操作 ======
 

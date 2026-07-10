@@ -156,6 +156,8 @@ def _required_product_for_request(request: Request) -> Optional[str]:
         return None
     if relative == "/credits/membership":
         return None
+    if relative.startswith("/credits/products/"):
+        return None
     if relative.startswith("/credits/purchase/status/"):
         return None
     if relative == "/credits/pay/notify":

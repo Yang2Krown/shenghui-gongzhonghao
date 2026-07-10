@@ -329,6 +329,12 @@ const routes = [
     meta: { title: 'IP罗盘 — 创作不迷路，商单有方向' }
   },
   {
+    path: '/camp',
+    name: 'PracticalCampIntro',
+    component: () => import('@/pages/courses/PracticalCampIntro.vue'),
+    meta: { title: 'AI垂类公众号陪伴营 · 从选题到商业变现' }
+  },
+  {
     path: '/login',
     name: 'Login',
     component: () => import('@/pages/auth/Login.vue'),
@@ -374,44 +380,7 @@ const router = createRouter({
 })
 
 // 不需要登录的页面
-const PUBLIC_ROUTES = ['Login', 'NotFound', 'Landing', 'Terms', 'Privacy']
-
-const PRODUCT_LABELS = {
-  creation_tool: '创作工具',
-  potential_commercial: '潜在商单',
-  practical_camp: '实战营'
-}
-
-const requiredProductForRoute = (to) => {
-  if (to.meta.product) return to.meta.product
-  if (to.meta.requiresAdmin) return null
-  const path = to.path || ''
-  if (path.startsWith('/potential-commercial') || path.startsWith('/content-info/commercial')) {
-    return 'potential_commercial'
-  }
-  if (path.startsWith('/courses') || path.startsWith('/creation/practical')) {
-    return 'practical_camp'
-  }
-  if (
-    path === '/' ||
-    path.startsWith('/content-info') ||
-    path.startsWith('/topic-clusters') ||
-    path.startsWith('/legacy') ||
-    path.startsWith('/creation') ||
-    path.startsWith('/content-transform') ||
-    path.startsWith('/content-imitate') ||
-    path.startsWith('/creation-history') ||
-    path.startsWith('/history') ||
-    path.startsWith('/standalone-title') ||
-    path.startsWith('/munger-generation') ||
-    path.startsWith('/wechat-to-xhs') ||
-    path.startsWith('/custom-topic') ||
-    path.startsWith('/munger-scorer')
-  ) {
-    return 'creation_tool'
-  }
-  return null
-}
+const PUBLIC_ROUTES = ['Login', 'NotFound', 'Landing', 'PracticalCampIntro', 'Terms', 'Privacy']
 
 // 全局前置守卫
 router.beforeEach(async (to, from, next) => {
@@ -431,15 +400,7 @@ router.beforeEach(async (to, from, next) => {
   } else if (isPublic && userStore.isAuthenticated && to.name === 'Login') {
     // 已登录用户访问登录页 → 跳首页
     next({ path: '/' })
-  } else if (to.name === 'Landing' && userStore.isAuthenticated && userStore.isMember) {
-    // 已是会员访问 Landing 页 → 跳首页
-    next({ path: '/' })
   } else {
-    const requiredProduct = requiredProductForRoute(to)
-    if (userStore.isAuthenticated && requiredProduct && !userStore.hasProduct(requiredProduct)) {
-      next({ name: 'Landing', query: { show: 'membership', product: requiredProduct, productName: PRODUCT_LABELS[requiredProduct] } })
-      return
-    }
     next()
   }
 })

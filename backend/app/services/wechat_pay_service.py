@@ -18,7 +18,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.product_access import PRODUCT_CREATION_TOOL, grant_product_access, has_product_access
+from app.core.product_access import (
+    ALL_PRODUCTS,
+    PRODUCT_CREATION_TOOL,
+    PRODUCT_LABELS,
+    grant_product_access,
+    has_product_access,
+)
 from app.core.timezone import utcnow
 from app.models.payment import PaymentOrder
 from app.models.user import User
@@ -30,6 +36,13 @@ logger = logging.getLogger(__name__)
 MEMBERSHIP_FEE_FEN = 69900
 # 创作工具首次开通赠送积分
 MEMBERSHIP_GIFT_CREDITS = 6000
+
+# 产品价格只在服务端定义，前端展示价格不能作为下单金额来源。
+PRODUCT_PLANS = {
+    PRODUCT_CREATION_TOOL: {"amount_fen": 69900, "period": "月", "description": "IP罗盘 - 创作工具"},
+    "potential_commercial": {"amount_fen": 29900, "period": "月", "description": "IP罗盘 - 潜在商单"},
+    "practical_camp": {"amount_fen": 398000, "period": "年", "description": "IP罗盘 - AI垂类公众号实战营"},
+}
 
 
 class WechatPayService:
@@ -111,39 +124,48 @@ class WechatPayService:
         return order
 
     async def create_membership_order(self, user_id: int) -> PaymentOrder:
-        """创建创作工具支付订单（699 元），保留原 membership order_type 兼容前端。"""
+        """兼容旧入口：创建创作工具订单。"""
+        return await self.create_product_order(user_id, PRODUCT_CREATION_TOOL)
+
+    async def create_product_order(self, user_id: int, product: str) -> PaymentOrder:
+        """创建指定产品的 Native 扫码订单。"""
         self.require_configured()
 
-        # 安全检查 1：已开通创作工具则拒绝
+        if product not in ALL_PRODUCTS or product not in PRODUCT_PLANS:
+            raise ValueError("未知产品")
+        plan = PRODUCT_PLANS[product]
+
+        # 已拥有产品则拒绝重复下单（创作工具为订阅制，允许续订）。
         user_stmt = select(User).where(User.id == user_id)
         user = (await self.db.execute(user_stmt)).scalar_one_or_none()
         if not user:
             raise ValueError("用户不存在")
-        if has_product_access(user, PRODUCT_CREATION_TOOL):
-            raise ValueError("您已经开通创作工具，无需重复购买")
+        if product != PRODUCT_CREATION_TOOL and has_product_access(user, product):
+            raise ValueError(f"您已经开通{PRODUCT_LABELS[product]}，无需重复购买")
 
-        # 安全检查 2：复用未支付的会员订单（防止刷单）
+        # 复用同一产品待支付订单，防止重复刷单。
         pending_stmt = (
             select(PaymentOrder)
             .where(PaymentOrder.user_id == user_id)
-            .where(PaymentOrder.order_type == "membership")
+            .where(PaymentOrder.order_type == "product")
+            .where(PaymentOrder.package_name == product)
             .where(PaymentOrder.status == "PENDING")
             .order_by(PaymentOrder.created_at.desc())
             .limit(1)
         )
         existing = (await self.db.execute(pending_stmt)).scalar_one_or_none()
         if existing:
-            logger.info("[WechatPay] 复用待支付会员订单 out_trade_no=%s", existing.out_trade_no)
+            logger.info("[WechatPay] 复用待支付产品订单 out_trade_no=%s product=%s", existing.out_trade_no, product)
             return existing
 
-        # 金额硬编码防篡改
-        amount_fen = 1 if settings.WXPAY_TEST_MODE else MEMBERSHIP_FEE_FEN
+        # 金额硬编码防篡改；测试模式仍走 0.01 元。
+        amount_fen = 1 if settings.WXPAY_TEST_MODE else plan["amount_fen"]
 
         out_trade_no = self._generate_trade_no()
         payload = {
             "appid": settings.WXPAY_APP_ID,
             "mchid": settings.WXPAY_MCH_ID,
-            "description": "IP罗盘 - 创作工具",
+            "description": plan["description"],
             "out_trade_no": out_trade_no,
             "notify_url": settings.WXPAY_NOTIFY_URL,
             "amount": {
@@ -160,7 +182,7 @@ class WechatPayService:
             )
 
         if response.status_code >= 400:
-            logger.error("[WechatPay] 会员下单失败 status=%s body=%s", response.status_code, response.text)
+            logger.error("[WechatPay] 产品下单失败 status=%s body=%s", response.status_code, response.text)
             raise ValueError("微信支付下单失败")
 
         data = response.json()
@@ -171,8 +193,8 @@ class WechatPayService:
         order = PaymentOrder(
             out_trade_no=out_trade_no,
             user_id=user_id,
-            order_type="membership",
-            package_name="membership",
+            order_type="product",
+            package_name=product,
             amount_fen=amount_fen,
             credits=0,
             status="PENDING",
@@ -181,7 +203,7 @@ class WechatPayService:
         )
         self.db.add(order)
         await self.db.flush()
-        logger.info("[WechatPay] 创作工具订单创建成功 out_trade_no=%s user_id=%s", out_trade_no, user_id)
+        logger.info("[WechatPay] 产品订单创建成功 out_trade_no=%s user_id=%s product=%s", out_trade_no, user_id, product)
         return order
 
     async def get_order(self, out_trade_no: str, user_id: Optional[int] = None) -> Optional[PaymentOrder]:
@@ -221,12 +243,16 @@ class WechatPayService:
             logger.warning("[WechatPay] 回调订单不存在 out_trade_no=%s", out_trade_no)
             return None
 
+        # 先校验外部交易数据，再进入数据库行锁；无效回调不应占用/修改订单。
+        self._validate_transaction_matches_order(transaction, order)
+
         # 行锁：防止并发回调重复入账
         lock_stmt = select(PaymentOrder).where(PaymentOrder.id == order.id).with_for_update()
         order = (await self.db.execute(lock_stmt)).scalar_one_or_none()
         if not order:
             return None
 
+        # 锁定后再次校验，确保并发场景中订单记录未被改写。
         self._validate_transaction_matches_order(transaction, order)
         order.notify_raw = body
         if order.status == "PAID":
@@ -237,31 +263,44 @@ class WechatPayService:
         order.paid_at = self._parse_success_time(success_time) or utcnow()
 
         # 根据订单类型执行不同的入账逻辑（同一事务内完成）
-        if order.order_type == "membership":
-            # 历史 membership 订单：开通创作工具权益 + 赠送 6000 积分
+        if order.order_type in {"membership", "product"}:
+            # 历史 membership 订单默认是创作工具；新订单记录具体产品键。
+            product = order.package_name if order.package_name in ALL_PRODUCTS else PRODUCT_CREATION_TOOL
             user_stmt = select(User).where(User.id == order.user_id)
             user = (await self.db.execute(user_stmt)).scalar_one_or_none()
-            if user and not has_product_access(user, PRODUCT_CREATION_TOOL):
-                grant_product_access(user, PRODUCT_CREATION_TOOL)
+            if not user:
+                logger.warning("[WechatPay] 回调用户不存在 out_trade_no=%s", out_trade_no)
+            elif product == PRODUCT_CREATION_TOOL:
+                # 创作工具：按月订阅。开通或续订都延长一个月并发放本期赠送积分。
+                grant_product_access(user, product)
                 user.is_member = True
-                user.member_since = utcnow()
+                user.member_since = user.member_since or utcnow()
                 self.db.add(user)
-                # 赠送 6000 积分（同一事务内完成）
                 credit_service = CreditService(self.db)
-                await credit_service.gift_credits(
+                await credit_service.activate_subscription(
                     user_id=order.user_id,
-                    amount=MEMBERSHIP_GIFT_CREDITS,
-                    description="创作工具开通赠送积分",
+                    gift_amount=MEMBERSHIP_GIFT_CREDITS,
+                    description="创作工具订阅赠送积分",
                 )
                 logger.info(
-                    "[WechatPay] 创作工具开通成功+赠送积分 out_trade_no=%s user_id=%s credits=%s",
-                    out_trade_no, order.user_id, MEMBERSHIP_GIFT_CREDITS,
+                    "[WechatPay] 创作工具订阅开通/续订成功 out_trade_no=%s user_id=%s",
+                    out_trade_no, order.user_id,
                 )
-            elif user and has_product_access(user, PRODUCT_CREATION_TOOL):
+            elif not has_product_access(user, product):
+                # 其它产品（潜在商单/实战营）：一次性开通
+                grant_product_access(user, product)
+                user.is_member = True
+                user.member_since = user.member_since or utcnow()
+                self.db.add(user)
+                logger.info(
+                    "[WechatPay] 产品开通成功 out_trade_no=%s user_id=%s product=%s",
+                    out_trade_no, order.user_id, product,
+                )
+            else:
                 # 幂等：已经开通（可能回调重复），仅记录日志
                 logger.info(
-                    "[WechatPay] 用户已开通创作工具，跳过重复开通 out_trade_no=%s user_id=%s",
-                    out_trade_no, order.user_id,
+                    "[WechatPay] 用户已开通产品，跳过重复开通 out_trade_no=%s user_id=%s product=%s",
+                    out_trade_no, order.user_id, product,
                 )
         else:
             # 积分套餐订单：充值积分

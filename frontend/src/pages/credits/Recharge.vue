@@ -12,6 +12,14 @@
           <span class="number">{{ creditStore.formattedBalance }}</span>
           <span class="unit">积分</span>
         </div>
+        <div v-if="creditStore.isSubscriptionActive" class="expire-hint">
+          <span class="dot"></span>
+          距积分过期还剩 <strong>{{ creditStore.daysUntilExpire }}</strong> 天 · {{ creditStore.expireDateText }} 清零
+        </div>
+        <div v-else class="expire-hint inactive">
+          <span class="dot"></span>
+          未开通创作工具订阅，积分暂不可用
+        </div>
       </div>
       <button class="history-btn" @click="router.push('/creation-history')">
         消耗记录
@@ -43,9 +51,9 @@
 
     <!-- 说明 -->
     <div class="tips">
-      <p>· 开通会员赠送 6000 积分</p>
-      <p>· 积分永不过期，操作失败不扣费</p>
-      <p>· 1 积分 = ¥0.10</p>
+      <p>· 创作工具 ¥699 / 月，开通即赠 6000 积分</p>
+      <p>· <strong>积分一个月过期</strong>：订阅到期后余额整体清零，需续费重新开通</p>
+      <p>· 操作失败不扣费 · 1 积分 = ¥0.10</p>
     </div>
 
     <el-dialog
@@ -93,7 +101,7 @@ const checkingPay = ref(false)
 
 onMounted(async () => {
   await Promise.all([
-    creditStore.fetchBalance(),
+    creditStore.fetchAccount(),
     creditStore.fetchPackages(),
   ])
 })
@@ -156,7 +164,7 @@ const checkStatusOnce = async (tradeNo = activeOrder.value?.out_trade_no) => {
     if (data.status === 'PAID') {
       stopPolling()
       payDialogVisible.value = false
-      await creditStore.fetchBalance()
+      await creditStore.fetchAccount()
       ElMessage.success('支付成功，积分已到账')
     }
   } finally {
@@ -236,6 +244,39 @@ const checkStatusOnce = async (tradeNo = activeOrder.value?.out_trade_no) => {
 .balance-amount .unit {
   font-size: 14px;
   color: var(--ink-3);
+}
+
+.expire-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 5px 12px;
+  border-radius: var(--r-pill);
+  font-size: 12.5px;
+  color: var(--clay-deep);
+  background: var(--clay-tint);
+}
+
+.expire-hint strong {
+  font-weight: 700;
+}
+
+.expire-hint .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--clay);
+  flex-shrink: 0;
+}
+
+.expire-hint.inactive {
+  color: var(--ink-3);
+  background: var(--bone);
+}
+
+.expire-hint.inactive .dot {
+  background: var(--ink-4);
 }
 
 /* 套餐 */

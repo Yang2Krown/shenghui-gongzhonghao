@@ -10,9 +10,10 @@
         <div class="nav-links">
           <a href="#features">产品功能</a>
           <a href="#tools">创作工具箱</a>
+          <a class="nav-camp" @click="goCamp">实战营</a>
         </div>
         <div class="nav-cta">
-          <button class="btn btn-primary" @click="openLogin">立即开始 <span class="btn-arrow">→</span></button>
+          <PublicLoginButton @authenticated="goToWorkspace" />
         </div>
       </div>
     </nav>
@@ -44,7 +45,7 @@
               陪创作者从内容经营走向商业合作：从信息选题、内容生产到潜在商单识别，把每一次创作都校准到更清晰的增长方向。
             </p>
             <div class="hero-actions">
-              <MagnetButton @click="openLogin">
+              <MagnetButton @click="startCreationTool">
                 <button class="star-btn"><span>立即开始使用 <span class="btn-arrow">→</span></span></button>
               </MagnetButton>
               <a href="#features" class="btn btn-ghost btn-lg">看罗盘怎么跑</a>
@@ -278,8 +279,8 @@
           从海量信息中提炼选题，到打磨出可发布的公众号文章——全流程自动化，你只做最终审核。
         </p>
         <div class="hero-actions fade-up" style="justify-content:center;position:relative;z-index:1">
-          <MagnetButton @click="openLogin">
-            <button class="star-btn"><span>免费试用 <span class="btn-arrow">→</span></span></button>
+          <MagnetButton @click="startCreationTool">
+            <button class="star-btn"><span>立即开始 <span class="btn-arrow">→</span></span></button>
           </MagnetButton>
           <a href="#features" class="btn btn-ghost btn-lg">了解更多</a>
         </div>
@@ -354,28 +355,25 @@
         <!-- 支付成功 -->
         <div v-if="membershipPaid" class="modal-success active">
           <div class="icon" style="background:var(--clay)">✓</div>
-          <h4>创作工具开通成功</h4>
-          <p>已赠送 6000 积分，即将进入工作台…</p>
+          <h4>{{ requestedProductLabel }}开通成功</h4>
+          <p>{{ requestedProduct === 'creation_tool' ? '已赠送 6000 积分，' : '' }}正在为你进入对应页面…</p>
         </div>
 
         <!-- 正常流程 -->
         <div v-else>
           <h3>开通{{ requestedProductLabel }}</h3>
-          <p v-if="requestedProduct !== 'creation_tool'" class="modal-sub">
-            当前账号尚未开通{{ requestedProductLabel }}。该产品暂不支持页面自助开通，请联系最高管理员为手机号配置产品权益。
-          </p>
-          <p v-else class="modal-sub">一次性购买创作工具 ¥{{ membershipPrice }}，开通 AI 创作相关功能。购买后赠送 6000 积分。</p>
+          <p class="modal-sub">{{ currentPlan.description }}</p>
 
-          <div v-if="requestedProduct === 'creation_tool'" class="benefits-list">
-            <div class="benefit-item" v-for="b in membershipBenefits" :key="b">
+          <div class="benefits-list">
+            <div class="benefit-item" v-for="b in currentPlan.benefits" :key="b">
               <span class="benefit-check">✓</span> {{ b }}
             </div>
           </div>
 
-          <div v-if="requestedProduct === 'creation_tool'" class="price-row" style="text-align:center;margin-bottom:20px;padding:16px 0;border-top:1px dashed var(--line-2);border-bottom:1px dashed var(--line-2)">
+          <div class="price-row" style="text-align:center;margin-bottom:20px;padding:16px 0;border-top:1px dashed var(--line-2);border-bottom:1px dashed var(--line-2)">
             <span style="font-size:18px;color:var(--ink-3);vertical-align:top">¥</span>
             <span style="font-size:42px;font-weight:700;color:var(--clay)">{{ membershipPrice }}</span>
-            <span style="font-size:14px;color:var(--ink-3);margin-left:4px">/ 永久</span>
+            <span style="font-size:14px;color:var(--ink-3);margin-left:4px">/ {{ currentPlan.period }}</span>
           </div>
 
           <div v-if="membershipOrder" style="text-align:center;margin-bottom:20px">
@@ -394,11 +392,8 @@
 
           <div v-if="membershipError" class="modal-error active"><strong>提示</strong>{{ membershipError }}</div>
 
-          <button v-if="requestedProduct === 'creation_tool' && !membershipOrder" class="btn btn-primary btn-submit" :disabled="membershipLoading" @click="createMembershipOrder">
-            {{ membershipLoading ? '创建订单中...' : `立即开通创作工具 ¥${membershipPrice}` }}
-          </button>
-          <button v-else-if="requestedProduct !== 'creation_tool'" class="btn btn-primary btn-submit" @click="dismissMembership">
-            我知道了
+          <button v-if="!membershipOrder" class="btn btn-primary btn-submit" :disabled="membershipLoading" @click="createMembershipOrder">
+            {{ membershipLoading ? '创建订单中...' : `立即开通${requestedProductLabel} ¥${membershipPrice} / ${currentPlan.period}` }}
           </button>
 
           <div class="modal-foot">
@@ -417,6 +412,7 @@ import { useUserStore } from '@/stores/user'
 import { sendSmsCode, loginByPhone } from '@/api/auth'
 import { post, get } from '@/api/api'
 import { ElMessage } from 'element-plus'
+import PublicLoginButton from '@/components/product/PublicLoginButton.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -444,6 +440,28 @@ const openLogin = () => {
   loginError.value = ''
   loginCountdown.value = 0
   loginOpen.value = true
+}
+
+const goCamp = () => {
+  router.push('/camp')
+}
+
+// 产品入口只处理本产品的权限；登录本身不再默认开通或跳转任何产品。
+const startCreationTool = () => {
+  if (!userStore.isAuthenticated) {
+    loginIntent.value = 'creation_tool'
+    openLogin()
+    return
+  }
+  if (userStore.hasProduct('creation_tool') || userStore.isAdmin) {
+    router.push('/')
+    return
+  }
+  openMembership('creation_tool')
+}
+
+const goToWorkspace = () => {
+  if (userStore.hasProduct('creation_tool') || userStore.isAdmin) router.push('/')
 }
 
 const sendCode = async () => {
@@ -505,12 +523,18 @@ const submitLogin = async () => {
 
 const goToDashboard = () => {
   loginOpen.value = false
-  // 非会员 → 直接打开会员弹窗（不跳路由，避免 onMounted 不重新执行）
-  if (userStore.isAuthenticated && !userStore.isMember && !userStore.isAdmin) {
-    openMembership()
+  const intent = loginIntent.value || route.query.intent
+  loginIntent.value = ''
+  // 从产品 CTA 触发登录后，回到同一个产品继续完成开通；右上角登录仅建立登录状态。
+  if (intent === 'practical_camp') {
+    router.push({ path: '/camp', query: { openPay: '1' } })
     return
   }
-  router.push(route.query.redirect || '/')
+  if (intent === 'creation_tool') {
+    openMembership('creation_tool')
+    return
+  }
+  router.push(route.query.redirect || '/landing')
 }
 
 /* ── Membership Modal ── */
@@ -518,21 +542,13 @@ const membershipOpen = ref(false)
 const membershipPaid = ref(false)
 const membershipOrder = ref(null)
 const membershipQrUrl = ref('')
-const membershipPrice = ref(0.01)
+const membershipPrice = ref(699)
 const membershipLoading = ref(false)
 const membershipPolling = ref(false)
 const membershipError = ref('')
 const requestedProduct = ref('creation_tool')
+const loginIntent = ref('')
 let membershipTimer = null
-
-const membershipBenefits = [
-  'AI 选题挖掘：20+ 数据源智能推荐',
-  'AI 全流程创作：大纲→正文→标题',
-  'AI 文案润色、续写、仿写、转写',
-  '公众号编辑器 + 草稿箱发布',
-  '小红书跨平台改编与发布',
-  '购买创作工具赠送 6000 积分',
-]
 
 const productLabels = {
   creation_tool: '创作工具',
@@ -541,9 +557,31 @@ const productLabels = {
 }
 
 const requestedProductLabel = computed(() => productLabels[requestedProduct.value] || '对应产品')
+const productPlans = {
+  creation_tool: {
+    price: 699, period: '月',
+    description: '订阅创作工具，开通信息选题、创作工具、内容仿写和创作历史。每月赠送 6000 积分。',
+    benefits: ['AI 选题挖掘：20+ 数据源智能推荐', 'AI 全流程创作：大纲→正文→标题', 'AI 文案润色、续写、仿写、转写', '公众号编辑器 + 草稿箱发布', '每月赠送 6000 积分'],
+    fallback: '/',
+  },
+  potential_commercial: {
+    price: 299, period: '月',
+    description: '订阅潜在商单，解锁品牌投放线索、投放账号、时间和原文链接。',
+    benefits: ['品牌投放聚合与趋势筛选', '投放账号、时间和文章线索', '潜在商单原文与判断依据'],
+    fallback: '/potential-commercial',
+  },
+  practical_camp: {
+    price: 3980, period: '年',
+    description: '报名 AI 垂类公众号实战营，开通完整课程资料与实战讲义。',
+    benefits: ['完整课程资料与章节讲义', '从选题到商业变现的方法论', '实战营专属学习内容'],
+    fallback: '/courses',
+  },
+}
+const currentPlan = computed(() => productPlans[requestedProduct.value] || productPlans.creation_tool)
 
-const openMembership = () => {
-  requestedProduct.value = route.query.product || 'creation_tool'
+const openMembership = (product) => {
+  requestedProduct.value = product || route.query.product || 'creation_tool'
+  membershipPrice.value = currentPlan.value.price
   if (
     userStore.isAuthenticated &&
     (userStore.hasProduct(requestedProduct.value) || userStore.isAdmin)
@@ -561,8 +599,7 @@ const openMembership = () => {
 const closeMembership = () => {
   membershipOpen.value = false
   if (membershipTimer) { clearInterval(membershipTimer); membershipTimer = null }
-  userStore.clearAuth()
-  window.location.href = '/landing'
+  router.replace('/landing')
 }
 
 const dismissMembership = () => {
@@ -575,7 +612,7 @@ const createMembershipOrder = async () => {
   membershipLoading.value = true
   membershipError.value = ''
   try {
-    const res = await post('/credits/membership')
+    const res = await post(`/credits/products/${requestedProduct.value}`)
     membershipOrder.value = res.data
     if (res.data.amount_yuan) membershipPrice.value = res.data.amount_yuan
     membershipQrUrl.value = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(res.data.code_url)}`
@@ -598,7 +635,8 @@ const startMembershipPolling = (outTradeNo) => {
         clearInterval(membershipTimer)
         membershipTimer = null
         await userStore.fetchUser()
-        setTimeout(() => { membershipOpen.value = false; router.push('/') }, 2000)
+        const target = route.query.redirect || currentPlan.value.fallback
+        setTimeout(() => { membershipOpen.value = false; router.push(target) }, 1400)
       }
     } catch { /* 静默重试 */ }
   }, 3000)
@@ -608,6 +646,8 @@ const startMembershipPolling = (outTradeNo) => {
 watch(() => route.query.show, (val) => {
   if (val === 'membership' && !membershipOpen.value) {
     openMembership()
+  } else if (val === 'login' && !loginOpen.value) {
+    openLogin()
   }
 }, { immediate: true })
 
@@ -667,6 +707,8 @@ onMounted(() => {
   // 检查是否需要打开会员弹窗
   if (route.query.show === 'membership') {
     openMembership()
+  } else if (route.query.show === 'login') {
+    openLogin()
   }
 
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -1113,6 +1155,7 @@ export default {
 .nav-links { display: flex; gap: 28px; margin-left: 24px; }
 .nav-links a { font-size: 14px; color: var(--ink-2); font-weight: 500; transition: color .15s; }
 .nav-links a:hover { color: var(--clay-deep); }
+.nav-links a.nav-camp { cursor: pointer; }
 .nav-cta { margin-left: auto; display: flex; gap: 10px; align-items: center; }
 
 /* Buttons */

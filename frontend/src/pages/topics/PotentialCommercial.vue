@@ -3,7 +3,7 @@
     <div class="pc-header">
       <div>
         <h1 class="pc-title">潜在商单</h1>
-        <p class="pc-subtitle">按品牌聚合公众号投放，快速查看投放账号、时间和链接</p>
+        <p class="pc-subtitle">按品牌聚合公众号投放，仅展示近 10 天内的有效信息</p>
       </div>
       <div class="pc-stats" v-if="total > 0">
         <div><b>{{ brandCount }}</b><span>品牌</span></div>
@@ -41,11 +41,7 @@
           placeholder="搜索品牌、产品、标题、摘要"
           @keyup.enter="fetchGroups"
         />
-        <div class="pc-days">
-          <button v-for="d in [7, 30, 90, 180]" :key="d" :class="{ on: days === d }" @click="changeDays(d)">
-            {{ d }}天
-          </button>
-        </div>
+        <button class="pc-search-btn" :disabled="loading" @click="fetchGroups">搜索确认</button>
       </div>
     </div>
 
@@ -170,7 +166,7 @@ const categoryOptions = ref([])
 const selectedBrand = ref('')
 const selectedCategory = ref('')
 const keyword = ref('')
-const days = ref(30)
+const DISPLAY_WINDOW_DAYS = 10
 
 const drawerVisible = ref(false)
 const detailItem = ref(null)
@@ -206,15 +202,16 @@ const fetchFilters = async () => {
 const fetchGroups = async () => {
   loading.value = true
   try {
-    const params = { days: days.value }
+    // 接口按相同窗口预筛一次；前端仍会再次过滤，确保任何异常数据都不会露出。
+    const params = { days: DISPLAY_WINDOW_DAYS }
     if (selectedBrand.value) params.brand = selectedBrand.value
     if (selectedCategory.value) params.category = selectedCategory.value
     if (keyword.value.trim()) params.keyword = keyword.value.trim()
     const res = await api.get('/commercial/groups', { params })
     const data = res.data || {}
-    groups.value = data.groups || []
-    total.value = data.total || 0
-    brandCount.value = data.brand_count || groups.value.length
+    groups.value = keepRecentGroups(data.groups || [])
+    total.value = groups.value.reduce((sum, group) => sum + group.count, 0)
+    brandCount.value = groups.value.length
   } catch (e) {
     console.error(e)
     ElMessage.error('获取潜在商单失败')
@@ -225,15 +222,9 @@ const fetchGroups = async () => {
 
 const toggleBrand = (value) => {
   selectedBrand.value = selectedBrand.value === value ? '' : value
-  fetchGroups()
 }
 const toggleCategory = (value) => {
   selectedCategory.value = selectedCategory.value === value ? '' : value
-  fetchGroups()
-}
-const changeDays = (value) => {
-  days.value = value
-  fetchGroups()
 }
 const openDetail = (item) => {
   detailGroup.value = null
@@ -273,6 +264,31 @@ const timeLabel = (item) => {
   return '时间未知'
 }
 
+const isWithinDisplayWindow = (item) => {
+  const timestamp = item.published_at || item.scraped_at
+  const time = timestamp ? new Date(timestamp).getTime() : NaN
+  return Number.isFinite(time) && time >= Date.now() - DISPLAY_WINDOW_DAYS * 24 * 60 * 60 * 1000
+}
+
+const keepRecentGroups = (sourceGroups) => sourceGroups
+  .map((group) => {
+    const items = (group.items || []).filter(isWithinDisplayWindow)
+    const accounts = [...new Set(items
+      .map(item => item.source_account_name || item.author)
+      .filter(Boolean))]
+    return {
+      ...group,
+      items,
+      accounts,
+      count: items.length,
+      last_time: items.reduce((latest, item) => {
+        const value = item.published_at || item.scraped_at
+        return !latest || (value && new Date(value) > new Date(latest)) ? value : latest
+      }, null),
+    }
+  })
+  .filter(group => group.items.length > 0)
+
 onMounted(() => {
   fetchFilters()
   fetchGroups()
@@ -281,47 +297,55 @@ onMounted(() => {
 
 <style scoped>
 .pc-page { max-width: 1240px; margin: 0 auto; }
-.pc-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 22px; }
-.pc-title { margin: 0; color: var(--ink); font-size: 28px; font-weight: 700; }
-.pc-subtitle { margin: 6px 0 0; color: var(--ink-4); font-size: 14px; }
-.pc-stats { display: flex; gap: 10px; }
-.pc-stats div { min-width: 86px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
-.pc-stats b { display: block; color: var(--clay); font-size: 20px; }
-.pc-stats span { color: var(--ink-4); font-size: 12px; }
-.pc-filters { padding: 14px 16px; margin-bottom: 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
-.pc-filter-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
-.pc-filter-label { width: 34px; color: var(--ink-4); font-size: 12px; font-weight: 700; }
-.pc-chip { border: 1px solid var(--line); background: var(--paper-soft, #fff); color: var(--ink-3); border-radius: 999px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+.pc-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 24px; }
+.pc-title { margin: 0; color: var(--ink); font-family: var(--font-serif, var(--serif)); font-size: 30px; font-weight: 500; letter-spacing: -.03em; }
+.pc-subtitle { margin: 7px 0 0; color: var(--ink-4); font-size: 14px; }
+.pc-stats { display: flex; gap: 8px; }
+.pc-stats div { min-width: 90px; padding: 11px 15px; border: 1px solid var(--line); border-radius: var(--r-sm, 8px); background: var(--paper); }
+.pc-stats b { display: block; color: var(--clay); font-family: var(--font-serif, var(--serif)); font-size: 22px; line-height: 1.1; }
+.pc-stats span { display: block; margin-top: 5px; color: var(--ink-4); font-size: 12px; }
+.pc-filters { padding: 17px 18px 18px; margin-bottom: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); box-shadow: 0 8px 24px rgba(71, 54, 39, .035); }
+.pc-filter-line { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 12px; }
+.pc-filter-label { width: 36px; color: var(--ink-4); font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+.pc-chip { border: 1px solid var(--line); background: var(--paper); color: var(--ink-3); border-radius: 999px; padding: 5px 10px; font-size: 12px; line-height: 1.35; cursor: pointer; transition: border-color .18s ease, background .18s ease, color .18s ease; }
+.pc-chip:hover { border-color: var(--clay-soft, var(--clay)); color: var(--ink); }
 .pc-chip.is-on { border-color: var(--clay); color: var(--clay); background: var(--clay-tint); }
 .pc-chip em { margin-left: 5px; font-style: normal; color: var(--ink-4); }
-.pc-toolbar { display: flex; justify-content: space-between; gap: 12px; }
-.pc-search { flex: 1; min-width: 220px; height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-.pc-days { display: flex; gap: 4px; }
-.pc-days button { height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer; }
-.pc-days button.on { border-color: var(--clay); color: var(--clay); background: var(--clay-tint); }
-.pc-loading, .pc-empty { padding: 54px 20px; text-align: center; color: var(--ink-4); border: 1px dashed var(--line); border-radius: 8px; background: var(--paper); }
-.pc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.brand-card { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
-.brand-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.brand-head h2 { margin: 0; color: var(--ink); font-size: 20px; }
+.pc-chip.is-on em { color: var(--clay); }
+.pc-toolbar { display: flex; gap: 10px; padding-top: 3px; border-top: 1px solid var(--bone); }
+.pc-search { flex: 1; min-width: 220px; height: 38px; padding: 0 13px; border: 1px solid var(--line); border-radius: 8px; outline: none; background: var(--ivory); color: var(--ink); font: inherit; transition: border-color .18s ease, box-shadow .18s ease; }
+.pc-search::placeholder { color: var(--ink-4); }
+.pc-search:focus { border-color: var(--clay-soft, var(--clay)); box-shadow: 0 0 0 3px var(--clay-tint); }
+.pc-search-btn { min-width: 94px; height: 38px; border: 1px solid var(--clay); border-radius: 8px; background: var(--clay); color: var(--paper); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .18s ease, border-color .18s ease, transform .18s ease; }
+.pc-search-btn:hover { border-color: var(--clay-deep, var(--clay)); background: var(--clay-deep, var(--clay)); }
+.pc-search-btn:active { transform: translateY(1px); }
+.pc-search-btn:disabled { cursor: wait; opacity: .65; }
+.pc-loading, .pc-empty { padding: 54px 20px; text-align: center; color: var(--ink-4); border: 1px dashed var(--line); border-radius: 12px; background: var(--paper); }
+.pc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.brand-card { padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); transition: border-color .18s ease, box-shadow .18s ease; }
+.brand-card:hover { border-color: var(--clay-soft, var(--line)); box-shadow: 0 10px 28px rgba(71, 54, 39, .05); }
+.brand-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.brand-head h2 { margin: 0; color: var(--ink); font-family: var(--font-serif, var(--serif)); font-size: 22px; font-weight: 500; }
 .brand-head p { margin: 4px 0 0; color: var(--ink-4); font-size: 13px; }
 .brand-count { align-self: flex-start; border-radius: 999px; background: var(--bone); color: var(--ink-3); padding: 5px 10px; font-size: 12px; }
 .brand-count.hot { color: var(--clay); background: var(--clay-tint); }
-.brand-meta { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
-.brand-meta div { padding: 9px; border-radius: 8px; background: rgba(0,0,0,.025); min-width: 0; }
+.brand-meta { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 13px; }
+.brand-meta div { padding: 10px; border-radius: 8px; background: var(--bone); min-width: 0; }
 .brand-meta span { display: block; margin-bottom: 4px; color: var(--ink-4); font-size: 12px; }
 .brand-meta strong { display: block; color: var(--ink-2); font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .detail ul { margin: 0; padding-left: 18px; color: var(--ink-3); font-size: 13px; line-height: 1.7; }
 .placements { display: flex; flex-direction: column; gap: 8px; }
-.placement { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.placement { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); transition: border-color .18s ease, background .18s ease; }
+.placement:hover { border-color: var(--clay-soft, var(--line)); background: var(--ivory); }
 .placement-main { min-width: 0; flex: 1; cursor: pointer; }
 .placement-title { color: var(--ink); font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .placement-sub { display: flex; gap: 10px; margin-top: 5px; color: var(--ink-4); font-size: 12px; }
 .placement-insight { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .placement-insight span { max-width: 100%; padding: 3px 7px; border-radius: 999px; background: rgba(80, 52, 31, .05); color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.level { color: #7a5a00; }
-.level.likely { color: #b42318; }
-.link-btn, .more-btn { border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink-3); cursor: pointer; }
+.level { color: var(--clay); }
+.level.likely { color: var(--clay-deep, var(--clay)); font-weight: 600; }
+.link-btn, .more-btn { border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink-3); cursor: pointer; transition: border-color .18s ease, color .18s ease, background .18s ease; }
+.link-btn:hover, .more-btn:hover { border-color: var(--clay-soft, var(--clay)); background: var(--clay-tint); color: var(--clay); }
 .link-btn { padding: 6px 9px; }
 .more-btn { width: 100%; margin-top: 10px; padding: 8px; }
 .detail h3 { margin: 0 0 12px; color: var(--ink); line-height: 1.35; }
@@ -337,6 +361,7 @@ onMounted(() => {
 .drawer-list { margin-top: 12px; }
 @media (max-width: 900px) {
   .pc-header, .pc-toolbar { flex-direction: column; align-items: stretch; }
+  .pc-search-btn { width: 100%; }
   .pc-grid { grid-template-columns: 1fr; }
   .brand-meta { grid-template-columns: 1fr; }
 }

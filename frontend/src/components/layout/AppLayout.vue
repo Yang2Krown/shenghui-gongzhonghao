@@ -96,7 +96,7 @@
           <span class="font-semibold text-ink-2">{{ currentLabel }}</span>
         </div>
         <!-- 积分余额 -->
-        <div class="credit-topbar-wrap">
+        <div v-if="hasCreationTool" class="credit-topbar-wrap">
           <button class="credit-topbar" @click="router.push('/credits/recharge')" :class="{ 'credit-animate': creditAnimating }">
             <span class="credit-icon">💰</span>
             <span class="credit-amount">{{ creditStore.formattedBalance }}</span>
@@ -117,7 +117,8 @@
         <div style="padding: 32px 32px 80px;" class="fade-in">
           <router-view v-slot="{ Component, route }">
             <keep-alive :include="['TopicClusterList']">
-              <component :is="Component" :key="route.name" />
+              <component v-if="!previewProduct" :is="Component" :key="route.name" />
+              <ProductPreview v-else :product="previewProduct" />
             </keep-alive>
           </router-view>
         </div>
@@ -141,6 +142,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useCreditStore } from '@/stores/credit'
 import InsufficientCreditsDialog from '@/components/credit/InsufficientCreditsDialog.vue'
+import ProductPreview from '@/components/product/ProductPreview.vue'
 import {
   Edit, Setting, ArrowRight, Expand, Fold, User,
   Document, ChatDotSquare, Switch, EditPen, Clock, View, Reading
@@ -158,6 +160,25 @@ const IconTitle = ChatDotSquare
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+
+const productForPath = (path) => {
+  if (path.startsWith('/potential-commercial') || path.startsWith('/content-info/commercial')) return 'potential_commercial'
+  if (path.startsWith('/courses') || path.startsWith('/creation/practical')) return 'practical_camp'
+  if (
+    path === '/' || path.startsWith('/content-info') || path.startsWith('/topic-clusters') ||
+    path.startsWith('/legacy') || path.startsWith('/creation') || path.startsWith('/content-transform') ||
+    path.startsWith('/content-imitate') || path.startsWith('/creation-history') || path.startsWith('/history') ||
+    path.startsWith('/standalone-title') || path.startsWith('/munger-generation') || path.startsWith('/wechat-to-xhs') ||
+    path.startsWith('/custom-topic') || path.startsWith('/munger-scorer')
+  ) return 'creation_tool'
+  return null
+}
+
+const previewProduct = computed(() => {
+  const required = route.meta?.product || productForPath(route.path)
+  return required && !userStore.hasProduct(required) ? required : null
+})
+const hasCreationTool = computed(() => userStore.hasProduct('creation_tool'))
 const creditStore = useCreditStore()
 
 const isCollapsed = ref(false)
@@ -195,8 +216,8 @@ const handleInsufficientCredits = (event) => {
 
 onMounted(() => {
   window.addEventListener('insufficient-credits', handleInsufficientCredits)
-  // 初始化积分余额
-  creditStore.fetchBalance()
+  // 积分只属于创作工具；实战营用户不请求该接口，避免被创作工具门禁误拦。
+  if (hasCreationTool.value) creditStore.fetchBalance()
 })
 
 onUnmounted(() => {

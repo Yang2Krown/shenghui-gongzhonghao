@@ -116,7 +116,7 @@ async def get_topic_clusters(
     keyword: Optional[str] = Query(None),
     commercial_only: bool = Query(False, description="True=仅显示含潜在商单原文的话题"),
     wechat_only: bool = Query(False, description="True=仅按公众号来源过滤/统计潜在商单"),
-    sort_by: str = Query("display_score", description="display_score / heat_score / created_at / source_count"),
+    sort_by: str = Query("display_score", description="display_score / heat_score / timeline_at / created_at / source_count"),
     sort_order: str = Query("desc"),
     balanced: bool = Query(True, description="True=每类保底配额，False=纯分数排序"),
 ) -> Any:
@@ -138,6 +138,14 @@ async def get_topic_clusters(
     # 时效自然日边界（北京时间）：今日 / 昨日 / 两天前
     start_today = _now.replace(hour=0, minute=0, second=0, microsecond=0)
     start_yesterday = start_today - timedelta(days=1)
+    # 时间轴统一规则：发布时间优先；没有发布时间时取最近抓取时间；最后才用聚类创建时间。
+    latest_scraped_at = (
+        select(func.max(RawInfo.scraped_at))
+        .where(RawInfo.info_cluster_id == InfoCluster.id)
+        .correlate(InfoCluster)
+        .scalar_subquery()
+    )
+    effective_ts = func.coalesce(InfoCluster.published_at, latest_scraped_at, InfoCluster.created_at)
     base_filter = [
         InfoCluster.is_ai_relevant.is_(True),
         or_(InfoCluster.published_at.is_(None), InfoCluster.published_at >= cutoff),
@@ -164,14 +172,13 @@ async def get_topic_clusters(
         else:
             base_filter.append(InfoCluster.needs_update.is_(False))
     if freshness:
-        effective_dt = func.coalesce(InfoCluster.published_at, InfoCluster.created_at)
         if freshness == "today":
-            base_filter.append(effective_dt >= start_today)
+            base_filter.append(effective_ts >= start_today)
         elif freshness == "yesterday":
-            base_filter.append(effective_dt >= start_yesterday)
-            base_filter.append(effective_dt < start_today)
+            base_filter.append(effective_ts >= start_yesterday)
+            base_filter.append(effective_ts < start_today)
         elif freshness == "earlier":
-            base_filter.append(or_(effective_dt.is_(None), effective_dt < start_yesterday))
+            base_filter.append(or_(effective_ts.is_(None), effective_ts < start_yesterday))
     if keyword:
         base_filter.append(
             or_(
@@ -196,7 +203,6 @@ async def get_topic_clusters(
 
     # display_score 表达式（与 SQL CASE 保持一致）
     # 所有类型平等：不再按 info_type 加权
-    effective_ts = func.coalesce(InfoCluster.published_at, InfoCluster.created_at)
     freshness_boost = case(
         (effective_ts >= start_today, 2.0),
         (effective_ts >= start_yesterday, 1.2),
@@ -217,6 +223,8 @@ async def get_topic_clusters(
 
     if sort_by == "display_score":
         order_col = display_score_expr
+    elif sort_by == "timeline_at":
+        order_col = effective_ts
     else:
         order_col = getattr(InfoCluster, sort_by, InfoCluster.heat_score)
 
@@ -287,6 +295,12 @@ async def get_topic_clusters(
     candidate_counts = {}
     commercial_counts = {}
     if cluster_ids:
+        scraped_time_result = await db.execute(
+            select(RawInfo.info_cluster_id, func.max(RawInfo.scraped_at))
+            .where(RawInfo.info_cluster_id.in_(cluster_ids))
+            .group_by(RawInfo.info_cluster_id)
+        )
+        latest_scraped_times = {row[0]: row[1] for row in scraped_time_result.all()}
         count_result = await db.execute(
             select(TopicCandidate.info_cluster_id, func.count(TopicCandidate.id))
             .where(
@@ -315,6 +329,9 @@ async def get_topic_clusters(
         )
         commercial_counts = {row[0]: row[1] for row in commercial_count_result.all()}
 
+    else:
+        latest_scraped_times = {}
+
     items = []
     for c in page_clusters:
         live_freshness = _compute_freshness(c.published_at, fallback_dt=c.created_at)
@@ -335,6 +352,8 @@ async def get_topic_clusters(
         display_score = round((c.heat_score or 0) * boost * src_mul, 2)
         # 「已挖掘 / 待更新」按当前用户：有没有自己的候选
         my_candidate_count = candidate_counts.get(c.id, 0)
+        scraped_at = latest_scraped_times.get(c.id)
+        timeline_at = c.published_at or scraped_at or c.created_at
         items.append({
             "id": c.id,
             "core_title": c.core_title,
@@ -355,6 +374,10 @@ async def get_topic_clusters(
             "candidate_count": my_candidate_count,
             "commercial_count": commercial_counts.get(c.id, 0),
             "created_at": c.created_at.isoformat() if c.created_at else None,
+            "published_at": c.published_at.isoformat() if c.published_at else None,
+            "scraped_at": scraped_at.isoformat() if scraped_at else None,
+            "timeline_at": timeline_at.isoformat() if timeline_at else None,
+            "timeline_source": "published_at" if c.published_at else ("scraped_at" if scraped_at else "created_at"),
         })
 
     return {
