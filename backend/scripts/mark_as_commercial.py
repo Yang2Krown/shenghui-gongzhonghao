@@ -66,11 +66,8 @@ def _extract_meta_from_html(html: str) -> Tuple[str, str]:
 
 
 async def _fetch_article(url: str) -> dict:
-    """抓取单篇公众号文章，复用项目已有的 extract_wechat + extract_wechat_html_snapshot。"""
-    from app.services.scraping.link_extractor import (
-        extract_wechat,
-        extract_wechat_html_snapshot,
-    )
+    """抓取单篇公众号文章；不再生成或保存 HTML 快照。"""
+    from app.services.scraping.link_extractor import extract_wechat
 
     # 提取正文（使用微信客户端 UA，不会被验证码拦）
     result = await extract_wechat(url)
@@ -84,20 +81,11 @@ async def _fetch_article(url: str) -> dict:
 
     print(f"  + 正文 {len(content)} 字, 标题: {title[:40]}")
 
-    # 生成 HTML 快照（图片 base64 嵌入）
-    content_html = None
-    try:
-        content_html = await extract_wechat_html_snapshot(url)
-        if content_html:
-            print(f"  + HTML 快照 {len(content_html)} 字节")
-    except Exception as e:
-        print(f"  ⚠ HTML 快照失败: {e}")
-
     return {
         "url": url,
         "title": title,
         "content": content,
-        "content_html": content_html,
+        "content_html": None,
         "author": author,
     }
 

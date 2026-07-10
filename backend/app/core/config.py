@@ -167,6 +167,12 @@ class Settings(BaseSettings):
     ALIYUN_SMS_TEMPLATE_CODE: Optional[str] = None
     SMS_SEND_TIMEOUT_SECONDS: float = 8.0
 
+    # 短信白名单：这些手机号跳过阿里云，直接用固定验证码登录。
+    # 应急用（短信通道故障时保底登录）；恢复后清空 SMS_BYPASS_PHONES 即失效。
+    # 逗号分隔，如 "18021751281,19852111748"
+    SMS_BYPASS_PHONES: str = ""
+    SMS_BYPASS_CODE: str = "111111"
+
     # Exa API（微信公众号搜索，替代 mcporter CLI）
     EXA_API_KEY: Optional[str] = None
 

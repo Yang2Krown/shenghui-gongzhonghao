@@ -288,6 +288,41 @@ class CreditService:
         logger.info(f"用户 {user_id} 退还 {amount} 积分({reason})，余额: {account.balance}")
         return transaction
 
+    async def admin_adjust_balance(
+        self,
+        user_id: int,
+        delta: int,
+        reason: str,
+    ) -> Dict[str, Any]:
+        """最高管理员手动调整用户积分余额（正数增加，负数扣减）。
+
+        不走业务扣费/购买逻辑，直接改余额并记一条 adjust 流水，便于人工纠错、补偿。
+        扣减后余额不允许为负。正数调整计入 total_gifted，方便统计口径与余额对账。
+        """
+        account = await self.get_or_create_account(user_id)
+        new_balance = account.balance + delta
+        if new_balance < 0:
+            raise ValueError(f"扣减后余额不能为负：当前 {account.balance}，本次调整 {delta}")
+
+        account.balance = new_balance
+        if delta > 0:
+            account.total_gifted += delta
+
+        transaction = CreditTransaction(
+            user_id=user_id,
+            credit_account_id=account.id,
+            type="adjust",
+            amount=delta,
+            balance_after=new_balance,
+            operation="admin_adjust",
+            description=reason,
+        )
+        self.db.add(transaction)
+        await self.db.flush()
+
+        logger.info(f"管理员调整用户 {user_id} 积分 {delta:+d}，余额: {new_balance}（{reason}）")
+        return {"balance": new_balance, "delta": delta, "transaction_id": transaction.id}
+
     async def purchase_credits(
         self,
         user_id: int,

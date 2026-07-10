@@ -481,7 +481,6 @@ async def get_topic_cluster_detail(
             "source_platform": row.source_platform or "",
             "commercial_level": raw.commercial_level or "none",
             "commercial_meta": raw.commercial_meta or {},
-            "has_snapshot": bool(raw.content_html),
         })
 
     return {

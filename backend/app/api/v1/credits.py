@@ -10,6 +10,7 @@ from app.models.admin_audit import AdminAuditLog
 from app.models.user import User
 from app.services.credit_service import CreditService, get_available_packages, get_operation_costs
 from app.core.credit_config import estimate_monthly_cost, FULL_CREATION_FLOW
+from app.core.product_access import is_admin_user
 
 router = APIRouter()
 
@@ -44,6 +45,13 @@ async def get_account_info(
 ):
     """获取积分账户详情"""
     info = await credit_service.get_account_info(current_user.id)
+    # 管理员在产品权限层天然拥有创作工具权限，不应因没有普通订阅到期日而被前端误标为不可用。
+    if is_admin_user(current_user):
+        info.update({
+            "is_subscription_active": True,
+            "subscription_access": "admin",
+            "credit_expiry_policy": "never",
+        })
     return {
         "code": 200,
         "message": "success",

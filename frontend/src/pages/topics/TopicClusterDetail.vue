@@ -71,7 +71,6 @@
                     v-for="raw in cluster.raw_infos"
                     :key="raw.id"
                     :href="raw.url"
-                    @click="openRawSource($event, raw)"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="source-card"
@@ -279,21 +278,6 @@ watch(
 
 // 面板中的候选列表（本地副本）
 const candidateList = ref([])
-
-const openRawSource = async (event, raw) => {
-  if (!raw?.has_snapshot) return
-  event.preventDefault()
-  try {
-    const resp = await get(`/article-snapshots/${raw.id}`, {}, { responseType: 'text' })
-    const html = resp.data
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    window.open(url, '_blank', 'noopener,noreferrer')
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
-  } catch (err) {
-    ElMessage.error(err?.response?.data?.detail || '原文快照打开失败')
-  }
-}
 
 // 从 cluster 同步候选到本地列表
 const syncCandidates = () => {

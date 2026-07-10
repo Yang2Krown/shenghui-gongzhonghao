@@ -11,23 +11,54 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_super_admin_user
 from app.core.admin_permissions import ADMIN_ROLES, allowed_roles_text, require_admin_permission
 from app.core.config import settings
-from app.core.product_access import ALL_PRODUCTS, PRODUCT_LABELS, effective_product_access, normalize_product_access
+from app.core.product_access import (
+    ALL_PRODUCTS,
+    PRODUCT_CREATION_TOOL,
+    PRODUCT_LABELS,
+    effective_product_access,
+    is_admin_user,
+    normalize_product_access,
+)
 from app.core.timezone import utcnow
 from app.db.session import get_db
 from app.models.admin_audit import AdminAuditLog
+from app.models.api_request_log import ApiRequestLog
 from app.models.credit import UserCredit
-from app.models.llm_monitoring import LlmModelPricing
+from app.models.generation_record import GenerationRecord
+from app.models.llm_monitoring import LlmCallLog, LlmModelPricing
 from app.models.monitoring import MonitoringAlert, MonitoringSnapshot
 from app.models.raw_info import RawInfo
 from app.models.source_registry import SourceRegistry
+from app.models.system_announcement import SystemAnnouncement
 from app.models.task import Task, TaskStatus
 from app.models.user import User
 from app.services.monitoring.checks import build_alert_specs, collect_admin_monitoring
 from app.services.monitoring.modules import collect_ai_costs, collect_api_health, collect_source_health, collect_user_stats
 from app.services.monitoring.security_health import collect_security_health
 from app.services.llm.cost_guard import collect_llm_guard_status
+from app.services.credit_service import CreditService
+from app.services.wechat_pay_service import MEMBERSHIP_GIFT_CREDITS
 
 router = APIRouter()
+
+
+async def _activate_manual_creation_subscription(user: User, db: AsyncSession) -> bool:
+    """管理员首次授予创作工具时，同步建立订阅和本期赠送积分。
+
+    只对没有有效订阅的普通用户执行，反复保存同一份权益不会重复发放。
+    """
+    if is_admin_user(user) or PRODUCT_CREATION_TOOL not in normalize_product_access(user.product_access):
+        return False
+    service = CreditService(db)
+    account = await service.get_or_create_account(user.id)
+    if account.subscription_expires_at and account.subscription_expires_at > utcnow():
+        return False
+    await service.activate_subscription(
+        user_id=user.id,
+        gift_amount=MEMBERSHIP_GIFT_CREDITS,
+        description="管理员开通创作工具赠送积分",
+    )
+    return True
 
 
 class AdminGrantRequest(BaseModel):
@@ -59,6 +90,12 @@ class UserProductAccessUpdateRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=1000, description="操作原因")
 
 
+class UserCreditAdjustRequest(BaseModel):
+    amount: int = Field(..., description="调整数量：mode=delta 时为增减量（可为负），mode=set 时为目标余额")
+    mode: str = Field("delta", description="delta=在当前余额上增减；set=直接设为指定余额")
+    reason: str = Field(..., min_length=1, max_length=500, description="调整原因（必填，便于审计追溯）")
+
+
 class LlmPricingRequest(BaseModel):
     provider: str = Field(..., min_length=1, max_length=50)
     model: str = Field(..., min_length=1, max_length=120)
@@ -77,6 +114,19 @@ class LlmPricingUpdateRequest(BaseModel):
     currency: Optional[str] = Field(None, min_length=1, max_length=10)
     enabled: Optional[bool] = None
     note: Optional[str] = Field(None, max_length=1000)
+
+
+class SystemAnnouncementRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=120)
+    content: str = Field(..., min_length=1, max_length=10000)
+    expires_at: datetime
+
+
+class SystemAnnouncementUpdateRequest(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=120)
+    content: Optional[str] = Field(None, min_length=1, max_length=10000)
+    expires_at: Optional[datetime] = None
+    is_published: Optional[bool] = None
 
 
 def _mask_phone(phone: Optional[str]) -> Optional[str]:
@@ -154,6 +204,17 @@ def _audit_payload(log: AdminAuditLog) -> dict:
     return log.to_dict()
 
 
+def _announcement_admin_payload(row: SystemAnnouncement) -> dict:
+    return {
+        "id": row.id, "title": row.title, "content": row.content,
+        "is_published": row.is_published,
+        "published_at": row.published_at.isoformat() if row.published_at else None,
+        "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+        "created_by_user_id": row.created_by_user_id,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
 def _public_alert_spec(spec: dict) -> dict:
     """前端当前告警只需要展示字段，不能返回内部 payload，避免循环引用。"""
     return {key: value for key, value in spec.items() if key != "payload"}
@@ -193,6 +254,59 @@ def _add_audit_log(
     )
     db.add(log)
     return log
+
+
+@router.get("/announcements", response_model=dict)
+async def list_system_announcements(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin_user),
+) -> Any:
+    """最高管理员查看全部系统公告（含过期和已停用）。"""
+    rows = (await db.execute(select(SystemAnnouncement).order_by(SystemAnnouncement.created_at.desc()))).scalars().all()
+    return {"code": 200, "message": "获取系统公告成功", "data": {"items": [_announcement_admin_payload(row) for row in rows]}}
+
+
+@router.post("/announcements", response_model=dict)
+async def create_system_announcement(
+    req: SystemAnnouncementRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin_user),
+) -> Any:
+    """发布一条立即生效的系统公告。"""
+    now = utcnow()
+    if req.expires_at <= now:
+        raise HTTPException(status_code=400, detail="提示到期时间必须晚于当前时间")
+    row = SystemAnnouncement(title=req.title.strip(), content=req.content.strip(), expires_at=req.expires_at, published_at=now, created_by_user_id=current_user.id)
+    db.add(row)
+    _add_audit_log(db, actor_user_id=current_user.id, action="system_announcement.create", target_type="system_announcement", summary=f"发布系统公告：{row.title}", metadata={"expires_at": req.expires_at.isoformat(), **_request_metadata(request)})
+    await db.commit()
+    await db.refresh(row)
+    return {"code": 200, "message": "系统公告已发布", "data": _announcement_admin_payload(row)}
+
+
+@router.patch("/announcements/{announcement_id}", response_model=dict)
+async def update_system_announcement(
+    announcement_id: int,
+    req: SystemAnnouncementUpdateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin_user),
+) -> Any:
+    """修改公告，或通过 is_published=false 立即停止提示。"""
+    row = await db.get(SystemAnnouncement, announcement_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="系统公告不存在")
+    changes = req.model_dump(exclude_unset=True)
+    if "expires_at" in changes and changes["expires_at"] <= utcnow():
+        raise HTTPException(status_code=400, detail="提示到期时间必须晚于当前时间")
+    for key, value in changes.items():
+        setattr(row, key, value.strip() if isinstance(value, str) else value)
+    row.updated_at = utcnow()
+    _add_audit_log(db, actor_user_id=current_user.id, action="system_announcement.update", target_type="system_announcement", target_id=str(row.id), summary=f"更新系统公告：{row.title}", metadata={"changes": {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in changes.items()}, **_request_metadata(request)})
+    await db.commit()
+    await db.refresh(row)
+    return {"code": 200, "message": "系统公告已更新", "data": _announcement_admin_payload(row)}
 
 
 @router.get("/monitoring/overview", response_model=dict)
@@ -634,6 +748,9 @@ async def update_user_membership(
         user.member_since = None
         user.product_access = []
     db.add(user)
+    creation_subscription_activated = False
+    if req.is_member:
+        creation_subscription_activated = await _activate_manual_creation_subscription(user, db)
     _add_audit_log(
         db,
         actor_user_id=current_user.id,
@@ -645,7 +762,10 @@ async def update_user_membership(
         metadata={
             "target_user_id": user.id,
             "before": before,
-            "after": {"is_member": user.is_member},
+            "after": {
+                "is_member": user.is_member,
+                "creation_subscription_activated": creation_subscription_activated,
+            },
             **_request_metadata(request),
         },
     )
@@ -683,6 +803,7 @@ async def update_user_product_access(
     elif not user.is_member:
         user.member_since = None
     db.add(user)
+    creation_subscription_activated = await _activate_manual_creation_subscription(user, db)
     _add_audit_log(
         db,
         actor_user_id=current_user.id,
@@ -694,13 +815,220 @@ async def update_user_product_access(
         metadata={
             "target_user_id": user.id,
             "before": before,
-            "after": {"product_access": user.product_access},
+            "after": {
+                "product_access": user.product_access,
+                "creation_subscription_activated": creation_subscription_activated,
+            },
             **_request_metadata(request),
         },
     )
     await db.commit()
     await db.refresh(user)
-    return {"code": 200, "message": "产品权益已更新", "data": _user_payload(user)}
+    message = "产品权益已更新"
+    if creation_subscription_activated:
+        message += "，已开通创作工具订阅并赠送 6000 积分"
+    return {"code": 200, "message": message, "data": _user_payload(user)}
+
+
+@router.get("/users/{user_id}/credits", response_model=dict)
+async def get_user_credits_detail(
+    user_id: int,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin_permission("users:read")),
+) -> Any:
+    """查看指定用户的积分账户、消耗统计与交易流水。"""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    service = CreditService(db)
+    account = await service.get_account_info(user_id)
+    stats = await service.get_consumption_stats(user_id)
+    transactions = await service.get_transactions(user_id, limit=limit, offset=offset)
+    total = await service.get_transaction_count(user_id)
+    # get_account_info 可能懒创建了积分账户，提交一次
+    await db.commit()
+
+    return {
+        "code": 200,
+        "message": "获取用户积分记录成功",
+        "data": {
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "full_name": user.full_name,
+                "phone": _mask_phone(user.phone),
+            },
+            "account": account,
+            "stats": stats,
+            "transactions": transactions,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        },
+    }
+
+
+def _gen_record_payload(record: GenerationRecord) -> dict:
+    snapshot = record.output_snapshot if isinstance(record.output_snapshot, dict) else {}
+    return {
+        "id": record.id,
+        "type": record.type,
+        "status": record.status,
+        "run_id": record.run_id,
+        "display_title": record.display_title,
+        "error": snapshot.get("error"),
+        "input_snapshot": record.input_snapshot,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+    }
+
+
+def _llm_error_payload(row: LlmCallLog) -> dict:
+    return {
+        "id": row.id,
+        "provider": row.provider,
+        "model": row.model,
+        "operation": row.operation,
+        "operation_id": row.operation_id,
+        "status": row.status,
+        "finish_reason": row.finish_reason,
+        "error_message": row.error_message,
+        "duration_ms": row.duration_ms,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _api_error_payload(row: ApiRequestLog) -> dict:
+    return {
+        "id": row.id,
+        "method": row.method,
+        "path": row.path,
+        "status_code": row.status_code,
+        "duration_ms": row.duration_ms,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+@router.get("/users/{user_id}/diagnostics", response_model=dict)
+async def get_user_diagnostics(
+    user_id: int,
+    limit: int = Query(30, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin_permission("users:read")),
+) -> Any:
+    """按用户排障：一次性拉取最近生成记录（含失败原因）、失败的 LLM 调用、接口错误。
+
+    用户反馈"生成失败/用不了"时，在此定位到具体是哪一步、报什么错，无需上服务器查日志。
+    """
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    gen_rows = (await db.execute(
+        select(GenerationRecord)
+        .where(GenerationRecord.user_id == user_id)
+        .order_by(GenerationRecord.created_at.desc())
+        .limit(limit)
+    )).scalars().all()
+
+    llm_rows = (await db.execute(
+        select(LlmCallLog)
+        .where(LlmCallLog.user_id == user_id, LlmCallLog.status != "success")
+        .order_by(LlmCallLog.created_at.desc())
+        .limit(limit)
+    )).scalars().all()
+
+    api_rows = (await db.execute(
+        select(ApiRequestLog)
+        .where(ApiRequestLog.user_id == user_id, ApiRequestLog.status_code >= 400)
+        .order_by(ApiRequestLog.created_at.desc())
+        .limit(limit)
+    )).scalars().all()
+
+    return {
+        "code": 200,
+        "message": "获取用户排障信息成功",
+        "data": {
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "full_name": user.full_name,
+                "phone": _mask_phone(user.phone),
+            },
+            "summary": {
+                "generation_total": len(gen_rows),
+                "generation_failed": sum(1 for r in gen_rows if r.status == "failed"),
+                "llm_errors": len(llm_rows),
+                "api_errors": len(api_rows),
+                "limit": limit,
+            },
+            "generation_records": [_gen_record_payload(r) for r in gen_rows],
+            "llm_errors": [_llm_error_payload(r) for r in llm_rows],
+            "api_errors": [_api_error_payload(r) for r in api_rows],
+        },
+    }
+
+
+@router.patch("/users/{user_id}/credits", response_model=dict)
+async def adjust_user_credits(
+    user_id: int,
+    req: UserCreditAdjustRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin_user),
+) -> Any:
+    """最高管理员手动调整用户积分余额（增加/扣减/设为指定值）。"""
+    if req.mode not in ("delta", "set"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode 只能为 delta 或 set")
+
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    service = CreditService(db)
+    account = await service.get_or_create_account(user_id)
+    before = account.balance
+
+    if req.mode == "set":
+        if req.amount < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="设定余额不能为负")
+        delta = req.amount - before
+    else:
+        delta = req.amount
+
+    if delta == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="积分没有变化，无需调整")
+
+    try:
+        result = await service.admin_adjust_balance(user_id, delta, req.reason.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    _add_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="user.credits.adjust",
+        target_type="user",
+        target_id=str(user.id),
+        summary=f"调整用户积分 {delta:+d}（{before} → {result['balance']}）：{user.id}",
+        detail=req.reason,
+        metadata={
+            "target_user_id": user.id,
+            "mode": req.mode,
+            "delta": delta,
+            "before": before,
+            "after": result["balance"],
+            **_request_metadata(request),
+        },
+    )
+    await db.commit()
+    return {
+        "code": 200,
+        "message": "用户积分已调整",
+        "data": result,
+    }
 
 
 @router.post("/admins", response_model=dict)

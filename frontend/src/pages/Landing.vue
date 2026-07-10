@@ -596,15 +596,25 @@ const openMembership = (product) => {
   membershipOpen.value = true
 }
 
+const closeMembershipOrder = () => {
+  const no = membershipOrder.value?.out_trade_no
+  if (!no || membershipPaid.value) return
+  membershipOrder.value = null
+  // 取消支付时关闭未支付订单，让二维码立即失效（尽力而为，不阻塞 UI）。
+  post(`/credits/purchase/close/${no}`).catch(() => {})
+}
+
 const closeMembership = () => {
   membershipOpen.value = false
   if (membershipTimer) { clearInterval(membershipTimer); membershipTimer = null }
+  closeMembershipOrder()
   router.replace('/landing')
 }
 
 const dismissMembership = () => {
   membershipOpen.value = false
   if (membershipTimer) { clearInterval(membershipTimer); membershipTimer = null }
+  closeMembershipOrder()
   router.replace('/landing')
 }
 
@@ -730,6 +740,7 @@ onUnmounted(() => {
   if (fadeObserver) fadeObserver.disconnect()
   if (countdownTimer) clearInterval(countdownTimer)
   if (membershipTimer) clearInterval(membershipTimer)
+  closeMembershipOrder()
 })
 </script>
 

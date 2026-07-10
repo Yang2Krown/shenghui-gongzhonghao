@@ -1,18 +1,18 @@
 <template>
   <div class="legal-page">
     <div class="legal-card">
-      <h1>{{ title }}</h1>
+      <h1>{{ doc.title }}</h1>
       <p class="legal-updated">最后更新：{{ updated }}</p>
-      <!-- ponytail: 占位正文，待替换为正式法律文本 -->
+
       <div class="legal-body">
-        <p>本文档正文待补充。以下为占位内容。</p>
-        <h2>一、总则</h2>
-        <p>欢迎使用本服务。在使用本服务前，请您仔细阅读本{{ short }}。您一旦开始使用本服务，即视为您已阅读并同意接受本{{ short }}的全部内容。</p>
-        <h2>二、服务说明</h2>
-        <p>本服务为面向公众号创作者的 AI 内容辅助工具，具体功能以平台实际提供为准。</p>
-        <h2>三、其他</h2>
-        <p>本{{ short }}的最终解释权归本平台所有。如有疑问，请通过平台公示的联系方式与我们联系。</p>
+        <p class="legal-intro">{{ doc.intro }}</p>
+
+        <template v-for="(section, i) in doc.sections" :key="i">
+          <h2>{{ section.heading }}</h2>
+          <p v-for="(para, j) in section.paragraphs" :key="j">{{ para }}</p>
+        </template>
       </div>
+
       <button class="legal-back" @click="goBack">← 返回</button>
     </div>
   </div>
@@ -21,13 +21,13 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { TERMS_DOC, PRIVACY_DOC, LEGAL_UPDATED } from './legalContent'
 
 const route = useRoute()
 const router = useRouter()
 
-const title = computed(() => route.meta.title || '')
-const short = computed(() => (route.name === 'Privacy' ? '隐私政策' : '用户协议'))
-const updated = '2026-06-17'
+const doc = computed(() => (route.name === 'Privacy' ? PRIVACY_DOC : TERMS_DOC))
+const updated = LEGAL_UPDATED
 
 const goBack = () => {
   if (window.history.length > 1) router.back()
@@ -49,11 +49,11 @@ const goBack = () => {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: var(--r-lg, 16px);
-  padding: 40px 44px;
+  padding: 44px 48px;
 }
 .legal-card h1 {
   font-family: var(--serif);
-  font-size: 26px;
+  font-size: 28px;
   color: var(--ink);
   margin: 0;
 }
@@ -62,16 +62,28 @@ const goBack = () => {
   font-size: 13px;
   margin: 8px 0 28px;
 }
+.legal-intro {
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.9;
+  margin: 0 0 8px;
+  padding: 16px 18px;
+  background: var(--ivory);
+  border-radius: var(--r-md, 10px);
+  border-left: 3px solid var(--clay-soft, #E9B79E);
+}
 .legal-body h2 {
-  font-size: 16px;
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 600;
   color: var(--ink);
-  margin: 26px 0 8px;
+  margin: 30px 0 10px;
 }
 .legal-body p {
   color: var(--ink-2);
   font-size: 14px;
-  line-height: 1.8;
-  margin: 0 0 4px;
+  line-height: 1.85;
+  margin: 0 0 8px;
 }
 .legal-back {
   margin-top: 36px;

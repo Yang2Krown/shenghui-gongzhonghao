@@ -150,6 +150,9 @@ def _required_product_for_request(request: Request) -> Optional[str]:
         return None
     if relative == "/users/profile":
         return None
+    if relative.startswith("/announcements/"):
+        # 系统公告面向全部已登录用户，不能被产品权益门禁拦截。
+        return None
     if relative.startswith("/admin/"):
         return None
     if relative in {"/credits/packages", "/credits/operation-costs", "/credits/estimate"}:
@@ -166,7 +169,7 @@ def _required_product_for_request(request: Request) -> Optional[str]:
         return None
     if relative.startswith("/commercial"):
         return PRODUCT_POTENTIAL_COMMERCIAL
-    if relative.startswith("/courses") or relative.startswith("/practical") or relative.startswith("/feishu/brief"):
+    if relative.startswith("/courses"):
         return PRODUCT_PRACTICAL_CAMP
     if relative.startswith((
         "/creations",
@@ -193,7 +196,6 @@ def _required_product_for_request(request: Request) -> Optional[str]:
         "/content-polish",
         "/wechat-accounts",
         "/images",
-        "/article-snapshots",
         "/_test_gzh_fetch",
     )):
         return PRODUCT_CREATION_TOOL

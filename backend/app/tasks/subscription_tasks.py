@@ -54,8 +54,10 @@ async def _expire_subscriptions() -> dict:
                 ).scalar_one_or_none()
                 if not user:
                     continue
-                # 管理员不受订阅到期影响
+                # 管理员积分永久有效；顺带清除遗留到期时间，避免每轮任务重复扫描。
                 if is_admin_user(user):
+                    account.subscription_expires_at = None
+                    db.add(account)
                     continue
 
                 current = normalize_product_access(user.product_access)

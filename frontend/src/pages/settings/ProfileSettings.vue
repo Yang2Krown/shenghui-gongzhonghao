@@ -1,17 +1,10 @@
 <template>
   <div class="settings-page">
     <!-- 个人信息 -->
-    <div class="profile-card">
-      <div class="profile-header">
-        <h3 class="profile-title">个人信息</h3>
-        <el-button type="danger" plain size="small" @click="handleLogout">
-          <el-icon><SwitchButton /></el-icon>
-          退出登录
-        </el-button>
-      </div>
-      <div class="profile-body">
-        <div class="profile-content-row">
-          <!-- 头像 -->
+    <div class="profile-card profile-card--identity">
+      <aside class="profile-identity">
+        <span class="identity-kicker">ACCOUNT PROFILE</span>
+        <div class="profile-avatar-panel">
           <div class="profile-avatar">
             <el-avatar :size="72" :src="userAvatar" @error="onAvatarError">
               <span style="font-size: 24px;">{{ userName.charAt(0).toUpperCase() }}</span>
@@ -21,62 +14,68 @@
             </el-button>
             <input ref="avatarInput" type="file" accept="image/*" class="hidden" @change="handleAvatarChange" />
           </div>
-          <!-- 表单 -->
-          <div class="profile-form-area">
-            <el-form
-              ref="profileFormRef"
-              :model="profileForm"
-              :rules="profileRules"
-              label-position="top"
-              class="profile-form profile-form-main"
-            >
-              <el-form-item label="昵称" prop="name">
-                <div class="nickname-row">
-                  <el-input v-model="profileForm.name" placeholder="请输入昵称" />
-                  <el-button type="primary" @click="saveProfile" :loading="saving">保存</el-button>
-                </div>
-              </el-form-item>
-              <el-form-item label="创作者人设" prop="persona">
-                <el-input
-                  v-model="profileForm.persona"
-                  type="textarea"
-                  :rows="5"
-                  maxlength="2000"
-                  show-word-limit
-                  resize="none"
-                  placeholder="例如：我是长期深度使用 AI 编程工具的创作者，熟悉 Claude Code、Cursor、Agent 工作流。文章中不要把我写成刚入门的新手；涉及个人经历时，只能基于这里写明的背景。"
-                />
-              </el-form-item>
-            </el-form>
+          <strong>{{ userName }}</strong>
+          <span>点击头像更换照片</span>
+        </div>
+        <p class="identity-note">完善创作者资料，让每一次生成都更贴近你的表达。</p>
+      </aside>
+      <section class="profile-editor">
+        <div class="profile-header">
+          <div>
+            <h3 class="profile-title">个人资料</h3>
+            <p>管理昵称与创作者人设</p>
+          </div>
+          <el-button type="danger" plain size="small" @click="handleLogout">
+            <el-icon><SwitchButton /></el-icon>
+            退出登录
+          </el-button>
+        </div>
+        <div class="profile-form-area">
+          <el-form
+            ref="profileFormRef"
+            :model="profileForm"
+            :rules="profileRules"
+            label-position="top"
+            class="profile-form profile-form-main"
+          >
+            <el-form-item label="昵称" prop="name">
+              <el-input v-model="profileForm.name" placeholder="请输入昵称" />
+            </el-form-item>
+            <el-form-item label="创作者人设" prop="persona">
+              <el-input
+                v-model="profileForm.persona"
+                type="textarea"
+                :rows="5"
+                maxlength="2000"
+                show-word-limit
+                resize="none"
+                placeholder="例如：我是长期深度使用 AI 编程工具的创作者，熟悉 Claude Code、Cursor、Agent 工作流。文章中不要把我写成刚入门的新手；涉及个人经历时，只能基于这里写明的背景。"
+              />
+            </el-form-item>
+          </el-form>
+          <div class="profile-form-footer">
+            <span>创作者人设会参与内容生成</span>
+            <el-button type="primary" @click="saveProfile" :loading="saving">保存修改</el-button>
           </div>
         </div>
-        <!-- 积分卡片 -->
-        <div class="credit-card">
-          <div class="credit-card-left">
-            <span class="credit-icon">💰</span>
-            <span class="credit-num">{{ creditStore.formattedBalance }}</span>
-            <span class="credit-text">积分</span>
-          </div>
-          <el-button type="primary" plain size="small" @click="router.push('/credits/recharge')">充值</el-button>
-        </div>
-      </div>
+      </section>
     </div>
 
     <!-- 公众号凭证配置 -->
-    <div class="profile-card">
-      <div style="padding: 24px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+    <div class="profile-card account-card">
+      <div class="account-card-inner">
+        <div class="account-card-header">
           <div>
-            <h3 style="font-size: 17px; font-weight: 600; color: var(--ink); margin-bottom: 4px;">公众号账号</h3>
-            <p style="font-size: 13px; color: var(--ink-4);">管理你的公众号凭证，支持绑定多个账号</p>
+            <h3>公众号账号</h3>
+            <p>管理公众号凭证，支持绑定多个账号</p>
           </div>
           <el-button type="primary" @click="openAddAccount">+ 添加账号</el-button>
         </div>
 
         <!-- 账号列表 -->
-        <div v-if="wechatAccounts.length === 0" style="text-align: center; padding: 32px 0; color: var(--ink-4);">
+        <div v-if="wechatAccounts.length === 0" class="account-empty">
           <p>暂无公众号账号</p>
-          <p style="font-size: 13px; margin-top: 4px;">点击「添加账号」配置你的公众号</p>
+          <p>点击「添加账号」配置你的公众号</p>
         </div>
         <div v-else class="account-list">
           <div v-for="acc in wechatAccounts" :key="acc.id" class="account-item">
@@ -99,7 +98,7 @@
     </div>
 
     <!-- 飞书绑定 -->
-    <FeishuConnect />
+    <FeishuConnect class="feishu-card" />
 
     <!-- 添加/编辑账号弹窗 -->
     <el-dialog v-model="accountDialogVisible" :title="editingAccount ? '编辑公众号账号' : '添加公众号账号'" width="440px" destroy-on-close>
@@ -276,7 +275,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { useCreditStore } from '@/stores/credit'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Camera, SwitchButton } from '@element-plus/icons-vue'
 import FeishuConnect from '@/components/settings/FeishuConnect.vue'
@@ -294,7 +292,6 @@ import PreviewModal from '@/components/style/PreviewModal.vue'
 const RADAR_KEYS = ['语气温度', '专业密度', '句式节奏', '情绪强度', '修辞偏好', '结构习惯']
 
 const userStore = useUserStore()
-const creditStore = useCreditStore()
 const profileFormRef = ref(null)
 const avatarInput = ref(null)
 
@@ -623,7 +620,7 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
-  align-items: stretch;
+  align-items: start;
 }
 
 /* ── 个人信息卡片 ── */
@@ -637,11 +634,74 @@ onMounted(() => {
   flex-direction: column;
 }
 
+.profile-card--identity {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  overflow: hidden;
+  padding: 0;
+  border-radius: 20px;
+}
+
+.profile-identity {
+  position: relative;
+  display: flex;
+  min-height: 330px;
+  flex-direction: column;
+  padding: 30px;
+  color: #fffaf3;
+  background: linear-gradient(150deg, #62544d 0%, #9a6f5d 100%);
+}
+
+.profile-identity::after {
+  position: absolute;
+  right: -55px;
+  bottom: -70px;
+  width: 190px;
+  height: 190px;
+  border: 1px solid rgba(255, 237, 205, 0.18);
+  border-radius: 50%;
+  content: '';
+}
+
+.identity-kicker {
+  color: rgba(255, 250, 243, 0.58);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+}
+
+.profile-avatar-panel {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  color: rgba(255, 250, 243, 0.66);
+  font-size: 12px;
+}
+
+.profile-avatar-panel strong {
+  color: #fffaf3;
+  font-size: 20px;
+  font-weight: 700;
+}
+
 .profile-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
+}
+
+.profile-editor {
+  padding: 30px 34px 26px;
+}
+
+.profile-header p {
+  margin: 5px 0 0;
+  color: var(--ink-4, #9a968d);
+  font-size: 13px;
 }
 
 .profile-title {
@@ -651,66 +711,95 @@ onMounted(() => {
   margin: 0;
 }
 
-.profile-body {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  flex: 1;
-  justify-content: center;
-  flex-direction: column;
-}
-
-.profile-content-row {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  width: 100%;
-}
-
 .profile-avatar {
   position: relative;
   flex-shrink: 0;
 }
 
+.identity-note {
+  position: relative;
+  z-index: 1;
+  margin: 22px 0 0;
+  color: rgba(255, 250, 243, 0.7);
+  font-size: 12px;
+  line-height: 1.75;
+}
+
 .profile-form-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
   min-width: 0;
 }
 
-.nickname-row {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  width: 100%;
+.profile-form :deep(.el-form-item) {
+  margin-bottom: 18px;
 }
 
-.credit-card {
+.profile-form :deep(.el-form-item__label) {
+  padding-bottom: 6px;
+  font-weight: 600;
+  color: var(--ink-2, #4a4640);
+}
+
+.profile-form-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(135deg, #fdf8f3 0%, #f9f3ed 100%);
-  border: 1px solid #f0e8e0;
-  border-radius: 10px;
-  padding: 14px 18px;
-  margin-top: 16px;
-  width: 100%;
+  gap: 12px;
+  padding-top: 2px;
 }
 
-.credit-card-left {
+.profile-form-footer span {
+  color: var(--ink-4, #9a968d);
+  font-size: 12px;
+}
+
+.account-card-inner {
+  padding: 2px 0;
+}
+
+.account-card-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  color: var(--ink-3, #666);
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
 }
 
-.credit-card-left .credit-num {
-  font-weight: 600;
-  font-size: 16px;
+.account-card-header h3 {
+  margin: 0 0 5px;
   color: var(--ink, #1a1a1a);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.account-card-header p,
+.account-empty p {
+  margin: 0;
+  color: var(--ink-4, #9a968d);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.account-empty {
+  display: flex;
+  min-height: 145px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  border: 1px dashed var(--line, #e5e5e5);
+  border-radius: 12px;
+  background: var(--paper-2, #faf9f7);
+  text-align: center;
+}
+
+.account-empty p:first-child {
+  margin-bottom: 4px;
+  color: var(--ink-3, #666);
+  font-size: 14px;
+}
+
+.feishu-card {
+  grid-column: auto;
+  width: 100%;
 }
 
 .style-section {
@@ -997,8 +1086,12 @@ onMounted(() => {
 
 @media (max-width: 768px) {
   .settings-page { grid-template-columns: 1fr; }
-  .profile-card { flex-direction: column; align-items: center; text-align: center; }
-  .profile-content { flex-direction: column; }
+  .profile-card { padding: 20px; }
+  .profile-card--identity { display: block; padding: 0; }
+  .profile-identity { min-height: auto; padding: 24px; }
+  .profile-avatar-panel { margin-top: 28px; }
+  .profile-editor { padding: 24px 20px 20px; }
+  .profile-form-footer { align-items: flex-start; flex-direction: column; }
   .profile-form { max-width: 100%; }
   .style-section { grid-column: 1 / -1; }
 

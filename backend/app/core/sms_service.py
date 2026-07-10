@@ -38,8 +38,23 @@ def _generate_code() -> str:
     return str(random.randint(100000, 999999))
 
 
+def _bypass_phones() -> set:
+    """短信白名单手机号集合（应急保底登录用，通过 SMS_BYPASS_PHONES 配置）。"""
+    raw = settings.SMS_BYPASS_PHONES or ""
+    return {p.strip() for p in raw.split(",") if p.strip()}
+
+
+def _is_bypass(phone: str) -> bool:
+    return phone in _bypass_phones()
+
+
 async def send_sms_code(phone: str) -> dict:
     """发送短信验证码，返回 {"ok": bool, "message": str}"""
+    # 白名单手机号：不调阿里云，直接放行（短信通道故障时的保底登录）。
+    if _is_bypass(phone):
+        logger.warning("短信白名单命中，跳过阿里云直接放行 phone=%s", phone)
+        return {"ok": True, "message": "验证码已发送"}
+
     r = _get_redis()
     code = None
     try:
@@ -75,6 +90,10 @@ async def send_sms_code(phone: str) -> dict:
 
 async def verify_sms_code(phone: str, code: str) -> bool:
     """校验验证码，通过后删除"""
+    # 白名单手机号：只认固定验证码，不依赖 Redis / 阿里云。
+    if _is_bypass(phone):
+        return code == (settings.SMS_BYPASS_CODE or "")
+
     r = _get_redis()
     try:
         stored = await r.get(f"{_CODE_PREFIX}{phone}")

@@ -137,6 +137,31 @@ async def purchase_status(
     }
 
 
+@router.post("/purchase/close/{out_trade_no}", response_model=dict)
+async def close_purchase_order(
+    out_trade_no: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """用户取消支付：关闭本人未支付订单，使二维码立即失效。"""
+    pay_service = WechatPayService(db)
+    try:
+        order = await pay_service.close_order(out_trade_no, current_user.id)
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    return {
+        "code": 200,
+        "message": "订单已关闭",
+        "data": {"out_trade_no": order.out_trade_no, "status": order.status},
+    }
+
+
 @router.post("/pay/notify")
 async def wechat_pay_notify(
     request: Request,

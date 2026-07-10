@@ -1,10 +1,10 @@
 <template>
-  <div class="profile-card">
-    <div style="padding: 24px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+  <div class="profile-card feishu-connect-card">
+    <div class="integration-card-inner">
+      <div class="integration-card-header">
         <div>
-          <h3 style="font-size: 17px; font-weight: 600; color: var(--ink); margin-bottom: 4px;">飞书绑定</h3>
-          <p style="font-size: 13px; color: var(--ink-4);">连接飞书后，可直接粘贴客户的飞书 brief 链接，自动读取并解析成写作要求</p>
+          <h3>飞书绑定</h3>
+          <p>连接后可一键导入飞书 brief，自动生成写作要求</p>
         </div>
 
         <!-- 已绑定 -->
@@ -16,14 +16,14 @@
       </div>
 
       <!-- 已绑定身份 -->
-      <div v-if="status === 'valid'" class="feishu-bound">
+      <div v-if="status === 'valid'" class="feishu-bound integration-status">
         <el-icon color="#16a34a"><CircleCheck /></el-icon>
         <span>已绑定：<b>{{ feishuUserName || '飞书账号' }}</b></span>
         <span v-if="authorizedAt" class="feishu-meta">· {{ formatTime(authorizedAt) }}</span>
       </div>
 
       <!-- 授权进行中 -->
-      <div v-else-if="status === 'pending'" class="feishu-pending">
+      <div v-else-if="status === 'pending'" class="feishu-pending integration-status">
         <div class="feishu-pending-head">
           <el-icon class="is-loading"><Loading /></el-icon>
           <span>等待在飞书中确认授权…</span>
@@ -36,8 +36,9 @@
       </div>
 
       <!-- 未绑定提示 -->
-      <div v-else class="feishu-hint">
-        <p>尚未绑定。绑定后即可在创作页一键导入飞书 brief。</p>
+      <div v-else class="feishu-hint integration-empty">
+        <p>尚未绑定飞书账号</p>
+        <p>绑定后即可在创作页一键导入飞书 brief。</p>
         <p v-if="lastError" class="feishu-error">上次失败：{{ lastError }}</p>
       </div>
     </div>
@@ -166,12 +167,20 @@ onUnmounted(stopPolling)
 </script>
 
 <style scoped>
-.feishu-bound { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); }
+.integration-card-inner { padding: 2px 0; }
+.integration-card-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+.integration-card-header h3 { margin: 0 0 5px; color: var(--ink); font-size: 17px; font-weight: 600; }
+.integration-card-header p { margin: 0; color: var(--ink-4); font-size: 13px; line-height: 1.6; }
+.integration-empty { display: flex; min-height: 145px; align-items: center; justify-content: center; flex-direction: column; border: 1px dashed var(--line, #e5e5e5); border-radius: 12px; background: var(--paper-2, #faf9f7); text-align: center; }
+.integration-empty p { margin: 0; color: var(--ink-4); font-size: 13px; line-height: 1.6; }
+.integration-empty p:first-child { margin-bottom: 4px; color: var(--ink-3); font-size: 14px; }
+.integration-status { min-height: 145px; box-sizing: border-box; }
+.feishu-bound { display: flex; align-items: center; gap: 8px; justify-content: center; padding: 16px; border: 1px solid #d9ebdf; border-radius: 12px; background: #f4faf6; font-size: 14px; color: var(--ink); }
 .feishu-meta { color: var(--ink-4); font-size: 12px; }
 .feishu-pending { background: var(--paper-2, #faf9f7); border: 1px solid var(--line, #eee); border-radius: 10px; padding: 14px 16px; }
 .feishu-pending-head { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); margin-bottom: 6px; }
 .feishu-tip { font-size: 12px; color: var(--ink-4); margin-bottom: 10px; }
 .feishu-actions { display: flex; gap: 8px; }
-.feishu-hint { font-size: 13px; color: var(--ink-4); }
 .feishu-error { color: #dc2626; margin-top: 4px; }
+@media (max-width: 768px) { .integration-card-header { align-items: flex-start; } }
 </style>

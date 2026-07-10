@@ -4,7 +4,7 @@ import json
 import logging
 import secrets
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -36,6 +36,10 @@ logger = logging.getLogger(__name__)
 MEMBERSHIP_FEE_FEN = 69900
 # 创作工具首次开通赠送积分
 MEMBERSHIP_GIFT_CREDITS = 6000
+
+# Native 二维码有效期（分钟）。微信默认约 2 小时，这里取更保守的 110 分钟，
+# 复用待支付订单时超过此时长就重新下单，避免把过期的 code_url 返回给前端。
+ORDER_VALID_MINUTES = 110
 
 # 产品价格只在服务端定义，前端展示价格不能作为下单金额来源。
 PRODUCT_PLANS = {
@@ -85,6 +89,7 @@ class WechatPayService:
             "description": f"公众号智能体-{package['name']}",
             "out_trade_no": out_trade_no,
             "notify_url": settings.WXPAY_NOTIFY_URL,
+            "time_expire": self._time_expire(),
             "amount": {
                 "total": amount_fen,
                 "currency": "CNY",
@@ -150,11 +155,12 @@ class WechatPayService:
             .where(PaymentOrder.order_type == "product")
             .where(PaymentOrder.package_name == product)
             .where(PaymentOrder.status == "PENDING")
+            .where(PaymentOrder.created_at >= utcnow() - timedelta(minutes=ORDER_VALID_MINUTES))
             .order_by(PaymentOrder.created_at.desc())
             .limit(1)
         )
         existing = (await self.db.execute(pending_stmt)).scalar_one_or_none()
-        if existing:
+        if existing and existing.code_url:
             logger.info("[WechatPay] 复用待支付产品订单 out_trade_no=%s product=%s", existing.out_trade_no, product)
             return existing
 
@@ -168,6 +174,7 @@ class WechatPayService:
             "description": plan["description"],
             "out_trade_no": out_trade_no,
             "notify_url": settings.WXPAY_NOTIFY_URL,
+            "time_expire": self._time_expire(),
             "amount": {
                 "total": amount_fen,
                 "currency": "CNY",
@@ -212,6 +219,50 @@ class WechatPayService:
             stmt = stmt.where(PaymentOrder.user_id == user_id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def close_order(self, out_trade_no: str, user_id: Optional[int] = None) -> Optional[PaymentOrder]:
+        """关闭未支付订单：调用微信 closeorder 让二维码立即失效，并落库 CLOSED。
+
+        - 已支付（PAID）订单绝不关闭，直接返回。
+        - 微信侧「订单已关闭 / 不存在」视为幂等成功。
+        关闭后本地状态置 CLOSED，create_product_order 的待支付复用只认 PENDING，
+        因此下次开弹窗会重新下单、拿到新二维码。
+        """
+        order = await self.get_order(out_trade_no, user_id)
+        if not order:
+            return None
+        if order.status != "PENDING":
+            return order
+
+        self.require_configured()
+        url_path = f"/v3/pay/transactions/out-trade-no/{out_trade_no}/close"
+        payload = {"mchid": settings.WXPAY_MCH_ID}
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                "https://api.mch.weixin.qq.com" + url_path,
+                content=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                headers=self._wechat_headers("POST", url_path, payload),
+            )
+
+        # 微信关单成功返回 204 No Content；对已关闭/不存在做幂等处理。
+        if response.status_code not in (200, 204):
+            err_code = ""
+            try:
+                err_code = (response.json() or {}).get("code", "")
+            except Exception:  # noqa: BLE001 - 响应非 JSON 时忽略
+                err_code = ""
+            if err_code not in {"ORDER_CLOSED", "ORDERNOTEXIST", "ORDER_NOT_EXIST"}:
+                logger.error(
+                    "[WechatPay] 关单失败 out_trade_no=%s status=%s body=%s",
+                    out_trade_no, response.status_code, response.text,
+                )
+                raise ValueError("微信支付关单失败")
+
+        order.status = "CLOSED"
+        self.db.add(order)
+        await self.db.flush()
+        logger.info("[WechatPay] 订单已关闭 out_trade_no=%s user_id=%s", out_trade_no, order.user_id)
+        return order
 
     async def handle_notify(
         self,
@@ -391,6 +442,11 @@ class WechatPayService:
 
     def _generate_trade_no(self) -> str:
         return "GZH" + datetime.now().strftime("%Y%m%d%H%M%S") + secrets.token_hex(6).upper()
+
+    def _time_expire(self) -> str:
+        """微信 time_expire：RFC3339 带时区。utcnow() 是 naive 北京时间，补 +08:00。"""
+        expire_at = utcnow() + timedelta(minutes=ORDER_VALID_MINUTES)
+        return expire_at.strftime("%Y-%m-%dT%H:%M:%S+08:00")
 
     def _parse_success_time(self, value: Optional[str]):
         if not value:

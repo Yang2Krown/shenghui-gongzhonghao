@@ -79,3 +79,19 @@ export const updateAdminUserMembership = (id, data) => {
 export const updateAdminUserProductAccess = (id, data) => {
   return patch(`/admin/users/${id}/product-access`, data)
 }
+
+export const getUserCredits = (id, params = {}) => {
+  return get(`/admin/users/${id}/credits`, params)
+}
+
+export const adjustUserCredits = (id, data) => {
+  return patch(`/admin/users/${id}/credits`, data)
+}
+
+export const getUserDiagnostics = (id, params = {}) => {
+  return get(`/admin/users/${id}/diagnostics`, params)
+}
+
+export const getSystemAnnouncements = () => get('/admin/announcements')
+export const createSystemAnnouncement = (data) => post('/admin/announcements', data)
+export const updateSystemAnnouncement = (id, data) => patch(`/admin/announcements/${id}`, data)

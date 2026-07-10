@@ -324,12 +324,21 @@ const payCanvas = ref(null)
 const payLoading = ref(false)
 const payPolling = ref(false)
 const payError = ref('')
+const campOrderNo = ref('')
 let payTimer = null
 
 const stopPayPolling = () => {
   if (payTimer) window.clearInterval(payTimer)
   payTimer = null
   payPolling.value = false
+}
+
+// 用户取消支付时关闭未支付订单，让二维码立即失效（尽力而为，不阻塞 UI）。
+const closeCampOrder = () => {
+  if (!campOrderNo.value) return
+  const no = campOrderNo.value
+  campOrderNo.value = ''
+  post(`/credits/purchase/close/${no}`).catch(() => {})
 }
 
 const createCampOrder = async () => {
@@ -345,6 +354,10 @@ const createCampOrder = async () => {
   payError.value = ''
   try {
     const res = await post('/credits/products/practical_camp')
+    campOrderNo.value = res.data.out_trade_no
+    // 必须先关掉 loading，二维码 <canvas>（v-if="!payLoading"）才会挂载，
+    // 否则 payCanvas.value 还是 null，toCanvas 画到游离画布上 → 空白码。
+    payLoading.value = false
     await nextTick()
     await QRCode.toCanvas(payCanvas.value, res.data.code_url, { width: 220, margin: 1 })
     payPolling.value = true
@@ -352,6 +365,7 @@ const createCampOrder = async () => {
       try {
         const status = await get(`/credits/purchase/status/${res.data.out_trade_no}`)
         if (status.data.status === 'PAID') {
+          campOrderNo.value = ''
           stopPayPolling()
           await userStore.fetchUser()
           activeModal.value = ''
@@ -361,7 +375,6 @@ const createCampOrder = async () => {
     }, 2500)
   } catch (error) {
     payError.value = error.response?.data?.detail || '创建支付订单失败，请稍后重试'
-  } finally {
     payLoading.value = false
   }
 }
@@ -370,8 +383,8 @@ const openModal = async (id) => {
   activeModal.value = id
   if (id === 'pay') await createCampOrder()
 }
-const closeModal = () => { stopPayPolling(); activeModal.value = '' }
-const switchModal = (id) => { stopPayPolling(); activeModal.value = id }
+const closeModal = () => { stopPayPolling(); closeCampOrder(); activeModal.value = '' }
+const switchModal = (id) => { stopPayPolling(); closeCampOrder(); activeModal.value = id }
 
 const goLanding = () => { router.push('/landing') }
 const goToCourse = () => {
@@ -419,6 +432,7 @@ onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
   if (fadeObserver) fadeObserver.disconnect()
   stopPayPolling()
+  closeCampOrder()
   document.body.style.overflow = ''
 })
 </script>
@@ -514,6 +528,9 @@ onUnmounted(() => {
 .btn-primary:hover { background: var(--accent-deep); transform: translateY(-1px); box-shadow: 0 10px 26px rgba(204,120,92,.28); }
 .btn-primary:active { transform: translateY(0); }
 .btn-ghost { background: var(--bg-000); color: var(--text-100); border-color: var(--border-medium); }
+/* <a> 版按钮要盖过 .camp a { color: inherit }（特异性更高），否则文字会继承深墨色变成褐字 */
+.camp a.btn-primary { color: #fff; }
+.camp a.btn-ghost { color: var(--text-100); }
 .btn-ghost:hover { border-color: rgba(31,31,30,.2); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
 .btn-block { width: 100%; max-width: 320px; margin-top: 4px; }
 .btn-arrow { display: inline-block; transition: transform .2s; }

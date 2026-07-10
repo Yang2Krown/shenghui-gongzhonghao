@@ -129,7 +129,7 @@ const routes = [
         path: 'creation/practical',
         name: 'PracticalCreation',
         component: () => import('@/pages/creation/PracticalCreation.vue'),
-        meta: { title: '实操 / 商稿创作' }
+        meta: { title: '实操 / 商稿创作', product: 'creation_tool' }
       },
       {
         path: 'creation/wechat-editor',
@@ -191,6 +191,12 @@ const routes = [
         name: 'AdminUsers',
         component: () => import('@/pages/admin/UserManagement.vue'),
         meta: { title: '用户管理', requiresAdmin: true }
+      },
+      {
+        path: 'admin/announcements',
+        name: 'AdminAnnouncements',
+        component: () => import('@/pages/admin/SystemAnnouncements.vue'),
+        meta: { title: '系统公告', requiresAdmin: true }
       },
       // ===== 我的创作已下线 → 重定向到选题列表 =====
       {

@@ -291,7 +291,7 @@ async def _enrich_dajiala_wechat_fulltext(
     from sqlalchemy import or_, select
     from app.models.raw_info import RawInfo
     from app.models.source_registry import SourceRegistry
-    from app.services.scraping.adapters.exa_wechat_adapter import resolve_wechat_permalink
+    from app.services.scraping.agent_reach_runner import agent_reach_client
 
     try:
         async with AsyncSessionLocal() as db:
@@ -319,16 +319,12 @@ async def _enrich_dajiala_wechat_fulltext(
 
             async def _one(raw: RawInfo) -> None:
                 async with sem:
-                    _, content, content_html = await resolve_wechat_permalink(
-                        raw.url,
-                        timeout=15.0,
-                        fetch_permanent_content=True,
-                        fetch_snapshot=False,
+                    # 临时链接已在入库前通过极致了转为永久链；这里不再抓微信公众号 HTML。
+                    content = await asyncio.wait_for(
+                        agent_reach_client.read_url(raw.url), timeout=15.0,
                     )
                     if content:
                         raw.content = content
-                        if content_html:
-                            raw.content_html = content_html
                         filled_ids.append(raw.id)
 
             await asyncio.gather(*[_one(raw) for raw in rows], return_exceptions=True)

@@ -38,6 +38,7 @@ from app.models.monitoring import MonitoringAlert, MonitoringSnapshot
 
 # 管理员审计
 from app.models.admin_audit import AdminAuditLog
+from app.models.system_announcement import SystemAnnouncement, SystemAnnouncementDismissal
 
 # API 请求监测
 from app.models.api_request_log import ApiRequestLog
@@ -85,6 +86,8 @@ __all__ = [
     "MonitoringSnapshot",
     "MonitoringAlert",
     "AdminAuditLog",
+    "SystemAnnouncement",
+    "SystemAnnouncementDismissal",
     "ApiRequestLog",
     "LlmCallLog",
     "LlmModelPricing",

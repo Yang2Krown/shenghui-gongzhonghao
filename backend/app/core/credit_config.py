@@ -74,39 +74,51 @@ OPERATION_COSTS = {
 # ====== 积分套餐定义 ======
 CREDIT_PACKAGES = [
     {
-        "name": "体验包",
-        "credits": 100,
-        "price_yuan": 0.01,
+        "name": "300 元充值",
+        "credits": 3000,
+        "base_credits": 3000,
+        "bonus_credits": 0,
+        "bonus_rate": 0,
+        "price_yuan": 300,
         "original_price_yuan": None,
-        "description": "测试套餐，可创作约 5 篇完整文章",
-        "badge": "测试",
+        "description": "基础兑换，1 元 = 10 积分",
+        "badge": None,
         "sort_order": 1,
     },
     {
-        "name": "标准包",
-        "credits": 500,
-        "price_yuan": 39,
-        "original_price_yuan": 49.5,
-        "description": "最受欢迎，可创作约 27 篇完整文章",
+        "name": "500 元充值",
+        "credits": 5250,
+        "base_credits": 5000,
+        "bonus_credits": 250,
+        "bonus_rate": 5,
+        "price_yuan": 500,
+        "original_price_yuan": None,
+        "description": "多充多送，额外赠送 250 积分",
         "badge": "推荐",
         "sort_order": 2,
     },
     {
-        "name": "专业包",
-        "credits": 1200,
-        "price_yuan": 79,
-        "original_price_yuan": 118.8,
-        "description": "专业运营首选，可创作约 66 篇完整文章",
+        "name": "1000 元充值",
+        "credits": 11000,
+        "base_credits": 10000,
+        "bonus_credits": 1000,
+        "bonus_rate": 10,
+        "price_yuan": 1000,
+        "original_price_yuan": None,
+        "description": "高效创作，额外赠送 1000 积分",
         "badge": "超值",
         "sort_order": 3,
     },
     {
-        "name": "团队包",
-        "credits": 3000,
-        "price_yuan": 169,
-        "original_price_yuan": 297,
-        "description": "团队批量采购，可创作约 166 篇完整文章",
-        "badge": None,
+        "name": "2000 元充值",
+        "credits": 24000,
+        "base_credits": 20000,
+        "bonus_credits": 4000,
+        "bonus_rate": 20,
+        "price_yuan": 2000,
+        "original_price_yuan": None,
+        "description": "最高赠送，额外赠送 4000 积分",
+        "badge": "最高省 ¥400",
         "sort_order": 4,
     },
 ]
@@ -143,7 +155,7 @@ def estimate_monthly_cost(articles_per_month: int) -> dict:
     """估算月度成本"""
     cost_per_article = FULL_CREATION_FLOW["total_credits"]
     total_credits = cost_per_article * articles_per_month
-    total_yuan = total_credits * 0.10  # 1积分 = ¥0.10
+    total_yuan = total_credits / 10  # 1 元 = 10 积分
 
     # 推荐套餐
     recommended_package = None

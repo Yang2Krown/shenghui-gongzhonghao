@@ -291,6 +291,14 @@
               <td>{{ fmtDate(item.created_at) }}</td>
               <td>{{ fmtDate(item.last_login) }}</td>
               <td class="action-cell">
+                <button class="btn-ghost btn-sm" @click="openRecordsDialog(item)">使用记录</button>
+                <button
+                  v-if="userStore.isSuperAdmin"
+                  class="btn-ghost btn-sm"
+                  @click="openCreditDialog(item)"
+                >
+                  改积分
+                </button>
                 <button
                   v-if="!item.is_superuser"
                   class="btn-ghost btn-sm"
@@ -385,6 +393,77 @@
         </div>
       </section>
     </div>
+
+    <el-dialog v-model="creditDialog.visible" title="调整用户积分" width="440px" :close-on-click-modal="false">
+      <div v-if="creditDialog.user" class="dialog-body">
+        <div class="dialog-user">
+          <strong>{{ creditDialog.user.full_name || creditDialog.user.username }}</strong>
+          <span class="muted">当前余额：{{ creditDialog.currentBalance }} 积分</span>
+        </div>
+        <el-radio-group v-model="creditDialog.mode" class="dialog-modes">
+          <el-radio-button label="add">增加</el-radio-button>
+          <el-radio-button label="deduct">扣减</el-radio-button>
+          <el-radio-button label="set">设为</el-radio-button>
+        </el-radio-group>
+        <el-input-number v-model="creditDialog.amount" :min="creditDialog.mode === 'set' ? 0 : 1" :step="10" style="width: 100%;" />
+        <div class="dialog-preview muted">调整后余额约为 {{ creditPreviewBalance }} 积分</div>
+        <el-input
+          v-model="creditDialog.reason"
+          type="textarea"
+          :rows="3"
+          maxlength="500"
+          show-word-limit
+          placeholder="请填写调整原因（必填，会记入操作审计）"
+        />
+      </div>
+      <template #footer>
+        <button class="btn-ghost btn-uniform" @click="creditDialog.visible = false">取消</button>
+        <button class="btn-primary btn-uniform" :disabled="creditDialog.saving || !creditDialog.reason.trim()" @click="submitCreditAdjust">确认调整</button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="recordsDialog.visible" title="积分使用记录" width="760px">
+      <div v-loading="recordsDialog.loading" class="records-body">
+        <div v-if="recordsDialog.user" class="records-summary">
+          <div class="records-user">
+            <strong>{{ recordsDialog.user.full_name || recordsDialog.user.username }}</strong>
+            <span class="muted">{{ recordsDialog.user.phone || '—' }}</span>
+          </div>
+          <div class="records-stat"><span>当前余额</span><strong>{{ recordsDialog.account?.balance ?? 0 }}</strong></div>
+          <div class="records-stat"><span>累计消耗</span><strong>{{ recordsDialog.account?.total_consumed ?? 0 }}</strong></div>
+          <div class="records-stat"><span>累计购买</span><strong>{{ recordsDialog.account?.total_purchased ?? 0 }}</strong></div>
+          <div class="records-stat"><span>累计赠送</span><strong>{{ recordsDialog.account?.total_gifted ?? 0 }}</strong></div>
+        </div>
+        <div class="table-scroll">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>类型</th>
+                <th>变动</th>
+                <th>变动后</th>
+                <th>操作/说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="t in recordsDialog.transactions" :key="t.id">
+                <td>{{ fmtDate(t.created_at) }}</td>
+                <td><el-tag :type="creditTypeTag(t.type)" size="small">{{ creditTypeLabel(t.type) }}</el-tag></td>
+                <td :class="t.amount >= 0 ? 'amount-pos' : 'amount-neg'">{{ t.amount >= 0 ? '+' : '' }}{{ t.amount }}</td>
+                <td>{{ t.balance_after ?? '—' }}</td>
+                <td>
+                  <div>{{ operationLabel(t.operation) }}</div>
+                  <div v-if="t.description" class="muted">{{ t.description }}</div>
+                </td>
+              </tr>
+              <tr v-if="!recordsDialog.transactions.length">
+                <td colspan="5" class="empty-cell">暂无积分流水</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -393,6 +472,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import {
+  adjustUserCredits,
   getAdminAuditLogs,
   getAdminUsers,
   getAdmins,
@@ -401,6 +481,7 @@ import {
   getMonitoringOverview,
   getMonitoringSnapshots,
   getSecurityHealth,
+  getUserCredits,
   setAdminByPhone,
   updateAdminUserStatus,
   updateMonitoringAlert,
@@ -431,6 +512,22 @@ const securityHealth = ref({})
 const securityHandled = ref({})
 const securityAlertHandled = ref({})
 const showHandledSecurityAlerts = ref(false)
+const creditDialog = reactive({
+  visible: false,
+  user: null,
+  currentBalance: 0,
+  mode: 'add',
+  amount: 10,
+  reason: '',
+  saving: false,
+})
+const recordsDialog = reactive({
+  visible: false,
+  loading: false,
+  user: null,
+  account: null,
+  transactions: [],
+})
 const openPanels = reactive({
   roles: true,
   history: false,
@@ -443,6 +540,7 @@ const openPanels = reactive({
 const sensitiveActions = new Set([
   'admin.role.update',
   'credits.gift',
+  'user.credits.adjust',
   'user.status.update',
   'llm_pricing.create',
   'llm_pricing.update',
@@ -665,6 +763,7 @@ function actionLabel(action) {
     'admin.revoke': '取消管理员',
     'admin.role.update': '后台角色变更',
     'credits.gift': '赠送积分',
+    'user.credits.adjust': '调整积分',
     'user.status.update': '用户状态变更',
     'llm_pricing.create': '新增模型单价',
     'llm_pricing.update': '修改模型单价',
@@ -674,7 +773,7 @@ function actionLabel(action) {
 }
 
 function auditRiskLevel(item) {
-  if (['admin.role.update', 'credits.gift', 'user.status.update', 'llm_pricing.update'].includes(item.action)) {
+  if (['admin.role.update', 'credits.gift', 'user.credits.adjust', 'user.status.update', 'llm_pricing.update'].includes(item.action)) {
     return 'critical'
   }
   return sensitiveActions.has(item.action) ? 'warn' : 'info'
@@ -723,6 +822,101 @@ async function toggleUserStatus(item) {
   await updateAdminUserStatus(item.id, { is_active: nextActive, reason: value || '' })
   ElMessage.success(`用户已${actionText}`)
   await loadAll()
+}
+
+const creditPreviewBalance = computed(() => {
+  const base = creditDialog.currentBalance || 0
+  const amount = Number(creditDialog.amount) || 0
+  if (creditDialog.mode === 'set') return Math.max(amount, 0)
+  if (creditDialog.mode === 'deduct') return Math.max(base - amount, 0)
+  return base + amount
+})
+
+const creditTypeMeta = {
+  purchase: { label: '购买', tag: 'success' },
+  gift: { label: '赠送', tag: 'success' },
+  consume: { label: '消耗', tag: 'info' },
+  refund: { label: '退款', tag: 'warning' },
+  expire: { label: '过期清零', tag: 'danger' },
+  adjust: { label: '人工调整', tag: 'warning' },
+}
+
+const operationLabels = {
+  topic_mining: '选题挖掘',
+  outline_generation: '大纲生成',
+  content_generation: '正文生成',
+  content_polish: '文案润色',
+  title_generation: '标题生成',
+  content_continuation: '正文续写',
+  title_scoring: '标题评分',
+  content_transform: '内容转写',
+  content_imitate: '内容仿写',
+  practical_research: '实操调研',
+  admin_adjust: '管理员调整',
+}
+
+function creditTypeLabel(type) {
+  return creditTypeMeta[type]?.label || type || '—'
+}
+
+function creditTypeTag(type) {
+  return creditTypeMeta[type]?.tag || 'info'
+}
+
+function operationLabel(operation) {
+  if (!operation) return '—'
+  return operationLabels[operation] || operation
+}
+
+function openCreditDialog(item) {
+  creditDialog.user = item
+  creditDialog.currentBalance = item.credit_balance || 0
+  creditDialog.mode = 'add'
+  creditDialog.amount = 10
+  creditDialog.reason = ''
+  creditDialog.saving = false
+  creditDialog.visible = true
+}
+
+async function submitCreditAdjust() {
+  const reason = creditDialog.reason.trim()
+  if (!reason) {
+    ElMessage.warning('请填写调整原因')
+    return
+  }
+  const amount = Number(creditDialog.amount) || 0
+  if (creditDialog.mode !== 'set' && amount <= 0) {
+    ElMessage.warning('调整数量必须大于 0')
+    return
+  }
+  const payload = creditDialog.mode === 'set'
+    ? { mode: 'set', amount, reason }
+    : { mode: 'delta', amount: creditDialog.mode === 'deduct' ? -amount : amount, reason }
+
+  creditDialog.saving = true
+  try {
+    const resp = await adjustUserCredits(creditDialog.user.id, payload)
+    ElMessage.success(`积分已调整，当前余额 ${resp.data?.balance ?? '—'}`)
+    creditDialog.visible = false
+    await loadUsers()
+  } finally {
+    creditDialog.saving = false
+  }
+}
+
+async function openRecordsDialog(item) {
+  recordsDialog.visible = true
+  recordsDialog.loading = true
+  recordsDialog.user = item
+  recordsDialog.account = null
+  recordsDialog.transactions = []
+  try {
+    const resp = await getUserCredits(item.id, { limit: 100 })
+    recordsDialog.account = resp.data?.account || null
+    recordsDialog.transactions = resp.data?.transactions || []
+  } finally {
+    recordsDialog.loading = false
+  }
 }
 
 async function openAlertNote(item) {
@@ -835,6 +1029,20 @@ h1 { margin: 4px 0 0; font-family: var(--serif); font-size: 34px; color: var(--i
 .note-cell { max-width: 220px; color: var(--ink-3); font-size: 13px; line-height: 1.5; }
 .ua-cell { max-width: 260px; overflow-wrap: anywhere; }
 .action-cell { display: flex; gap: 6px; flex-wrap: wrap; }
+.dialog-body { display: flex; flex-direction: column; gap: 14px; }
+.dialog-user { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.dialog-user strong { color: var(--ink); font-size: 15px; }
+.dialog-modes { align-self: flex-start; }
+.dialog-preview { font-size: 13px; }
+.records-body { display: flex; flex-direction: column; gap: 14px; }
+.records-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding-bottom: 4px; }
+.records-user { display: flex; flex-direction: column; }
+.records-user strong { color: var(--ink); }
+.records-stat { display: flex; flex-direction: column; }
+.records-stat span { font-size: 12px; color: var(--ink-4); }
+.records-stat strong { color: var(--ink); font-size: 18px; font-variant-numeric: tabular-nums; }
+.amount-pos { color: #2f855a; font-variant-numeric: tabular-nums; }
+.amount-neg { color: #c0392b; font-variant-numeric: tabular-nums; }
 @media (max-width: 900px) {
   .admin-grid, .signal-grid, .alert-strip, .security-grid, .baseline-grid { grid-template-columns: 1fr; }
   .grant-row { grid-template-columns: 1fr; }

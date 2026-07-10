@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate, wechat_draft, content_continuation, content_polish, wechat_accounts, credits, credit_purchase, practical, feishu_brief, images, commercial, article_snapshots, admin, _test_gzh_fetch, courses
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate, wechat_draft, content_continuation, content_polish, wechat_accounts, credits, credit_purchase, practical, feishu_brief, images, commercial, admin, announcements, _test_gzh_fetch, courses
 
 api_router = APIRouter()
 
@@ -43,6 +43,13 @@ api_router.include_router(
     admin.router,
     prefix="/admin",
     tags=["管理员后台"]
+)
+
+# 系统公告（所有已登录用户可读取）
+api_router.include_router(
+    announcements.router,
+    prefix="/announcements",
+    tags=["系统公告"]
 )
 
 # AI服务路由
@@ -232,13 +239,6 @@ api_router.include_router(
     images.router,
     prefix="/images",
     tags=["图片上传"]
-)
-
-# 文章HTML快照路由
-api_router.include_router(
-    article_snapshots.router,
-    prefix="/article-snapshots",
-    tags=["文章快照"]
 )
 
 # 课程资料路由

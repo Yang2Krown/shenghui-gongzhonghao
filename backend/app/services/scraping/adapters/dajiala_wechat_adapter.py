@@ -145,8 +145,6 @@ class DajialaWechatAdapter(SourceAdapter):
         items = await resolve_items_permalinks(
             items,
             concurrency=int(cfg.get("resolve_concurrency", 3)),
-            fetch_permanent_content=True,
-            fetch_snapshot=False,
         )
         logger.info("[%s] 极致了当天发文抓回 %s 条（账号 %s 个）", source.platform, len(items), len(account_list))
         return items
@@ -175,8 +173,6 @@ class DajialaWechatAdapter(SourceAdapter):
         items = await resolve_items_permalinks(
             items,
             concurrency=int(cfg.get("resolve_concurrency", 3)),
-            fetch_permanent_content=True,
-            fetch_snapshot=False,
         )
         logger.info(
             "[%s] 极致了历史补库抓回 %s 条（账号 %s 个，每号最多 %s 页）",

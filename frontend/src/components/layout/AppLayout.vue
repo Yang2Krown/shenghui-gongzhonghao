@@ -163,7 +163,7 @@ const userStore = useUserStore()
 
 const productForPath = (path) => {
   if (path.startsWith('/potential-commercial') || path.startsWith('/content-info/commercial')) return 'potential_commercial'
-  if (path.startsWith('/courses') || path.startsWith('/creation/practical')) return 'practical_camp'
+  if (path.startsWith('/courses')) return 'practical_camp'
   if (
     path === '/' || path.startsWith('/content-info') || path.startsWith('/topic-clusters') ||
     path.startsWith('/legacy') || path.startsWith('/creation') || path.startsWith('/content-transform') ||
@@ -301,6 +301,7 @@ const navItems = [
       { id: 'admin-security-health', label: '安全健康' },
       { id: 'admin-user-stats', label: '用户统计' },
       { id: 'admin-users', label: '用户管理' },
+      { id: 'admin-announcements', label: '系统公告' },
       { id: 'gzh-test', label: '公众号抓取测试' },
     ],
   },
@@ -354,6 +355,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/admin/security-health')) return 'admin-security-health'
   if (path.startsWith('/admin/user-stats')) return 'admin-user-stats'
   if (path.startsWith('/admin/users')) return 'admin-users'
+  if (path.startsWith('/admin/announcements')) return 'admin-announcements'
   if (path.startsWith('/admin')) return 'admin-dashboard'
   if (path.startsWith('/tools/gzh-test')) return 'gzh-test'
   return 'content-info'
@@ -420,6 +422,7 @@ const routeMap = {
   'admin-security-health': '/admin/security-health',
   'admin-user-stats': '/admin/user-stats',
   'admin-users': '/admin/users',
+  'admin-announcements': '/admin/announcements',
   'gzh-test': '/tools/gzh-test',
 }
 
