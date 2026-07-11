@@ -45,7 +45,7 @@ ORDER_VALID_MINUTES = 110
 PRODUCT_PLANS = {
     PRODUCT_CREATION_TOOL: {"amount_fen": 69900, "period": "月", "description": "IP罗盘 - 创作工具"},
     "potential_commercial": {"amount_fen": 29900, "period": "月", "description": "IP罗盘 - 潜在商单"},
-    "practical_camp": {"amount_fen": 398000, "period": "年", "description": "IP罗盘 - AI垂类公众号实战营"},
+    "practical_camp": {"amount_fen": 198000, "period": "年", "description": "IP罗盘 - AI垂类公众号实战营"},
 }
 
 

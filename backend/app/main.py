@@ -163,6 +163,10 @@ def _required_product_for_request(request: Request) -> Optional[str]:
         return None
     if relative.startswith("/credits/purchase/status/"):
         return None
+    if relative.startswith("/credits/purchase/close/"):
+        # 关闭本人未支付订单本身已由接口校验登录身份和订单归属，
+        # 不能再要求用户拥有创作工具产品，否则实战营/积分订单无法关单。
+        return None
     if relative == "/credits/pay/notify":
         return None
     if relative.startswith("/docs") or relative.endswith("/openapi.json"):

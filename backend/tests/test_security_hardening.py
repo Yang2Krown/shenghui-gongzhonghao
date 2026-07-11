@@ -1,5 +1,7 @@
 import pytest
+from starlette.requests import Request
 
+from app.main import _required_product_for_request
 from app.core.progress import ProgressStore
 from app.core.url_security import UnsafeURL, validate_public_http_url
 
@@ -22,6 +24,24 @@ def test_progress_store_legacy_unowned_run_is_not_readable():
     assert store.exists(run_id) is True
     assert store.can_access(run_id, 1) is False
     assert store.snapshot(run_id, user_id=1) is None
+
+
+def test_payment_order_close_endpoint_is_not_blocked_by_product_gate():
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/credits/purchase/close/GZH123",
+            "headers": [],
+            "query_string": b"",
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("testclient", 1234),
+            "root_path": "",
+        }
+    )
+
+    assert _required_product_for_request(request) is None
 
 
 @pytest.mark.parametrize(

@@ -58,7 +58,7 @@ const route = useRoute()
 const plans = {
   creation_tool: { label: '创作工具', price: '¥699 / 月', action: '开通创作工具', description: '解锁信息选题、创作工具、内容仿写与创作历史。' },
   potential_commercial: { label: '潜在商单', price: '¥299 / 月', action: '立即开通', description: '解锁品牌投放线索、账号、时间与原文链接，快速发现可合作机会。' },
-  practical_camp: { label: 'AI 垂类公众号实战营', price: '¥3980 / 年', action: '查看实战营', description: '报名后即可进入完整课程资料，从选题到商业变现系统学习。' },
+  practical_camp: { label: 'AI 垂类公众号实战营', price: '¥1980 / 年', action: '查看实战营', description: '报名后即可进入完整课程资料，从选题到商业变现系统学习。' },
 }
 const commercialCards = [
   { brand: '深度求索', count: 4, title: 'AI 搜索场景内容投放持续升温', account: 'AI 产品观察', time: '今天 10:20' },

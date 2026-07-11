@@ -598,7 +598,7 @@ const productPlans = {
     fallback: '/potential-commercial',
   },
   practical_camp: {
-    price: 3980, period: '年',
+    price: 1980, period: '年',
     description: '报名 AI 垂类公众号实战营，开通完整课程资料与实战讲义。',
     benefits: ['完整课程资料与章节讲义', '从选题到商业变现的方法论', '实战营专属学习内容'],
     fallback: '/courses',

@@ -249,8 +249,8 @@
           <p class="sec-lead center fade-up">AI 垂类公众号单篇商稿的市场价通常在几千元。这门课教你的，是持续接单的完整系统。</p>
         </div>
         <div class="price-card fade-up">
-          <div class="price-old">原价 ¥9800 / 年</div>
-          <div class="price-now"><em>¥</em>3980<em> / 年</em></div>
+          <div class="price-old">原价 ¥3980 / 年</div>
+          <div class="price-now"><em>¥</em>1980<em> / 年</em></div>
           <div class="price-note">首期学员价 · 含一整年全部陪伴权益 · 随期数上涨</div>
           <div class="includes-label">课程内容</div>
           <ul class="includes">
@@ -282,7 +282,7 @@
               <h3>微信扫码支付</h3>
               <div class="camp-pay-summary">
                 <div class="camp-pay-package">AI 垂类公众号实战营</div>
-                <div class="camp-pay-amount">¥3980</div>
+                <div class="camp-pay-amount">¥1980</div>
                 <div class="camp-pay-benefit">1 年课程陪伴权益</div>
               </div>
               <p v-if="payError" class="camp-pay-error">{{ payError }}</p>
