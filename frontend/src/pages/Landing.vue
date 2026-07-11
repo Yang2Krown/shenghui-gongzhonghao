@@ -304,9 +304,9 @@
     </footer>
 
     <!-- Login Modal -->
-    <div v-if="loginOpen" class="modal-backdrop active" @click.self="loginOpen = false">
+    <div v-if="loginOpen" class="modal-backdrop active" @click.self="closeLogin">
       <div class="modal" role="dialog" aria-modal="true">
-        <button class="modal-close" @click="loginOpen = false" aria-label="关闭">×</button>
+        <button class="modal-close" @click="closeLogin" aria-label="关闭">×</button>
         <div v-if="loginStep === 'form'">
           <h3>登录 / 注册</h3>
           <p class="modal-sub">输入手机号即可一步完成登录或注册。还没有账号？自动创建。</p>
@@ -433,13 +433,48 @@ const loginLoading = ref(false)
 const sendingCode = ref(false)
 let countdownTimer = null
 
+const clearLoginCountdown = () => {
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+}
+
+const startLoginCountdown = (seconds = 60) => {
+  clearLoginCountdown()
+  loginCountdown.value = seconds
+  countdownTimer = setInterval(() => {
+    if (loginCountdown.value <= 1) {
+      loginCountdown.value = 0
+      clearLoginCountdown()
+      return
+    }
+    loginCountdown.value -= 1
+  }, 1000)
+}
+
 const openLogin = () => {
+  clearLoginCountdown()
   loginStep.value = 'form'
   loginPhone.value = ''
   loginCode.value = ''
   loginError.value = ''
   loginCountdown.value = 0
   loginOpen.value = true
+}
+
+const closeLogin = () => {
+  clearLoginCountdown()
+  loginCountdown.value = 0
+  loginOpen.value = false
+
+  // 清掉触发弹窗的 query，否则再次点击右上角时路由不变，监听器不会重新打开弹窗。
+  if (route.name === 'Landing' && route.query.show === 'login') {
+    const query = { ...route.query }
+    delete query.show
+    delete query.intent
+    router.replace({ name: 'Landing', query })
+  }
 }
 
 const goCamp = () => {
@@ -474,22 +509,13 @@ const sendCode = async () => {
   try {
     await sendSmsCode(loginPhone.value)
     ElMessage.success('验证码已发送，请注意查收')
-    loginCountdown.value = 60
+    startLoginCountdown()
   } catch (error) {
     loginError.value = error.response?.data?.detail || '发送失败，请稍后重试'
   } finally {
     sendingCode.value = false
   }
 }
-
-watch(loginCountdown, (v) => {
-  if (v > 0) {
-    countdownTimer = setInterval(() => {
-      loginCountdown.value--
-      if (loginCountdown.value <= 0) clearInterval(countdownTimer)
-    }, 1000)
-  }
-})
 
 const submitLogin = async () => {
   if (!/^1[3-9]\d{9}$/.test(loginPhone.value)) {
@@ -511,7 +537,7 @@ const submitLogin = async () => {
     localStorage.setItem('refreshToken', refresh_token)
     localStorage.setItem('tokenSavedAt', String(Date.now()))
     await userStore.fetchUser()
-    if (countdownTimer) clearInterval(countdownTimer)
+    clearLoginCountdown()
     ElMessage.success('登录成功')
     goToDashboard()
   } catch (error) {
@@ -523,6 +549,7 @@ const submitLogin = async () => {
 
 const goToDashboard = () => {
   loginOpen.value = false
+  clearLoginCountdown()
   const intent = loginIntent.value || route.query.intent
   loginIntent.value = ''
   // 从产品 CTA 触发登录后，回到同一个产品继续完成开通；右上角登录仅建立登录状态。
@@ -652,6 +679,28 @@ const startMembershipPolling = (outTradeNo) => {
   }, 3000)
 }
 
+// 弹窗打开时锁定 body 滚动，并补偿滚动条宽度，避免页面左右跳动。
+let bodyScrollLockActive = false
+let previousBodyOverflow = ''
+let previousBodyPaddingRight = ''
+
+const updateBodyScrollLock = (isLocked) => {
+  if (isLocked) {
+    if (bodyScrollLockActive) return
+    bodyScrollLockActive = true
+    previousBodyOverflow = document.body.style.overflow
+    previousBodyPaddingRight = document.body.style.paddingRight
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
+    document.body.style.paddingRight = scrollbarWidth ? `${scrollbarWidth}px` : ''
+    document.body.style.overflow = 'hidden'
+    return
+  }
+  if (!bodyScrollLockActive) return
+  bodyScrollLockActive = false
+  document.body.style.overflow = previousBodyOverflow
+  document.body.style.paddingRight = previousBodyPaddingRight
+}
+
 // 监听路由 query 变化：从其他页面被守卫弹回 /landing?show=membership 时
 watch(() => route.query.show, (val) => {
   if (val === 'membership' && !membershipOpen.value) {
@@ -661,10 +710,9 @@ watch(() => route.query.show, (val) => {
   }
 }, { immediate: true })
 
-// 弹窗打开时锁定 body 滚动，防止出现横向滚动条
 watch([loginOpen, membershipOpen], ([login, membership]) => {
-  document.body.style.overflow = (login || membership) ? 'hidden' : ''
-})
+  updateBodyScrollLock(login || membership)
+}, { immediate: true })
 
 /* ── Pain Points data ── */
 const painPoints = [
@@ -714,13 +762,6 @@ onMounted(() => {
   window.addEventListener('scroll', onScroll, { passive: true })
   onScroll()
 
-  // 检查是否需要打开会员弹窗
-  if (route.query.show === 'membership') {
-    openMembership()
-  } else if (route.query.show === 'login') {
-    openLogin()
-  }
-
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     fadeObserver = new IntersectionObserver(
       entries => entries.forEach(e => {
@@ -738,8 +779,9 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('scroll', onScroll)
   if (fadeObserver) fadeObserver.disconnect()
-  if (countdownTimer) clearInterval(countdownTimer)
+  clearLoginCountdown()
   if (membershipTimer) clearInterval(membershipTimer)
+  updateBodyScrollLock(false)
   closeMembershipOrder()
 })
 </script>

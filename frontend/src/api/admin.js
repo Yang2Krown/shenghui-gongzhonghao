@@ -1,4 +1,4 @@
-import { get, patch, post } from './api'
+import { del, get, patch, post } from './api'
 
 export const getMonitoringOverview = () => {
   return get('/admin/monitoring/overview')
@@ -10,6 +10,10 @@ export const getSourceHealth = () => {
 
 export const getCommercialDiagnostics = (params = {}) => {
   return get('/admin/monitoring/commercial-diagnostics', params)
+}
+
+export const deleteCommercialDiagnostic = (id) => {
+  return del(`/admin/monitoring/commercial-diagnostics/${id}`)
 }
 
 export const getAiCosts = () => {

@@ -57,14 +57,25 @@ def _wechat_commercial_filters(
     if level:
         filters[0] = RawInfo.commercial_level == level
     if brand:
-        filters.append(RawInfo.commercial_brand == brand)
+        filters.append(or_(
+            RawInfo.commercial_brand == brand,
+            RawInfo.commercial_meta["brand"].as_string() == brand,
+        ))
     if category:
-        filters.append(RawInfo.commercial_category == category)
+        filters.append(or_(
+            RawInfo.commercial_category == category,
+            RawInfo.commercial_meta["category"].as_string() == category,
+        ))
     if keyword:
         filters.append(
             or_(
                 RawInfo.title.ilike(f"%{keyword}%"),
                 RawInfo.summary.ilike(f"%{keyword}%"),
+                RawInfo.commercial_brand.ilike(f"%{keyword}%"),
+                RawInfo.commercial_category.ilike(f"%{keyword}%"),
+                RawInfo.commercial_meta["brand"].as_string().ilike(f"%{keyword}%"),
+                RawInfo.commercial_meta["category"].as_string().ilike(f"%{keyword}%"),
+                RawInfo.commercial_meta["product"].as_string().ilike(f"%{keyword}%"),
             )
         )
     return filters
@@ -135,11 +146,11 @@ async def get_commercial_timeline(
     """时间轴：按天分组，返回潜在商单列表。"""
     filters = _wechat_commercial_filters(level=level, brand=brand, category=category, keyword=keyword)
 
-    # 截断日期范围（scraped_at 是 naive datetime，cutoff 也要 naive）
+    # 截断日期范围（published_at 是 naive datetime，cutoff 也要 naive）
     from datetime import datetime, timedelta
     cutoff = datetime.utcnow() - timedelta(days=days)
 
-    filters.append(RawInfo.scraped_at >= cutoff)
+    filters.append(RawInfo.published_at >= cutoff)
 
     query = (
         select(
@@ -150,7 +161,7 @@ async def get_commercial_timeline(
         .outerjoin(SourceRegistry, RawInfo.source_registry_id == SourceRegistry.id)
         .outerjoin(SourceAccount, RawInfo.source_account_id == SourceAccount.id)
         .where(*filters)
-        .order_by(desc(RawInfo.scraped_at))
+        .order_by(desc(RawInfo.published_at))
         .limit(500)
     )
     rows = (await db.execute(query)).all()
@@ -162,7 +173,7 @@ async def get_commercial_timeline(
         item = _serialize_row(row)
         if _is_frontend_noise(item):
             continue
-        day_key = raw.scraped_at.strftime("%Y-%m-%d") if raw.scraped_at else "unknown"
+        day_key = raw.published_at.strftime("%Y-%m-%d") if raw.published_at else "unknown"
         groups[day_key].append(item)
 
     # 排序输出（日期降序）
@@ -199,7 +210,7 @@ async def get_commercial_diagnostics(
             RawInfo.content,
             RawInfo.commercial_level,
             RawInfo.commercial_meta,
-            RawInfo.scraped_at,
+            RawInfo.published_at,
         )
         .join(SourceRegistry, RawInfo.source_registry_id == SourceRegistry.id)
         .where(SourceRegistry.source_type == "dajiala_wechat")
@@ -215,8 +226,8 @@ async def get_commercial_diagnostics(
         "likely": 0,
         "frontend_visible": 0,
     }
-    for content, level, meta, scraped_at in rows:
-        in_days = bool(scraped_at and scraped_at >= cutoff)
+    for content, level, meta, published_at in rows:
+        in_days = bool(published_at and published_at >= cutoff)
         meta = meta or {}
         signals = meta.get("signals") if isinstance(meta, dict) else {}
         if in_days:
@@ -258,18 +269,26 @@ async def get_commercial_filters(
 ) -> Any:
     """返回可用的筛选维度（甲方 + 功能方向），带计数。"""
     base_filter = _wechat_commercial_filters()
+    brand_expr = func.coalesce(
+        func.nullif(RawInfo.commercial_brand, ""),
+        RawInfo.commercial_meta["brand"].as_string(),
+    )
+    category_expr = func.coalesce(
+        func.nullif(RawInfo.commercial_category, ""),
+        RawInfo.commercial_meta["category"].as_string(),
+    )
 
     # 品牌分布
     brand_query = (
         select(
-            RawInfo.commercial_brand,
+            brand_expr.label("brand"),
             func.count(RawInfo.id).label("count"),
         )
         .outerjoin(SourceRegistry, RawInfo.source_registry_id == SourceRegistry.id)
         .where(*base_filter)
-        .where(RawInfo.commercial_brand.isnot(None))
-        .where(RawInfo.commercial_brand != "")
-        .group_by(RawInfo.commercial_brand)
+        .where(brand_expr.isnot(None))
+        .where(brand_expr != "")
+        .group_by(brand_expr)
         .order_by(desc("count"))
     )
     brand_rows = (await db.execute(brand_query)).all()
@@ -281,14 +300,14 @@ async def get_commercial_filters(
     # 功能方向分布
     cat_query = (
         select(
-            RawInfo.commercial_category,
+            category_expr.label("category"),
             func.count(RawInfo.id).label("count"),
         )
         .outerjoin(SourceRegistry, RawInfo.source_registry_id == SourceRegistry.id)
         .where(*base_filter)
-        .where(RawInfo.commercial_category.isnot(None))
-        .where(RawInfo.commercial_category != "")
-        .group_by(RawInfo.commercial_category)
+        .where(category_expr.isnot(None))
+        .where(category_expr != "")
+        .group_by(category_expr)
         .order_by(desc("count"))
     )
     cat_rows = (await db.execute(cat_query)).all()
@@ -366,14 +385,14 @@ async def get_commercial_groups(
     category: Optional[str] = Query(None, description="按功能方向筛选"),
     level: Optional[str] = Query(None, description="suspected / likely"),
     keyword: Optional[str] = Query(None),
-    days: int = Query(30, ge=1, le=180, description="最近 N 天"),
+    days: int = Query(10, ge=1, le=180, description="最近 N 天"),
 ) -> Any:
     """品牌聚合：按品牌/产品聚合投放账号、时间、链接和主体信息。"""
     filters = _wechat_commercial_filters(level=level, brand=brand, category=category, keyword=keyword)
 
     from datetime import datetime, timedelta
     cutoff = datetime.utcnow() - timedelta(days=days)
-    filters.append(RawInfo.scraped_at >= cutoff)
+    filters.append(RawInfo.published_at >= cutoff)
 
     query = (
         select(

@@ -515,7 +515,7 @@ async def _mine_one(db: AsyncSession, cluster_id: int, user_id: int) -> dict:
             detail="该话题与 AI 无关，跳过挖掘"
         )
 
-    run_id = progress_store.create_run(user_id=current_user.id)
+    run_id = progress_store.create_run(user_id=user_id)
 
     async def _run():
         from app.db.session import AsyncSessionLocal

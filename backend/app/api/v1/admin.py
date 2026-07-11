@@ -5,10 +5,11 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_super_admin_user
+from app.api.v1.commercial import UNTITLED_PREFIX, _is_frontend_noise
 from app.core.admin_permissions import ADMIN_ROLES, allowed_roles_text, require_admin_permission
 from app.core.config import settings
 from app.core.product_access import (
@@ -332,7 +333,7 @@ async def monitoring_source_health(
 
 @router.get("/monitoring/commercial-diagnostics", response_model=dict)
 async def monitoring_commercial_diagnostics(
-    days: int = Query(30, ge=1, le=180, description="前端当前时间范围"),
+    days: int = Query(10, ge=1, le=180, description="前端当前时间范围"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin_permission("monitoring:read")),
 ) -> Any:
@@ -343,7 +344,7 @@ async def monitoring_commercial_diagnostics(
             RawInfo.content,
             RawInfo.commercial_level,
             RawInfo.commercial_meta,
-            RawInfo.scraped_at,
+            RawInfo.published_at,
         )
         .join(SourceRegistry, RawInfo.source_registry_id == SourceRegistry.id)
         .where(SourceRegistry.source_type == "dajiala_wechat")
@@ -359,8 +360,8 @@ async def monitoring_commercial_diagnostics(
         "likely": 0,
         "frontend_visible": 0,
     }
-    for content, level, meta, scraped_at in rows:
-        in_days = bool(scraped_at and scraped_at >= cutoff)
+    for content, level, meta, published_at in rows:
+        in_days = bool(published_at and published_at >= cutoff)
         meta = meta or {}
         signals = meta.get("signals") if isinstance(meta, dict) else {}
         if in_days:
@@ -375,8 +376,52 @@ async def monitoring_commercial_diagnostics(
             data["suspected"] += 1
         elif level == "likely":
             data["likely"] += 1
-        if level in ("suspected", "likely") and in_days:
-            data["frontend_visible"] += 1
+    # 这里必须复用潜在商单页面的来源、标题和噪声过滤，不能把所有
+    # suspected/likely 都直接算作“前端当前可见”。
+    frontend_candidates = (
+        await db.execute(
+            select(RawInfo)
+            .join(SourceRegistry, RawInfo.source_registry_id == SourceRegistry.id)
+            .where(
+                RawInfo.commercial_level.in_(["suspected", "likely"]),
+                or_(
+                    RawInfo.url.ilike("%mp.weixin.qq.com%"),
+                    SourceRegistry.source_type.in_(["dajiala_wechat", "sogou_wechat", "exa_wechat"]),
+                ),
+                RawInfo.title.isnot(None),
+                RawInfo.title != "",
+                ~RawInfo.title.ilike(f"{UNTITLED_PREFIX}%"),
+                RawInfo.published_at >= cutoff,
+            )
+            .order_by(desc(RawInfo.published_at).nulls_last())
+        )
+    ).scalars().all()
+
+    frontend_items = []
+    for row in frontend_candidates:
+        meta = row.commercial_meta if isinstance(row.commercial_meta, dict) else {}
+        item = {
+            "id": row.id,
+            "title": row.title,
+            "summary": row.summary,
+            "commercial_brand": row.commercial_brand or meta.get("brand") or "",
+            "product": meta.get("product") or "",
+        }
+        if _is_frontend_noise(item):
+            continue
+        frontend_items.append({
+            "id": row.id,
+            "title": row.title,
+            "url": row.url,
+            "commercial_level": row.commercial_level or "none",
+            "commercial_brand": item["commercial_brand"],
+            "commercial_category": row.commercial_category or meta.get("category") or "",
+            "product": item["product"],
+            "published_at": row.published_at.isoformat() if row.published_at else None,
+            "scraped_at": row.scraped_at.isoformat() if row.scraped_at else None,
+        })
+    data["frontend_visible"] = len(frontend_items)
+    data["items"] = frontend_items[:200]
 
     if data["total"] == 0:
         diagnosis = "极致了文章还没有入库。先跑历史补库或等待当天发文任务。"
@@ -387,12 +432,59 @@ async def monitoring_commercial_diagnostics(
     elif data["suspected"] + data["likely"] == 0:
         diagnosis = "DeepSeek 已判断，但全部是 none。前端为空是因为没有 suspected/likely。"
     elif data["frontend_visible"] == 0:
-        diagnosis = f"有商单结果，但不在最近 {days} 天范围内。切到 90/180 天看。"
+        diagnosis = f"有商单结果，但按前端展示规则在最近 {days} 天内没有可见记录。"
     else:
         diagnosis = "后端已有可展示商单；如果前端仍为空，是页面筛选或接口请求问题。"
 
     data["diagnosis"] = diagnosis
     return {"code": 200, "message": "获取商单诊断成功", "data": data}
+
+
+@router.delete("/monitoring/commercial-diagnostics/{raw_info_id}", response_model=dict)
+async def delete_commercial_diagnostic(
+    raw_info_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin_user),
+) -> Any:
+    """移除一条商单判断结果，但保留原始文章，仅最高管理员可操作。"""
+    row = await db.get(RawInfo, raw_info_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="商单记录不存在")
+    if row.commercial_level not in ("suspected", "likely"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该文章当前不是商单记录")
+
+    source_type = (
+        await db.execute(
+            select(SourceRegistry.source_type).where(SourceRegistry.id == row.source_registry_id)
+        )
+    ).scalar_one_or_none()
+    if source_type != "dajiala_wechat":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只能删除极致了来源的商单记录")
+
+    title = (row.title or "未命名文章").strip()
+    _add_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="commercial_diagnostic.delete",
+        target_type="raw_info",
+        target_id=str(row.id),
+        summary=f"删除商单诊断记录：{title[:120]}",
+        metadata={
+            "title": row.title,
+            "url": row.url,
+            "commercial_level": row.commercial_level,
+            "commercial_brand": row.commercial_brand,
+            "commercial_category": row.commercial_category,
+            **_request_metadata(request),
+        },
+    )
+    row.commercial_level = "none"
+    row.commercial_meta = {}
+    row.commercial_brand = None
+    row.commercial_category = None
+    await db.commit()
+    return {"code": 200, "message": "商单记录已删除，原文已保留", "data": {"id": raw_info_id}}
 
 
 @router.get("/monitoring/ai-costs", response_model=dict)
