@@ -17,7 +17,7 @@
 
       <!-- 已绑定身份 -->
       <div v-if="status === 'valid'" class="feishu-bound integration-status">
-        <el-icon color="#16a34a"><CircleCheck /></el-icon>
+        <el-icon class="bound-icon"><CircleCheck /></el-icon>
         <span>已绑定：<b>{{ feishuUserName || '飞书账号' }}</b></span>
         <span v-if="authorizedAt" class="feishu-meta">· {{ formatTime(authorizedAt) }}</span>
       </div>
@@ -174,13 +174,31 @@ onUnmounted(stopPolling)
 .integration-empty { display: flex; min-height: 145px; align-items: center; justify-content: center; flex-direction: column; border: 1px dashed var(--line, #e5e5e5); border-radius: 12px; background: var(--paper-2, #faf9f7); text-align: center; }
 .integration-empty p { margin: 0; color: var(--ink-4); font-size: 13px; line-height: 1.6; }
 .integration-empty p:first-child { margin-bottom: 4px; color: var(--ink-3); font-size: 14px; }
-.integration-status { min-height: 145px; box-sizing: border-box; }
-.feishu-bound { display: flex; align-items: center; gap: 8px; justify-content: center; padding: 16px; border: 1px solid #d9ebdf; border-radius: 12px; background: #f4faf6; font-size: 14px; color: var(--ink); }
+.integration-status { box-sizing: border-box; }
+.feishu-bound {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+  height: 84px;
+  min-height: 84px;
+  padding: 14px 18px;
+  border: 1px solid var(--line, #e5e5e5);
+  border-radius: 10px;
+  background: var(--paper, #fff);
+  font-size: 13px;
+  color: var(--ink-2, #3a3935);
+}
+.feishu-bound .bound-icon { flex-shrink: 0; color: var(--leaf, #6b8e6b); }
 .feishu-meta { color: var(--ink-4); font-size: 12px; }
 .feishu-pending { background: var(--paper-2, #faf9f7); border: 1px solid var(--line, #eee); border-radius: 10px; padding: 14px 16px; }
 .feishu-pending-head { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); margin-bottom: 6px; }
 .feishu-tip { font-size: 12px; color: var(--ink-4); margin-bottom: 10px; }
 .feishu-actions { display: flex; gap: 8px; }
 .feishu-error { color: #dc2626; margin-top: 4px; }
-@media (max-width: 768px) { .integration-card-header { align-items: flex-start; } }
+@media (max-width: 768px) {
+  .integration-card-header { align-items: flex-start; }
+  .feishu-bound { height: auto; min-height: 0; }
+}
 </style>

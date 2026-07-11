@@ -10,9 +10,10 @@
         <div class="nav-links">
           <a href="#features">产品功能</a>
           <a href="#tools">创作工具箱</a>
-          <a class="nav-camp" @click="goCamp">实战营</a>
+          <RouterLink class="nav-camp" :to="{ name: 'PracticalCampIntro' }">实战营</RouterLink>
         </div>
         <div class="nav-cta">
+          <RouterLink class="nav-camp-mobile" :to="{ name: 'PracticalCampIntro' }">实战营</RouterLink>
           <PublicLoginButton @authenticated="goToWorkspace" />
         </div>
       </div>
@@ -475,10 +476,6 @@ const closeLogin = () => {
     delete query.intent
     router.replace({ name: 'Landing', query })
   }
-}
-
-const goCamp = () => {
-  router.push('/camp')
 }
 
 // 产品入口只处理本产品的权限；登录本身不再默认开通或跳转任何产品。
@@ -1209,6 +1206,20 @@ export default {
 .nav-links a { font-size: 14px; color: var(--ink-2); font-weight: 500; transition: color .15s; }
 .nav-links a:hover { color: var(--clay-deep); }
 .nav-links a.nav-camp { cursor: pointer; }
+.nav-camp-mobile {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.nav-camp-mobile:hover { color: var(--clay-deep); border-color: var(--clay-soft); }
 .nav-cta { margin-left: auto; display: flex; gap: 10px; align-items: center; }
 
 /* Buttons */
@@ -1721,6 +1732,7 @@ export default {
   .hc-3 { top: 38%; right: 0; width: 66%; }
   .hc-4 { bottom: 2%; left: 6%; width: 64%; }
   .nav-links { display: none; }
+  .nav-camp-mobile { display: inline-flex; }
   .pain-grid { grid-template-columns: 1fr; }
   .feature-block, .feature-block.reverse { grid-template-columns: 1fr; gap: 40px; }
   .feature-block.reverse .fb-text, .feature-block.reverse .fb-visual { order: initial; }
@@ -1734,6 +1746,8 @@ export default {
 @media (max-width: 540px) {
   .container { padding: 0 20px; }
   .nav-inner { padding: 0 20px; }
+  .nav-cta { gap: 6px; }
+  .nav-camp-mobile { height: 34px; padding: 0 8px; font-size: 12px; }
   .hero { padding: 96px 0 60px; }
   .hero-title { font-size: 38px; }
   .hero-actions { flex-direction: column; align-items: stretch; }
@@ -1913,5 +1927,57 @@ export default {
   .lp .stagger-grid .fade-up:nth-child(2) { transition-delay: .08s; }
   .lp .stagger-grid .fade-up:nth-child(3) { transition-delay: .16s; }
   .lp .stagger-grid .fade-up:nth-child(4) { transition-delay: .24s; }
+}
+
+/* Hero cards: on phones show one full-width active card instead of compressing
+   the absolutely positioned desktop stack into a narrow vertical strip. */
+@media (max-width: 540px) {
+  .lp .hero-visual {
+    width: 100%;
+    max-width: none;
+    height: 250px;
+    aspect-ratio: auto;
+    margin: 0;
+    overflow: visible;
+  }
+
+  .lp .card-stack {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+  }
+
+  .lp .hero-card {
+    top: 0 !important;
+    right: 0 !important;
+    bottom: auto !important;
+    left: 0 !important;
+    width: 100% !important;
+    min-width: 0;
+    max-width: none;
+    box-sizing: border-box;
+    padding: 16px;
+  }
+
+  .lp .hero-card.hc-dim {
+    opacity: 0 !important;
+    pointer-events: none;
+  }
+
+  .lp .hero-card.hc-active {
+    opacity: 1 !important;
+  }
+
+  .lp .hero-card .card-desc,
+  .lp .hero-card .card-tag,
+  .lp .card-row .cr-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .lp .card-row .cr-status {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
 }
 </style>

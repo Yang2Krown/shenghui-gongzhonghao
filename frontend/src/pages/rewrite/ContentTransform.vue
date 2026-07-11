@@ -27,7 +27,7 @@
         </div>
       </div>
       <div style="padding: 22px;">
-        <div style="display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;">
+        <div class="platform-direction-row" style="display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;">
           <!-- 源平台 -->
           <div style="flex: 1; min-width: 168px;">
             <div class="text-xs text-ink-4 uppercase font-semibold" style="margin-bottom: 9px; letter-spacing: .08em;">从（源平台）</div>

@@ -6,7 +6,6 @@
         <h1 class="font-serif text-ink" style="font-size: 30px; font-weight: 500; line-height: 1.2;">{{ pageTitle }}</h1>
         <p class="mt-1" style="color: #6B6862; font-size: 14px;">{{ pageSubtitle }}</p>
       </div>
-      <el-button :icon="Refresh" :loading="refreshing" @click="manualRefresh">手动抓取</el-button>
     </div>
 
     <!-- 常驻筛选 -->
@@ -184,8 +183,8 @@ import { ref, reactive, onMounted, onUnmounted, onActivated, onDeactivated, watc
 
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Loading, Folder, Refresh } from '@element-plus/icons-vue'
-import { get, post } from '@/api/api'
+import { Loading, Folder } from '@element-plus/icons-vue'
+import { get } from '@/api/api'
 
 const router = useRouter()
 const route = useRoute()
@@ -207,7 +206,6 @@ const pageSubtitle = PRESET === '资讯型'
       : '聚合各平台的热点资讯，点击任意一条查看详情与原文来源'
 
 const loading = ref(false)
-const refreshing = ref(false)
 const clusters = ref([])
 
 const timelineGroups = computed(() => {
@@ -231,18 +229,6 @@ const timelineGroups = computed(() => {
   }
   return [...groups.values()]
 })
-
-const manualRefresh = async () => {
-  refreshing.value = true
-  try {
-    await post('/topic-clusters/refresh')
-    ElMessage.success('已提交抓取任务，预计几分钟后刷新页面查看新数据')
-  } catch (e) {
-    ElMessage.error('提交失败，请稍后重试')
-  } finally {
-    refreshing.value = false
-  }
-}
 
 const filters = reactive({
   info_type: PRESET,         // 预设页面锁定为对应类型

@@ -1,10 +1,14 @@
 <template>
   <div class="app-layout" style="min-height: 100vh; background: var(--ivory);">
     <!-- 侧边栏 -->
-    <aside class="app-sidebar" :style="{ width: isCollapsed ? '64px' : '248px' }">
+    <aside
+      class="app-sidebar"
+      :class="{ 'is-mobile-open': mobileMenuOpen }"
+      :style="{ width: isCollapsed ? '64px' : '248px' }"
+    >
       <div class="flex flex-col h-full">
         <!-- Logo区域 -->
-        <div class="flex items-center" style="padding: 13px 20px 13px;">
+        <div class="mobile-sidebar-head flex items-center" style="padding: 13px 20px 13px;">
           <div class="brand-mark">
             <img src="/brand/ip-compass.svg" alt="IP罗盘" />
           </div>
@@ -12,6 +16,14 @@
             <div class="brand-title">IP罗盘</div>
             <div class="brand-subtitle">Creator Compass</div>
           </div>
+          <button
+            class="mobile-menu-close"
+            type="button"
+            aria-label="关闭导航菜单"
+            @click="closeMobileMenu"
+          >
+            ×
+          </button>
         </div>
 
         <!-- 导航菜单 -->
@@ -82,11 +94,31 @@
       </div>
     </aside>
 
+    <button
+      v-if="mobileMenuOpen"
+      class="mobile-menu-backdrop"
+      type="button"
+      aria-label="关闭导航菜单"
+      @click="closeMobileMenu"
+    />
+
     <!-- 主内容区 -->
-    <div :style="{ marginLeft: isCollapsed ? '64px' : '248px' }" class="transition-all duration-300">
+    <div
+      class="app-content-shell transition-all duration-300"
+      :style="{ marginLeft: isCollapsed ? '64px' : '248px' }"
+    >
       <!-- 顶部导航栏 -->
       <header class="app-topbar" :style="{ left: isCollapsed ? '64px' : '248px' }">
-        <div class="flex items-center" style="gap: 8px; color: var(--ink-4); font-size: 13px; flex: 1;">
+        <button
+          class="mobile-menu-button"
+          type="button"
+          aria-label="打开导航菜单"
+          :aria-expanded="mobileMenuOpen"
+          @click="mobileMenuOpen = true"
+        >
+          <el-icon :size="20"><Expand /></el-icon>
+        </button>
+        <div class="app-breadcrumb flex items-center" style="gap: 8px; color: var(--ink-4); font-size: 13px; flex: 1;">
           <span>首页</span>
           <template v-if="currentGroup">
             <el-icon :size="13"><ArrowRight /></el-icon>
@@ -113,8 +145,8 @@
       </header>
 
       <!-- 页面内容 -->
-      <main style="padding-top: 60px;">
-        <div style="padding: 32px 32px 80px;" class="fade-in">
+      <main class="app-main" style="padding-top: 60px;">
+        <div class="app-main-content fade-in" style="padding: 32px 32px 80px;">
           <router-view v-slot="{ Component, route }">
             <keep-alive :include="['TopicClusterList']">
               <component v-if="!previewProduct" :is="Component" :key="route.name" />
@@ -182,6 +214,7 @@ const hasCreationTool = computed(() => userStore.hasProduct('creation_tool'))
 const creditStore = useCreditStore()
 
 const isCollapsed = ref(false)
+const mobileMenuOpen = ref(false)
 
 // 积分动画
 const creditAnimating = ref(false)
@@ -432,8 +465,27 @@ const navigateTo = (id) => {
   if (path) {
     router.push(path)
     window.scrollTo({ top: 0 })
+    closeMobileMenu()
   }
 }
+
+const closeMobileMenu = () => {
+  mobileMenuOpen.value = false
+}
+
+const handleMobileMenuKeydown = (event) => {
+  if (event.key === 'Escape') closeMobileMenu()
+}
+
+watch(() => route.path, closeMobileMenu)
+
+onMounted(() => {
+  window.addEventListener('keydown', handleMobileMenuKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleMobileMenuKeydown)
+})
 </script>
 
 <style scoped>
@@ -489,6 +541,16 @@ const navigateTo = (id) => {
   z-index: 30;
   overflow: hidden;
   transition: width 0.3s cubic-bezier(.32,.72,0,1);
+}
+
+.mobile-menu-button,
+.mobile-menu-backdrop,
+.mobile-menu-close {
+  display: none;
+}
+
+.app-content-shell {
+  min-width: 0;
 }
 
 .app-topbar {
@@ -681,6 +743,115 @@ const navigateTo = (id) => {
 .credit-toast.is-gain {
   border-color: rgba(31, 157, 85, 0.35);
   color: #1f9d55;
+}
+
+/*
+ * Mobile layout is deliberately isolated behind a media query. The desktop
+ * sidebar, fixed topbar, spacing and collapse behavior above remain unchanged.
+ */
+@media (max-width: 768px) {
+  .app-sidebar {
+    width: min(86vw, 320px) !important;
+    max-width: 320px;
+    transform: translateX(-105%);
+    box-shadow: 18px 0 48px rgba(31, 31, 30, .12);
+    transition: transform .26s cubic-bezier(.32,.72,0,1);
+    z-index: 1100;
+  }
+
+  .app-sidebar.is-mobile-open {
+    transform: translateX(0);
+  }
+
+  .mobile-sidebar-head {
+    padding-right: 14px !important;
+  }
+
+  .mobile-menu-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    margin-left: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--ink-3);
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .mobile-menu-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1090;
+    border: 0;
+    padding: 0;
+    background: rgba(31, 31, 30, .28);
+    backdrop-filter: blur(2px);
+  }
+
+  .app-content-shell {
+    margin-left: 0 !important;
+  }
+
+  .app-topbar {
+    left: 0 !important;
+    height: 58px;
+    padding: 0 14px;
+    z-index: 1000;
+  }
+
+  .mobile-menu-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 38px;
+    width: 38px;
+    height: 38px;
+    margin-right: 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--paper);
+    color: var(--ink-2);
+    cursor: pointer;
+  }
+
+  .app-breadcrumb {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .app-breadcrumb > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .app-breadcrumb > .el-icon:nth-of-type(1),
+  .app-breadcrumb > span:first-child {
+    display: none;
+  }
+
+  .credit-topbar {
+    gap: 4px;
+    padding: 6px 9px;
+  }
+
+  .credit-topbar .credit-label {
+    display: none;
+  }
+
+  .app-main {
+    padding-top: 58px !important;
+  }
+
+  .app-main-content {
+    padding: 18px 14px 56px !important;
+  }
 }
 
 .credit-toast-enter-active {

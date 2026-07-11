@@ -800,7 +800,10 @@ onMounted(() => {
 .feishu-card {
   grid-column: auto;
   width: 100%;
+  align-self: stretch;
 }
+
+.account-card { align-self: stretch; }
 
 .style-section {
   grid-column: 1 / -1;
@@ -816,6 +819,9 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  height: 84px;
+  min-height: 84px;
+  box-sizing: border-box;
   padding: 14px 18px;
   border: 1px solid var(--line, #e5e5e5);
   border-radius: 10px;
@@ -827,6 +833,7 @@ onMounted(() => {
 .account-info {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 .account-name {
   font-size: 15px;
@@ -837,6 +844,9 @@ onMounted(() => {
   font-size: 13px;
   color: var(--ink-4, #9a968d);
   margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .account-actions {
   display: flex;
@@ -1096,6 +1106,16 @@ onMounted(() => {
   .style-section { grid-column: 1 / -1; }
 
   .style-analysis-grid { grid-template-columns: 1fr; }
+  .account-item {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+  .account-meta {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
 }
 
 </style>

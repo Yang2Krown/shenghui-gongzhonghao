@@ -221,4 +221,55 @@ const handlePhoneLogin = async () => {
 .is-error :deep(.el-input__wrapper) {
   box-shadow: 0 0 0 1px var(--crimson) inset !important;
 }
+
+@media (max-width: 639px) {
+  .login-page {
+    width: 100vw;
+    max-width: 100vw;
+    min-width: 0;
+    overflow-x: hidden;
+    align-items: stretch;
+  }
+
+  .login-page > div {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    min-width: 0;
+    margin-left: auto;
+    margin-right: auto;
+    box-sizing: border-box;
+  }
+
+  .login-page h2,
+  .login-page p {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal !important;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .login-page h2 {
+    padding: 0 12px;
+  }
+
+  .login-card {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .login-card form,
+  .login-card form > div,
+  .login-card .flex-1 {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .login-card :deep(.code-btn.el-button) {
+    min-width: 104px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
 </style>
