@@ -279,12 +279,20 @@
           <div class="camp-modal-box" role="dialog" aria-modal="true">
             <button class="camp-modal-close" @click="closeModal" aria-label="关闭">×</button>
             <template v-if="activeModal === 'pay'">
-              <h3>扫码报名 · ¥3980 / 年</h3>
+              <h3>微信扫码支付</h3>
+              <div class="camp-pay-summary">
+                <div class="camp-pay-package">AI 垂类公众号实战营</div>
+                <div class="camp-pay-amount">¥3980</div>
+                <div class="camp-pay-benefit">1 年课程陪伴权益</div>
+              </div>
               <p v-if="payError" class="camp-pay-error">{{ payError }}</p>
-              <p v-else-if="payLoading">正在生成微信支付二维码…</p>
-              <p v-else>请使用微信扫码完成报名，支付成功后会自动进入课程资料。</p>
-              <div v-if="!payLoading && !payError" class="camp-qr"><canvas ref="payCanvas"></canvas></div>
-              <p v-if="payPolling" class="camp-pay-wait">正在等待支付确认，请不要刷新或离开页面。</p>
+              <p v-else-if="payLoading" class="camp-pay-loading">正在生成微信支付二维码…</p>
+              <template v-else>
+                <div class="camp-qr"><canvas ref="payCanvas"></canvas></div>
+                <p class="camp-qr-tip">请使用微信扫一扫完成支付</p>
+                <p class="camp-qr-sub">支付成功后会自动进入课程资料</p>
+              </template>
+              <p v-if="payPolling" class="camp-pay-wait">支付完成后请不要刷新或离开页面，系统正在自动确认支付结果。</p>
             </template>
             <template v-else>
               <h3>扫码添加微信</h3>
@@ -575,14 +583,29 @@ onUnmounted(() => {
 .method p { font-size: 14.5px; margin: 0; line-height: 1.72; }
 .method .quote { font-size: 13.5px; color: var(--text-400); margin-top: 10px; border-left: 2px solid var(--accent-soft); padding-left: 14px; font-style: italic; }
 
-/* outline table — 轻量编辑体风格：无外框、无底色，仅极细横向分隔线 */
-.outline-wrap { margin-top: 8px; border: 0; background: transparent; overflow: visible; }
+/* outline table — 柔和纸张卡片，避免生硬的黑色表格外框 */
+.outline-wrap {
+  margin-top: 8px;
+  overflow: hidden;
+  background: rgba(255,255,255,.54);
+  border: 1px solid var(--bg-line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgba(74,55,39,.045), 0 1px 2px rgba(74,55,39,.025);
+}
 .outline { width: 100%; border-collapse: collapse; border: 0; background: transparent; box-shadow: none; }
-.outline thead th { text-align: left; font-size: 12px; font-weight: 600; color: var(--text-400); text-transform: uppercase; letter-spacing: .06em; padding: 0 20px 14px; border: 0; border-bottom: 1px solid var(--bg-line); background: transparent; }
-.outline tbody td { padding: 16px 20px; font-size: 14.5px; border: 0; border-bottom: 1px solid var(--border-light); vertical-align: middle; color: var(--text-200); background: transparent; transition: background .15s ease; }
+.outline thead th {
+  text-align: left; font-size: 12px; font-weight: 600; color: var(--text-400); text-transform: uppercase;
+  letter-spacing: .06em; padding: 14px 22px; border: 0; border-bottom: 1px solid var(--bg-line);
+  background: rgba(245,241,235,.72);
+}
+.outline tbody td {
+  padding: 17px 22px; font-size: 14.5px; border: 0; border-bottom: 1px solid rgba(228,221,206,.72);
+  vertical-align: middle; color: var(--text-200); background: transparent;
+  transition: background .18s ease, color .18s ease;
+}
 .outline tbody tr:last-child td { border-bottom: 0; }
-.outline tbody tr:hover td { background: rgba(204,120,92,.05); }
-.outline tbody tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--accent-soft); }
+.outline tbody tr:hover td { background: rgba(204,120,92,.055); }
+.outline tbody tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--accent-soft); color: var(--accent-deep); }
 .outline .ch { color: var(--text-400); font-size: 13px; white-space: nowrap; width: 110px; }
 .outline .name { font-family: var(--serif); font-weight: 600; color: var(--text-100); white-space: nowrap; }
 .core-tag { display: inline-block; font-size: 11px; font-weight: 600; color: var(--accent-deep); background: rgba(204,120,92,.12); border-radius: 999px; padding: 2px 9px; margin-left: 10px; vertical-align: 1px; font-family: var(--sans); }
@@ -681,15 +704,23 @@ onUnmounted(() => {
 .camp-modal-close:hover { background: var(--bone, #EFEAE0); color: var(--ink, #1F1F1E); }
 .camp-modal-box h3 { font-family: 'Source Han Serif SC', 'Songti SC', 'Noto Serif SC', Georgia, serif; font-size: 19px; font-weight: 600; color: var(--ink, #1F1F1E); margin: 0 0 6px; }
 .camp-modal-box p { font-size: 13.5px; color: var(--ink-3, #6B6862); margin: 0 0 20px; line-height: 1.6; }
+.camp-pay-summary { margin: 14px 0 16px; text-align: center; }
+.camp-pay-package { font-size: 15px; font-weight: 600; color: var(--ink-2, #3A3935); }
+.camp-pay-amount { margin-top: 4px; font-family: var(--serif, 'Source Han Serif SC', Georgia, serif); font-size: 30px; font-weight: 700; line-height: 1.2; color: var(--clay, #CC785C); }
+.camp-pay-benefit,
+.camp-qr-sub { margin-top: 4px !important; margin-bottom: 0 !important; font-size: 13px !important; color: var(--ink-4, #8A8680) !important; }
+.camp-pay-loading { margin: 30px 0 !important; }
 .camp-qr {
-  width: 232px; margin: 0 auto; padding: 12px;
+  box-sizing: content-box; width: 220px; margin: 0 auto; padding: 10px;
   background: #fff; border: 1px solid var(--line, #E4DDCE); border-radius: var(--r-md, 10px);
 }
-.camp-qr img { width: 100%; height: auto; display: block; border-radius: 6px; }
+.camp-qr img,
+.camp-qr canvas { width: 100%; height: auto; display: block; border-radius: 6px; }
+.camp-qr-tip { margin: 14px 0 0 !important; font-size: 14px !important; color: var(--ink-2, #3A3935) !important; }
 .camp-modal-alt { margin: 18px 0 0; }
 .camp-modal-alt a { font-size: 13.5px; color: var(--clay-deep, #A85A40); cursor: pointer; border-bottom: 1px solid var(--clay-soft, #E9B79E); }
 .camp-modal-alt a:hover { color: var(--clay, #CC785C); }
-.camp-pay-wait { margin-top: 14px !important; color: var(--clay-deep, #A85A40) !important; font-size: 12.5px !important; }
+.camp-pay-wait { margin: 8px 0 0 !important; color: var(--clay-deep, #A85A40) !important; font-size: 12.5px !important; }
 .camp-pay-error { color: #b43b33 !important; }
 
 /* 弹窗过渡 */

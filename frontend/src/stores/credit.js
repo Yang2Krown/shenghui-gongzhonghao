@@ -16,23 +16,8 @@ export const useCreditStore = defineStore('credit', () => {
   const packages = ref(DEFAULT_PACKAGES)
   const loading = ref(false)
 
-  // 订阅到期信息
-  const subscriptionExpiresAt = ref(null)
-  const daysUntilExpire = ref(null)
-  const isSubscriptionActive = ref(false)
-  const subscriptionAccess = ref(null)
-
   const formattedBalance = computed(() => balance.value.toLocaleString())
   const balanceYuan = computed(() => (balance.value / 10).toFixed(2))
-
-  const expireDateText = computed(() => {
-    if (!subscriptionExpiresAt.value) return ''
-    const d = new Date(subscriptionExpiresAt.value)
-    if (Number.isNaN(d.getTime())) return ''
-    const mm = String(d.getMonth() + 1).padStart(2, '0')
-    const dd = String(d.getDate()).padStart(2, '0')
-    return `${d.getFullYear()}-${mm}-${dd}`
-  })
 
   const fetchBalance = async () => {
     try {
@@ -49,10 +34,6 @@ export const useCreditStore = defineStore('credit', () => {
       const res = await getCreditAccount()
       const data = res.data || res
       balance.value = data.balance ?? balance.value
-      subscriptionExpiresAt.value = data.subscription_expires_at || null
-      daysUntilExpire.value = data.days_until_expire ?? null
-      isSubscriptionActive.value = !!data.is_subscription_active
-      subscriptionAccess.value = data.subscription_access || null
     } catch (error) {
       console.error('获取积分账户详情失败:', error)
     }
@@ -91,13 +72,8 @@ export const useCreditStore = defineStore('credit', () => {
     balance,
     packages,
     loading,
-    subscriptionExpiresAt,
-    daysUntilExpire,
-    isSubscriptionActive,
-    subscriptionAccess,
     formattedBalance,
     balanceYuan,
-    expireDateText,
     fetchBalance,
     fetchAccount,
     fetchPackages,

@@ -30,7 +30,10 @@ from bs4 import BeautifulSoup
 from app.core.timezone import utcnow
 from app.models.source_registry import SourceRegistry, SourceAccount, SOURCE_TYPE_SOGOU_WECHAT
 from app.services.scraping.base import FetchedItem, SourceAdapter
-from app.services.scraping.adapters.exa_wechat_adapter import resolve_wechat_permalink
+from app.services.scraping.adapters.exa_wechat_adapter import (
+    _is_temporary_wechat_url,
+    resolve_wechat_permalink,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +145,10 @@ class SogouWechatAdapter(SourceAdapter):
             return it
 
         resolved = await asyncio.gather(*[_resolve(it) for it in all_items], return_exceptions=True)
-        all_items = [it for it in resolved if isinstance(it, FetchedItem)]
+        all_items = [
+            it for it in resolved
+            if isinstance(it, FetchedItem) and not _is_temporary_wechat_url(it.url)
+        ]
 
         # 解析后多个搜狗中转链可能指向同一篇 mp 文章，按 mp 链接再去一次重
         deduped: List[FetchedItem] = []
@@ -171,6 +177,8 @@ class SogouWechatAdapter(SourceAdapter):
         async def _one(it: FetchedItem) -> Optional[Dict[str, Any]]:
             try:
                 url, _, _ = await resolve_wechat_permalink(it.url)
+                if _is_temporary_wechat_url(url):
+                    return None
                 return {"title": it.title, "url": url, "content": it.summary or ""}
             except Exception as e:
                 logger.debug(f"search_articles 转链失败: {type(e).__name__}: {e}")

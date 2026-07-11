@@ -45,7 +45,7 @@ async def get_account_info(
 ):
     """获取积分账户详情"""
     info = await credit_service.get_account_info(current_user.id)
-    # 管理员在产品权限层天然拥有创作工具权限，不应因没有普通订阅到期日而被前端误标为不可用。
+    # 管理员在产品权限层天然拥有创作工具权限；积分本身对所有账号均永久有效。
     if is_admin_user(current_user):
         info.update({
             "is_subscription_active": True,

@@ -98,7 +98,7 @@ CELERY_BEAT_SCHEDULE = {
         "kwargs": {"days": 14},
     },
 
-    # ── 创作工具订阅到期：每天凌晨 4:20 处理到期订阅（移除权限 + 积分清零）──
+    # ── 创作工具订阅到期：每天凌晨 4:20 处理到期订阅（仅移除权益，积分永久保留）──
     "subscription-expire-due": {
         "task": "subscription.expire_due",
         "schedule": crontab(minute=20, hour=4),

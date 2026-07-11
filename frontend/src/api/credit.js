@@ -39,3 +39,8 @@ export const purchaseCredits = (packageName) => post(`/credits/purchase?package_
  * 查询支付状态
  */
 export const getPurchaseStatus = (outTradeNo) => get(`/credits/purchase/status/${outTradeNo}`)
+
+/**
+ * 关闭未支付订单
+ */
+export const closePurchaseOrder = (outTradeNo) => post(`/credits/purchase/close/${outTradeNo}`)

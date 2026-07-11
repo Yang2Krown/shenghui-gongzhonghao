@@ -116,6 +116,11 @@ async def fetch_aihot(
 
     feed_conf = AIHOT_FEEDS[feed_key]
     source = await _ensure_source_registry(db, feed_key)
+    # AI HOT 直接写 RawInfo，不能绕过公众号临时链入库保险。
+    from app.services.scraping.adapters.exa_wechat_adapter import (
+        _is_temporary_wechat_url,
+        resolve_wechat_permalink,
+    )
 
     def _parse():
         return feedparser.parse(feed_conf["url"])
@@ -135,6 +140,11 @@ async def fetch_aihot(
         url = getattr(entry, "link", "").strip()
         if not url:
             continue
+        if _is_temporary_wechat_url(url):
+            url, _, _ = await resolve_wechat_permalink(url)
+            if _is_temporary_wechat_url(url):
+                logger.error("AI HOT 公众号临时链接转换失败，跳过入库: %s", url[:120])
+                continue
 
         title = (getattr(entry, "title", "") or url).strip()
         h = _dedup_hash(url, title)

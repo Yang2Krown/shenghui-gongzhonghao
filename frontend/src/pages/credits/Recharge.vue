@@ -12,17 +12,9 @@
           <span class="number">{{ creditStore.formattedBalance }}</span>
           <span class="unit">积分</span>
         </div>
-        <div v-if="creditStore.subscriptionAccess === 'admin'" class="expire-hint admin-access">
+        <div class="expire-hint admin-access">
           <span class="dot"></span>
-          管理员账号 · 积分永久有效
-        </div>
-        <div v-else-if="creditStore.isSubscriptionActive" class="expire-hint">
-          <span class="dot"></span>
-          积分有效期：还剩 <strong>{{ creditStore.daysUntilExpire }}</strong> 天 · 将于 {{ creditStore.expireDateText }} 清零
-        </div>
-        <div v-else class="expire-hint inactive">
-          <span class="dot"></span>
-          未开通创作工具订阅，积分暂不可用
+          积分永久有效
         </div>
       </div>
       <button class="history-btn" @click="router.push('/creation-history')">
@@ -81,7 +73,7 @@
     <!-- 说明 -->
     <div class="tips">
       <p>· 创作工具 ¥699 / 月，开通即赠 6000 积分</p>
-      <p>· <strong>积分一个月过期</strong>：订阅到期后余额整体清零，需续费重新开通</p>
+      <p>· 创作工具订阅到期后仅影响创作工具权益，账户积分永久保留</p>
       <p>· 充值后即时到账 · 1 元 = 10 积分 · 操作失败不扣费</p>
       <div class="tips-disclaimer">
         <p>积分使用、退款与其他交易规则以 <a href="/terms" target="_blank" rel="noopener">《用户协议》</a> 为准。</p>
@@ -93,7 +85,7 @@
       title="微信扫码支付"
       width="360px"
       :close-on-click-modal="false"
-      @closed="stopPolling"
+      @closed="handlePayDialogClosed"
     >
       <div class="pay-dialog">
         <div class="pay-summary">
@@ -120,7 +112,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
-import { getPurchaseStatus } from '@/api/credit'
+import { closePurchaseOrder, getPurchaseStatus } from '@/api/credit'
 import { useCreditStore } from '@/stores/credit'
 
 const router = useRouter()
@@ -187,6 +179,18 @@ const stopPolling = () => {
   }
 }
 
+const closeActiveOrder = () => {
+  const order = activeOrder.value
+  if (!order?.out_trade_no || order.status === 'PAID') return
+  activeOrder.value = null
+  closePurchaseOrder(order.out_trade_no).catch(() => {})
+}
+
+const handlePayDialogClosed = () => {
+  stopPolling()
+  closeActiveOrder()
+}
+
 const checkStatusOnce = async (tradeNo = activeOrder.value?.out_trade_no) => {
   if (!tradeNo || checkingPay.value) return
   checkingPay.value = true
@@ -195,6 +199,7 @@ const checkStatusOnce = async (tradeNo = activeOrder.value?.out_trade_no) => {
     const data = res.data || res
     if (data.status === 'PAID') {
       stopPolling()
+      activeOrder.value = { ...activeOrder.value, status: 'PAID' }
       payDialogVisible.value = false
       await creditStore.fetchAccount()
       ElMessage.success('支付成功，积分已到账')

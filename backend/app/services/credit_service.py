@@ -67,14 +67,18 @@ class CreditService:
         return account.balance
 
     async def get_account_info(self, user_id: int) -> Dict[str, Any]:
-        """获取用户积分账户详情（含订阅到期信息）"""
+        """获取用户积分账户详情。
+
+        积分余额（包括订阅赠送和充值所得）永久有效；订阅到期时间仅用于判断创作工具权益。
+        """
         account = await self.get_or_create_account(user_id)
         info = account.to_dict()
         info.update(self._subscription_status(account))
+        info["credit_expiry_policy"] = "never"
         return info
 
     def _subscription_status(self, account: UserCredit) -> Dict[str, Any]:
-        """根据到期时间计算订阅状态，供前端展示"积分还有多久过期"。"""
+        """根据到期时间计算创作工具订阅状态，不影响积分余额有效期。"""
         expires_at = account.subscription_expires_at
         if not expires_at:
             return {
@@ -133,28 +137,6 @@ class CreditService:
             f"到期 {account.subscription_expires_at}，余额 {account.balance}"
         )
         return account
-
-    async def expire_and_reset(self, user_id: int, reason: str = "订阅到期，积分清零") -> Optional[CreditTransaction]:
-        """订阅到期：把余额整体清零为 0，记一条 expire 负数流水。"""
-        account = await self.get_or_create_account(user_id)
-        if account.balance <= 0:
-            account.balance = 0
-            return None
-
-        cleared = account.balance
-        account.balance = 0
-        transaction = CreditTransaction(
-            user_id=user_id,
-            credit_account_id=account.id,
-            type="expire",
-            amount=-cleared,
-            balance_after=0,
-            description=reason,
-        )
-        self.db.add(transaction)
-        await self.db.flush()
-        logger.info(f"用户 {user_id} 订阅到期清零 {cleared} 积分，余额归 0")
-        return transaction
 
     # ====== 积分操作 ======
 

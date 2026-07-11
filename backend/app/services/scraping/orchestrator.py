@@ -138,6 +138,12 @@ class ScrapingOrchestrator:
         source: SourceRegistry,
         items: Iterable[FetchedItem],
     ) -> tuple[int, int, List[int]]:
+        # 延迟导入，避免 adapters.__init__ 注册 orchestrator 时形成循环依赖。
+        from app.services.scraping.adapters.exa_wechat_adapter import (
+            _is_temporary_wechat_url,
+            resolve_wechat_permalink,
+        )
+
         new_count = 0
         dup_count = 0
         new_raw_info_ids: List[int] = []
@@ -147,6 +153,16 @@ class ScrapingOrchestrator:
             url = (item.url or "").strip()
             if not url:
                 continue
+
+            # 最后一层入库保险：无论哪个公众号适配器产出链接，临时链都必须
+            # 在写 RawInfo 前完成极致了转换；转换失败则不存临时链。
+            if _is_temporary_wechat_url(url):
+                resolved_url, _, _ = await resolve_wechat_permalink(url)
+                if _is_temporary_wechat_url(resolved_url):
+                    logger.error("公众号临时链接转换失败，跳过入库: %s", url[:120])
+                    continue
+                item.url = resolved_url
+                url = resolved_url
             url_trunc = url[:1000]
 
             h = item.dedup_hash()

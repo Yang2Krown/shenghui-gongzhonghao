@@ -16,8 +16,8 @@ class UserCredit(BaseModel):
     total_consumed = Column(Integer, nullable=False, default=0, comment="累计消耗")
     total_gifted = Column(Integer, nullable=False, default=0, comment="累计赠送")
 
-    # 创作工具按月订阅：到期后由定时任务移除权限并清零余额
-    subscription_expires_at = Column(DateTime, nullable=True, comment="创作工具订阅到期时间")
+    # 创作工具按月订阅：到期后仅移除产品权益，积分余额永久有效
+    subscription_expires_at = Column(DateTime, nullable=True, comment="创作工具订阅到期时间（不影响积分余额）")
     gift_credits_at = Column(DateTime, nullable=True, comment="本期赠送积分时间")
 
     # 时间戳

@@ -4,7 +4,7 @@
 - 满一个月（user_credits.subscription_expires_at < 现在）后：
   1. 移除该用户的 creation_tool 产品权益
   2. is_member 置 false（仅当不再持有任何付费产品时）
-  3. 积分余额整体清零为 0（记一条 type=expire 的负数流水）
+  3. 保留全部积分余额（订阅赠送与充值积分均永久有效）
 
 只处理"有过订阅"的账户（subscription_expires_at 非空），
 纯买积分包、从未订阅创作工具的用户不受影响。
@@ -31,11 +31,10 @@ async def _expire_subscriptions() -> dict:
         effective_product_access,
         is_admin_user,
     )
-    from app.services.credit_service import CreditService
 
     now = utcnow()
     processed = 0
-    cleared_users = 0
+    expired_users = 0
 
     try:
         async with AsyncSessionLocal() as db:
@@ -47,7 +46,6 @@ async def _expire_subscriptions() -> dict:
             )
             accounts = (await db.execute(stmt)).scalars().all()
 
-            credit_service = CreditService(db)
             for account in accounts:
                 user = (
                     await db.execute(select(User).where(User.id == account.user_id))
@@ -69,28 +67,23 @@ async def _expire_subscriptions() -> dict:
                     user.is_member = False
                 db.add(user)
 
-                # 3) 余额整体清零
-                await credit_service.expire_and_reset(
-                    user_id=account.user_id,
-                    reason="创作工具订阅到期，积分清零",
-                )
-                # 停订：清空到期时间，避免重复处理
+                # 3) 停订：只清空订阅到期时间，积分余额永久保留。
                 account.subscription_expires_at = None
                 db.add(account)
 
                 processed += 1
-                cleared_users += 1
+                expired_users += 1
 
             await db.commit()
 
-        return {"processed": processed, "cleared_users": cleared_users}
+        return {"processed": processed, "expired_users": expired_users}
     finally:
         await engine.dispose()
 
 
 @shared_task(bind=True, name="subscription.expire_due", max_retries=1)
 def expire_due_subscriptions(self) -> dict:
-    """处理所有到期的创作工具订阅：移除权限 + 清零积分。"""
+    """处理所有到期的创作工具订阅：移除权益，积分余额永久保留。"""
     try:
         result = asyncio.run(_expire_subscriptions())
         logger.info(f"订阅到期处理完成: {result}")

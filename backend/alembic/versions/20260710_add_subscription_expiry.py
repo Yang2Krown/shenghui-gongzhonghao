@@ -4,7 +4,7 @@
 - user_credits.subscription_expires_at：创作工具订阅到期时间（naive 北京时间）
 - user_credits.gift_credits_at：本期赠送积分的时间（用于前端展示"本期赠送"来源）
 
-到期后由 Celery Beat 任务移除 creation_tool 权限并把余额整体清零为 0。
+到期后由 Celery Beat 任务移除 creation_tool 权益；账户积分余额永久保留。
 
 Revision ID: 20260710_sub_expiry
 Revises: 20260709_product_access

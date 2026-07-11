@@ -69,8 +69,9 @@ async def _convert_temporary_wechat_url(url: str, *, timeout: float) -> str:
 
     payload = {"url": url, "key": key}
     verifycode = (settings.DAJIALA_VERIFYCODE or "").strip()
-    if verifycode:
-        payload["verifycode"] = verifycode
+    # 接口文档虽然说明附加码可选，但服务端实际要求字段始终存在；
+    # 未设置附加码时也必须传空字符串，否则返回 code=20002。
+    payload["verifycode"] = verifycode
 
     for attempt in range(1, 4):
         await _wait_dajiala_qps()
@@ -126,7 +127,7 @@ async def resolve_items_permalinks(
     *,
     concurrency: int = 5,
 ) -> List[FetchedItem]:
-    """批量将公众号临时链接通过极致了转换为永久链接，失败保留原链。"""
+    """批量转换公众号临时链接；转换失败的条目不进入后续入库。"""
     sem = asyncio.Semaphore(concurrency)
 
     async def _one(it: FetchedItem) -> FetchedItem:
@@ -137,7 +138,11 @@ async def resolve_items_permalinks(
         return it
 
     resolved = await asyncio.gather(*[_one(it) for it in items], return_exceptions=True)
-    return [it for it in resolved if isinstance(it, FetchedItem)]
+    # 硬性保证：转换失败仍是临时链时直接丢弃，禁止临时链进入 RawInfo。
+    return [
+        it for it in resolved
+        if isinstance(it, FetchedItem) and not _is_temporary_wechat_url(it.url)
+    ]
 
 
 class ExaWechatAdapter(SourceAdapter):
