@@ -101,7 +101,50 @@
     <FeishuConnect class="feishu-card" />
 
     <!-- 添加/编辑账号弹窗 -->
-    <el-dialog v-model="accountDialogVisible" :title="editingAccount ? '编辑公众号账号' : '添加公众号账号'" width="440px" destroy-on-close>
+    <el-dialog v-model="accountDialogVisible" :title="editingAccount ? '编辑公众号账号' : '添加公众号账号'" width="520px" destroy-on-close align-center class="account-dialog" modal-class="account-dialog-modal" @closed="accountGuideVisible = false">
+      <div class="account-dialog-guide">
+        <button
+          type="button"
+          class="account-guide-toggle"
+          :aria-expanded="accountGuideVisible"
+          @click="accountGuideVisible = !accountGuideVisible"
+        >
+          <span class="account-guide-toggle-mark">?</span>
+          <span>{{ accountGuideVisible ? '收起获取教程' : '不知道去哪里找？查看 AppID 和 AppSecret 获取教程' }}</span>
+          <svg class="account-guide-chevron" :class="{ 'is-open': accountGuideVisible }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+
+        <div v-if="accountGuideVisible" class="account-guide">
+          <div class="account-guide-heading">
+            <div class="account-guide-title-row">
+              <strong>获取 AppID 和 AppSecret</strong>
+              <a href="https://developers.weixin.qq.com/doc/oplatform/developers/product/subscription_service/appid.html" target="_blank" rel="noopener noreferrer">查看官方教程</a>
+            </div>
+            <span class="account-guide-source">需要使用绑定公众号的管理员微信登录</span>
+          </div>
+          <ol class="account-guide-steps">
+            <li>
+              <span class="account-guide-step-number">1</span>
+              <div>登录<a href="https://developers.weixin.qq.com/platform/" target="_blank" rel="noopener noreferrer">微信开发者平台</a>。</div>
+            </li>
+            <li>
+              <span class="account-guide-step-number">2</span>
+              <div>进入「我的业务与服务」，打开目标公众号。</div>
+            </li>
+            <li>
+              <span class="account-guide-step-number">3</span>
+              <div>进入「账号详情」→「注册信息」，复制 AppID。</div>
+            </li>
+            <li>
+              <span class="account-guide-step-number">4</span>
+              <div>进入「开发密钥」，点击「启用」或「激活」，管理员确认后复制 AppSecret。</div>
+            </li>
+          </ol>
+          <div class="account-guide-note"><b>安全提示</b>　AppSecret 只在启用时完整显示，请及时保存，不要发到群聊或公开代码仓库。</div>
+        </div>
+      </div>
       <el-form label-position="top" :model="accountForm" :rules="accountRules" ref="accountFormRef">
         <el-form-item label="账号别名" prop="account_name">
           <el-input v-model="accountForm.account_name" placeholder="如：主号、测试号" />
@@ -314,6 +357,7 @@ const profileRules = {
 
 // 公众号账号管理（数据库持久化）
 const wechatAccounts = ref([])
+const accountGuideVisible = ref(false)
 const accountDialogVisible = ref(false)
 const accountSaving = ref(false)
 const editingAccount = ref(null)
@@ -761,6 +805,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  min-height: 52px;
   margin-bottom: 22px;
 }
 
@@ -779,9 +824,275 @@ onMounted(() => {
   line-height: 1.6;
 }
 
+.account-card-header :deep(.el-button),
+.feishu-card :deep(.integration-card-header .el-button) {
+  min-height: 42px;
+  padding: 0 20px;
+  border-radius: 13px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.feishu-card :deep(.integration-card-header) {
+  min-height: 52px;
+  margin-bottom: 22px;
+}
+
+.feishu-card :deep(.integration-card-header h3) {
+  margin-bottom: 5px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.feishu-card :deep(.integration-card-header p) {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.account-guide-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+  justify-content: flex-start;
+  margin: -2px 0 18px;
+  padding: 0 12px;
+  border: 1px solid var(--line, #e5e5e5);
+  border-radius: 10px;
+  background: var(--paper-2, #faf9f7);
+  color: var(--clay, #cc785c);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.account-guide-toggle:hover {
+  border-color: #e2b4a3;
+  background: #fffaf7;
+  color: var(--clay-deep, #a95d45);
+}
+
+.account-guide-toggle:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.account-guide-toggle:focus-visible {
+  outline: 2px solid rgba(204, 120, 92, 0.35);
+  outline-offset: 2px;
+}
+
+.account-dialog-guide {
+  margin: 0 0 20px;
+  padding-top: 2px;
+}
+
+.account-dialog-guide .account-guide-toggle {
+  margin: 0;
+}
+
+.account-dialog-guide .account-guide {
+  margin: 10px 0 0;
+}
+
+:deep(.account-dialog.el-dialog),
+:deep(.account-dialog .el-dialog) {
+  width: 520px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 48px);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.account-dialog-modal.el-overlay) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 24px;
+  overflow: hidden;
+}
+
+:deep(.account-dialog-modal .el-overlay-dialog) {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+:deep(.account-dialog-modal .el-dialog) {
+  width: 520px !important;
+  max-width: 100%;
+  max-height: calc(100vh - 48px);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.account-dialog.el-dialog .el-dialog__body),
+:deep(.account-dialog .el-dialog__body),
+:deep(.account-dialog-modal .el-dialog__body) {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+}
+
+:deep(.account-dialog.el-dialog .el-dialog__header),
+:deep(.account-dialog.el-dialog .el-dialog__footer),
+:deep(.account-dialog .el-dialog__header),
+:deep(.account-dialog .el-dialog__footer),
+:deep(.account-dialog-modal .el-dialog__header),
+:deep(.account-dialog-modal .el-dialog__footer) {
+  flex-shrink: 0;
+}
+
+.account-guide-toggle-mark {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.account-guide-chevron {
+  transition: transform 0.2s ease;
+}
+
+.account-guide-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.account-guide {
+  margin: -2px 0 22px;
+  padding: 16px 18px 15px;
+  border: 1px solid #eadfd7;
+  border-radius: 12px;
+  background: #fffdfb;
+}
+
+.account-guide-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--ink, #2c2b28);
+  font-size: 14px;
+}
+
+.account-guide-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.account-guide-title-row strong {
+  font-weight: 600;
+}
+
+.account-guide-title-row a {
+  flex-shrink: 0;
+  color: var(--clay, #cc785c);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.account-guide-source {
+  color: var(--ink-4, #9a968d);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.account-guide-eyebrow {
+  display: none;
+  color: var(--clay, #cc785c);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+}
+
+.account-guide-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 16px 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-2, #4a4640);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.account-guide-steps li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.account-guide-steps li:not(:last-child)::before {
+  position: absolute;
+  top: 25px;
+  bottom: -11px;
+  left: 11px;
+  border-left: 1px solid #eadfd7;
+  content: '';
+}
+
+.account-guide-step-number {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e3b9a8;
+  border-radius: 50%;
+  background: #fff8f4;
+  color: var(--clay, #cc785c);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.account-guide a {
+  margin: 0 2px;
+  color: var(--clay, #cc785c);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.account-guide-note {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fbf1eb;
+  color: var(--ink-3, #666);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.account-guide-note b {
+  color: var(--ink-2, #4a4640);
+  font-weight: 600;
+}
+
 .account-empty {
   display: flex;
   min-height: 145px;
+  box-sizing: border-box;
   align-items: center;
   justify-content: center;
   flex-direction: column;
@@ -789,6 +1100,14 @@ onMounted(() => {
   border-radius: 12px;
   background: var(--paper-2, #faf9f7);
   text-align: center;
+}
+
+.feishu-card :deep(.integration-empty) {
+  min-height: 145px;
+  box-sizing: border-box;
+  border-color: var(--line, #e5e5e5);
+  border-radius: 12px;
+  background: var(--paper-2, #faf9f7);
 }
 
 .account-empty p:first-child {
@@ -1116,6 +1435,12 @@ onMounted(() => {
     text-overflow: clip;
     white-space: normal;
   }
+  :deep(.account-dialog-modal.el-overlay) { padding: 16px; }
+  :deep(.account-dialog-modal .el-dialog) {
+    width: 100% !important;
+    max-height: calc(100vh - 32px);
+  }
+  .account-guide-title-row { align-items: flex-start; flex-direction: column; gap: 4px; }
 }
 
 </style>
