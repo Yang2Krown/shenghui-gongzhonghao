@@ -39,7 +39,7 @@
       </button>
       <div style="flex: 1;"></div>
       <button class="btn-ghost btn-uniform btn-format" @click="oneClickFormat">
-        <el-icon :size="15"><MagicStick /></el-icon> 一键排版
+        一键排版
       </button>
       <button class="btn-ghost btn-uniform btn-publish" @click="openPublishDialog">
         <el-icon><Promotion /></el-icon>
@@ -153,7 +153,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { EditPen, Promotion, CopyDocument, Upload, Loading, MagicStick, Picture } from '@element-plus/icons-vue'
+import { EditPen, Promotion, CopyDocument, Upload, Loading, Picture } from '@element-plus/icons-vue'
 import WechatRichEditor from '@/components/ui/WechatRichEditor.vue'
 import { get, createWechatDraft, generateWechatCover, getBingImages } from '@/api/api'
 

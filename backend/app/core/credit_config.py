@@ -22,7 +22,7 @@ OPERATION_COSTS = {
         "estimated_cost_yuan": 0.15,
     },
     "content_polish": {
-        "base_credits": 8,
+        "base_credits": 6,
         "description": "文案润色",
         "estimated_tokens": 45000,
         "estimated_cost_yuan": 0.10,
@@ -34,7 +34,7 @@ OPERATION_COSTS = {
         "estimated_cost_yuan": 0.05,
     },
     "content_continuation": {
-        "base_credits": 1,
+        "base_credits": 5,
         "description": "正文续写",
         "estimated_tokens": 8000,
         "estimated_cost_yuan": 0.02,

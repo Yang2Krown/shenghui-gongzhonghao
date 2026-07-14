@@ -199,8 +199,7 @@ const detailLoading = ref(false)
 const detailRecord = ref(null)
 
 // 类型元数据：标签、分类、积分消耗
-// credits 镜像后端 credit_config.py 的 base_credits；仅计费操作 > 0，
-// 重评/对比/独立工具等为免费功能。
+// credits 镜像后端 credit_config.py 的基础计费；多模型对比按 5 倍计费。
 // ponytail: 静态镜像后端定价，定价若改为动态再由接口返回
 const TYPE_META = {
   outline_generate:         { label: '大纲生成', cat: 'outline', credits: 3 },
@@ -208,16 +207,16 @@ const TYPE_META = {
   angle_inspection:         { label: '角度体检', cat: 'outline', credits: 0 },
   title_generate:           { label: '标题生成', cat: 'title', credits: 3 },
   standalone_title:         { label: '独立标题', cat: 'title', credits: 0 },
-  multi_model_title:        { label: '多模型标题', cat: 'title', credits: 0 },
+  multi_model_title:        { label: '多模型标题', cat: 'title', credits: 15 },
   munger_generate:          { label: '芒格标题', cat: 'title', credits: 0 },
   munger_score:             { label: '标题评分', cat: 'title', credits: 0 },
   title_reevaluate:         { label: '标题重评', cat: 'title', credits: 0 },
   content_generate:         { label: '正文生成', cat: 'content', credits: 10 },
-  content_polish:           { label: '文案润色', cat: 'content', credits: 8 },
-  content_continuation:     { label: '正文续写', cat: 'content', credits: 1 },
+  content_polish:           { label: '文案润色', cat: 'content', credits: 6 },
+  content_continuation:     { label: '正文续写', cat: 'content', credits: 5 },
   content_reevaluate:       { label: '正文重评', cat: 'content', credits: 0 },
-  multi_model_polish:       { label: '多模型润色', cat: 'content', credits: 0 },
-  multi_model_continuation: { label: '多模型续写', cat: 'content', credits: 0 },
+  multi_model_polish:       { label: '多模型润色', cat: 'content', credits: 30 },
+  multi_model_continuation: { label: '多模型续写', cat: 'content', credits: 25 },
   content_transform:        { label: '内容转写', cat: 'convert', credits: 2 },
   content_imitate:          { label: '内容仿写', cat: 'convert', credits: 3 },
   xhs_convert:              { label: '转小红书', cat: 'convert', credits: 0 },

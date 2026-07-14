@@ -53,14 +53,14 @@ async def check_credits(
     }
 
 
-async def ensure_credits_or_402(user_id: int, operation: str) -> None:
+async def ensure_credits_or_402(user_id: int, operation: str, multiplier: int = 1) -> None:
     """检查余额，不足则抛 402。
 
     供 spawn / background_task 型端点在创建任务前调用——这类端点会立即返回 run_id，
     若不在此处拦截，积分不足就无法以 402 形式传回前端，只会静默生成或超时。
     """
     async with AsyncSessionLocal() as db:
-        result = await CreditService(db).check_balance(user_id, operation)
+        result = await CreditService(db).check_balance(user_id, operation, multiplier=multiplier)
 
     if not result["sufficient"]:
         raise HTTPException(
@@ -178,6 +178,7 @@ async def deduct_credits_safe(
     user_id: int,
     operation: str,
     operation_id: Optional[str] = None,
+    multiplier: int = 1,
 ) -> None:
     """成功后扣费：开独立 session、提交、失败只记日志不影响用户。
 
@@ -190,6 +191,7 @@ async def deduct_credits_safe(
                 user_id=user_id,
                 operation=operation,
                 operation_id=operation_id,
+                multiplier=multiplier,
             )
             await db.commit()
     except Exception as e:

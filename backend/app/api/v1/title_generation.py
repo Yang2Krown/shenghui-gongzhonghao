@@ -30,6 +30,7 @@ from app.schemas.title_generation import (
     FinalRecommendationResponse,
 )
 from app.core.generation_tracker import track_start, track_complete, track_fail
+from app.core.credit_guard import ensure_credits_or_402, deduct_credits_safe
 from app.services.credit_service import CreditService
 from app.db.session import AsyncSessionLocal
 
@@ -343,6 +344,8 @@ async def compare_multi_model_titles(
     """
     from app.services.title_generation_service import TitleGenerationService
 
+    await ensure_credits_or_402(current_user.id, "title_generation", multiplier=5)
+
     try:
         # 创建 service（不传 db，因为这里不需要持久化）
         service = TitleGenerationService(db=None)
@@ -351,6 +354,13 @@ async def compare_multi_model_titles(
         comparison = await service.execute_multi_model_comparison(
             request=request,
             providers=providers,
+        )
+
+        await deduct_credits_safe(
+            current_user.id,
+            "title_generation",
+            operation_id=f"legacy-multi-model-{uuid.uuid4()}",
+            multiplier=5,
         )
 
         return {

@@ -134,7 +134,7 @@
         <template v-if="progress.isRunning.value">
           <el-icon class="spin"><Loading /></el-icon> 正在打磨标题…
         </template>
-        <template v-else>生成标题 <CreditHint :cost="3" /></template>
+        <template v-else>生成标题 <CreditHint :cost="creditCost" /></template>
       </button>
       <div class="multi-model-toggle">
         <label class="toggle-label">
@@ -363,6 +363,7 @@ const preference = ref('')
 const result = ref(null)
 const multiModelMode = ref(false) // 多模型对比模式
 const multiModelResult = ref(null) // 多模型对比结果
+const creditCost = computed(() => (multiModelMode.value ? 15 : 3))
 const showPublishChoice = ref(false)
 const selectedPublishTitle = ref('')
 

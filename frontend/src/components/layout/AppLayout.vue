@@ -130,7 +130,6 @@
         <!-- 积分余额 -->
         <div v-if="hasCreationTool" class="credit-topbar-wrap">
           <button class="credit-topbar" @click="router.push('/credits/recharge')" :class="{ 'credit-animate': creditAnimating }">
-            <span class="credit-icon">💰</span>
             <span class="credit-amount">{{ creditStore.formattedBalance }}</span>
             <span class="credit-label">积分</span>
           </button>
@@ -680,10 +679,6 @@ onUnmounted(() => {
 .credit-topbar:hover {
   border-color: var(--clay-soft);
   background: var(--clay-tint);
-}
-
-.credit-topbar .credit-icon {
-  font-size: 14px;
 }
 
 .credit-topbar .credit-amount {

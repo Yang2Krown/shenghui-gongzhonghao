@@ -331,7 +331,7 @@ async def _run_polish_compare_background(
         })
         await track_complete(run_id, result_data, display_title="多模型对比润色")
 
-        await deduct_credits_safe(user_id, "content_polish", operation_id=run_id)
+        await deduct_credits_safe(user_id, "content_polish", operation_id=run_id, multiplier=5)
 
     except Exception as e:
         logger.error(f"多模型对比润色失败: {str(e)}", exc_info=True)
@@ -352,7 +352,7 @@ async def compare_multi_model_polish(
     同时用多个模型运行润色流水线，用于对比不同模型的效果。
     Agent E (Kimi联网纠错) 在所有模型中都会使用 Moonshot/Kimi。
     """
-    await ensure_credits_or_402(current_user.id, "content_polish")
+    await ensure_credits_or_402(current_user.id, "content_polish", multiplier=5)
 
     run_id = progress_store.create_run(user_id=current_user.id)
 

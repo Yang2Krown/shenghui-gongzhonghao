@@ -491,7 +491,7 @@ async def _run_multi_model_title_background(
 
         await track_complete(run_id, result_data, display_title=f"多模型对比 · {topic.title[:30]}")
 
-        await deduct_credits_safe(user_id, "title_generation", operation_id=run_id)
+        await deduct_credits_safe(user_id, "title_generation", operation_id=run_id, multiplier=5)
 
     except Exception as e:
         logger.error(f"多模型对比生成失败: {str(e)}", exc_info=True)
@@ -512,7 +512,7 @@ async def compare_multi_model_titles(
 
     同时用多个模型生成标题，用于对比不同模型的效果。
     """
-    await ensure_credits_or_402(current_user.id, "title_generation")
+    await ensure_credits_or_402(current_user.id, "title_generation", multiplier=5)
 
     run_id = progress_store.create_run(user_id=current_user.id)
 

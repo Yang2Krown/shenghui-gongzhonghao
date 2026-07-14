@@ -29,7 +29,6 @@
         <span class="text-xs text-ink-4">字（可后续逐节微调）</span>
       </div>
       <el-button type="primary" size="large" @click="generateOutline" :loading="generating">
-        <el-icon><MagicStick /></el-icon>
         生成大纲 <CreditHint :cost="3" />
       </el-button>
     </div>
@@ -200,7 +199,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Document, MagicStick, CircleCloseFilled, DocumentCopy, Refresh, ArrowRight, Aim } from '@element-plus/icons-vue'
+import { Document, CircleCloseFilled, DocumentCopy, Refresh, ArrowRight, Aim } from '@element-plus/icons-vue'
 import AgentStatusBar from './AgentStatusBar.vue'
 import AgentFeedbackPanel from './AgentFeedbackPanel.vue'
 import outlineApi from '@/api/outline'

@@ -64,13 +64,13 @@
           <transition name="card-body">
             <div v-show="isExpanded(agent, i)" class="card-body">
               <!-- 综述 -->
-              <div v-if="agent.summary" class="section summary-section">
+              <div v-if="agent.summary" class="feedback-section summary-section">
                 <p class="summary-text">{{ agent.summary }}</p>
               </div>
 
               <!-- 维度评分明细 -->
-              <div v-if="agent.dimensions && agent.dimensions.length" class="section dimensions-section">
-                <div class="section-title">评分维度</div>
+              <div v-if="agent.dimensions && agent.dimensions.length" class="feedback-section dimensions-section">
+                <div class="feedback-section-title">评分维度</div>
 
                 <!-- 雷达图 -->
                 <div class="radar-container">
@@ -136,7 +136,7 @@
               </div>
 
               <!-- 三档建议 -->
-              <div v-if="agent.priorities" class="section priorities-section">
+              <div v-if="agent.priorities" class="feedback-section priorities-section">
                 <div v-if="agent.priorities.high && agent.priorities.high.length" class="priority-group priority-high">
                   <div class="priority-header">
                     <span class="priority-icon">!</span>
@@ -167,16 +167,16 @@
               </div>
 
               <!-- 改进建议 -->
-              <div v-if="agent.suggestions && agent.suggestions.length" class="section suggestions-section">
-                <div class="section-title">改进建议</div>
+              <div v-if="agent.suggestions && agent.suggestions.length" class="feedback-section suggestions-section">
+                <div class="feedback-section-title">改进建议</div>
                 <ul class="suggestion-list">
                   <li v-for="(s, i) in agent.suggestions" :key="i">{{ s }}</li>
                 </ul>
               </div>
 
               <!-- 问题列表 -->
-              <div v-if="agent.issues && agent.issues.length" class="section issues-section">
-                <div class="section-title">{{ agent.issuesLabel || '问题点' }}</div>
+              <div v-if="agent.issues && agent.issues.length" class="feedback-section issues-section">
+                <div class="feedback-section-title">{{ agent.issuesLabel || '问题点' }}</div>
                 <div class="issue-list">
                   <div v-for="(p, i) in agent.issues" :key="i" class="issue-item">
                     <div v-if="p.location" class="issue-loc">{{ p.location }}</div>
@@ -415,12 +415,15 @@ function shortLabel(label) {
 .pipeline {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 0;
 }
 
 .pipeline-step {
   display: flex;
   align-items: flex-start;
+  flex: 0 0 auto;
   gap: 14px;
   position: relative;
 }
@@ -502,7 +505,9 @@ function shortLabel(label) {
 
 /* ── Agent 卡片 ── */
 .agent-card {
-  flex: 1;
+  flex: 1 1 auto;
+  align-self: flex-start;
+  height: fit-content;
   min-width: 0;
   background: var(--paper);
   border: 1px solid var(--line);
@@ -661,6 +666,7 @@ function shortLabel(label) {
   padding: 0 14px 12px;
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
   gap: 10px;
 }
 
@@ -680,12 +686,12 @@ function shortLabel(label) {
 }
 
 /* ── 内容区块 ── */
-.section {
-  padding-top: 10px;
+.feedback-section {
+  padding: 10px 0 0;
   border-top: 1px solid var(--line);
 }
 
-.section-title {
+.feedback-section-title {
   font-size: 11px;
   font-weight: 700;
   color: var(--ink-3);

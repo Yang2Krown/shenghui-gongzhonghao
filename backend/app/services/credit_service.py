@@ -178,9 +178,9 @@ class CreditService:
             description=f"新用户注册赠送 {NEW_USER_GIFT_CREDITS} 积分",
         )
 
-    async def check_balance(self, user_id: int, operation: str) -> Dict[str, Any]:
+    async def check_balance(self, user_id: int, operation: str, multiplier: int = 1) -> Dict[str, Any]:
         """检查余额是否足够执行某操作"""
-        required = get_operation_credits(operation)
+        required = get_operation_credits(operation) * multiplier
         balance = await self.get_balance(user_id)
 
         return {
@@ -198,9 +198,10 @@ class CreditService:
         operation_id: Optional[str] = None,
         token_usage: Optional[Dict] = None,
         description: Optional[str] = None,
+        multiplier: int = 1,
     ) -> CreditTransaction:
         """扣减积分（操作成功后调用）"""
-        amount = get_operation_credits(operation)
+        amount = get_operation_credits(operation) * multiplier
         account = await self.get_or_create_account(user_id)
 
         # 检查余额

@@ -134,7 +134,7 @@
         <template v-if="progress.isRunning.value">
           <el-icon class="spin"><Loading /></el-icon> 正在构思续写方案…
         </template>
-        <template v-else>生成续写 <CreditHint :cost="1" /></template>
+        <template v-else>生成续写 <CreditHint :cost="creditCost" /></template>
       </button>
       <div class="multi-model-toggle">
         <label class="toggle-label">
@@ -381,6 +381,7 @@ const preference = ref('')
 const result = ref(null)
 const multiModelMode = ref(false)
 const multiModelResult = ref(null)
+const creditCost = computed(() => (multiModelMode.value ? 25 : 5))
 const showPublishChoice = ref(false)
 const selectedPlanContent = ref('')
 const dragOver = ref(false)

@@ -75,7 +75,7 @@
         <span class="text-xs text-ink-3 ml-2">（开启后同时用 DeepSeek 和 Claude 生成，对比效果）</span>
       </div>
       <el-button type="primary" size="large" @click="generate" :loading="generating">
-        生成标题 <CreditHint :cost="3" />
+        生成标题 <CreditHint :cost="creditCost" />
       </el-button>
     </div>
 
@@ -334,6 +334,7 @@ const errorMessage = ref('')
 const result = ref(null)
 const showAllCandidates = ref(false)
 const multiModelMode = ref(true) // 默认开启多模型对比模式
+const creditCost = computed(() => (multiModelMode.value ? 15 : 3))
 
 const progress = useAgentProgress()
 

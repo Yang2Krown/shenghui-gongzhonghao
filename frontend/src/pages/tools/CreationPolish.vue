@@ -140,7 +140,7 @@
         <template v-if="progress.isRunning.value">
           <el-icon class="spin"><Loading /></el-icon> 正在润色文案…
         </template>
-        <template v-else>开始润色 <CreditHint :cost="8" /></template>
+        <template v-else>开始润色 <CreditHint :cost="creditCost" /></template>
       </button>
       <div class="multi-model-toggle">
         <label class="toggle-label">
@@ -419,6 +419,7 @@ const viewMode = ref('diff')
 const multiModelMode = ref(false)
 const showPublishChoice = ref(false)
 const multiModelResult = ref(null)
+const creditCost = computed(() => (multiModelMode.value ? 30 : 6))
 const selectedProvider = ref('')
 const mmViewMode = ref('diff')
 
