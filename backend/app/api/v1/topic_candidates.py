@@ -5,6 +5,7 @@
 
 import asyncio
 import logging
+from uuid import uuid4
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -13,7 +14,8 @@ from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.core.security import get_current_user
+from app.api.deps import oauth2_scheme
+from app.core.security import decode_token, get_current_user
 from app.core.rate_limit import limit_ai_generation
 from app.core.progress import progress_store
 from app.api.v1.progress_access import ensure_run_owner_from_token
@@ -22,6 +24,9 @@ from app.db.session import get_db
 from app.models.user import User
 from app.models.topic_candidate import TopicCandidate, PersonaReview, CandidateScore
 from app.models.info_cluster import InfoCluster
+from app.models.raw_info import RawInfo, RAW_STATE_CLUSTERED
+from app.models.source_registry import SourceRegistry
+from app.core.timezone import utcnow
 from app.services.topic_mining.agent_a_deriver import derive_candidates
 from app.services.topic_mining.agent_a2_feasibility import audit_feasibility
 from app.services.topic_mining.agent_b_scorer import score_candidates
@@ -30,6 +35,82 @@ from app.services.preprocess.rules import is_ai_related
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _extract_adhoc_sources(sources: list[dict]) -> list[dict]:
+    """统一整理自由输入来源，并保留可回写到原文表的完整内容。"""
+    from app.services.scraping.link_extractor import extract_link_content
+
+    items = []
+    for src in sources:
+        original = (src.get("content") or "").strip()
+        src_type = src.get("type", "text")
+        source_url = (src.get("url") or "").strip()
+        if not original:
+            continue
+
+        item = {
+            "type": src_type,
+            "url": source_url if source_url.startswith(("http://", "https://")) else (
+                original if src_type == "link" and original.startswith(("http://", "https://")) else None
+            ),
+            "title": source_url if source_url.startswith(("http://", "https://")) else "外部来源内容",
+            "author": None,
+            "content": original,
+        }
+        if src_type == "link":
+            try:
+                extracted = await extract_link_content(original)
+                item["title"] = extracted.get("title") or original
+                item["author"] = extracted.get("author") or None
+                item["content"] = extracted.get("content") or original
+            except Exception:
+                item["title"] = original
+        else:
+            first_line = next((line.strip() for line in original.splitlines() if line.strip()), "")
+            item["title"] = first_line[:500] or "外部来源内容"
+
+        item["summary"] = item["content"][:500]
+        items.append(item)
+    return items
+
+
+async def _persist_adhoc_sources(db: AsyncSession, cluster: InfoCluster, items: list[dict]) -> None:
+    """把自由输入也落成 RawInfo，保证话题详情能回溯原文。"""
+    registry = (await db.execute(
+        select(SourceRegistry).where(SourceRegistry.platform == "adhoc_input")
+    )).scalar_one_or_none()
+    if not registry:
+        registry = SourceRegistry(
+            name="外部来源",
+            platform="adhoc_input",
+            source_type="web",
+            enabled=True,
+            description="来自创作工具的外部来源",
+        )
+        db.add(registry)
+        await db.flush()
+
+    source_urls = []
+    for item in items:
+        url = item["url"] or f"adhoc://{cluster.id}/{uuid4().hex}"
+        db.add(RawInfo(
+            source_registry_id=registry.id,
+            title=(item["title"] or "外部来源内容")[:500],
+            url=url,
+            author=item.get("author"),
+            summary=item.get("summary"),
+            content=item.get("content"),
+            scraped_at=utcnow(),
+            state=RAW_STATE_CLUSTERED,
+            info_cluster_id=cluster.id,
+            extras={"input_type": item.get("type", "text"), "original_url": item.get("url")},
+        ))
+        if item.get("url"):
+            source_urls.append(item["url"])
+
+    cluster.source_count = len(items)
+    cluster.source_urls = source_urls
 
 @router.post("/mine", response_model=dict)
 async def trigger_mining(
@@ -80,39 +161,19 @@ async def trigger_adhoc_mining(
             detail="至少提供一个信息源",
         )
 
-    # 合并所有信息源内容
-    from app.services.scraping.link_extractor import extract_link_content
+    # 合并所有信息源内容，同时保留来源明细供话题详情回溯。
+    source_items = await _extract_adhoc_sources(sources)
     combined_text_parts = []
-    for src in sources:
-        content = (src.get("content") or "").strip()
-        src_type = src.get("type", "text")
-
-        if content:
-            if src_type == "link":
-                # 链接类型：调用链接提取服务获取实际内容
-                try:
-                    extracted = await extract_link_content(content)
-                    title = extracted.get("title", "")
-                    text_content = extracted.get("content", "")
-                    author = extracted.get("author", "")
-                    platform = extracted.get("platform", "")
-
-                    # 组合提取结果
-                    parts = []
-                    if title:
-                        parts.append(f"标题：{title}")
-                    if author:
-                        parts.append(f"作者：{author}")
-                    if text_content:
-                        parts.append(text_content)
-
-                    combined_text_parts.append("\n".join(parts) if parts else content)
-                except Exception as e:
-                    # 提取失败时降级使用原始链接
-                    combined_text_parts.append(content)
-            else:
-                # 文本/文件类型：直接使用
-                combined_text_parts.append(content)
+    for item in source_items:
+        parts = []
+        if item.get("type") == "link" and item.get("title") and item["title"] != "外部来源内容":
+            parts.append(f"标题：{item['title']}")
+        if item.get("author"):
+            parts.append(f"作者：{item['author']}")
+        if item.get("content"):
+            parts.append(item["content"])
+        if parts:
+            combined_text_parts.append("\n".join(parts))
 
     if not combined_text_parts:
         raise HTTPException(
@@ -135,10 +196,12 @@ async def trigger_adhoc_mining(
         elements={},
         freshness="today",
         heat_score=5.0,
-        source_urls=[],
+        source_urls=[item["url"] for item in source_items if item.get("url")],
         mined=False,
     )
     db.add(cluster)
+    await db.flush()
+    await _persist_adhoc_sources(db, cluster, source_items)
     await db.commit()
     await db.refresh(cluster)
 
@@ -170,7 +233,7 @@ async def trigger_adhoc_mining(
                     freshness="today",
                     heat_score=5.0,
                     low_fan_hit=False,
-                    source_urls=[],
+                    source_urls=bg_cluster.source_urls or [],
                 )
 
                 # Agent A: 衍生候选选题
@@ -195,7 +258,7 @@ async def trigger_adhoc_mining(
                     info_type="资讯型",
                     freshness="today",
                     summary=bg_cluster.summary or "",
-                    source_urls=[],
+                    source_urls=bg_cluster.source_urls or [],
                     candidates=candidates_a,
                 )
                 result_a2 = await audit_feasibility(a2_input)
@@ -363,32 +426,19 @@ async def create_adhoc_candidate(
             detail="至少提供一个信息源",
         )
 
-    # 合并所有信息源内容
-    from app.services.scraping.link_extractor import extract_link_content
+    # 合并所有信息源内容，同时保留来源明细供话题详情回溯。
+    source_items = await _extract_adhoc_sources(sources)
     combined_text_parts = []
-    for src in sources:
-        content = (src.get("content") or "").strip()
-        src_type = src.get("type", "text")
-
-        if content:
-            if src_type == "link":
-                try:
-                    extracted = await extract_link_content(content)
-                    title = extracted.get("title", "")
-                    text_content = extracted.get("content", "")
-                    author = extracted.get("author", "")
-                    parts = []
-                    if title:
-                        parts.append(f"标题：{title}")
-                    if author:
-                        parts.append(f"作者：{author}")
-                    if text_content:
-                        parts.append(text_content)
-                    combined_text_parts.append("\n".join(parts) if parts else content)
-                except Exception:
-                    combined_text_parts.append(content)
-            else:
-                combined_text_parts.append(content)
+    for item in source_items:
+        parts = []
+        if item.get("type") == "link" and item.get("title") and item["title"] != "外部来源内容":
+            parts.append(f"标题：{item['title']}")
+        if item.get("author"):
+            parts.append(f"作者：{item['author']}")
+        if item.get("content"):
+            parts.append(item["content"])
+        if parts:
+            combined_text_parts.append("\n".join(parts))
 
     combined_text = "\n\n".join(combined_text_parts).strip()
     if not combined_text:
@@ -413,11 +463,13 @@ async def create_adhoc_candidate(
     cluster = InfoCluster(
         core_title=title,
         summary=summary,
-        source_count=len(sources),
+        source_count=len(source_items),
+        source_urls=[item["url"] for item in source_items if item.get("url")],
         mined=False,
     )
     db.add(cluster)
     await db.flush()
+    await _persist_adhoc_sources(db, cluster, source_items)
 
     # 创建 TopicCandidate
     candidate = TopicCandidate(
@@ -450,13 +502,31 @@ async def create_adhoc_candidate(
 @router.get("/progress/{run_id}", response_model=dict)
 async def get_mining_progress(
     run_id: str,
-    current_user: User = Depends(get_current_user),
+    token: str = Depends(oauth2_scheme),
 ) -> Any:
     """轮询式进度查询（绕开 SSE，避免反向代理缓冲流式响应）。
 
-    前端每隔 1-2 秒查一次，返回当前步骤 / Agent / 是否完成 / 结果。
+    进度状态只存在内存 progress_store 中，因此这里直接校验 JWT 的 subject
+    并检查 run 所属关系，不再为每一次 1-2 秒的轮询查询 users 表、占用数据库连接。
     """
-    snap = progress_store.snapshot(run_id, user_id=current_user.id)
+    payload = decode_token(token)
+    if not payload or not payload.get("sub") or payload.get("type") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无法验证凭据",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        user_id = int(payload["sub"])
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无法验证凭据",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    snap = progress_store.snapshot(run_id, user_id=user_id)
     if snap is None:
         return {"code": 404, "message": "run 不存在或已过期", "data": {"exists": False}}
     return {"code": 200, "message": "ok", "data": snap}

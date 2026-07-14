@@ -1,5 +1,8 @@
+import json
 from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
@@ -7,6 +10,7 @@ from app.crud.creation import creation as creation_crud
 from app.db.session import get_db
 from app.models.user import User
 from app.models.creation import ContentCreation
+from app.models.generation_record import GenerationRecord
 from app.schemas.creation import (
     ContentCreationCreate,
     ContentCreationUpdate,
@@ -17,6 +21,33 @@ from app.schemas.creation import (
 )
 
 router = APIRouter()
+
+
+class CreationPublishedRequest(BaseModel):
+    """公众号草稿箱上传成功后的本地状态回写。"""
+
+    platform: str = "wechat_draft"
+
+
+def _decode_creation_content(raw: Optional[str]) -> str:
+    """兼容旧的纯文本正文和当前保存的 JSON 正文快照。"""
+    if not raw:
+        return ""
+    try:
+        value = json.loads(raw)
+        if isinstance(value, dict):
+            return str(value.get("final_text") or value.get("content") or "")
+    except (TypeError, ValueError):
+        pass
+    return raw
+
+
+def _append_unique(items: list, seen: set, value: str, payload: dict) -> None:
+    value = (value or "").strip()
+    if not value or value in seen:
+        return
+    seen.add(value)
+    items.append({**payload, "value": value})
 
 
 @router.post("", response_model=dict)
@@ -81,6 +112,162 @@ async def get_creations(
             "page_size": page_size,
             "total_pages": (total + page_size - 1) // page_size
         }
+    }
+
+
+@router.get("/{creation_id}/adjustment-options", response_model=dict)
+async def get_creation_adjustment_options(
+    creation_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """获取草稿调整弹窗需要的当前内容和历史生成版本。"""
+    creation = await creation_crud.get(db, id=creation_id)
+    if not creation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="创作不存在")
+    if creation.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问他人创作")
+
+    current_content = _decode_creation_content(creation.content)
+    title_options: list = []
+    content_options: list = []
+    seen_titles: set = set()
+    seen_contents: set = set()
+
+    # 生成记录原本按 candidate_id 关联；草稿保存后仍可恢复该选题的全部历史生成结果。
+    if creation.candidate_id:
+        result = await db.execute(
+            select(GenerationRecord)
+            .where(
+                GenerationRecord.user_id == current_user.id,
+                GenerationRecord.candidate_id == creation.candidate_id,
+                GenerationRecord.status == "completed",
+                GenerationRecord.type.in_(["title_generate", "content_generate"]),
+            )
+            .order_by(desc(GenerationRecord.created_at))
+        )
+        records = result.scalars().all()
+
+        for record in records:
+            snapshot = record.output_snapshot or {}
+            if not isinstance(snapshot, dict):
+                continue
+
+            if record.type == "title_generate":
+                # 推荐标题和全部候选都保留；相同标题只展示一次。
+                title_items = []
+                for key in ("recommendations", "titles", "candidates"):
+                    values = snapshot.get(key)
+                    if isinstance(values, list):
+                        title_items.extend(values)
+                if not title_items and snapshot.get("title"):
+                    title_items = [snapshot]
+                for item in title_items:
+                    if isinstance(item, str):
+                        title = item
+                        meta = {}
+                    elif isinstance(item, dict):
+                        title = item.get("title") or item.get("editable_title") or ""
+                        meta = {
+                            key: item[key]
+                            for key in ("rank", "score", "final_score", "method", "reason", "is_top3", "is_top5")
+                            if item.get(key) is not None
+                        }
+                    else:
+                        continue
+                    _append_unique(
+                        title_options,
+                        seen_titles,
+                        title,
+                        {
+                            "record_id": record.id,
+                            "generated_at": record.created_at,
+                            "is_current": False,
+                            **meta,
+                        },
+                    )
+            else:
+                content = snapshot.get("final_text") or snapshot.get("content") or ""
+                if content:
+                    _append_unique(
+                        content_options,
+                        seen_contents,
+                        content,
+                        {
+                            "record_id": record.id,
+                            "generated_at": record.created_at,
+                            "is_current": False,
+                            "word_count": len(content),
+                        },
+                    )
+
+    # 当前草稿可能是手动编辑后的值，也可能来自旧数据，必须始终可选。
+    current_title = (creation.title or "").strip()
+    if current_title and current_title not in seen_titles:
+        title_options.insert(0, {
+            "record_id": None,
+            "generated_at": creation.updated_at,
+            "is_current": True,
+            "value": current_title,
+        })
+    else:
+        for item in title_options:
+            if item["value"] == current_title:
+                item["is_current"] = True
+                break
+
+    if current_content and current_content not in seen_contents:
+        content_options.insert(0, {
+            "record_id": None,
+            "generated_at": creation.updated_at,
+            "is_current": True,
+            "word_count": len(current_content),
+            "value": current_content,
+        })
+    else:
+        for item in content_options:
+            if item["value"] == current_content:
+                item["is_current"] = True
+                break
+
+    return {
+        "code": 200,
+        "data": {
+            "creation": {
+                "id": creation.id,
+                "title": current_title,
+                "content": current_content,
+                "status": creation.status,
+            },
+            "titles": title_options,
+            "contents": content_options,
+        },
+    }
+
+
+@router.post("/{creation_id}/mark-published", response_model=dict)
+async def mark_creation_published(
+    creation_id: int,
+    req: CreationPublishedRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """公众号草稿箱上传成功后，将本地创作标记为已发布。"""
+    creation = await creation_crud.get(db, id=creation_id)
+    if not creation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="创作不存在")
+    if creation.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权发布他人创作")
+
+    published_creation = await creation_crud.publish(
+        db,
+        db_obj=creation,
+        platform=req.platform or "wechat_draft",
+    )
+    return {
+        "code": 200,
+        "message": "创作状态已更新为已发布",
+        "data": ContentCreationResponse.from_orm(published_creation).dict(),
     }
 
 

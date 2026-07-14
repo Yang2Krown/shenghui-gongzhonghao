@@ -275,6 +275,7 @@ const generateTitles = async () => {
     const keyPoints = sections.flatMap((s) => s?.core_points || s?.key_points || [])
 
     const payload = {
+      candidate_id: props.candidateId,
       topic: {
         title: candidate?.title || '',
         direction: candidate?.direction || '',

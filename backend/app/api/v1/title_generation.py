@@ -300,6 +300,7 @@ async def create_title_generation(
         run_id=run_id,
         input_snapshot=request_data,
         display_title=f"标题生成 · {topic_title[:30]}",
+        candidate_id=request.candidate_id,
         resume_context={
             "route": "/creation/new",
             "query": {},

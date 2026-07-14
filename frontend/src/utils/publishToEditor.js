@@ -80,9 +80,10 @@ export function textToHtml(text) {
  * @param {object} router - Vue Router 实例（useRouter() 的返回值）
  * @param {string} text - 正文纯文本/markdown
  * @param {string} title - 文章标题
+ * @param {number|string|null} creationId - 本地创作 ID，用于发布成功后回写状态
  * @returns {Promise<void>}
  */
-export async function publishToWechatEditor(router, text, title) {
+export async function publishToWechatEditor(router, text, title, creationId = null) {
   const loading = ElLoading.service({
     fullscreen: true,
     lock: true,
@@ -118,6 +119,8 @@ export async function publishToWechatEditor(router, text, title) {
     const html = textToHtml(finalText)
     sessionStorage.setItem('wechat_editor_content', html)
     sessionStorage.setItem('wechat_editor_title', title || '')
+    if (creationId) sessionStorage.setItem('wechat_editor_creation_id', String(creationId))
+    else sessionStorage.removeItem('wechat_editor_creation_id')
     router.push('/creation/wechat-editor')
   } finally {
     loading.close()

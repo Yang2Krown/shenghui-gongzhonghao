@@ -64,6 +64,7 @@ class ContentInfo(BaseModel):
 
 class TitleGenerationRequest(BaseModel):
     """标题生成请求模式"""
+    candidate_id: Optional[int] = Field(None, description="选题候选 ID，用于关联生成历史")
     topic: TopicInfo = Field(..., description="选题信息")
     outline: OutlineInfo = Field(..., description="大纲信息")
     content: Optional[ContentInfo] = Field(None, description="正文信息（可选，用于标题参考正文）")

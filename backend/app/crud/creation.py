@@ -1,3 +1,4 @@
+import json
 from typing import Any, Dict, List, Optional, Union
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,19 @@ from app.schemas.creation import (
     ContentCreationCreate,
     ContentCreationUpdate
 )
+
+
+def _content_word_count(content: Optional[str]) -> int:
+    """正文可能以 JSON 快照保存，字数应按最终正文而不是快照字符串计算。"""
+    if not content:
+        return 0
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, dict):
+            content = parsed.get("final_text") or parsed.get("content") or ""
+    except (TypeError, ValueError):
+        pass
+    return len(content or "")
 
 
 class CRUDContentCreation(CRUDBase[ContentCreation, ContentCreationCreate, ContentCreationUpdate]):
@@ -41,7 +55,10 @@ class CRUDContentCreation(CRUDBase[ContentCreation, ContentCreationCreate, Conte
         
         # 应用筛选条件
         if status:
-            statement = statement.where(ContentCreation.status == status)
+            statuses = [item.strip() for item in status.split(",") if item.strip()]
+            statement = statement.where(
+                ContentCreation.status.in_(statuses) if len(statuses) > 1 else ContentCreation.status == statuses[0]
+            )
         
         if topic_id:
             statement = statement.where(ContentCreation.topic_id == topic_id)
@@ -82,7 +99,10 @@ class CRUDContentCreation(CRUDBase[ContentCreation, ContentCreationCreate, Conte
         
         # 应用筛选条件
         if status:
-            statement = statement.where(ContentCreation.status == status)
+            statuses = [item.strip() for item in status.split(",") if item.strip()]
+            statement = statement.where(
+                ContentCreation.status.in_(statuses) if len(statuses) > 1 else ContentCreation.status == statuses[0]
+            )
         
         if topic_id:
             statement = statement.where(ContentCreation.topic_id == topic_id)
@@ -106,7 +126,7 @@ class CRUDContentCreation(CRUDBase[ContentCreation, ContentCreationCreate, Conte
         """
         # 计算字数和阅读时间
         content = obj_in.content or ""
-        word_count = len(content)
+        word_count = _content_word_count(content)
         reading_time = max(1, word_count // 500)  # 假设每分钟500字
         
         db_obj = ContentCreation(
@@ -164,8 +184,8 @@ class CRUDContentCreation(CRUDBase[ContentCreation, ContentCreationCreate, Conte
         # 如果内容更新，重新计算字数和阅读时间
         if "content" in update_data:
             content = update_data["content"] or ""
-            db_obj.word_count = len(content)
-            db_obj.reading_time = max(1, len(content) // 500)
+            db_obj.word_count = _content_word_count(content)
+            db_obj.reading_time = max(1, db_obj.word_count // 500)
         
         # 更新时间
         db_obj.updated_at = datetime.utcnow()

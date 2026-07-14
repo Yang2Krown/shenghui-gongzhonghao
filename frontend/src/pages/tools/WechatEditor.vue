@@ -156,12 +156,14 @@ import { ElMessage } from 'element-plus'
 import { EditPen, Promotion, CopyDocument, Upload, Loading, Picture } from '@element-plus/icons-vue'
 import WechatRichEditor from '@/components/ui/WechatRichEditor.vue'
 import { get, createWechatDraft, generateWechatCover, getBingImages } from '@/api/api'
+import { markCreationPublished } from '@/api/creation'
 
 const router = useRouter()
 
 const articleTitle = ref('')
 const editorHtml = ref('')
 const editorRef = ref(null)
+const creationId = ref(null)
 
 // 发布相关
 const showPublishDialog = ref(false)
@@ -215,6 +217,7 @@ onMounted(() => {
   loadWechatAccount()
   const savedContent = sessionStorage.getItem('wechat_editor_content')
   const savedTitle = sessionStorage.getItem('wechat_editor_title')
+  creationId.value = sessionStorage.getItem('wechat_editor_creation_id') || null
   console.log('[WechatEditor] onMounted', {
     hasContent: !!savedContent,
     contentLength: savedContent?.length || 0,
@@ -235,6 +238,7 @@ onMounted(() => {
     articleTitle.value = savedTitle
     sessionStorage.removeItem('wechat_editor_title')
   }
+  sessionStorage.removeItem('wechat_editor_creation_id')
 })
 
 // ── 一键排版 ──
@@ -432,6 +436,14 @@ const handlePublish = async () => {
     const res = await createWechatDraft(params)
     const data = res.data || res
     if (data.success) {
+      if (creationId.value) {
+        try {
+          await markCreationPublished(creationId.value, 'wechat_draft')
+        } catch (statusError) {
+          console.error('回写创作发布状态失败:', statusError)
+          ElMessage.warning('文章已上传草稿箱，但创作历史状态同步失败，请稍后刷新重试')
+        }
+      }
       publishResult.value = { success: true, message: `发布成功！media_id: ${data.media_id || ''}` }
       ElMessage.success('已发布到公众号草稿箱')
     } else {

@@ -592,7 +592,7 @@ const handleGenerate = async () => {
           if (s.linkTitle) parts.push(`标题：${s.linkTitle}`)
           if (s.linkAuthor) parts.push(`作者：${s.linkAuthor}`)
           if (s.linkContent) parts.push(s.linkContent)
-          return { type: 'text', content: parts.join('\n') }
+          return { type: 'text', content: parts.join('\n'), url: s.url }
         }
         return { type: 'link', content: s.url }
       }

@@ -10,6 +10,11 @@ export const getCreationById = (id) => {
   return get(`/creations/${id}`)
 }
 
+// 获取草稿调整弹窗中的当前内容和历史生成版本
+export const getCreationAdjustmentOptions = (id) => {
+  return get(`/creations/${id}/adjustment-options`)
+}
+
 // 创建创作
 export const createCreation = (creationData) => {
   return post('/creations', creationData)
@@ -18,6 +23,11 @@ export const createCreation = (creationData) => {
 // 更新创作
 export const updateCreation = (id, creationData) => {
   return put(`/creations/${id}`, creationData)
+}
+
+// 公众号草稿箱上传成功后回写本地创作状态
+export const markCreationPublished = (id, platform = 'wechat_draft') => {
+  return post(`/creations/${id}/mark-published`, { platform })
 }
 
 // 删除创作

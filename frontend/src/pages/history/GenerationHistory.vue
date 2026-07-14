@@ -22,11 +22,24 @@
           v-for="c in categories"
           :key="c.value"
           :class="['type-chip', { 'type-chip-active': currentCat === c.value }]"
-          @click="currentCat = c.value; currentPage = 1; fetchRecords()"
+          @click="selectCategory(c.value)"
         >
           {{ c.label }}
         </button>
       </div>
+    </div>
+
+    <!-- 草稿状态筛选 -->
+    <div v-if="currentCat === 'draft'" class="card draft-filter-bar">
+      <span class="text-sm text-ink-4">状态：</span>
+      <button
+        v-for="item in draftStatuses"
+        :key="item.value"
+        :class="['type-chip', { 'type-chip-active': draftStatus === item.value }]"
+        @click="draftStatus = item.value; currentPage = 1; fetchDrafts()"
+      >
+        {{ item.label }}
+      </button>
     </div>
 
     <!-- 加载状态 -->
@@ -36,10 +49,42 @@
     </div>
 
     <!-- 空状态 -->
-    <div v-else-if="records.length === 0" class="card" style="text-align: center; padding: 80px 22px;">
+    <div v-else-if="(currentCat === 'draft' ? drafts.length === 0 : records.length === 0)" class="card" style="text-align: center; padding: 80px 22px;">
       <el-icon :size="48" class="text-ink-4"><Document /></el-icon>
-      <h3 class="font-sans text-ink" style="font-size: 18px; font-weight: 600; margin-top: 16px;">暂无生成记录</h3>
-      <p class="text-sm text-ink-3" style="margin-top: 8px;">使用各功能生成内容后，记录会自动出现在这里</p>
+      <h3 class="font-sans text-ink" style="font-size: 18px; font-weight: 600; margin-top: 16px;">{{ currentCat === 'draft' ? '暂无草稿' : '暂无生成记录' }}</h3>
+      <p class="text-sm text-ink-3" style="margin-top: 8px;">{{ currentCat === 'draft' ? '在信息选题完成文章后保存草稿，就能在这里继续调整' : '使用各功能生成内容后，记录会自动出现在这里' }}</p>
+    </div>
+
+    <!-- 草稿列表 -->
+    <div v-else-if="currentCat === 'draft'" class="draft-list">
+      <div
+        v-for="draft in drafts"
+        :key="draft.id"
+        class="card draft-card"
+        @click="navigateToDraft(draft)"
+      >
+        <div class="draft-card-main">
+          <div class="draft-card-head">
+            <span :class="['draft-status-badge', draft.status === 'published' ? 'draft-status-published' : 'draft-status-unpublished']">
+              {{ draft.status === 'published' ? '已发布' : '未发布' }}
+            </span>
+            <span class="text-sm text-ink-4">{{ formatTime(draft.updated_at) }}</span>
+          </div>
+          <h3 class="draft-title">{{ draft.title || '未命名' }}</h3>
+          <p class="draft-preview">{{ draftContentPreview(draft) || '暂无正文内容' }}</p>
+          <div class="draft-meta">
+            <span>{{ draft.word_count || draftContentText(draft).length || 0 }} 字</span>
+            <span v-if="draft.topic_direction">{{ draft.topic_direction }}</span>
+            <span v-if="draft.published_platform">已上传公众号草稿箱</span>
+          </div>
+        </div>
+        <div class="draft-card-actions">
+          <button class="btn-action" @click.stop="navigateToDraft(draft)">
+            查看详情
+            <el-icon :size="14"><ArrowRight /></el-icon>
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- 记录列表 -->
@@ -85,7 +130,7 @@
         :page-size="pageSize"
         :total="total"
         layout="prev, pager, next"
-        @current-change="fetchRecords"
+        @current-change="currentCat === 'draft' ? fetchDrafts() : fetchRecords()"
       />
     </div>
 
@@ -162,6 +207,7 @@
         </div>
       </div>
     </el-dialog>
+
   </div>
 </template>
 
@@ -172,6 +218,7 @@ import { ElMessage } from 'element-plus'
 import { Clock, Loading, Document, ArrowRight } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import generationRecordApi from '@/api/generationRecord'
+import { getCreations } from '@/api/creation'
 
 // 配置 marked
 marked.setOptions({
@@ -188,10 +235,12 @@ const router = useRouter()
 
 const loading = ref(false)
 const records = ref([])
+const drafts = ref([])
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = 20
 const currentCat = ref('')
+const draftStatus = ref('')
 
 // 详情弹窗
 const showDetail = ref(false)
@@ -224,15 +273,29 @@ const TYPE_META = {
 
 const categories = [
   { value: '', label: '全部' },
+  { value: 'draft', label: '草稿' },
   { value: 'outline', label: '选题大纲' },
   { value: 'title', label: '标题' },
   { value: 'content', label: '正文' },
   { value: 'convert', label: '转换' },
 ]
 
+const draftStatuses = [
+  { value: '', label: '全部' },
+  { value: 'draft', label: '未发布' },
+  { value: 'published', label: '已发布' },
+]
+
 const typeLabel = (type) => TYPE_META[type]?.label || '其他'
 const typeCat = (type) => TYPE_META[type]?.cat || 'other'
 const typeCredits = (type) => TYPE_META[type]?.credits ?? 0
+
+const selectCategory = (category) => {
+  currentCat.value = category
+  currentPage.value = 1
+  if (category === 'draft') fetchDrafts()
+  else fetchRecords()
+}
 
 // ===== 详情可读化渲染 =====
 const KEY_LABELS = {
@@ -319,6 +382,40 @@ const fetchRecords = async () => {
   }
 }
 
+const draftContentText = (draft) => {
+  const raw = draft?.content || ''
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') return parsed.final_text || parsed.content || ''
+  } catch {}
+  return raw
+}
+
+const draftContentPreview = (draft) => {
+  const text = draftContentText(draft).replace(/[#>*_`~]/g, '').replace(/\s+/g, ' ').trim()
+  return text.length > 220 ? `${text.slice(0, 220)}…` : text
+}
+
+const fetchDrafts = async () => {
+  loading.value = true
+  try {
+    const params = { page: currentPage.value, page_size: pageSize }
+    params.status = draftStatus.value || 'draft,published'
+    const res = await getCreations(params)
+    drafts.value = res.data.items || []
+    total.value = res.data.total || 0
+  } catch (e) {
+    ElMessage.error('加载草稿失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+const navigateToDraft = (draft) => {
+  router.push(`/creation/${draft.id}`)
+}
+
 const navigateToRecord = async (record) => {
   showDetail.value = true
   detailLoading.value = true
@@ -358,6 +455,21 @@ onMounted(fetchRecords)
   border-color: var(--clay);
   box-shadow: 0 2px 8px rgba(204, 120, 92, 0.08);
 }
+
+.draft-filter-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 22px; margin-bottom: 16px; }
+.draft-list { display: flex; flex-direction: column; gap: 12px; }
+.draft-card { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 20px 22px; cursor: pointer; }
+.draft-card:hover { border-color: var(--clay); box-shadow: 0 2px 8px rgba(204, 120, 92, 0.08); }
+.draft-card-main { min-width: 0; flex: 1; }
+.draft-card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.draft-status-badge { display: inline-flex; padding: 3px 10px; border-radius: var(--r-pill); font-size: 12px; font-weight: 600; }
+.draft-status-unpublished { background: rgba(230, 162, 60, .12); color: #A66A08; }
+.draft-status-published { background: rgba(82, 196, 26, .12); color: #3B8B19; }
+.draft-title { margin: 0; color: var(--ink); font-family: var(--font-serif); font-size: 20px; line-height: 1.4; }
+.draft-preview { margin: 8px 0 12px; color: var(--ink-3); font-size: 14px; line-height: 1.7; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.draft-meta { display: flex; gap: 14px; color: var(--ink-4); font-size: 12px; }
+.draft-card-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+@media (max-width: 700px) { .draft-card { flex-direction: column; } .draft-card-actions { width: 100%; justify-content: flex-end; } }
 
 .type-chip {
   display: inline-flex;

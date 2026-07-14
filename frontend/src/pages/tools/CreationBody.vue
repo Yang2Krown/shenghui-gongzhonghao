@@ -270,7 +270,7 @@ const handleGenerate = async () => {
     // 构造信息源
     const sources = []
     if (inputMode.value === 'link' && linkTitle.value) {
-      sources.push({ type: 'text', content: sourceText })
+      sources.push({ type: 'text', content: sourceText, url: linkUrl.value.trim() })
     } else if (inputMode.value === 'file') {
       sources.push({ type: 'text', content: fileText.value })
     } else {

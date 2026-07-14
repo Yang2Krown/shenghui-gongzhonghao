@@ -41,6 +41,7 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config
     const userStore = useUserStore()
+    const skipErrorToast = originalRequest?.skipErrorToast === true
     
     // 如果是401错误且没有重试过
     if (error.response?.status === 401 && !originalRequest._retry) {
@@ -64,6 +65,11 @@ api.interceptors.response.use(
       }
     }
     
+    // 后台轮询等场景由调用方自行处理错误，避免每次短暂网络抖动都弹 toast。
+    if (skipErrorToast) {
+      return Promise.reject(error)
+    }
+
     // 处理其他错误
     const status = error.response?.status
     const detail = error.response?.data?.detail

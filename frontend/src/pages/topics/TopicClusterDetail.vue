@@ -67,12 +67,13 @@
 
                 <!-- 完整原文卡片 -->
                 <div v-if="cluster.raw_infos?.length > 0" class="flex flex-col gap-2 source-scroll">
-                  <a
+                  <component
+                    :is="isHttpUrl(raw.url) ? 'a' : 'div'"
                     v-for="raw in cluster.raw_infos"
                     :key="raw.id"
-                    :href="raw.url"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    :href="isHttpUrl(raw.url) ? raw.url : undefined"
+                    :target="isHttpUrl(raw.url) ? '_blank' : undefined"
+                    :rel="isHttpUrl(raw.url) ? 'noopener noreferrer' : undefined"
                     class="source-card"
                   >
                     <div class="source-card-header">
@@ -90,9 +91,11 @@
                     </div>
                     <div class="source-title-row">
                       <span class="source-title">{{ raw.title }}</span>
-                      <span class="source-link">阅读原文 &rarr;</span>
+                      <span v-if="isHttpUrl(raw.url)" class="source-link">阅读原文 &rarr;</span>
+                      <span v-else class="source-link source-link-muted">链接暂缺</span>
                     </div>
-                  </a>
+                    <div v-if="!isHttpUrl(raw.url) && raw.summary" class="source-summary">{{ raw.summary }}</div>
+                  </component>
                 </div>
 
                 <!-- 兼容旧的 URL 列表 -->
@@ -330,13 +333,25 @@ const scrollToResults = () => {
 
 // ── 轮询挖掘进度（绕开 SSE）──────────────────────
 let pollTimer = null
+let pollingRunId = null
+let pollInFlight = false
 const POLL_INTERVAL = 1500
+const POLL_TIMEOUT = 5000
 
 const stopPolling = () => {
   if (pollTimer) {
-    clearInterval(pollTimer)
+    clearTimeout(pollTimer)
     pollTimer = null
   }
+  pollingRunId = null
+}
+
+const schedulePoll = (runId) => {
+  if (pollingRunId !== runId || pollTimer) return
+  pollTimer = setTimeout(() => {
+    pollTimer = null
+    pollProgress(runId)
+  }, POLL_INTERVAL)
 }
 
 const onMiningSuccess = (result) => {
@@ -360,8 +375,14 @@ const onMiningError = (msg) => {
 }
 
 const pollProgress = async (runId) => {
+  if (pollingRunId !== runId || pollInFlight) return
+  pollInFlight = true
+
   try {
-    const res = await get(`/topic-candidates/progress/${runId}`)
+    const res = await get(`/topic-candidates/progress/${runId}`, {}, {
+      timeout: POLL_TIMEOUT,
+      skipErrorToast: true,
+    })
     const d = res?.data || {}
     if (d.exists === false) return  // run 还没建好或已清理，下次再试
 
@@ -383,6 +404,10 @@ const pollProgress = async (runId) => {
     }
   } catch {
     // 单次轮询失败忽略，下次继续
+  } finally {
+    pollInFlight = false
+    // 用 setTimeout 串行轮询，避免上一次请求卡住时继续堆积请求。
+    schedulePoll(runId)
   }
 }
 
@@ -408,9 +433,9 @@ const startMining = async () => {
     }
     const runId = data.run_id
     if (runId) {
+      pollingRunId = runId
       // 立即查一次，之后定时轮询
       pollProgress(runId)
-      pollTimer = setInterval(() => pollProgress(runId), POLL_INTERVAL)
     }
   } catch (error) {
     const detail = error?.response?.data?.detail || error?.message || '挖掘失败'
@@ -461,6 +486,8 @@ const formatFreshness = (val) => {
   const map = { 'today': '今日', 'yesterday': '昨日', 'earlier': '两天前' }
   return map[val] || val
 }
+
+const isHttpUrl = (url) => /^https?:\/\//i.test(url || '')
 
 const formatRelativeTime = (iso) => {
   if (!iso) return ''
@@ -664,6 +691,10 @@ const startCreation = (candidate) => {
   background: var(--clay-tint);
 }
 
+.source-card:not(a) {
+  cursor: default;
+}
+
 .source-card-header {
   display: flex;
   align-items: center;
@@ -716,11 +747,26 @@ const startCreation = (candidate) => {
   gap: 8px;
 }
 
+.source-summary {
+  margin-top: 6px;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
 .source-link {
   color: var(--clay-deep);
   font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
+}
+
+.source-link-muted {
+  color: var(--ink-4);
 }
 
 /* Source Item (legacy) */

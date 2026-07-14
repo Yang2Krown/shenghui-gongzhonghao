@@ -531,7 +531,9 @@ const handleGenerate = async () => {
   // 单模型模式（原有逻辑）
   try {
     // 创建选题候选
-    const sources = [{ type: 'text', content }]
+    const sources = mode.value === 'link'
+      ? [{ type: 'text', content, url: linkUrl.value.trim() }]
+      : [{ type: 'text', content }]
     const res = await api.post('/topic-candidates/create-adhoc', {
       sources,
       preference: preference.value,

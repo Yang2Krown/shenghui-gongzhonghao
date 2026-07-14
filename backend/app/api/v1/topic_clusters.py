@@ -7,7 +7,7 @@ from datetime import date
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -159,7 +159,8 @@ async def get_topic_clusters(
         select(TopicCandidate.id)
         .where(
             TopicCandidate.info_cluster_id == InfoCluster.id,
-            TopicCandidate.user_id == current_user.id,
+            # 历史候选没有 user_id，仍应作为当前账号的只读历史结果展示。
+            or_(TopicCandidate.user_id == current_user.id, TopicCandidate.user_id.is_(None)),
         )
         .exists()
     )
@@ -305,7 +306,7 @@ async def get_topic_clusters(
             select(TopicCandidate.info_cluster_id, func.count(TopicCandidate.id))
             .where(
                 TopicCandidate.info_cluster_id.in_(cluster_ids),
-                TopicCandidate.user_id == current_user.id,
+                or_(TopicCandidate.user_id == current_user.id, TopicCandidate.user_id.is_(None)),
             )
             .group_by(TopicCandidate.info_cluster_id)
         )
@@ -416,7 +417,8 @@ async def get_topic_cluster_detail(
         )
         .where(
             TopicCandidate.info_cluster_id == cluster_id,
-            TopicCandidate.user_id == current_user.id,
+            # 兼容早期未绑定用户的历史候选，避免详情页只剩少量新数据。
+            or_(TopicCandidate.user_id == current_user.id, TopicCandidate.user_id.is_(None)),
         )
         .order_by(desc(TopicCandidate.weighted_score))
     )
@@ -481,6 +483,22 @@ async def get_topic_cluster_detail(
             "source_platform": row.source_platform or "",
             "commercial_level": raw.commercial_level or "none",
             "commercial_meta": raw.commercial_meta or {},
+        })
+
+    # 旧版记录可能只保存了摘要，没有 RawInfo 或 URL。这里仅展示已保存的
+    # 历史内容，并明确标记链接缺失，不能把它误归因为用户输入。
+    if not raw_infos_list and not (cluster.source_urls or []) and cluster.summary:
+        raw_infos_list.append({
+            "id": f"legacy-adhoc-{cluster.id}",
+            "title": cluster.core_title or "历史来源内容",
+            "url": None,
+            "summary": cluster.summary[:200],
+            "author": None,
+            "published_at": None,
+            "source_name": "历史来源",
+            "source_platform": "legacy",
+            "commercial_level": "none",
+            "commercial_meta": {},
         })
 
     return {

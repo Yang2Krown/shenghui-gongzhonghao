@@ -64,8 +64,9 @@ async def cleanup_polluted_data(db: AsyncSession) -> Dict[str, int]:
 
     await db.flush()
 
-    # ---- Step 3：重算每个 cluster 的真实 source_count，删空 cluster ----
-    # 拉所有 cluster 和它们的 clustered raw_info 数
+    # ---- Step 3：刷新来源快照，清理真正没有任何来源的空簇 ----
+    # source_urls 是 InfoCluster 上的历史来源快照，不能因为 raw_info 被标记
+    # skipped 就整体重写为空；否则原文链接会随着清理任务永久消失。
     rows = await db.execute(
         select(InfoCluster.id, func.count(RawInfo.id))
         .outerjoin(RawInfo, (RawInfo.info_cluster_id == InfoCluster.id) & (RawInfo.state == RAW_STATE_CLUSTERED))
@@ -79,22 +80,27 @@ async def cleanup_polluted_data(db: AsyncSession) -> Dict[str, int]:
         if not cluster:
             continue
 
-        if actual_count == 0:
+        current_urls = [
+            u for (u,) in (await db.execute(
+                select(RawInfo.url).where(
+                    RawInfo.info_cluster_id == cluster_id,
+                    RawInfo.state == RAW_STATE_CLUSTERED,
+                )
+            )).all()
+            if u
+        ]
+        snapshot_urls = list(cluster.source_urls or [])
+        merged_urls = list(dict.fromkeys(snapshot_urls + current_urls))
+
+        if actual_count == 0 and not merged_urls:
             await db.delete(cluster)
             deleted_clusters += 1
-        elif cluster.source_count != actual_count:
-            cluster.source_count = actual_count
-            # 重新生成 source_urls 列表
-            urls = [
-                u for (u,) in (await db.execute(
-                    select(RawInfo.url).where(
-                        RawInfo.info_cluster_id == cluster_id,
-                        RawInfo.state == RAW_STATE_CLUSTERED,
-                    )
-                )).all()
-            ]
-            cluster.source_urls = urls
-            updated_clusters += 1
+        else:
+            next_count = len(merged_urls) or actual_count
+            if cluster.source_urls != merged_urls or cluster.source_count != next_count:
+                cluster.source_urls = merged_urls
+                cluster.source_count = next_count
+                updated_clusters += 1
 
     stats["deleted_clusters"] = deleted_clusters
     stats["updated_clusters"] = updated_clusters

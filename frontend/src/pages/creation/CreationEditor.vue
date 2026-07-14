@@ -493,13 +493,12 @@ const onTitleComplete = (titleData) => {
 // 标题确认后 → 保存草稿
 const handleSaveDraftAfterTitle = async () => {
   await saveDraft()
-  goWorkflowStep('title')
 }
 
 // 标题确认后 → 一键发布到公众号编辑器
 const handlePublishAfterTitle = async () => {
   // 先保存草稿，确保数据不丢
-  await saveDraft()
+  const savedCreation = await saveDraft(false)
   // 将正文和标题写入 sessionStorage，公众号编辑器 onMounted 时读取
   // fallback 链：finalContent → creationStore → outlineText → sourceText → 空
   let finalText = finalContent.value?.final_text || finalContent.value?.content || ''
@@ -554,19 +553,19 @@ const handlePublishAfterTitle = async () => {
     ElMessage.warning('正文内容为空，编辑器将只显示标题。请先完成正文生成或在编辑器中手动输入。')
   }
   // 发布到公众号编辑器（内含 LLM 智能换行 + loading 动画）
-  await publishToWechatEditor(router, finalText, titleText)
+  await publishToWechatEditor(router, finalText, titleText, savedCreation?.id || route.params.id || null)
 }
 
 // 从 ContentPanel 触发保存草稿（携带当前编辑内容）
-const onSaveDraft = (contentData) => {
+const onSaveDraft = async (contentData) => {
   if (contentData) {
     finalContent.value = contentData
   }
-  saveDraft()
+  await saveDraft()
 }
 
 // 保存草稿
-const saveDraft = async () => {
+const saveDraft = async (openDraft = true) => {
   saving.value = true
   try {
     const finalTitle = selectedTitle.value?.title || topicTitle.value || '未命名创作'
@@ -590,20 +589,28 @@ const saveDraft = async () => {
       outline_status: outlineStatus.value,
       title_status: titleStatus.value,
       content_status: contentStatus.value,
-      status: 'draft',
+      // 编辑已有创作时保留其发布状态；新建创作默认是未发布草稿。
+      status: isEditing.value && creationStore.currentCreation?.status === 'published'
+        ? 'published'
+        : 'draft',
     }
 
-    if (isEditing.value) {
-      await creationStore.updateCreation(route.params.id, data)
-    } else {
-      const creation = await creationStore.createCreation(data)
-      // 替换 URL 为编辑模式
-      router.replace(`/creation/editor/${creation.id}`)
-    }
+    const savedCreation = isEditing.value
+      ? await creationStore.updateCreation(route.params.id, data)
+      : await creationStore.createCreation(data)
+
     isDirty.value = false
     ElMessage.success('草稿已保存')
+
+    // 保存草稿后直接进入统一的草稿详情页；发布流程则保留当前工作台。
+    if (openDraft && savedCreation?.id) {
+      await router.push(`/creation/${savedCreation.id}`)
+    }
+
+    return savedCreation
   } catch (e) {
     console.error('保存失败:', e)
+    throw e
   } finally {
     saving.value = false
   }
