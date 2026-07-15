@@ -323,6 +323,30 @@
   p, .body-text {
     font-size: 15px;
     line-height: 1.70;
+    text-align: justify;
+    text-justify: inter-ideograph;
+  }
+
+  /* 正文类文字统一两端对齐；标题、按钮、标签和导航保持各自的特殊排版。 */
+  :where(
+    .detail-text,
+    .summary-text,
+    .issue-text,
+    .source-summary,
+    .wc-summary,
+    .art-summary,
+    .angle-summary,
+    .info-text,
+    .score-evidence,
+    .evidence-text,
+    .detail-markdown p,
+    .markdown-body p,
+    .markdown-body li,
+    .article p,
+    .article li
+  ) {
+    text-align: justify;
+    text-justify: inter-ideograph;
   }
   
   .small-text {

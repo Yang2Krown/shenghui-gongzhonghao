@@ -268,6 +268,7 @@ const miningRunning = ref(false)
 // Agent 进度（轮询）
 const miningProgress = useAgentProgress()
 const MINING_TOTAL_STEPS = 3        // 挖掘 3 个 Agent（衍生 → 可写性审计 → 评分）
+let miningCompletionHandled = false
 
 // 监听 composable 完成：isRunning 变 false 且有 result 时触发成功回调
 watch(
@@ -355,6 +356,9 @@ const schedulePoll = (runId) => {
 }
 
 const onMiningSuccess = (result) => {
+  // 完成结果可能同时从轮询回调和进度动画回调到达，只处理一次。
+  if (miningCompletionHandled) return
+  miningCompletionHandled = true
   ElMessage.success(`挖掘完成，生成 ${result?.total_candidates ?? '?'} 个候选`)
   miningRunning.value = false
   // 标记该话题已挖掘，返回列表页时定点刷新标签
@@ -396,11 +400,7 @@ const pollProgress = async (runId) => {
     }
     if (d.done && d.result) {
       stopPolling()
-      // 等进度条动画到 100% 后关闭面板、刷新数据
-      const resultData = d.result
-      setTimeout(() => {
-        onMiningSuccess(resultData)
-      }, 1500)
+      // 结果交给 useAgentProgress 的完成动画统一处理，避免重复调用 onMiningSuccess。
     }
   } catch {
     // 单次轮询失败忽略，下次继续
@@ -417,6 +417,7 @@ const startMining = async () => {
   // 先停掉旧轮询（防止多次点击导致泄漏）
   stopPolling()
   miningProgress.reset()
+  miningCompletionHandled = false
   miningRunning.value = true
   panelMode.value = 'mining'
 
