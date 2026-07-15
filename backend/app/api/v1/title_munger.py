@@ -1,18 +1,16 @@
 """
 芒格版标题生成与评分 API 端点
 
-支持 SSE 实时推送 Agent 进度。
+支持进度快照轮询。
 """
 
 import asyncio
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException
 
 from fastapi import Depends
 from app.core.progress import progress_store
-from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.core.security import get_current_user
 from app.core.rate_limit import limit_ai_generation
@@ -97,9 +95,9 @@ async def munger_title_generate(
     current_user: User = Depends(limit_ai_generation),
 ):
     """
-    芒格版标题生成（SSE 模式）
+    芒格版标题生成（进度快照轮询）
 
-    返回 run_id，前端通过 SSE 获取实时进度。
+    返回 run_id，前端通过通用进度快照接口获取实时进度。
     """
     if not request.content or len(request.content) < 10:
         raise HTTPException(status_code=400, detail="文章内容至少需要10个字符")
@@ -132,9 +130,9 @@ async def munger_title_score(
     current_user: User = Depends(limit_ai_generation),
 ):
     """
-    芒格版标题评分（SSE 模式）
+    芒格版标题评分（进度快照轮询）
 
-    返回 run_id，前端通过 SSE 获取实时进度。
+    返回 run_id，前端通过通用进度快照接口获取实时进度。
     """
     if not request.title:
         raise HTTPException(status_code=400, detail="请输入标题内容")
@@ -159,22 +157,3 @@ async def munger_title_score(
         "message": "芒格版标题评分任务已提交",
         "run_id": run_id,
     }
-
-
-@router.get("/stream/{run_id}")
-async def stream_munger_progress(
-    run_id: str,
-    token: str = Query(None, description="认证 token（EventSource 不支持 header）"),
-) -> StreamingResponse:
-    """SSE 端点：实时推送芒格版标题生成/评分进度。"""
-    ensure_run_owner_from_token(progress_store, run_id, token)
-
-    return StreamingResponse(
-        progress_store.stream(run_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )

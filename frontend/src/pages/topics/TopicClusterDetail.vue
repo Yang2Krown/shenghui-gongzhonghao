@@ -265,7 +265,7 @@ const isMined = computed(() => {
 const panelMode = ref('mining') // 'mining' | 'candidates'
 const miningRunning = ref(false)
 
-// Agent 进度（轮询，绕开 SSE 避免反代缓冲）
+// Agent 进度（轮询）
 const miningProgress = useAgentProgress()
 const MINING_TOTAL_STEPS = 3        // 挖掘 3 个 Agent（衍生 → 可写性审计 → 评分）
 
@@ -331,7 +331,7 @@ const scrollToResults = () => {
   }
 }
 
-// ── 轮询挖掘进度（绕开 SSE）──────────────────────
+// ── 轮询挖掘进度 ──────────────────────
 let pollTimer = null
 let pollingRunId = null
 let pollInFlight = false

@@ -163,13 +163,13 @@ const errorMessage = ref('')
 const saving = ref(false)
 const reevaluating = ref(false)
 
-// Agent 进度（SSE 驱动）
+// Agent 进度（轮询驱动）
 const progress = useAgentProgress()
 const agentSteps = progress.steps
 const currentStepIndex = progress.currentStepIndex
 const stepPercent = progress.stepPercent
 
-// 监听 SSE 结果
+// 监听完成结果
 watch(() => progress.result.value, (newResult) => {
   if (newResult) {
     content.value = newResult
@@ -182,7 +182,7 @@ watch(() => progress.result.value, (newResult) => {
   }
 })
 
-// 监听 SSE 错误
+// 监听任务错误
 watch(() => progress.error.value, (newError) => {
   if (newError) {
     status.value = 'failed'
@@ -246,7 +246,7 @@ const generateContent = async () => {
     }
 
     if (runId) {
-      progress.start(`/api/v1/content-generation/stream/${runId}`)
+      progress.start(runId)
     }
   } catch (error) {
     status.value = 'failed'
@@ -305,7 +305,7 @@ const reevaluateContent = async () => {
     })
     const runId = res.data.run_id
     if (runId) {
-      reevaluateProgress.start(`/api/v1/content-generation/stream/${runId}`)
+      reevaluateProgress.start(runId)
     }
   } catch (e) {
     reevaluating.value = false

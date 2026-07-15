@@ -1,20 +1,17 @@
 """实操 / 商稿创作流端点。
 
 两段式（中间在前端做「研究确认 + 卖点选择」）：
-  POST /practical/research  → run_id；SSE 推研究进度，result = ProductResearch
-  POST /practical/draft     → run_id；SSE 推写作进度，result = 成稿
-进度流统一走 GET /practical/stream/{run_id}。
+  POST /practical/research  → run_id；前端轮询进度快照，result = ProductResearch
+  POST /practical/draft     → run_id；前端轮询进度快照，result = 成稿
 """
 
 import logging
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.progress import progress_store
-from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.core.security import get_current_user
 from app.core.rate_limit import limit_ai_generation, limit_link_extract
@@ -279,14 +276,3 @@ async def start_draft(req: DraftRequest, current_user: User = Depends(limit_ai_g
     )
     spawn(_run_draft(req, run_id, current_user.id))
     return RunResponse(run_id=run_id)
-
-
-# ────────────── 共用 SSE ──────────────
-@router.get("/stream/{run_id}")
-async def stream_progress(run_id: str, token: str = Query(None)) -> StreamingResponse:
-    ensure_run_owner_from_token(progress_store, run_id, token)
-    return StreamingResponse(
-        progress_store.stream(run_id),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
-    )

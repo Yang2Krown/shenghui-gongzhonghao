@@ -7,15 +7,13 @@
 import asyncio
 import logging
 from typing import Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
 from app.core.rate_limit import limit_ai_generation
 from app.core.progress import progress_store
-from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.db.session import get_db
 from app.models.user import User
@@ -94,10 +92,10 @@ async def generate_content_async(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(limit_ai_generation),
 ) -> Any:
-    """正文生成（SSE 实时进度）。
+    """正文生成（进度快照轮询）。
 
-    返回 run_id，前端可通过 GET /content-generation/stream/{run_id} 获取实时进度。
-    正文数据通过 SSE 的 result 事件返回（在 complete 之后）。
+    返回 run_id，前端通过通用进度快照接口获取实时进度。
+    正文数据通过进度快照中的 result 字段返回。
     """
     # 检查积分
     credit_service = CreditService(db)
@@ -506,25 +504,6 @@ async def generate_content_adhoc(
     }
 
 
-@router.get("/stream/{run_id}")
-async def stream_content_progress(
-    run_id: str,
-    token: str = Query(None, description="认证 token（EventSource 不支持 header）"),
-) -> StreamingResponse:
-    """SSE 端点：实时推送正文生成进度。"""
-    ensure_run_owner_from_token(progress_store, run_id, token)
-
-    return StreamingResponse(
-        progress_store.stream(run_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
 @router.post("/generate/sync", response_model=dict)
 async def generate_content_sync(
     req: ContentGenerationSyncRequest,
@@ -650,7 +629,7 @@ async def reevaluate_content(
     """重新评估正文（只跑 Agent D 诊断，与生成流水线完全解耦）。
 
     接收当前编辑后的正文文本，运行 Agent D 诊断评分。
-    返回 run_id，前端通过 SSE 获取实时进度。
+    返回 run_id，前端通过通用进度快照接口获取实时进度。
     """
     from app.services.llm import get_llm_client
     from app.services.llm.llm_client import ChatMessage, parse_json_loose

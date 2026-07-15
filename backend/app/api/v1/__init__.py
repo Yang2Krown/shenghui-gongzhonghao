@@ -4,7 +4,7 @@ from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidat
 
 api_router = APIRouter()
 
-# 通用进度轮询（绕开 SSE）
+# 通用进度轮询
 api_router.include_router(
     progress.router,
     tags=["进度"]

@@ -9,11 +9,9 @@ import logging
 from typing import Optional
 from pydantic import BaseModel, Field
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.progress import progress_store
-from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.core.security import get_current_user
 from app.core.rate_limit import limit_ai_generation
@@ -327,7 +325,6 @@ async def standalone_title_generate(
             "query": {},
         },
     )
-
     spawn(
         _run_standalone_title_background(
             content=request.content,
@@ -337,25 +334,6 @@ async def standalone_title_generate(
     )
 
     return StandaloneTitleResponse(run_id=run_id)
-
-
-@router.get("/stream/{run_id}")
-async def stream_standalone_title_progress(
-    run_id: str,
-    token: str = Query(None, description="认证 token"),
-) -> StreamingResponse:
-    """SSE 端点：实时推送标题生成进度。"""
-    ensure_run_owner_from_token(progress_store, run_id, token)
-
-    return StreamingResponse(
-        progress_store.stream(run_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
 
 
 async def _run_multi_model_title_background(
@@ -540,23 +518,4 @@ async def compare_multi_model_titles(
     return MultiModelTitleResponse(
         success=True,
         comparison={"run_id": run_id, "message": "多模型对比生成任务已创建"},
-    )
-
-
-@router.get("/compare/stream/{run_id}")
-async def stream_multi_model_title_progress(
-    run_id: str,
-    token: str = Query(None, description="认证 token"),
-) -> StreamingResponse:
-    """SSE 端点：实时推送多模型对比生成进度。"""
-    ensure_run_owner_from_token(progress_store, run_id, token)
-
-    return StreamingResponse(
-        progress_store.stream(run_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
     )

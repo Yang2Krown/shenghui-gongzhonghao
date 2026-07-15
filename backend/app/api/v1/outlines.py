@@ -9,7 +9,6 @@ import uuid
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
@@ -17,7 +16,6 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.core.security import get_current_user
 from app.core.rate_limit import limit_ai_generation
 from app.core.progress import progress_store
-from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.db.session import get_db
 from app.services.credit_service import CreditService
@@ -133,8 +131,8 @@ async def trigger_outline_generation(
 ) -> Any:
     """触发大纲生成任务。
 
-    返回 run_id，前端可通过 GET /outlines/stream/{run_id} 获取实时进度。
-    大纲数据通过 SSE 的 result 事件返回（在 complete 之后）。
+    返回 run_id，前端通过通用进度快照接口获取实时进度。
+    大纲数据通过进度快照中的 result 字段返回。
 
     body 格式：
     {
@@ -553,28 +551,6 @@ async def trigger_adhoc_outline_generation(
     }
 
 
-@router.get("/stream/{run_id}")
-async def stream_outline_progress(
-    run_id: str,
-    token: str = Query(None, description="认证 token（EventSource 不支持 header）"),
-) -> StreamingResponse:
-    """SSE 端点：实时推送大纲生成进度。
-
-    EventSource 不支持自定义 header，所以 token 通过 query param 传递。
-    """
-    ensure_run_owner_from_token(progress_store, run_id, token)
-
-    return StreamingResponse(
-        progress_store.stream(run_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
 @router.get("", response_model=dict)
 async def get_outlines(
     db: AsyncSession = Depends(get_db),
@@ -773,7 +749,7 @@ async def reevaluate_outline(
     """重新评估大纲（只跑 B→C→D，不重新生成）。
 
     使用当前已编辑的 sections 作为输入，跳过 Agent A，直接跑后置 Agent。
-    返回 run_id，前端通过 SSE 获取实时进度。
+    返回 run_id，前端通过通用进度快照接口获取实时进度。
     """
     result = await db.execute(
         select(Outline)

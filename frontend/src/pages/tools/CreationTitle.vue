@@ -508,7 +508,6 @@ const handleGenerate = async () => {
   // 多模型对比模式
   if (multiModelMode.value) {
     try {
-      progress.start('multi-model')
       const res = await api.post('/standalone-title/compare', {
         content,
         providers: ['deepseek', 'aigocode'],
@@ -518,7 +517,7 @@ const handleGenerate = async () => {
       const runId = data?.comparison?.run_id
 
       if (runId) {
-        progress.start(`/api/v1/standalone-title/compare/stream/${runId}`)
+        progress.start(runId)
       } else {
         progress.error.value = '未获取到任务 ID'
       }

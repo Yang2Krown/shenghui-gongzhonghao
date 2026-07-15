@@ -7,7 +7,6 @@
 import asyncio
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
-from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 import uuid
@@ -15,7 +14,6 @@ import logging
 
 from app.db.session import get_db, AsyncSessionLocal
 from app.core.progress import progress_store
-from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.core.security import get_current_user
 from app.core.rate_limit import limit_ai_generation
@@ -102,7 +100,7 @@ async def _run_title_generation_background(task_id: str, request_data: dict, run
                 request=request,
             )
 
-            # 推送结果事件（触发前端关闭 SSE 连接）
+            # 推送结果事件（标记轮询任务完成）
             if run_id:
                 from sqlalchemy import select, desc
                 from app.models.title import (
@@ -373,25 +371,6 @@ async def compare_multi_model_titles(
         raise HTTPException(status_code=500, detail=f"多模型对比生成失败: {str(e)}")
 
 
-@router.get("/stream/{run_id}")
-async def stream_title_progress(
-    run_id: str,
-    token: str = Query(None, description="认证 token（EventSource 不支持 header）"),
-) -> StreamingResponse:
-    """SSE 端点：实时推送标题生成进度。"""
-    ensure_run_owner_from_token(progress_store, run_id, token)
-
-    return StreamingResponse(
-        progress_store.stream(run_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
 @router.get("/{task_id}", response_model=TitleGenerationResultResponse)
 async def get_title_generation_result(
     task_id: str,
@@ -565,7 +544,7 @@ async def reevaluate_title_candidate(
 ):
     """重新评估单个标题候选（只跑 B 评分 + C 点击预测）。
 
-    返回 run_id，前端通过 SSE 获取实时进度。
+    返回 run_id，前端通过通用进度快照接口获取实时进度。
     """
     result = await db.execute(
         select(TitleCandidate).where(TitleCandidate.id == candidate_id)

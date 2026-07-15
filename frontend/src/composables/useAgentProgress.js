@@ -1,8 +1,7 @@
 /**
  * useAgentProgress — Agent 进度 composable（轮询实现）
  *
- * 历史上用 SSE，但生产环境反向代理会缓冲流式响应，导致事件被憋到最后才一起到。
- * 现改为**轮询**通用进度接口 `/progress/{run_id}`：普通短请求，任何代理都不缓冲。
+ * 通过轮询通用进度接口 `/progress/{run_id}` 获取任务快照。
  *
  * 每次 step 切换时：当前步先补满到 100%（1s 动画）→ 停顿 0.5s → 归零 → 下一步开始。
  */
@@ -28,8 +27,8 @@ export function useAgentProgress() {
   let _climbTimer = null
   let _advanceTimer = null
 
-  // ── 启动（传入原 SSE URL，取末段 runId 改走轮询）──
-  function start(url) {
+  // ── 启动（直接传入 runId）──
+  function start(runId) {
     stop()
 
     isRunning.value = true
@@ -39,8 +38,11 @@ export function useAgentProgress() {
     currentStepIndex.value = -1
     stepPercent.value = 0
 
-    const runId = String(url).split('?')[0].replace(/\/+$/, '').split('/').pop()
-    if (!runId) return
+    runId = String(runId || '').trim()
+    if (!runId) {
+      isRunning.value = false
+      return
+    }
 
     _poll(runId)
     _pollTimer = setInterval(() => _poll(runId), POLL_INTERVAL)

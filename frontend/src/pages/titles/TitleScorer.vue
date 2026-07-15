@@ -340,7 +340,7 @@ const score = async () => {
     const runId = data.run_id
 
     if (runId) {
-      progress.start(`/api/v1/title-munger/stream/${runId}`)
+      progress.start(runId)
     } else {
       status.value = 'failed'
       errorMessage.value = '未获取到任务 ID'

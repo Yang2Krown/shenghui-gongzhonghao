@@ -560,7 +560,7 @@ const handleFileDrop = async (source, event) => {
   }
 }
 
-// 监听 SSE 结果
+// 监听完成结果
 watch(() => progress.result.value, (data) => {
   if (data?.angles) {
     candidateList.value = data.angles
@@ -614,8 +614,8 @@ const handleGenerate = async () => {
       return
     }
 
-    // 2. 连接 SSE 流
-    progress.start(`/api/v1/topic-candidates/stream/${runId}`)
+    // 2. 开始轮询任务进度
+    progress.start(runId)
   } catch (err) {
     ElMessage.error(err?.response?.data?.detail || err.message || '请求失败')
     showPanel.value = false

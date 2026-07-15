@@ -185,13 +185,13 @@ const selectedIndex = ref(null)
 const errorMessage = ref('')
 const reevaluating = ref(false)
 
-// Agent 进度（SSE 驱动）
+// Agent 进度（轮询驱动）
 const progress = useAgentProgress()
 const agentSteps = progress.steps
 const currentStepIndex = progress.currentStepIndex
 const stepPercent = progress.stepPercent
 
-// 监听 SSE 结果
+// 监听完成结果
 watch(() => progress.result.value, (newResult) => {
   if (newResult) {
     candidatesAll.value = newResult.candidates || []
@@ -215,7 +215,7 @@ watch(() => progress.result.value, (newResult) => {
   }
 })
 
-// 监听 SSE 错误
+// 监听任务错误
 watch(() => progress.error.value, (newError) => {
   if (newError) {
     status.value = 'failed'
@@ -302,8 +302,7 @@ const generateTitles = async () => {
 
     const runId = res.data.run_id
     if (runId) {
-      // SSE 模式：连接进度流
-      progress.start(`/api/v1/title-generation/stream/${runId}`)
+      progress.start(runId)
     }
   } catch (error) {
     status.value = 'failed'
@@ -391,7 +390,7 @@ const reevaluateTitle = async () => {
     const res = await reevaluateTitleCandidate(title.id)
     const runId = res.data.run_id
     if (runId) {
-      reevaluateProgress.start(`/api/v1/title-generation/stream/${runId}`)
+      reevaluateProgress.start(runId)
     }
   } catch (e) {
     reevaluating.value = false

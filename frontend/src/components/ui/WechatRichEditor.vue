@@ -47,6 +47,15 @@ const spacingBefore = ref('0')
 const spacingAfter = ref('24px')
 // 保存最后已知的段落路径（handleChange 时更新），用于 popup 弹出时 selection 已丢失的情况
 let _lastKnownPath = 0
+let _editableEl = null
+let _editorWrap = null
+let _toolbarObserver = null
+let _spacingObserver = null
+let _toolbarPatchRaf = null
+let _spacingSyncRaf = null
+let _spacingPopupCleanup = () => {}
+let _pasteHandler = null
+let _toolbarClickHandler = null
 
 // ─── 注册自定义段前/段后距菜单 ───
 import { Boot, SlateEditor, i18nAddResources } from '@wangeditor/editor'
@@ -142,7 +151,7 @@ function _showSpacingPopup(editor, type, btnEl) {
   const savedPath = editor.selection?.anchor?.path?.[0] ?? _lastKnownPath
   if (savedPath == null) return
   // 保存选区，以便 popup 关闭后恢复焦点
-  document.querySelectorAll('.spacing-popup').forEach(el => el.remove())
+  _spacingPopupCleanup()
   const popup = document.createElement('div')
   popup.className = 'spacing-popup'
   popup.style.cssText = 'position:absolute;background:#fff;border:1px solid #ddd;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px 0;z-index:9999;min-width:56px;'
@@ -156,7 +165,7 @@ function _showSpacingPopup(editor, type, btnEl) {
     opt.onmousedown = (e) => { e.preventDefault(); e.stopPropagation() }  // 阻止编辑器 blur
     opt.onclick = () => {
       _applySpacingToDOM(editor, type, v, savedPath)
-      popup.remove()
+      _spacingPopupCleanup()
       editor.focus()  // 恢复编辑器焦点
     }
     popup.appendChild(opt)
@@ -165,14 +174,27 @@ function _showSpacingPopup(editor, type, btnEl) {
   const rect = btnEl.getBoundingClientRect()
   popup.style.left = rect.left + 'px'
   popup.style.top = (rect.bottom + 4) + 'px'
+  let listenerTimer = null
+  const cleanup = () => {
+    if (listenerTimer) {
+      clearTimeout(listenerTimer)
+      listenerTimer = null
+    }
+    popup.remove()
+    document.removeEventListener('click', close)
+    if (_spacingPopupCleanup === cleanup) _spacingPopupCleanup = () => {}
+  }
   const close = (e) => {
     if (!popup.contains(e.target)) {
-      popup.remove()
-      document.removeEventListener('click', close)
+      cleanup()
       editor.focus()
     }
   }
-  setTimeout(() => document.addEventListener('click', close), 0)
+  _spacingPopupCleanup = cleanup
+  listenerTimer = setTimeout(() => {
+    listenerTimer = null
+    document.addEventListener('click', close)
+  }, 0)
 }
 
 // 段前距按钮 class（和缩进按钮同模式，editor 由 wangEditor 传入，不依赖闭包）
@@ -391,22 +413,25 @@ const handleCreated = (editor) => {
 
   const editableEl = editor.getEditableContainer()
   if (!editableEl) return
+  _editableEl = editableEl
 
   // 粘贴长文时阻止自动滚到底部
-  editableEl.addEventListener('paste', () => {
+  _pasteHandler = () => {
     const scrollEl = editableEl.closest('.wechat-editor-content') || editableEl.parentElement
     if (scrollEl) {
       const scrollTop = scrollEl.scrollTop
       requestAnimationFrame(() => { scrollEl.scrollTop = scrollTop })
     }
-  }, true)
+  }
+  editableEl.addEventListener('paste', _pasteHandler, true)
 
   // ── 工具栏 DOM 修改 ──
   const wrap = editableEl.closest('.wechat-editor-wrap')
   if (!wrap) return
+  _editorWrap = wrap
 
   // 1. 点击工具栏时，延迟修改下拉选项（事件委托，不怕元素重建）
-  wrap.addEventListener('click', (e) => {
+  _toolbarClickHandler = (e) => {
     // headerSelect: 只保留正文+二级标题
     if (e.target.closest('button[data-menu-key="headerSelect"]')) {
       requestAnimationFrame(() => {
@@ -457,12 +482,13 @@ const handleCreated = (editor) => {
               const span = li.querySelector('span')
               if (span) span.textContent = '二级标题'
             }
-            li.addEventListener('click', () => { setTimeout(patchToolbarBtns, 250) }, { once: true })
+            li.addEventListener('click', () => { requestAnimationFrame(patchToolbarBtns) }, { once: true })
           })
         })
       })
     }
-  })
+  }
+  wrap.addEventListener('click', _toolbarClickHandler)
 
   // 2. 工具栏按钮文字替换（防覆盖）
   const replaceButtonText = (btn, newText) => {
@@ -505,10 +531,27 @@ const handleCreated = (editor) => {
 
   _patchToolbarBtns = patchToolbarBtns
   patchToolbarBtns()
-  setInterval(patchToolbarBtns, 50)
 
-  // 每 100ms 重新同步段前/段后距（wangEditor 重渲染会清除 inline styles）
-  setInterval(_syncAllSpacing, 100)
+  const scheduleToolbarPatch = () => {
+    if (_toolbarPatchRaf) return
+    _toolbarPatchRaf = requestAnimationFrame(() => {
+      _toolbarPatchRaf = null
+      patchToolbarBtns()
+    })
+  }
+  const scheduleSpacingSync = () => {
+    if (_spacingSyncRaf) return
+    _spacingSyncRaf = requestAnimationFrame(() => {
+      _spacingSyncRaf = null
+      _syncAllSpacing()
+    })
+  }
+
+  // wangEditor 会重建工具栏和段落 DOM，只在实际重建时触发同步。
+  _toolbarObserver = new MutationObserver(scheduleToolbarPatch)
+  _toolbarObserver.observe(wrap, { childList: true, subtree: true })
+  _spacingObserver = new MutationObserver(scheduleSpacingSync)
+  _spacingObserver.observe(editableEl, { childList: true, subtree: true })
 }
 
 // ─── 工具栏文字更新（模块级，handleChange 也能调用） ───
@@ -522,8 +565,13 @@ const handleChange = (editor) => {
   // 更新最后已知段落路径，用于间距 popup 定位
   _lastKnownPath = editor.selection?.anchor?.path?.[0] ?? _lastKnownPath
   _syncAllSpacing()
-  // requestAnimationFrame 确保在 wangEditor 更新工具栏之后立即替换
-  requestAnimationFrame(() => { _patchToolbarBtns() })
+  // requestAnimationFrame 确保在 wangEditor 更新工具栏之后立即替换，并可在卸载时取消
+  if (!_toolbarPatchRaf) {
+    _toolbarPatchRaf = requestAnimationFrame(() => {
+      _toolbarPatchRaf = null
+      _patchToolbarBtns()
+    })
+  }
 }
 
 const updateCounts = () => {
@@ -615,8 +663,32 @@ function extractTitle() {
 
 // ─── 生命周期 ───
 onBeforeUnmount(() => {
+  _toolbarObserver?.disconnect()
+  _spacingObserver?.disconnect()
+  _toolbarObserver = null
+  _spacingObserver = null
+
+  if (_toolbarPatchRaf) cancelAnimationFrame(_toolbarPatchRaf)
+  if (_spacingSyncRaf) cancelAnimationFrame(_spacingSyncRaf)
+  _toolbarPatchRaf = null
+  _spacingSyncRaf = null
+
+  if (_editableEl && _pasteHandler) {
+    _editableEl.removeEventListener('paste', _pasteHandler, true)
+  }
+  if (_editorWrap && _toolbarClickHandler) {
+    _editorWrap.removeEventListener('click', _toolbarClickHandler)
+  }
+  _pasteHandler = null
+  _toolbarClickHandler = null
+  _spacingPopupCleanup()
+  _editableEl = null
+  _editorWrap = null
+  _patchToolbarBtns = () => {}
+
   const editor = editorRef.value
   if (editor) editor.destroy()
+  editorRef.value = null
 })
 
 /**

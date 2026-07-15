@@ -183,7 +183,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onUnmounted } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { createCreation } from '@/api/creation'
@@ -198,6 +198,16 @@ const showStyle = ref(false)
 const currentStep = ref(-1)
 const saving = ref(false)
 const saved = ref(false)
+let stepTimer = null
+
+const clearStepTimer = () => {
+  if (stepTimer) {
+    clearInterval(stepTimer)
+    stepTimer = null
+  }
+}
+
+onUnmounted(clearStepTimer)
 
 // 每次重新生成都重置已保存状态
 watch(result, () => { saved.value = false })
@@ -331,7 +341,8 @@ const generateContent = async () => {
   currentStep.value = 0
 
   // 模拟步骤进度
-  const stepTimer = setInterval(() => {
+  clearStepTimer()
+  stepTimer = setInterval(() => {
     if (currentStep.value < 3) currentStep.value++
   }, 8000)
 
@@ -367,7 +378,7 @@ const generateContent = async () => {
     console.error('生成失败:', error)
     alert('生成失败: ' + (error.response?.data?.detail || error.message))
   } finally {
-    clearInterval(stepTimer)
+    clearStepTimer()
     loading.value = false
   }
 }

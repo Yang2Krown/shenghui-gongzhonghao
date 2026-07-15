@@ -349,13 +349,13 @@ const saving = ref(false)
 const reevaluating = ref(false)
 const generationPhase = ref('outline')
 
-// Agent 进度（SSE 驱动）
+// Agent 进度（轮询驱动）
 const progress = useAgentProgress()
 const agentSteps = progress.steps
 const currentStepIndex = progress.currentStepIndex
 const stepPercent = progress.stepPercent
 
-// 监听 SSE 结果
+// 监听完成结果
 watch(() => progress.result.value, (newResult) => {
   if (newResult) {
     outline.value = JSON.parse(JSON.stringify(newResult))
@@ -379,7 +379,7 @@ watch(() => progress.result.value, (newResult) => {
   }
 })
 
-// 监听 SSE 错误
+// 监听任务错误
 watch(() => progress.error.value, (newError) => {
   if (newError) {
     status.value = 'failed'
@@ -448,7 +448,7 @@ const generateOutline = async () => {
 
     const runId = res.data.run_id
     if (runId) {
-      progress.start(`/api/v1/outlines/stream/${runId}`)
+      progress.start(runId)
     }
   } catch (error) {
     status.value = 'failed'
@@ -545,8 +545,8 @@ const reevaluateOutline = async () => {
     const res = await outlineApi.reevaluateOutline(outline.value.id)
     const runId = res.data.run_id
     if (runId) {
-      // 用新的 SSE 连接获取重新评估结果
-      reevaluateProgress.start(`/api/v1/outlines/stream/${runId}`)
+      // 用新的进度轮询获取重新评估结果
+      reevaluateProgress.start(runId)
     }
   } catch (e) {
     reevaluating.value = false

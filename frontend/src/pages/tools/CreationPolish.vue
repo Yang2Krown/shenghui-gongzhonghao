@@ -584,7 +584,6 @@ const handleGenerate = async () => {
   // 多模型对比模式
   if (multiModelMode.value) {
     try {
-      progress.start('multi-model')
       const body = { text }
       if (title.value.trim()) body.title = title.value.trim()
       body.providers = ['deepseek', 'aigocode']
@@ -594,7 +593,7 @@ const handleGenerate = async () => {
       const runId = data?.comparison?.run_id
 
       if (runId) {
-        progress.start(`/api/v1/content-polish/compare/stream/${runId}`)
+        progress.start(runId)
       } else {
         progress.error.value = '未获取到任务 ID'
       }
@@ -615,7 +614,7 @@ const handleGenerate = async () => {
     const runId = data?.run_id
 
     if (runId) {
-      progress.start(`/api/v1/content-polish/stream/${runId}`)
+      progress.start(runId)
     } else {
       progress.error.value = '未获取到任务 ID'
     }

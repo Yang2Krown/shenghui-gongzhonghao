@@ -384,7 +384,7 @@ const copyTitle = async (text) => {
   }
 }
 
-// 监听 SSE 结果
+// 监听完成结果
 watch(() => progress.result.value, (newResult) => {
   if (newResult) {
     result.value = newResult
@@ -439,13 +439,11 @@ const generate = async () => {
   result.value = null
 
   try {
-    let endpoint, runEndpoint
+    let endpoint
     if (multiModelMode.value) {
       endpoint = '/standalone-title/compare'
-      runEndpoint = '/api/v1/standalone-title/compare/stream/'
     } else {
       endpoint = '/standalone-title/generate'
-      runEndpoint = '/api/v1/standalone-title/stream/'
     }
 
     const res = await post(endpoint, {
@@ -457,7 +455,7 @@ const generate = async () => {
     const runId = data.run_id || data.comparison?.run_id
 
     if (runId) {
-      progress.start(`${runEndpoint}${runId}`)
+      progress.start(runId)
     } else {
       status.value = 'failed'
       errorMessage.value = '未获取到任务 ID'

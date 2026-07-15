@@ -254,7 +254,7 @@ const verdictBadgeClass = (verdict) => {
   return 'badge-danger'
 }
 
-// 监听 SSE 结果
+// 监听完成结果
 import { watch } from 'vue'
 
 watch(() => progress.result.value, (newResult) => {
@@ -318,7 +318,7 @@ const generate = async () => {
     const runId = data.run_id
 
     if (runId) {
-      progress.start(`/api/v1/title-munger/stream/${runId}`)
+      progress.start(runId)
     } else {
       status.value = 'failed'
       errorMessage.value = '未获取到任务 ID'

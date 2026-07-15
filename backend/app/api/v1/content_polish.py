@@ -1,20 +1,18 @@
 """文案润色 API 端点。
 
-提供文案润色的 RESTful 接口，支持 SSE 实时进度推送。
+提供文案润色的 RESTful 接口，支持进度快照轮询。
 复用正文生成的 Agent B/D/E/C 四个 Agent，跳过 Agent A。
 """
 
 import asyncio
 import logging
 from typing import Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.core.security import get_current_user
 from app.core.rate_limit import limit_ai_generation
 from app.core.progress import progress_store
-from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.models.user import User
 from app.core.generation_tracker import track_start, track_complete, track_fail
@@ -38,7 +36,7 @@ class PolishRequest(BaseModel):
 
 class PolishResponse(BaseModel):
     """文案润色响应。"""
-    run_id: str = Field(..., description="进度流 ID，前端可通过 GET /content-polish/stream/{run_id} 获取实时进度")
+    run_id: str = Field(..., description="进度任务 ID，前端通过通用进度快照接口获取实时进度")
 
 
 # ──────────────────────────────────────────────
@@ -50,11 +48,11 @@ async def generate_polish(
     req: PolishRequest,
     current_user: User = Depends(limit_ai_generation),
 ) -> Any:
-    """文案润色（SSE 实时进度）。
+    """文案润色（进度快照轮询）。
 
     接收用户提供的文本，复用正文生成的 Agent B/D/E/C 进行润色。
-    返回 run_id，前端可通过 GET /content-polish/stream/{run_id} 获取实时进度。
-    润色结果通过 SSE 的 result 事件返回。
+    返回 run_id，前端通过通用进度快照接口获取实时进度。
+    润色结果通过快照中的 result 字段返回。
     """
     # 检查积分
     async with AsyncSessionLocal() as db:
@@ -87,7 +85,6 @@ async def generate_polish(
             "query": {},
         },
     )
-
     async def _run():
         try:
             from app.services.content_polish.orchestrator import polish_content
@@ -156,25 +153,6 @@ async def generate_polish(
         "message": "文案润色任务已提交",
         "data": {"run_id": run_id},
     }
-
-
-@router.get("/stream/{run_id}")
-async def stream_polish_progress(
-    run_id: str,
-    token: str = Query(None, description="认证 token（EventSource 不支持 header）"),
-) -> StreamingResponse:
-    """SSE 端点：实时推送文案润色进度。"""
-    ensure_run_owner_from_token(progress_store, run_id, token)
-
-    return StreamingResponse(
-        progress_store.stream(run_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
 
 
 # ──────────────────────────────────────────────
@@ -381,23 +359,4 @@ async def compare_multi_model_polish(
     return MultiModelPolishResponse(
         success=True,
         comparison={"run_id": run_id, "message": "多模型对比润色任务已创建"},
-    )
-
-
-@router.get("/compare/stream/{run_id}")
-async def stream_polish_compare_progress(
-    run_id: str,
-    token: str = Query(None, description="认证 token"),
-) -> StreamingResponse:
-    """SSE 端点：实时推送多模型对比润色进度。"""
-    ensure_run_owner_from_token(progress_store, run_id, token)
-
-    return StreamingResponse(
-        progress_store.stream(run_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
     )

@@ -9,7 +9,6 @@ from uuid import uuid4
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -18,7 +17,6 @@ from app.api.deps import oauth2_scheme
 from app.core.security import decode_token, get_current_user
 from app.core.rate_limit import limit_ai_generation
 from app.core.progress import progress_store
-from app.api.v1.progress_access import ensure_run_owner_from_token
 from app.core.background import spawn
 from app.db.session import get_db
 from app.models.user import User
@@ -504,7 +502,7 @@ async def get_mining_progress(
     run_id: str,
     token: str = Depends(oauth2_scheme),
 ) -> Any:
-    """轮询式进度查询（绕开 SSE，避免反向代理缓冲流式响应）。
+    """轮询式进度查询。
 
     进度状态只存在内存 progress_store 中，因此这里直接校验 JWT 的 subject
     并检查 run 所属关系，不再为每一次 1-2 秒的轮询查询 users 表、占用数据库连接。
@@ -530,25 +528,6 @@ async def get_mining_progress(
     if snap is None:
         return {"code": 404, "message": "run 不存在或已过期", "data": {"exists": False}}
     return {"code": 200, "message": "ok", "data": snap}
-
-
-@router.get("/stream/{run_id}")
-async def stream_mining_progress(
-    run_id: str,
-    token: str = Query(None, description="认证 token（EventSource 不支持 header）"),
-) -> StreamingResponse:
-    """SSE 端点：实时推送选题挖掘进度。"""
-    ensure_run_owner_from_token(progress_store, run_id, token)
-
-    return StreamingResponse(
-        progress_store.stream(run_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
 
 
 async def _mine_one(db: AsyncSession, cluster_id: int, user_id: int) -> dict:

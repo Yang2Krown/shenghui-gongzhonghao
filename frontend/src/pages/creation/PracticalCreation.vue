@@ -685,7 +685,7 @@ const startResearch = async () => {
       reference_links: referenceLinks,
     }, { timeout: 10000 })
     const runId = (res?.data || res)?.run_id
-    if (runId) progress.start(`/api/v1/practical/stream/${runId}`)
+    if (runId) progress.start(runId)
     else progress.error.value = '未获取到任务 ID'
   } catch (err) {
     progress.error.value = err?.response?.data?.detail || err.message || '请求失败'
@@ -705,7 +705,7 @@ const startDraft = async () => {
       brief_tone: structuredBrief.value?.tone || null,
     }, { timeout: 10000 })
     const runId = (res?.data || res)?.run_id
-    if (runId) progress.start(`/api/v1/practical/stream/${runId}`)
+    if (runId) progress.start(runId)
     else progress.error.value = '未获取到任务 ID'
   } catch (err) {
     progress.error.value = err?.response?.data?.detail || err.message || '请求失败'
@@ -742,7 +742,7 @@ const reAnalyze = async () => {
     const runId = (res?.data || res)?.run_id
     if (runId) {
       ElMessage.info(`正在抓取 ${newLinks.length} 个参考链接并重新分析...`)
-      progress.start(`/api/v1/practical/stream/${runId}`)
+      progress.start(runId)
     } else {
       progress.error.value = '未获取到任务 ID'
     }
@@ -761,7 +761,7 @@ const confirmResearch = async () => {
     }, { timeout: 10000 })
 
     const runId = (res?.data || res)?.run_id
-    if (runId) progress.start(`/api/v1/practical/stream/${runId}`)
+    if (runId) progress.start(runId)
     else progress.error.value = '未获取到任务 ID'
   } catch (err) {
     progress.error.value = err?.response?.data?.detail || err.message || '请求失败'
