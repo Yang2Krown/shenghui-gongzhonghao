@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_password_hash, verify_password
+from app.core.timezone import utcnow
 from app.crud.base import CRUDBase
 from app.models.user import User, UserProfile
 from app.schemas.user import (
@@ -258,8 +259,7 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         :param user: 用户对象
         :return: 更新后的用户
         """
-        from datetime import datetime
-        user.last_login = datetime.utcnow()
+        user.last_login = utcnow()
         db.add(user)
         await db.commit()
         await db.refresh(user)

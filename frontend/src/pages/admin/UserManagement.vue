@@ -527,7 +527,14 @@ const toggleStatus = async (row) => {
 
 const formatDate = (iso) => {
   if (!iso) return '-'
-  return new Date(iso).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' })
+  // 后端用户时间是无时区的北京时间；显式补上 +08:00，避免按浏览器本地时区误解析。
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(iso)
+  const date = new Date(hasTimezone ? iso : `${iso}+08:00`)
+  return date.toLocaleString('zh-CN', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'Asia/Shanghai'
+  })
 }
 
 onMounted(() => {

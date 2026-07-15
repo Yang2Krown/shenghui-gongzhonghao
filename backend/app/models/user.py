@@ -2,9 +2,9 @@ from datetime import datetime
 from typing import Optional, List
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 
 from app.db.base import BaseModel
+from app.core.timezone import utcnow
 
 
 class User(BaseModel):
@@ -26,8 +26,8 @@ class User(BaseModel):
     role = Column(String(20), default="user")  # user, admin, editor
     
     # 时间戳
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
     last_login = Column(DateTime, nullable=True)
     
     # 关系
@@ -75,8 +75,8 @@ class UserProfile(BaseModel):
     preferences = Column(JSON, default={})
     
     # 时间戳
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
     
     # 关系
     user = relationship("User", back_populates="profile")

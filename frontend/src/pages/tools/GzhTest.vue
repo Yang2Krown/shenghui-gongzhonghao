@@ -171,7 +171,7 @@ async function loadArticles(offset = 0) {
     const q = drawerQuery.value
     let path = ''
     if (q.type === 'account') {
-      path = `/_test_gzh_fetch/accounts/${q.id}`
+      path = `/_test_gzh_fetch/account/${q.id}`
     } else if (q.type === 'ungrouped') {
       path = `/_test_gzh_fetch/ungrouped/${q.id}`
     } else {

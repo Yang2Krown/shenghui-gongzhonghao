@@ -22,7 +22,7 @@ from app.models.source_registry import SourceRegistry, SourceAccount
 router = APIRouter(dependencies=[Depends(get_current_admin_user)])
 
 # 当前被视为"公众号"的 source_type 集合 — 要加新类型直接展开这行
-GZH_SOURCE_TYPES = ("exa_wechat", "sogou_wechat", "gzh_explosive")
+GZH_SOURCE_TYPES = ("exa_wechat", "sogou_wechat", "dajiala_wechat", "gzh_explosive")
 
 
 class AccountArticlesResponse(BaseModel):
