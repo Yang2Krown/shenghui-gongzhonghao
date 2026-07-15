@@ -32,15 +32,30 @@ celery_app.conf.update(
     worker_max_tasks_per_child=200,   # 每个 worker 跑 200 个任务后重启（防内存泄漏）
     broker_connection_retry_on_startup=True,
     beat_schedule=CELERY_BEAT_SCHEDULE,
+    task_send_sent_event=True,
+    task_default_queue="default",
+    task_routes={
+        "scraper.*": {"queue": "scraping"},
+        "preprocess.*": {"queue": "ai"},
+        "mining.*": {"queue": "ai"},
+        "commercial.*": {"queue": "ai"},
+        "ai.*": {"queue": "ai"},
+        "content.*": {"queue": "ai"},
+        "title.*": {"queue": "ai"},
+        "outline.*": {"queue": "ai"},
+        "publish.*": {"queue": "publish"},
+        "xhs.*": {"queue": "publish"},
+    },
 )
 
 # 显式导入任务模块，确保 @shared_task 注册到 celery_app
-import app.tasks.scraper_tasks  # noqa: F401
-import app.tasks.preprocess_tasks  # noqa: F401
-import app.tasks.topic_mining_tasks  # noqa: F401
-import app.tasks.commercial_tasks  # noqa: F401
-import app.tasks.cleanup_tasks  # noqa: F401
-import app.tasks.subscription_tasks  # noqa: F401
-import app.tasks.monitoring_tasks  # noqa: F401
+import app.tasks.scraper_tasks  # noqa: F401,E402
+import app.tasks.preprocess_tasks  # noqa: F401,E402
+import app.tasks.topic_mining_tasks  # noqa: F401,E402
+import app.tasks.commercial_tasks  # noqa: F401,E402
+import app.tasks.cleanup_tasks  # noqa: F401,E402
+import app.tasks.subscription_tasks  # noqa: F401,E402
+import app.tasks.monitoring_tasks  # noqa: F401,E402
+import app.core.celery_monitor  # noqa: F401,E402
 
 __all__ = ["celery_app"]

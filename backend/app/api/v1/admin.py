@@ -1,5 +1,6 @@
 """管理员后台 API。"""
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -24,6 +25,7 @@ from app.core.timezone import utcnow
 from app.db.session import get_db
 from app.models.admin_audit import AdminAuditLog
 from app.models.api_request_log import ApiRequestLog
+from app.models.celery_task_run import CeleryTaskRun
 from app.models.credit import UserCredit
 from app.models.generation_record import GenerationRecord
 from app.models.llm_monitoring import LlmCallLog, LlmModelPricing
@@ -180,6 +182,30 @@ def _task_payload(task: Task) -> dict:
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+    }
+
+
+def _celery_task_payload(task: CeleryTaskRun) -> dict:
+    return {
+        "id": task.id,
+        "task_id": task.task_id,
+        "task_name": task.task_name,
+        "category": task.category,
+        "queue": task.queue,
+        "status": task.status,
+        "retry_count": task.retry_count or 0,
+        "worker": task.worker,
+        "args": task.args_json,
+        "kwargs": task.kwargs_json,
+        "result": task.result_json,
+        "error_message": task.error_message,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+        "started_at": task.started_at,
+        "finished_at": task.finished_at,
+        "last_seen_at": task.last_seen_at,
+        "is_dead_letter": bool(task.is_dead_letter),
+        "retried_from_id": task.retried_from_id,
     }
 
 
@@ -777,6 +803,110 @@ async def list_failed_tasks(
         "code": 200,
         "message": "获取失败任务成功",
         "data": {"items": [_task_payload(task) for task in rows]},
+    }
+
+
+@router.get("/task-center/overview", response_model=dict)
+async def task_center_overview(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin_permission("monitoring:read")),
+) -> Any:
+    """Celery 队列、Worker 和任务生命周期总览。"""
+    from app.services.monitoring.celery_tasks import collect_celery_overview
+
+    data = await collect_celery_overview(db)
+    return {"code": 200, "message": "获取任务中心总览成功", "data": data}
+
+
+@router.get("/task-center/tasks", response_model=dict)
+async def task_center_tasks(
+    status_filter: str = Query("all", alias="status"),
+    category: Optional[str] = Query(None),
+    queue: Optional[str] = Query(None),
+    dead_letter: Optional[bool] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin_permission("monitoring:read")),
+) -> Any:
+    """管理员查看任务运行历史、失败任务和死信任务。"""
+    stmt = select(CeleryTaskRun).order_by(CeleryTaskRun.created_at.desc()).limit(limit)
+    if status_filter != "all":
+        stmt = stmt.where(CeleryTaskRun.status == status_filter)
+    if category:
+        stmt = stmt.where(CeleryTaskRun.category == category)
+    if queue:
+        stmt = stmt.where(CeleryTaskRun.queue == queue)
+    if dead_letter is not None:
+        stmt = stmt.where(CeleryTaskRun.is_dead_letter.is_(dead_letter))
+
+    rows = (await db.execute(stmt)).scalars().all()
+    return {
+        "code": 200,
+        "message": "获取任务列表成功",
+        "data": {"items": [_celery_task_payload(row) for row in rows]},
+    }
+
+
+@router.post("/task-center/tasks/{task_run_id}/retry", response_model=dict)
+async def retry_task_center_task(
+    task_run_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin_permission("tasks:retry")),
+) -> Any:
+    """重新投递失败或死信任务。仅允许后台管理员操作。"""
+    row = await db.get(CeleryTaskRun, task_run_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务记录不存在")
+    if row.status not in {"failed", "dead_letter"} and not row.is_dead_letter:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有失败或死信任务可以重试")
+    if not row.task_name or row.task_name == "unknown":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="任务缺少可重试的任务名称")
+
+    args = row.args_json if isinstance(row.args_json, list) else []
+    kwargs = row.kwargs_json if isinstance(row.kwargs_json, dict) else {}
+    try:
+        from app.core.celery_app import celery_app
+
+        result = await asyncio.to_thread(
+            celery_app.send_task,
+            row.task_name,
+            args=args,
+            kwargs=kwargs,
+            queue=row.queue or "default",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"任务重新投递失败：{str(exc)[:200]}")
+
+    _add_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="celery_task.retry",
+        target_type="celery_task_run",
+        target_id=str(row.id),
+        summary=f"重试 Celery 任务：{row.task_name}",
+        detail=row.error_message,
+        metadata={
+            "old_task_id": row.task_id,
+            "new_task_id": result.id,
+            "queue": row.queue,
+            **_request_metadata(request),
+        },
+    )
+    await db.commit()
+
+    # after_task_publish 通常会先落库；如果当前进程没有加载 signal，也不影响返回新任务 ID。
+    new_row = (await db.execute(
+        select(CeleryTaskRun).where(CeleryTaskRun.task_id == result.id)
+    )).scalar_one_or_none()
+    if new_row:
+        new_row.retried_from_id = row.id
+        await db.commit()
+
+    return {
+        "code": 200,
+        "message": "任务已重新投递",
+        "data": {"task_id": result.id, "task_name": row.task_name, "queue": row.queue},
     }
 
 

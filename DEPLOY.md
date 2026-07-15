@@ -123,7 +123,7 @@ git pull   # 或 rsync 上传
 
 # 重新构建并重启 backend / celery
 docker compose -f docker-compose.prod.yml --env-file backend/.env.production build backend
-docker compose -f docker-compose.prod.yml --env-file backend/.env.production up -d backend celery-worker celery-beat
+docker compose -f docker-compose.prod.yml --env-file backend/.env.production up -d backend celery-worker celery-worker-scraping celery-worker-ai celery-worker-publish celery-beat
 ```
 
 ### 改了数据模型（要迁移）

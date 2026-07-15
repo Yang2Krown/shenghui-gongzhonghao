@@ -334,6 +334,7 @@ const navItems = [
       { id: 'admin-user-stats', label: '用户统计' },
       { id: 'admin-users', label: '用户管理' },
       { id: 'admin-announcements', label: '系统公告' },
+      { id: 'admin-task-center', label: '任务中心' },
       { id: 'gzh-test', label: '公众号抓取测试' },
     ],
   },
@@ -388,6 +389,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/admin/user-stats')) return 'admin-user-stats'
   if (path.startsWith('/admin/users')) return 'admin-users'
   if (path.startsWith('/admin/announcements')) return 'admin-announcements'
+  if (path.startsWith('/admin/task-center')) return 'admin-task-center'
   if (path.startsWith('/admin')) return 'admin-dashboard'
   if (path.startsWith('/tools/gzh-test')) return 'gzh-test'
   return 'content-info'
@@ -455,6 +457,7 @@ const routeMap = {
   'admin-user-stats': '/admin/user-stats',
   'admin-users': '/admin/users',
   'admin-announcements': '/admin/announcements',
+  'admin-task-center': '/admin/task-center',
   'gzh-test': '/tools/gzh-test',
 }
 

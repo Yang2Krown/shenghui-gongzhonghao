@@ -145,12 +145,12 @@ cd "$DEPLOY_PATH"
 # 清掉 macOS 坏文件
 find . -name '._*' -delete 2>/dev/null || true
 # 重建后端相关容器（不重建 postgres/frontend）
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build backend celery-worker celery-beat
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build backend celery-worker celery-worker-scraping celery-worker-ai celery-worker-publish celery-beat
 # 清理本次构建产生的悬空镜像（预防磁盘堆积）
 docker image prune -f >/dev/null 2>&1 || true
 echo
 echo "----- 后端服务状态 -----"
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps backend celery-worker celery-beat
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps backend celery-worker celery-worker-scraping celery-worker-ai celery-worker-publish celery-beat
 EOF
   echo
   echo "==> [后端] 完成。稍等 10-30s 让 backend 变 healthy。"

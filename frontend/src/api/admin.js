@@ -64,6 +64,12 @@ export const getFailedTasks = (limit = 30) => {
   return get('/admin/tasks/failed', { limit })
 }
 
+export const getTaskCenterOverview = () => get('/admin/task-center/overview')
+
+export const getTaskCenterTasks = (params = {}) => get('/admin/task-center/tasks', params)
+
+export const retryTaskCenter = (id) => post(`/admin/task-center/tasks/${id}/retry`)
+
 export const getAdminAuditLogs = (limit = 50) => {
   return get('/admin/audit-logs', { limit })
 }

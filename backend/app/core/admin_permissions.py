@@ -19,6 +19,7 @@ PERMISSIONS = {
     "users:read": {ROLE_ADMIN},
     "payments:read": {ROLE_ADMIN},
     "audit:read": {ROLE_ADMIN},
+    "tasks:retry": {ROLE_ADMIN},
 }
 
 

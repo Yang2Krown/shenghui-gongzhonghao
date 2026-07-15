@@ -80,7 +80,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4
+    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4 --queues default,scraping,ai,publish
     volumes:
       - ./backend:/app
     environment:

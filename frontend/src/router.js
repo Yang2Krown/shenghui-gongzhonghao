@@ -198,6 +198,12 @@ const routes = [
         component: () => import('@/pages/admin/SystemAnnouncements.vue'),
         meta: { title: '系统公告', requiresAdmin: true }
       },
+      {
+        path: 'admin/task-center',
+        name: 'AdminTaskCenter',
+        component: () => import('@/pages/admin/TaskCenter.vue'),
+        meta: { title: '任务中心', requiresAdmin: true }
+      },
       // ===== 我的创作已下线 → 重定向到选题列表 =====
       {
         path: 'creation',

@@ -45,6 +45,7 @@ from app.models.api_request_log import ApiRequestLog
 
 # LLM 调用成本监测
 from app.models.llm_monitoring import LlmCallLog, LlmModelPricing
+from app.models.celery_task_run import CeleryTaskRun
 
 # 课程资料
 from app.models.course import CourseChapter
@@ -91,6 +92,7 @@ __all__ = [
     "ApiRequestLog",
     "LlmCallLog",
     "LlmModelPricing",
+    "CeleryTaskRun",
     # 课程资料
     "CourseChapter",
 ]
