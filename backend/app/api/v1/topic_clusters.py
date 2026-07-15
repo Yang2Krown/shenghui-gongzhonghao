@@ -150,6 +150,18 @@ async def get_topic_clusters(
         InfoCluster.is_ai_relevant.is_(True),
         or_(InfoCluster.published_at.is_(None), InfoCluster.published_at >= cutoff),
     ]
+    # 用户自由输入只服务于自己的创作，不属于公共信息选题库。
+    adhoc_source_exists = (
+        select(RawInfo.id)
+        .join(SourceRegistry, RawInfo.source_registry_id == SourceRegistry.id)
+        .where(
+            RawInfo.info_cluster_id == InfoCluster.id,
+            SourceRegistry.platform == "adhoc_input",
+        )
+        .correlate(InfoCluster)
+        .exists()
+    )
+    base_filter.append(~adhoc_source_exists)
     if info_type:
         base_filter.append(InfoCluster.info_type == info_type)
     if direction:
@@ -400,8 +412,21 @@ async def get_topic_cluster_detail(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
+    adhoc_source_exists = (
+        select(RawInfo.id)
+        .join(SourceRegistry, RawInfo.source_registry_id == SourceRegistry.id)
+        .where(
+            RawInfo.info_cluster_id == InfoCluster.id,
+            SourceRegistry.platform == "adhoc_input",
+        )
+        .correlate(InfoCluster)
+        .exists()
+    )
     result = await db.execute(
-        select(InfoCluster).where(InfoCluster.id == cluster_id)
+        select(InfoCluster).where(
+            InfoCluster.id == cluster_id,
+            ~adhoc_source_exists,
+        )
     )
     cluster = result.scalar_one_or_none()
 
@@ -472,10 +497,13 @@ async def get_topic_cluster_detail(
     raw_infos_list = []
     for row in raw_result.all():
         raw = row[0]
+        # 自由输入重复使用同一 URL 时，RawInfo 内部会使用 adhoc:// 唯一键；
+        # 对外仍返回真实原文地址，保证“阅读原文”始终打开公众号永久链接。
+        public_url = (raw.extras or {}).get("original_url") or raw.url
         raw_infos_list.append({
             "id": raw.id,
             "title": raw.title,
-            "url": raw.url,
+            "url": public_url,
             "summary": (raw.summary or "")[:200] if raw.summary else None,
             "author": raw.author,
             "published_at": raw.published_at.isoformat() if raw.published_at else None,

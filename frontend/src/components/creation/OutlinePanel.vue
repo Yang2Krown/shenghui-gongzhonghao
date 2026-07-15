@@ -150,7 +150,7 @@
                   <h4 class="text-base font-semibold text-ink">{{ section.title || '未命名小节' }}</h4>
                   <span class="text-xs text-ink-4 flex-shrink-0">{{ section.word_count || 0 }} 字</span>
                 </div>
-                <p class="text-sm text-ink-2 mt-1 leading-relaxed">
+                <p class="text-sm text-ink-2 mt-1 leading-relaxed ai-evaluation">
                   {{ section.description || (section.core_points || []).join('；') || '（无说明）' }}
                 </p>
               </div>

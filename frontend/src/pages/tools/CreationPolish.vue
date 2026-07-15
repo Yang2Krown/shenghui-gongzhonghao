@@ -904,6 +904,8 @@ onUnmounted(() => {
 }
 .content-preview :deep(p) {
   margin-bottom: 14px;
+  text-align: justify;
+  text-justify: inter-ideograph;
 }
 .content-preview :deep(h2) {
   font-size: 20px;

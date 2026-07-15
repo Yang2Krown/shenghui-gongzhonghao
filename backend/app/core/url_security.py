@@ -11,6 +11,19 @@ BLOCKED_METADATA_HOSTS = {
     "169.254.169.254",
     "metadata.google.internal",
 }
+# 当前支持的平台入口。部分本地网络/DNS 会给这些官方域名返回私有或
+# 保留的 IPv6 地址，通用 DNS 校验会因此误伤正常内容抓取。
+# 这里只放行这些平台的官方域名；HTTP 重定向仍会重新校验目标。
+TRUSTED_PUBLIC_HOSTS = {
+    "mp.weixin.qq.com",
+    "weixin.qq.com",
+    "xiaohongshu.com",
+    "xhslink.com",
+    "douyin.com",
+    "iesdouyin.com",
+    "v.douyin.com",
+    "zhihu.com",
+}
 
 
 class UnsafeURL(ValueError):
@@ -32,7 +45,14 @@ def validate_public_http_url(url: str) -> str:
     try:
         ip = ipaddress.ip_address(hostname)
     except ValueError:
-        _validate_resolved_addresses(hostname)
+        # 支持平台的官方入口不依赖本机 DNS 返回的地址判断，避免被
+        # VPN/代理/本地 DNS 的私有 IPv6 结果误判；跳转到其他域名时
+        # 仍会重新进入本函数，不能借此绕过重定向校验。
+        if not any(
+            hostname == trusted or hostname.endswith(f".{trusted}")
+            for trusted in TRUSTED_PUBLIC_HOSTS
+        ):
+            _validate_resolved_addresses(hostname)
     else:
         _validate_ip(ip)
 

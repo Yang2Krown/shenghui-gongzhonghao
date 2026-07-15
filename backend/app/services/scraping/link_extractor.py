@@ -43,14 +43,18 @@ def detect_platform(url: str) -> Optional[str]:
     """检测链接平台"""
     if not url:
         return None
-    lower = url.lower()
-    if 'xiaohongshu.com' in lower or 'xhslink.com' in lower:
+    hostname = (urlparse(url).hostname or '').rstrip('.').lower()
+
+    def is_domain(domain: str) -> bool:
+        return hostname == domain or hostname.endswith(f'.{domain}')
+
+    if is_domain('xiaohongshu.com') or is_domain('xhslink.com'):
         return 'xhs'
-    if 'mp.weixin.qq.com' in lower or 'weixin.qq.com' in lower:
+    if is_domain('mp.weixin.qq.com') or is_domain('weixin.qq.com'):
         return 'gzh'
-    if 'douyin.com' in lower or 'iesdouyin.com' in lower or 'v.douyin.com' in lower:
+    if is_domain('douyin.com') or is_domain('iesdouyin.com'):
         return 'douyin'
-    if 'zhihu.com' in lower:
+    if is_domain('zhihu.com'):
         return 'zhihu'
     return None
 

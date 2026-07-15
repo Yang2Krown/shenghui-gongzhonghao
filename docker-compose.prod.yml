@@ -169,7 +169,9 @@ services:
     networks:
       - aichub
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # 生产开启 TrustedHostMiddleware，localhost 会被判定为非法 Host。
+      # 健康检查携带正式域名，不降低 Host 白名单安全性。
+      test: ["CMD-SHELL", "curl -f -H \"Host: $${HEALTHCHECK_HOST:-gzh.midonghub.com}\" http://localhost:8000/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -66,3 +66,32 @@ def test_validate_public_http_url_allows_public_https(monkeypatch):
     )
 
     assert validate_public_http_url("https://example.com/a") == "https://example.com/a"
+
+
+@pytest.mark.parametrize("url", [
+    "https://mp.weixin.qq.com/s/example",
+    "https://weixin.qq.com/cgi-bin/example",
+    "https://www.xiaohongshu.com/explore/example",
+    "https://xhslink.com/example",
+    "https://www.zhihu.com/question/123",
+    "https://zhuanlan.zhihu.com/p/123",
+    "https://www.douyin.com/video/123",
+    "https://v.douyin.com/example",
+])
+def test_validate_public_http_url_allows_supported_entrypoints_without_dns(monkeypatch, url):
+    def fail_dns(*args, **kwargs):
+        raise AssertionError("公众号官方入口不应依赖本机 DNS 结果")
+
+    monkeypatch.setattr("app.core.url_security.socket.getaddrinfo", fail_dns)
+    assert validate_public_http_url(url) == url
+
+
+@pytest.mark.parametrize("url", [
+    "https://notzhihu.com/question/123",
+    "https://fakexiaohongshu.com/explore/123",
+    "https://mp.weixin.qq.com.evil.example/s/123",
+])
+def test_detect_platform_does_not_accept_lookalike_hosts(url):
+    from app.services.scraping.link_extractor import detect_platform
+
+    assert detect_platform(url) is None

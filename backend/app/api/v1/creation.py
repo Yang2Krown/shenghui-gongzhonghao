@@ -442,7 +442,7 @@ async def create_creation_from_candidate(
     creation = ContentCreation(
         user_id=current_user.id,
         candidate_id=candidate_id,
-        cluster_id=cluster_id or candidate.cluster_id,
+        cluster_id=cluster_id or candidate.info_cluster_id,
         title=candidate.title,
         topic_title=candidate.title,
         topic_direction=candidate.direction,

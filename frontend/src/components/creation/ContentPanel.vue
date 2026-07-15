@@ -743,6 +743,8 @@ const agentFeedback = computed(() => {
 
 .content-preview :deep(p) {
   margin-bottom: 14px;
+  text-align: justify;
+  text-justify: inter-ideograph;
 }
 
 /* 高亮：金句（暖色） */

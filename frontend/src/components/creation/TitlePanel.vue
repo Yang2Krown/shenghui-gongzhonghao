@@ -88,7 +88,7 @@
                 />
                 <!-- 预览模式 -->
                 <p v-else class="text-base font-semibold text-ink">{{ title.editable_title || title.title }}</p>
-                <p v-if="title.reason" class="text-sm text-ink-3 mt-2">{{ title.reason }}</p>
+                <p v-if="title.reason" class="text-sm text-ink-3 mt-2 ai-evaluation">{{ title.reason }}</p>
               </div>
               <div class="ml-2 text-right flex-shrink-0 flex flex-col items-end gap-1">
                 <div class="text-2xl font-bold" :class="getScoreColor(title.score || title.final_score)">

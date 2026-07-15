@@ -232,11 +232,11 @@
           <div style="padding: 18px 22px;">
             <div class="continuation-preview" style="padding: 14px 18px; background: var(--bone); border-radius: var(--r-md); border-left: 3px solid var(--clay);">
               <p class="text-sm text-ink-3" style="margin-bottom: 8px; font-style: italic;">衔接过渡：</p>
-              <p class="text-sm text-ink" style="line-height: 1.7;">{{ plan.transition }}</p>
+              <p class="text-sm text-ink ai-evaluation" style="line-height: 1.7;">{{ plan.transition }}</p>
             </div>
             <div style="margin-top: 14px; padding: 14px 18px; background: var(--bone); border-radius: var(--r-md);">
               <p class="text-sm text-ink-3" style="margin-bottom: 8px; font-style: italic;">续写正文：</p>
-              <p class="text-sm text-ink" style="line-height: 1.8; white-space: pre-wrap;">{{ plan.content }}</p>
+              <p class="text-sm text-ink ai-evaluation" style="line-height: 1.8; white-space: pre-wrap;">{{ plan.content }}</p>
             </div>
             <div v-if="plan.key_points?.length" style="margin-top: 12px;">
               <p class="text-xs text-ink-4" style="margin-bottom: 6px;">要点提示：</p>
@@ -309,11 +309,11 @@
                   <p v-if="plan.description" class="text-xs text-ink-4" style="margin-top: 4px;">{{ plan.description }}</p>
                   <div style="margin-top: 8px; padding: 10px 12px; background: var(--paper); border-radius: var(--r-sm); border-left: 3px solid var(--clay);">
                     <p class="text-xs text-ink-3" style="margin-bottom: 4px; font-style: italic;">衔接过渡：</p>
-                    <p class="text-xs text-ink" style="line-height: 1.6;">{{ plan.transition }}</p>
+                    <p class="text-xs text-ink ai-evaluation" style="line-height: 1.6;">{{ plan.transition }}</p>
                   </div>
                   <div style="margin-top: 8px; padding: 10px 12px; background: var(--paper); border-radius: var(--r-sm);">
                     <p class="text-xs text-ink-3" style="margin-bottom: 4px; font-style: italic;">续写正文：</p>
-                    <p class="text-xs text-ink" style="line-height: 1.7; white-space: pre-wrap;">{{ plan.content }}</p>
+                    <p class="text-xs text-ink ai-evaluation" style="line-height: 1.7; white-space: pre-wrap;">{{ plan.content }}</p>
                   </div>
                 </div>
                 <button class="btn-text btn-sm" @click="copyText(plan.content)" style="flex-shrink: 0; padding: 4px 8px;">

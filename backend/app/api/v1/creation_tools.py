@@ -15,6 +15,7 @@ from app.models.user import User
 from app.utils.file_extractor import extract_text, UnsupportedFileType
 from app.services.scraping.link_extractor import extract_link_content
 from app.services.llm.monitoring import record_llm_call
+from app.core.url_security import UnsafeURL
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -87,13 +88,40 @@ async def extract_link(
 
     try:
         result = await extract_link_content(req.url)
+        platform = result.get("platform", "unknown")
+        content = (result.get("content") or "").strip()
+
+        if platform == "unknown" or content.startswith("暂不支持"):
+            raise HTTPException(
+                status_code=400,
+                detail="暂不支持该链接类型。目前支持：微信公众号、小红书、知乎、抖音。",
+            )
+
+        failure_prefixes = (
+            "请输入有效的",
+            "请求失败",
+            "提取失败",
+            "文章已失效",
+        )
+        if not content or content.startswith(failure_prefixes):
+            detail = content or "页面没有可提取的正文内容"
+            raise HTTPException(
+                status_code=422,
+                detail=f"无法提取该链接的信息：{detail}",
+            )
+
         return {
             "title": result.get("title", ""),
-            "content": result.get("content", ""),
+            "content": content,
             "author": result.get("author", ""),
-            "platform": result.get("platform", "unknown"),
+            "platform": platform,
             "tags": result.get("tags", []),
         }
+    except HTTPException:
+        raise
+    except UnsafeURL as e:
+        # 用户输入的目标不安全是 4xx，不应伪装成服务器故障。
+        raise HTTPException(status_code=400, detail=f"链接不合法或不允许访问：{e}") from e
     except Exception as e:
         logger.error(f"链接提取失败: {e}")
         raise HTTPException(status_code=500, detail=f"链接提取失败: {str(e)}")

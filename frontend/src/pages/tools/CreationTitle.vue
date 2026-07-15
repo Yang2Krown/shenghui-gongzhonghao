@@ -195,7 +195,7 @@
               <span v-if="rec.b_score" class="badge badge-info">评审 {{ rec.b_score.toFixed(1) }}</span>
               <span v-if="rec.c_click_willingness" class="badge badge-success">点击意愿 {{ rec.c_click_willingness.toFixed(1) }}</span>
             </div>
-            <p v-if="rec.reason" class="text-xs text-ink-4" style="margin-top: 6px;">{{ rec.reason }}</p>
+            <p v-if="rec.reason" class="text-xs text-ink-4 ai-evaluation" style="margin-top: 6px;">{{ rec.reason }}</p>
           </div>
           <div style="display: flex; gap: 8px;">
             <button class="btn-text btn-sm" @click="copyText(rec.title)">
@@ -298,7 +298,7 @@
                     <span v-if="c.method" class="badge badge-clay" style="font-size: 11px;">{{ c.method }}</span>
                     <span class="text-xs text-ink-4">{{ c.word_count }} 字</span>
                   </div>
-                  <p v-if="c.explanation" class="text-xs text-ink-4" style="margin-top: 6px; line-height: 1.5;">{{ c.explanation }}</p>
+                  <p v-if="c.explanation" class="text-xs text-ink-4 ai-evaluation" style="margin-top: 6px; line-height: 1.5;">{{ c.explanation }}</p>
                 </div>
                 <button class="btn-text btn-sm" @click="copyText(c.title)" style="flex-shrink: 0; padding: 4px 8px;">
                   <el-icon :size="14"><CopyDocument /></el-icon>

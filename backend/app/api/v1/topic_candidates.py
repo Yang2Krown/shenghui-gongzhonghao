@@ -5,7 +5,6 @@
 
 import asyncio
 import logging
-from uuid import uuid4
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -22,9 +21,6 @@ from app.db.session import get_db
 from app.models.user import User
 from app.models.topic_candidate import TopicCandidate, PersonaReview, CandidateScore
 from app.models.info_cluster import InfoCluster
-from app.models.raw_info import RawInfo, RAW_STATE_CLUSTERED
-from app.models.source_registry import SourceRegistry
-from app.core.timezone import utcnow
 from app.services.topic_mining.agent_a_deriver import derive_candidates
 from app.services.topic_mining.agent_a2_feasibility import audit_feasibility
 from app.services.topic_mining.agent_b_scorer import score_candidates
@@ -72,43 +68,6 @@ async def _extract_adhoc_sources(sources: list[dict]) -> list[dict]:
         items.append(item)
     return items
 
-
-async def _persist_adhoc_sources(db: AsyncSession, cluster: InfoCluster, items: list[dict]) -> None:
-    """把自由输入也落成 RawInfo，保证话题详情能回溯原文。"""
-    registry = (await db.execute(
-        select(SourceRegistry).where(SourceRegistry.platform == "adhoc_input")
-    )).scalar_one_or_none()
-    if not registry:
-        registry = SourceRegistry(
-            name="外部来源",
-            platform="adhoc_input",
-            source_type="web",
-            enabled=True,
-            description="来自创作工具的外部来源",
-        )
-        db.add(registry)
-        await db.flush()
-
-    source_urls = []
-    for item in items:
-        url = item["url"] or f"adhoc://{cluster.id}/{uuid4().hex}"
-        db.add(RawInfo(
-            source_registry_id=registry.id,
-            title=(item["title"] or "外部来源内容")[:500],
-            url=url,
-            author=item.get("author"),
-            summary=item.get("summary"),
-            content=item.get("content"),
-            scraped_at=utcnow(),
-            state=RAW_STATE_CLUSTERED,
-            info_cluster_id=cluster.id,
-            extras={"input_type": item.get("type", "text"), "original_url": item.get("url")},
-        ))
-        if item.get("url"):
-            source_urls.append(item["url"])
-
-    cluster.source_count = len(items)
-    cluster.source_urls = source_urls
 
 @router.post("/mine", response_model=dict)
 async def trigger_mining(
@@ -185,23 +144,9 @@ async def trigger_adhoc_mining(
     lines = combined_text.strip().split("\n")
     core_title = lines[0][:80] if lines else combined_text[:80]
 
-    # 1. 创建 InfoCluster 记录
-    cluster = InfoCluster(
-        core_title=core_title,
-        summary=combined_text[:500] if len(combined_text) > 500 else combined_text,
-        info_type="资讯型",
-        direction=None,
-        elements={},
-        freshness="today",
-        heat_score=5.0,
-        source_urls=[item["url"] for item in source_items if item.get("url")],
-        mined=False,
-    )
-    db.add(cluster)
-    await db.flush()
-    await _persist_adhoc_sources(db, cluster, source_items)
-    await db.commit()
-    await db.refresh(cluster)
+    # 这是用户自己的创作输入，只用于本次角度生成，不进入信息选题库。
+    source_summary = combined_text[:500]
+    source_urls = [item["url"] for item in source_items if item.get("url")]
 
     owner_id = current_user.id  # 背景任务里没有 request 上下文，先抓出来
     run_id = progress_store.create_run(user_id=owner_id)
@@ -213,25 +158,18 @@ async def trigger_adhoc_mining(
                 async def _progress_cb(event):
                     await progress_store.push(run_id, event)
 
-                # 重新加载 cluster
-                bg_cluster = (await bg_db.execute(
-                    select(InfoCluster).where(InfoCluster.id == cluster.id)
-                )).scalar_one_or_none()
-                if not bg_cluster:
-                    raise RuntimeError(f"InfoCluster {cluster.id} 已不存在")
-
-                # 构造 InfoClusterInput
+                # 构造一次性输入，不创建 InfoCluster/RawInfo。
                 info_input = InfoClusterInput(
-                    cluster_id=bg_cluster.id,
+                    cluster_id=0,
                     core_title=core_title,
-                    summary=bg_cluster.summary or "",
+                    summary=source_summary,
                     info_type="资讯型",
                     direction=None,
                     elements={},
                     freshness="today",
                     heat_score=5.0,
                     low_fan_hit=False,
-                    source_urls=bg_cluster.source_urls or [],
+                    source_urls=source_urls,
                 )
 
                 # Agent A: 衍生候选选题
@@ -251,12 +189,12 @@ async def trigger_adhoc_mining(
                     "data": {"step": 2, "agent": "叶知秋 · 可写性审计员", "action": "正在联网搜索验证选题可写性...", "avatar": "/agents/agent-a2.png"},
                 })
                 a2_input = AgentA2Input(
-                    cluster_id=bg_cluster.id,
+                    cluster_id=0,
                     core_title=core_title,
                     info_type="资讯型",
                     freshness="today",
-                    summary=bg_cluster.summary or "",
-                    source_urls=bg_cluster.source_urls or [],
+                    summary=source_summary,
+                    source_urls=source_urls,
                     candidates=candidates_a,
                 )
                 result_a2 = await audit_feasibility(a2_input)
@@ -276,7 +214,7 @@ async def trigger_adhoc_mining(
                     "data": {"step": 3, "agent": "白景明 · 选题评分员", "action": "正在评分评估候选选题...", "avatar": "/agents/agent-b.png"},
                 })
                 b_input = AgentBInput(
-                    cluster_id=bg_cluster.id,
+                    cluster_id=0,
                     core_title=core_title,
                     info_type="资讯型",
                     freshness="today",
@@ -295,7 +233,7 @@ async def trigger_adhoc_mining(
                     fb = feasibility_map.get(scored.candidate_id)
                     tc = TopicCandidate(
                         user_id=owner_id,
-                        info_cluster_id=bg_cluster.id,
+                        info_cluster_id=None,
                         title=scored.title,
                         summary=fb.enriched_summary if fb and fb.enriched_summary else scored.summary,
                         direction=scored.direction,
@@ -380,14 +318,12 @@ async def trigger_adhoc_mining(
                     })
                     total_candidates += 1
 
-                # 标记 cluster 已挖掘
-                bg_cluster.mined = True
                 await bg_db.commit()
 
                 await progress_store.push(run_id, {
                     "event": "result",
                     "data": {
-                        "cluster_id": bg_cluster.id,
+                        "cluster_id": None,
                         "angles": angles,
                         "total": total_candidates,
                         "stats": result_b.stats,
@@ -402,7 +338,7 @@ async def trigger_adhoc_mining(
 
     spawn(_run())
 
-    return {"code": 200, "message": "挖掘任务已提交", "data": {"run_id": run_id, "cluster_id": cluster.id}}
+    return {"code": 200, "message": "挖掘任务已提交", "data": {"run_id": run_id, "cluster_id": None}}
 
 
 @router.post("/create-adhoc", response_model=dict)
@@ -457,22 +393,10 @@ async def create_adhoc_candidate(
     if last_boundary > 10:
         title = title[:last_boundary]
 
-    # 创建 InfoCluster
-    cluster = InfoCluster(
-        core_title=title,
-        summary=summary,
-        source_count=len(source_items),
-        source_urls=[item["url"] for item in source_items if item.get("url")],
-        mined=False,
-    )
-    db.add(cluster)
-    await db.flush()
-    await _persist_adhoc_sources(db, cluster, source_items)
-
     # 创建 TopicCandidate
     candidate = TopicCandidate(
         user_id=current_user.id,
-        info_cluster_id=cluster.id,
+        info_cluster_id=None,
         title=title,
         summary=summary,
         direction="",
@@ -492,7 +416,7 @@ async def create_adhoc_candidate(
         "data": {
             "candidate_id": candidate.id,
             "title": candidate.title,
-            "cluster_id": cluster.id,
+            "cluster_id": None,
         },
     }
 
