@@ -25,7 +25,16 @@
             <el-icon><Document /></el-icon>
             保存草稿
           </el-button>
-          <!-- 发布按钮暂时隐藏 -->
+          <el-button
+            v-if="canPublish"
+            type="primary"
+            :loading="publishing"
+            :disabled="saving"
+            @click="publishCreation"
+          >
+            <el-icon><Promotion /></el-icon>
+            发布到公众号
+          </el-button>
         </div>
       </div>
     </header>
@@ -110,7 +119,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, ArrowRight, Document, Check } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Document, Check, Promotion } from '@element-plus/icons-vue'
 import { useCreationStore } from '@/stores/creation'
 import OutlinePanel from '@/components/creation/OutlinePanel.vue'
 import TitlePanel from '@/components/creation/TitlePanel.vue'
@@ -212,6 +221,25 @@ const isDirty = ref(false)
 const outlineStatus = ref('idle')
 const contentStatus = ref('idle')
 const titleStatus = ref('idle')
+
+// 顶部“发布到公众号”按钮只在标题和正文都准备好后显示。
+// 实际上传仍复用下方的公众号编辑器流程：先保存本地创作，再排版、选择公众号账号并上传草稿箱。
+const publishTitle = computed(() => (
+  selectedTitle.value?.title?.trim()
+  || creationStore.currentCreation?.title?.trim()
+  || topicTitle.value.trim()
+  || ''
+))
+const publishText = computed(() => (
+  finalContent.value?.final_text?.trim()
+  || finalContent.value?.content?.trim()
+  || ''
+))
+const canPublish = computed(() => (
+  contentStatus.value === 'completed'
+  && !!publishTitle.value
+  && !!publishText.value
+))
 
 const steps = computed(() => {
   if (hasFreshTitleEntry.value) {
@@ -495,7 +523,7 @@ const handleSaveDraftAfterTitle = async () => {
   await saveDraft()
 }
 
-// 标题确认后 → 一键发布到公众号编辑器
+// 标题确认后 → 保存本地创作并进入公众号编辑器，最终上传到公众号草稿箱
 const handlePublishAfterTitle = async () => {
   // 先保存草稿，确保数据不丢
   const savedCreation = await saveDraft(false)
@@ -618,17 +646,30 @@ const saveDraft = async (openDraft = true) => {
 
 // 发布
 const publishCreation = async () => {
+  if (publishing.value) return
+
   if (contentStatus.value !== 'completed') {
     ElMessage.warning('请先完成正文生成')
     return
   }
+
+  if (!publishTitle.value) {
+    ElMessage.warning('请先确认文章标题')
+    return
+  }
+
+  if (!publishText.value) {
+    ElMessage.warning('正文内容为空，请先完成正文生成')
+    return
+  }
+
   publishing.value = true
   try {
-    // TODO: 实现发布逻辑
-    ElMessage.success('发布成功')
-    router.push('/content-info')
+    // 复用已有的保存、智能排版、公众号编辑器和草稿箱上传流程。
+    await handlePublishAfterTitle()
   } catch (e) {
     console.error('发布失败:', e)
+    ElMessage.error(e?.response?.data?.detail || '进入发布流程失败，请重试')
   } finally {
     publishing.value = false
   }
