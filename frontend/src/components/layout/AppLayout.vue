@@ -196,7 +196,7 @@ const productForPath = (path) => {
   if (path.startsWith('/potential-commercial') || path.startsWith('/content-info/commercial')) return 'potential_commercial'
   if (path.startsWith('/courses')) return 'practical_camp'
   if (
-    path === '/' || path.startsWith('/content-info') || path.startsWith('/topic-clusters') ||
+    path === '/' || path.startsWith('/content-info') || path.startsWith('/xhs-materials') || path.startsWith('/topic-clusters') ||
     path.startsWith('/legacy') || path.startsWith('/creation') || path.startsWith('/content-transform') ||
     path.startsWith('/content-imitate') || path.startsWith('/creation-history') || path.startsWith('/history') ||
     path.startsWith('/standalone-title') || path.startsWith('/munger-generation') || path.startsWith('/wechat-to-xhs') ||
@@ -273,6 +273,7 @@ const navItems = [
       { id: 'content-info', label: '选题列表' },
       { id: 'content-info-news', label: '资讯信息' },
       { id: 'content-info-cases', label: '实操案例' },
+      { id: 'xhs-materials', label: '小红书素材', adminOnly: true },
     ],
   },
   {
@@ -327,6 +328,7 @@ const navItems = [
     children: [
       { id: 'admin-dashboard', label: '监测总览' },
       { id: 'admin-source-health', label: '数据源健康' },
+      { id: 'admin-xhs-monitoring', label: '小红书采集监测' },
       { id: 'admin-commercial-diagnostics', label: '商单诊断' },
       { id: 'admin-ai-costs', label: 'AI 成本' },
       { id: 'admin-api-health', label: '接口健康' },
@@ -349,10 +351,10 @@ const canSeeAdminChild = (child) => {
 const visibleNavItems = computed(() => navItems
   .filter(item => !item.adminOnly || userStore.isAdmin)
   .map(item => {
-    if (!item.adminOnly || !item.children) return item
+    if (!item.children) return item
     return {
       ...item,
-      children: item.children.filter(canSeeAdminChild),
+      children: item.children.filter(child => (!child.adminOnly || userStore.isAdmin) && canSeeAdminChild(child)),
     }
   }))
 
@@ -361,6 +363,7 @@ const activeRoute = computed(() => {
   const path = route.path
   if (path === '/content-info/news') return 'content-info-news'
   if (path === '/content-info/cases') return 'content-info-cases'
+  if (path === '/xhs-materials') return 'xhs-materials'
   if (path === '/potential-commercial' || path === '/content-info/commercial') return 'potential-commercial'
   if (path.startsWith('/courses')) return 'courses'
   if (path === '/' || path.startsWith('/topic-clusters') || path === '/content-info') return 'content-info'
@@ -382,6 +385,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/history') || path.startsWith('/creation-history')) return 'creation-history'
   if (path.startsWith('/settings') || path.startsWith('/profile')) return 'profile'
   if (path.startsWith('/admin/source-health')) return 'admin-source-health'
+  if (path.startsWith('/admin/xhs-monitoring')) return 'admin-xhs-monitoring'
   if (path.startsWith('/admin/commercial-diagnostics')) return 'admin-commercial-diagnostics'
   if (path.startsWith('/admin/ai-costs')) return 'admin-ai-costs'
   if (path.startsWith('/admin/api-health')) return 'admin-api-health'
@@ -433,6 +437,7 @@ const routeMap = {
   'content-info': '/content-info',
   'content-info-news': '/content-info/news',
   'content-info-cases': '/content-info/cases',
+  'xhs-materials': '/xhs-materials',
   'potential-commercial': '/potential-commercial',
   'courses': '/courses',
   'creation-angle': '/creation/angle',
@@ -450,6 +455,7 @@ const routeMap = {
   'creation': '/creation',
   'admin-dashboard': '/admin',
   'admin-source-health': '/admin/source-health',
+  'admin-xhs-monitoring': '/admin/xhs-monitoring',
   'admin-commercial-diagnostics': '/admin/commercial-diagnostics',
   'admin-ai-costs': '/admin/ai-costs',
   'admin-api-health': '/admin/api-health',
@@ -560,8 +566,8 @@ onUnmounted(() => {
   top: 0;
   right: 0;
   height: 60px;
-  background: rgba(250,249,245,.85);
-  backdrop-filter: blur(10px);
+  /* 实心背景：半透明 +  backdrop 模糊会让下方滚动内容在顶栏透出，观感割裂 */
+  background: var(--ivory);
   border-bottom: 1px solid var(--line);
   z-index: 20;
   display: flex;

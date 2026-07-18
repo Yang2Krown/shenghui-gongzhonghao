@@ -1,0 +1,1082 @@
+<template>
+  <section class="xhs-page">
+    <header class="hero masthead"><div class="masthead-left"><div class="kicker">XHS · AI TOPIC INDEX</div><h1>小红书素材库</h1></div><div class="masthead-date">选题号外 · {{ todayEdition }}版</div></header>
+    <div class="screen-one" :class="{'screen-one--full':topics.length}">
+    <section v-if="topics.length" class="topic-board" :class="{'has-selection':hasSelection}">
+      <div class="tb-head"><div class="sec-kicker"><span class="ex">EXTRA · 号外</span><span class="sep"></span><span>每日早间选题速递</span></div><div class="sec-title-row"><h2>今日具体选题</h2><div v-if="boards.generated_at" class="sec-update"><span class="pulse"></span>更新于 {{ dateTime(boards.generated_at) }}</div></div></div>
+      <div class="board" :class="{solo:!railTopics.length}">
+        <article class="tb-topic tb-hero" :class="{selected:filters.keyword===headline.topic,'no-cover':!topNote}" role="button" tabindex="0" :aria-pressed="filters.keyword===headline.topic" :aria-label="`选题 1：${headline.topic}，点击按此话题筛选`" @click="filterByTopic(headline)" @keydown.enter.prevent="filterByTopic(headline)" @keydown.space.prevent="filterByTopic(headline)">
+          <span class="sel-chip">✓ 筛选中</span>
+          <div class="hero-main">
+            <div class="hero-top"><span class="rank">01</span><span class="badge" :class="headline.status==='fresh'?'badge-new':'badge-ferment'">{{ headline.status==='fresh'?'今日新切口':'持续发酵' }}</span><span class="page-tag">A1 · 头条</span></div>
+            <h3 class="hero-title">{{ headline.topic }}</h3>
+            <p class="hero-deck">{{ headline.ai_highlight || evidence(headline) }}</p>
+            <ul class="hero-meta">
+              <li><b>论据</b>{{ headline.status==='fresh' ? '今天首次形成热度' : fermentDays(headline)+' 天前出现 · 仍在发酵' }}</li>
+              <li><b>{{ headline.sample_count }}</b> 篇样本</li>
+              <li>最高 <b>{{ compact(headline.max_likes) }}</b> 赞</li>
+            </ul>
+            <div v-if="heroMoreNotes.length" class="hero-notes">
+              <div class="notes-label">其余代表笔记 · MORE NOTES</div>
+              <button v-for="(n,ni) in heroMoreNotes" :key="n.note_id" type="button" class="note" @click.stop="openDetail({ note_id: n.note_id })"><span class="no">NO.{{ ni+2 }}</span><span class="t">「{{ n.title }}」</span><span class="leader"></span><span class="lk"><b>{{ compact(n.likes) }}</b> 赞</span></button>
+            </div>
+          </div>
+          <figure v-if="topNote" class="hero-cover">
+            <img :src="imageUrl(topNote)" :alt="topNote.title" loading="lazy" referrerpolicy="no-referrer" @error="imageFailed($event,topNote,'cover')">
+            <span class="cover-wm">{{ headline.topic.slice(0,1) }}</span>
+            <span class="cover-tag">置顶代表笔记</span>
+            <figcaption title="查看笔记详情" @click.stop="openDetail({ note_id: topNote.note_id })"><span class="cover-title">「{{ topNote.title }}」</span><span class="like-chip"><i>♥</i> {{ compact(topNote.likes) }} 赞 · 话题内最热</span></figcaption>
+          </figure>
+        </article>
+        <aside v-if="railTopics.length" class="rail">
+          <div class="rail-head"><b>其余要闻</b><span>A2 · 02—{{ String(railTopics.length+1).padStart(2,'0') }}</span></div>
+          <article v-for="(t,i) in railTopics" :key="t.topic" class="tb-topic rail-item" :class="{selected:filters.keyword===t.topic}" role="button" tabindex="0" :aria-pressed="filters.keyword===t.topic" :aria-label="`选题 ${i+2}：${t.topic}，点击按此话题筛选`" @click="filterByTopic(t)" @keydown.enter.prevent="filterByTopic(t)" @keydown.space.prevent="filterByTopic(t)">
+            <span class="sel-chip">✓ 筛选中</span>
+            <div class="ri-top"><span class="rank">{{ String(i+2).padStart(2,'0') }}</span><h3 class="ri-name">{{ t.topic }}</h3><span class="badge sm" :class="t.status==='fresh'?'badge-new':'badge-ferment'">{{ t.status==='fresh'?'今日新切口':'持续发酵' }}</span></div>
+            <p v-if="t.ai_highlight" class="ri-deck">{{ t.ai_highlight }}</p>
+            <p class="ri-meta">{{ evidence(t) }}</p>
+            <ul v-if="t.notes.length" class="ri-notes">
+              <li v-for="n in t.notes.slice(0,3)" :key="n.note_id" @click.stop="openDetail({ note_id: n.note_id })"><span class="t" :title="n.title">「{{ n.title }}」</span><span class="l">{{ compact(n.likes) }}<em>赞</em></span></li>
+            </ul>
+          </article>
+        </aside>
+      </div>
+      <button type="button" class="scroll-hint" @click="scrollToFilters"><span>向下滑动查看全部素材</span><svg class="arrow" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+    </section>
+    </div>
+    <div class="screen-two">
+    <div ref="filtersEl" class="filters"><el-select v-model="filters.range" @change="load"><el-option label="近 1 天" value="1d"/><el-option label="近 3 天" value="3d"/><el-option label="近 7 天" value="7d"/></el-select><el-input v-model="filters.keyword" clearable placeholder="关键词" @keyup.enter="load"/><el-input v-model="filters.topic" clearable placeholder="AI 话题" @keyup.enter="load"/><el-select v-model="filters.note_type" @change="load"><el-option label="全部类型" value="all"/><el-option label="视频" value="video"/><el-option label="图文" value="image"/></el-select><el-select v-model="filters.sort" @change="load"><el-option label="综合排序" value="comprehensive"/><el-option label="最新" value="latest"/><el-option label="点赞" value="likes"/><el-option label="收藏" value="collects"/><el-option label="评论" value="comments"/></el-select><el-input v-model="filters.q" clearable placeholder="搜索标题、作者或话题" @keyup.enter="load"/><button class="reset" @click="reset">重置</button></div>
+    <div class="metrics"><article><span>精选素材</span><strong>{{ total }}</strong></article><article><span>热门话题</span><strong>{{ keywordCount }}</strong></article><article><span>视频 · 图文</span><strong>{{ videoCount }} · {{ imageCount }}</strong></article><article><span>最高点赞</span><strong>{{ compact(maxLikes) }}</strong></article></div>
+    <div class="section-title"><h2>高赞素材</h2><span>{{ total }} 篇</span></div>
+    <div v-loading="loading" class="body-grid"><div><div v-if="items.length" class="material-grid"><article v-for="note in items" :key="note.note_id" class="material-card" @click="openDetail(note)"><div class="cover"><img :src="imageUrl(note)" :alt="note.title" loading="lazy" referrerpolicy="no-referrer" @error="imageFailed($event,note,'cover')"><span class="type">{{ note.note_type==='video' ? '▶ 视频' : '▧ 图文' }}</span></div><div class="content"><h3>{{ note.title }}</h3><div class="meta"><div class="chips"><span v-for="tag in [...note.keywords,...note.ai_topics].map(cleanTag).filter(Boolean).slice(0,4)" :key="tag">{{ tag }}</span></div><div class="author"><img :src="avatarUrl(note)" loading="lazy" referrerpolicy="no-referrer" @error="imageFailed($event,note,'avatar')"><span>{{ note.author.nickname || '未知作者' }} · {{ relative(note.published_at) }}</span></div></div><div class="engagement"><div class="stat"><b>{{ metric(note.engagement.likes) }}</b><span>点赞</span></div><div class="stat"><b>{{ metric(note.engagement.collects) }}</b><span>收藏</span></div><div class="stat"><b>{{ metric(note.engagement.comments) }}</b><span>评论</span></div><div class="stat"><b>{{ metric(note.engagement.shares) }}</b><span>转发</span></div></div></div></article></div><el-empty v-else description="暂时没有符合条件的素材"/></div><aside><div class="side-card"><h3>当前筛选</h3><p>{{ rangeLabel }} · {{ filters.keyword || '全部关键词' }} · {{ typeLabel }}</p></div><div class="side-card"><h3>关键词热度</h3><button v-for="item in keywordHeat" :key="item[0]" @click="filters.keyword=item[0];load()"><span>{{ item[0] }}</span><b>{{ item[1] }}</b></button></div></aside></div>
+    </div>
+    <teleport to="body"><transition name="xhs-modal"><div v-if="drawer" class="modal-mask" @click.self="drawer=false"><div class="modal-card" role="dialog" aria-modal="true"><button class="modal-close" type="button" aria-label="关闭" @click="drawer=false">×</button><template v-if="selected"><div class="modal-media"><img class="bg" :src="imageUrl(selected)" alt="" aria-hidden="true" referrerpolicy="no-referrer"><img class="fg" :src="imageUrl(selected)" :alt="selected.title" referrerpolicy="no-referrer" @error="imageFailed($event,selected,'cover')"></div><div class="modal-side"><div class="modal-author"><img :src="avatarUrl(selected)" :alt="selected.author.nickname" referrerpolicy="no-referrer" @error="imageFailed($event,selected,'avatar')"><span class="name">{{ selected.author.nickname || '未知作者' }}</span><a :href="selected.original_url" target="_blank" rel="noopener noreferrer">打开原文</a></div><h2 class="modal-title">{{ selected.title }}</h2><p class="modal-content">{{ cleanContent(selected.content) || '暂无正文' }}</p><div class="modal-tail"><div class="chips"><span v-for="tag in [...selected.native_tags,...selected.ai_topics].map(cleanTag).filter(Boolean)" :key="tag">{{ tag }}</span></div><div class="modal-time">发布于 {{ dateTime(selected.published_at) }} · 采集于 {{ dateTime(selected.first_discovered_at) }}<template v-if="selected.keywords.length"> · 相关话题：{{ selected.keywords.join('、') }}</template></div></div><div class="modal-foot"><span title="点赞" aria-label="点赞"><svg class="ic" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><b>{{ metric(selected.engagement.likes) }}</b></span><span title="收藏" aria-label="收藏"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><b>{{ metric(selected.engagement.collects) }}</b></span><span title="评论" aria-label="评论"><svg class="ic" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg><b>{{ metric(selected.engagement.comments) }}</b></span><span title="转发" aria-label="转发"><svg class="ic" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg><b>{{ metric(selected.engagement.shares) }}</b></span></div></div></template></div></div></transition></teleport>
+  </section>
+</template>
+<script setup>
+import { computed,onMounted,onUnmounted,reactive,ref,watch } from 'vue';import api from '@/api/api'
+const loading=ref(false),items=ref([]),total=ref(0),drawer=ref(false),selected=ref(null);const failed=new Set();const placeholder='/brand/xhs-placeholder.svg';const filters=reactive({range:'7d',keyword:'',topic:'',note_type:'all',sort:'comprehensive',q:'',page_size:100})
+const load=async()=>{loading.value=true;try{const {data}=await api.get('/xhs/notes',{params:filters});items.value=data.items;total.value=data.total}catch{items.value=[];total.value=0}finally{loading.value=false}};const reset=()=>{Object.assign(filters,{range:'7d',keyword:'',topic:'',note_type:'all',sort:'comprehensive',q:''});load()};const openDetail=async n=>{try{selected.value=(await api.get(`/xhs/notes/${n.note_id}`)).data}catch{selected.value=n}drawer.value=true};const mediaHash=s=>{let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))|0;return(h>>>0).toString(36)};const mediaUrl=(u,n,kind)=>u?`/api/v1/xhs/media/${n.note_id}/${kind}?v=${mediaHash(u)}`:placeholder;const imageUrl=n=>mediaUrl(n.cover_url,n,'cover');const avatarUrl=n=>mediaUrl(n.author.avatar_url,n,'avatar');const imageFailed=(event,note,kind)=>{const original=event.target.src;if(original.endsWith('xhs-placeholder.svg'))return;event.target.src=placeholder;const key=`${note.note_id}:${kind}:${original}`;if(failed.has(key))return;failed.add(key);api.post(`/xhs/notes/${note.note_id}/image-failures`,{image_kind:kind,failed_url:kind==='cover'?note.cover_url:note.author.avatar_url},{skipErrorToast:true}).catch(()=>{})};const metric=n=>n===null||n===undefined?'—':compact(n);const compact=n=>n>=10000?`${(n/10000).toFixed(n>=100000?0:1)}万`:String(n||0);const dateTime=v=>v?new Date(v).toLocaleString('zh-CN',{hour12:false}):'—';const relative=v=>{if(!v)return '时间未知';const d=Math.floor((Date.now()-new Date(v))/86400000);return d<=0?'今天':`${d} 天前`};const keywordHeat=computed(()=>{const map={};items.value.forEach(n=>n.keywords.forEach(k=>map[k]=(map[k]||0)+1));return Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,10)});const keywordCount=computed(()=>keywordHeat.value.length);const videoCount=computed(()=>items.value.filter(n=>n.note_type==='video').length);const imageCount=computed(()=>items.value.length-videoCount.value);const cleanTag=t=>(t||'').replace(/\[话题\]/g,'').replace(/^#+|#+$/g,'').trim();const cleanContent=c=>(c||'').replace(/#[^#\[\]\s]{1,40}\[话题\]#/g,'').replace(/[^\S\n]+/g,' ').replace(/ *\n */g,'\n').replace(/\n{3,}/g,'\n\n').trim();const maxLikes=computed(()=>Math.max(0,...items.value.map(n=>n.engagement.likes||0)));const rangeLabel=computed(()=>({'1d':'近 1 天','3d':'近 3 天','7d':'近 7 天'})[filters.range]);const typeLabel=computed(()=>filters.note_type==='video'?'视频':filters.note_type==='image'?'图文':'全部类型');
+// 今日具体选题：独立于筛选器拉取，失败静默降级为空，不阻塞页面
+const boards=ref({generated_at:null,edition_date:null,fresh:[],fermenting:[]});const loadBoards=async()=>{try{const {data}=await api.get('/xhs/topic-boards',{skipErrorToast:true});boards.value={generated_at:data.generated_at||null,edition_date:data.edition_date||null,fresh:data.fresh||[],fermenting:data.fermenting||[]}}catch{boards.value={generated_at:null,edition_date:null,fresh:[],fermenting:[]}}};
+// 合并单榜：fresh / fermenting 打上状态标记后按最高赞降序取前 6
+const topics=computed(()=>[...boards.value.fresh.map(t=>({...t,status:'fresh'})),...boards.value.fermenting.map(t=>({...t,status:'fermenting'}))].sort((a,b)=>b.max_likes-a.max_likes).slice(0,6));
+// 发酵天数的参考日：所有上榜话题 last_seen_at 的最大值
+const referenceTime=computed(()=>Math.max(0,...topics.value.map(t=>+new Date(t.last_seen_at)||0)));
+const fermentDays=t=>Math.max(1,Math.round((referenceTime.value-+new Date(t.first_seen_at))/86400000));
+const evidence=t=>{if(t.status==='fresh')return `今天首次形成热度 · ${t.sample_count} 篇样本 · 最高 ${compact(t.max_likes)} 赞`;return `${fermentDays(t)} 天前出现 · 今天仍在发酵 · 最高 ${compact(t.max_likes)} 赞`};
+// v3 报纸风版面：第 1 名进头条位，02–04 进右侧要闻榜；亮点句优先 ai_highlight，为 null 时回退 evidence 数据句
+const headline=computed(()=>topics.value[0]||null);const railTopics=computed(()=>topics.value.slice(1,4));const topNote=computed(()=>headline.value?.notes?.[0]||null);const heroMoreNotes=computed(()=>(headline.value?.notes||[]).slice(1,3));const hasSelection=computed(()=>topics.value.some(t=>t.topic===filters.keyword));const filtersEl=ref(null);const scrollToFilters=()=>filtersEl.value?.scrollIntoView({behavior:'smooth',block:'start'});
+// 刊头版期：优先用看板实际锚定的采集日（后端 edition_date），无数据时回退当天 →「选题号外 · 07月17日版」
+const todayEdition=computed(()=>{if(boards.value.edition_date){const[,m,d]=boards.value.edition_date.split('-');return `${m}月${d}日`}const d=new Date();return `${String(d.getMonth()+1).padStart(2,'0')}月${String(d.getDate()).padStart(2,'0')}日`});
+// 两屏吸附：页面滚动在 window（AppLayout 顶栏固定、无内部滚动容器），snap class 挂 <html>；仅选题区存在时启用
+watch(()=>topics.value.length,n=>document.documentElement.classList.toggle('xhs-snap',n>0));
+// 整卡点击：话题名即采集关键词，开关式写入 filters.keyword 后重取素材并滚动到列表
+const filterByTopic=t=>{filters.keyword=filters.keyword===t.topic?'':t.topic;load().then(()=>document.querySelector('.body-grid')?.scrollIntoView({behavior:'smooth',block:'start'}))};onMounted(()=>{load();loadBoards()})
+// 弹窗打开时锁定背景滚动：补偿滚动条宽度防止布局晃动，不改 scrollTop（不回顶），Esc 关闭
+watch(drawer,v=>{const de=document.documentElement;if(v){const sw=window.innerWidth-de.clientWidth;de.style.paddingRight=sw>0?sw+'px':'';de.style.overflow='hidden'}else{de.style.overflow='';de.style.paddingRight=''}});const onKey=e=>{if(e.key==='Escape')drawer.value=false};
+// 页面级 sticky 前提：#app 的 overflow-x:hidden 会让它成为滚动容器导致 sticky 失效（headless Chromium 已复现）；overflow-x:clip 不生成滚动容器且视觉效果一致，仅本页挂载期间生效，卸载还原
+const appEl=document.getElementById('app');onMounted(()=>{window.addEventListener('keydown',onKey);if(appEl)appEl.style.overflowX='clip'});onUnmounted(()=>{window.removeEventListener('keydown',onKey);if(appEl)appEl.style.overflowX='';const de=document.documentElement;de.classList.remove('xhs-snap');de.style.overflow='';de.style.paddingRight=''})
+</script>
+<style scoped>
+.xhs-page{max-width:1540px;margin:auto;color:var(--ink)}.hero{margin-bottom:20px}.kicker{font-size:12px;letter-spacing:.12em;color:var(--clay-deep);font-weight:700}.hero h1{font-family:"PingFang SC","Helvetica Neue","Microsoft YaHei",Arial,sans-serif;font-size:36px;font-weight:650;letter-spacing:-.035em;line-height:1.2;margin:6px 0}.chips span{background:var(--clay-tint);color:var(--clay-deep);border-radius:99px;padding:5px 9px;font-size:12px}.filters{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) 1.6fr auto;gap:9px;padding:14px;margin:12px 0;background:var(--paper);border:1px solid var(--line);border-radius:14px}.reset{border:1px solid var(--line);background:white;border-radius:8px;padding:0 14px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.metrics article,.side-card{padding:16px;background:var(--paper);border:1px solid var(--line);border-radius:14px}.metrics span{color:var(--ink-3);font-size:12px}.metrics strong{display:block;font:700 26px var(--serif);margin-top:4px}.section-title{display:flex;justify-content:space-between;align-items:end;margin:24px 0 10px}.section-title h2{font:700 22px var(--serif);margin:0}.section-title span{color:var(--ink-3);font-size:12px}.body-grid{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:14px}.material-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}.material-card{background:var(--paper);border:1px solid var(--line);border-radius:14px;overflow:hidden;transition:.18s;cursor:pointer}.material-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-card)}.cover{position:relative;aspect-ratio:4/5;background:var(--bone);overflow:hidden}.cover>img{width:100%;height:100%;object-fit:cover}.type{position:absolute;left:9px;top:9px;padding:4px 8px;border-radius:99px;font-size:11px;background:rgba(255,255,255,.9)}.content{padding:13px}.content h3{font:700 15px/1.45 var(--serif);margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.chips{display:flex;gap:5px;flex-wrap:wrap;margin:9px 0}.chips span{font-size:10px;padding:3px 7px}.meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}.meta .chips{flex:1;min-width:0;margin:0}.author{display:flex;align-items:center;gap:6px;flex-shrink:0;max-width:48%;min-width:0;color:var(--ink-3);font-size:11px}.author img{width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0}.author span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.engagement{display:flex;justify-content:space-between;border-top:1px solid var(--line);margin-top:9px;padding-top:9px;color:var(--ink-3);font-size:12px}.engagement b{color:var(--ink);font-weight:600;font-size:13px;font-variant-numeric:tabular-nums}.side-card{margin-bottom:12px}.side-card h3{font:700 16px var(--serif);margin:0 0 10px}.side-card p{color:var(--ink-3)}.side-card button{display:flex;justify-content:space-between;width:100%;border:0;border-bottom:1px solid var(--line);background:none;padding:9px 0}@media(max-width:1200px){.filters{grid-template-columns:repeat(3,1fr)}.material-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:800px){.metrics{grid-template-columns:repeat(2,1fr)}.body-grid{grid-template-columns:1fr}.body-grid aside{grid-row:1}.material-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){.filters,.metrics,.material-grid{grid-template-columns:1fr}.hero h1{font-size:30px}}
+/* 刊头 masthead：sticky 钉在顶栏下方；固定高度（移动端 auto），背景用页面底色 var(--ivory)（body/AppLayout 同色），不透出下方滚动内容；底部报纸式双细线（粗线在上、细线在下，都在盒内保证背景覆盖） */
+.hero.masthead {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 50;
+  box-sizing: border-box;
+  height: var(--masthead-box);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin-bottom: var(--masthead-gap);
+  padding-bottom: 14px;
+  background: var(--ivory);
+  border-bottom: 1px solid var(--ink);
+}
+.hero.masthead::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 5px;
+  height: 3px;
+  background: var(--ink);
+}
+@media (max-width: 768px) {
+  /* 窄屏日期可能换行，刊头高度自适应（最小 86px），scroll-margin 按换行后的高度留量 */
+  .hero.masthead {
+    height: auto;
+    min-height: var(--masthead-box);
+  }
+}
+.hero h1 {
+  margin: 6px 0 0;
+  font-family: "Source Han Serif SC", "Songti SC", "STSong", "Noto Serif SC", Georgia, serif;
+  font-size: clamp(32px, 3.4vw, 44px);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+}
+.hero .kicker {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.24em;
+  color: var(--clay-deep);
+}
+.masthead-date {
+  flex: none;
+  padding-bottom: 4px;
+  font-size: 12.5px;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.filters > * {
+  width: 100%;
+  min-width: 0;
+}
+.filters :deep(.el-input__wrapper),
+.filters :deep(.el-select__wrapper) {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 42px;
+  height: 42px;
+}
+.filters .reset {
+  box-sizing: border-box;
+  width: 100%;
+  height: 42px;
+}
+@media (min-width: 1201px) {
+  .filters {
+    grid-template-columns: repeat(6, minmax(0, 1fr)) 82px;
+  }
+}
+
+/* ============ 今日具体选题 v3 · 报纸头版风 ============ */
+/* 高度对账变量：顶栏 60/58px + 内容上 padding 32/18px（见 AppLayout）+ 刊头盒高 104/86px + 刊头下间距 16px */
+.xhs-page {
+  --topbar-h: 60px;
+  --content-pad: 32px;
+  --masthead-box: 104px;
+  --masthead-gap: 16px;
+}
+@media (max-width: 768px) {
+  .xhs-page {
+    --topbar-h: 58px;
+    --content-pad: 18px;
+    --masthead-box: 86px;
+  }
+}
+/* 两屏布局：sticky 刊头（文档流占位）+ .screen-one（选题区）= 第一屏；.filters 起 = 第二屏 */
+.screen-one {
+  display: flex;
+  flex-direction: column;
+}
+/* 吸附对账：第一屏起点 = 文档流自然位置（顶栏+padding+刊头+间距，对应 scroll 0）；
+   第二屏及滚动锚点 = 顶栏+刊头+呼吸间距，保证不被 sticky 刊头遮住 */
+.screen-one {
+  scroll-margin-top: calc(var(--topbar-h) + var(--content-pad) + var(--masthead-box) + var(--masthead-gap));
+}
+.screen-two,
+.filters,
+.body-grid {
+  scroll-margin-top: calc(var(--topbar-h) + var(--masthead-box) + 16px);
+}
+@media (max-width: 768px) {
+  /* 移动端刊头 height:auto（换行后约 108px），统一按 58+108+12 留量 */
+  .screen-two,
+  .filters,
+  .body-grid {
+    scroll-margin-top: 178px;
+  }
+}
+/* 严格一屏模式：仅宽屏且视口高度充足时启用；窄屏（≤1024px）或低高度屏（≤760px）保持自然文档流，允许超高滚动，不裁内容 */
+@media (min-width: 1025px) and (min-height: 761px) {
+  .screen-one--full {
+    height: calc(100svh - var(--topbar-h) - var(--content-pad) - var(--masthead-box) - var(--masthead-gap));
+  }
+  .screen-one--full .topic-board {
+    flex: 1;
+    min-height: 0;
+  }
+  .screen-one--full .board {
+    min-height: 0;
+    margin-top: 16px;
+  }
+  .screen-one--full .tb-hero,
+  .screen-one--full .hero-main,
+  .screen-one--full .rail,
+  .screen-one--full .rail-item {
+    min-height: 0;
+  }
+  /* 封面为弹性元素：随可用空间变高变矮（img 本就 absolute 铺满封面） */
+  .screen-one--full .hero-cover {
+    min-height: 0;
+  }
+  /* 头条位与要闻榜间距收紧，保证 1440×900 恰好一屏 */
+  .screen-one--full .tb-hero {
+    padding: 20px 22px 18px;
+  }
+  .screen-one--full .hero-title {
+    margin: 12px 0 8px;
+  }
+  .screen-one--full .hero-meta {
+    margin-top: 12px;
+  }
+  .screen-one--full .hero-notes {
+    padding-top: 12px;
+  }
+  .screen-one--full .hero-notes .notes-label {
+    padding-top: 10px;
+    margin-bottom: 4px;
+  }
+  .screen-one--full .rail-item {
+    padding: 10px 16px 8px;
+  }
+  .screen-one--full .ri-deck {
+    margin-top: 6px;
+    line-height: 1.6;
+  }
+  .screen-one--full .ri-meta {
+    margin-top: 5px;
+    line-height: 1.5;
+  }
+  .screen-one--full .ri-deck + .ri-meta {
+    margin-top: 4px;
+  }
+  .screen-one--full .ri-notes {
+    margin-top: 6px;
+    padding-top: 5px;
+    gap: 3px;
+  }
+  .screen-one--full .scroll-hint {
+    padding-top: 14px;
+  }
+}
+.topic-board {
+  --serif: "Source Han Serif SC", "Songti SC", "STSong", "Noto Serif SC", Georgia, serif;
+  --sans: "PingFang SC", "Helvetica Neue", "Microsoft YaHei", Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+}
+/* 区块头 */
+.sec-kicker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  color: var(--ink-3);
+}
+.sec-kicker .ex {
+  color: var(--clay-deep);
+  font-weight: 700;
+}
+.sec-kicker .sep {
+  width: 26px;
+  height: 1px;
+  background: var(--ink-4);
+}
+.sec-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 10px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.sec-title-row h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: clamp(28px, 3vw, 38px);
+  letter-spacing: 0.03em;
+  line-height: 1.15;
+}
+.sec-update {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--clay);
+  flex: none;
+  animation: tb-pulse 2.2s ease-out infinite;
+}
+@keyframes tb-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(204, 120, 92, 0.45); }
+  70% { box-shadow: 0 0 0 9px rgba(204, 120, 92, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(204, 120, 92, 0); }
+}
+/* 头版版面：左头条 60% + 右要闻榜 */
+.board {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 7.2fr) minmax(0, 4.8fr);
+  gap: 26px;
+  align-items: stretch;
+  margin-top: 24px;
+}
+.board.solo {
+  grid-template-columns: 1fr;
+}
+.tb-topic {
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease,
+    background 0.25s ease, opacity 0.25s ease;
+}
+.tb-topic:focus-visible {
+  outline: 2px solid var(--pine);
+  outline-offset: 3px;
+}
+.topic-board.has-selection .tb-topic:not(.selected) {
+  opacity: 0.42;
+}
+.topic-board.has-selection .tb-topic:not(.selected):hover {
+  opacity: 0.92;
+}
+/* 选中角标（头条与榜单共用） */
+.sel-chip {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+  pointer-events: none;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: var(--ivory);
+  background: var(--clay-deep);
+  padding: 5px 10px;
+  border-radius: 2px;
+  opacity: 0;
+  transform: translateY(-5px);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.tb-topic.selected .sel-chip {
+  opacity: 1;
+  transform: none;
+}
+/* 排名印章（头条大 / 榜单小） */
+.rank {
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-family: var(--serif);
+  font-weight: 700;
+  color: var(--clay-deep);
+  border: 2px solid var(--clay-deep);
+  transition: background 0.22s ease, color 0.22s ease;
+}
+.tb-topic.selected .rank {
+  background: var(--clay-deep);
+  color: var(--ivory);
+}
+/* 状态徽章：今日新切口 = 黏土实心印章 / 持续发酵 = 松绿虚线描边 */
+.badge {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  padding: 6px 12px;
+  line-height: 1;
+}
+.badge-new {
+  background: var(--clay-deep);
+  color: var(--ivory);
+  box-shadow: 2px 2px 0 var(--clay-soft);
+}
+.badge-ferment {
+  color: var(--pine);
+  border: 1.5px dashed var(--pine);
+  padding: 5px 11px;
+}
+.badge.sm {
+  font-size: 10.5px;
+  padding: 4px 9px;
+  letter-spacing: 0.1em;
+}
+.badge-ferment.sm {
+  padding: 3px 8px;
+}
+/* ---------- 头条 HERO ---------- */
+.tb-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 0.98fr);
+  gap: 26px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  padding: 26px 26px 24px;
+}
+.tb-hero:hover {
+  transform: translateY(-3px);
+  border-color: var(--clay-soft);
+  box-shadow: 0 16px 38px -14px rgba(122, 74, 50, 0.28);
+}
+.tb-hero.selected {
+  border-color: var(--clay-deep);
+  background: linear-gradient(180deg, var(--paper) 0%, var(--clay-tint) 130%);
+  box-shadow: 0 0 0 1px var(--clay-deep), 0 18px 42px -14px rgba(168, 90, 64, 0.4);
+}
+.tb-hero.no-cover {
+  grid-template-columns: 1fr;
+}
+.hero-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.hero-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.tb-hero .rank {
+  width: 54px;
+  height: 54px;
+  font-size: 26px;
+}
+.page-tag {
+  margin-left: auto;
+  font-size: 10.5px;
+  letter-spacing: 0.22em;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+.hero-title {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: clamp(40px, 4.2vw, 64px);
+  line-height: 1.08;
+  letter-spacing: 0.02em;
+  margin: 18px 0 12px;
+  overflow-wrap: anywhere;
+  transition: color 0.25s ease;
+}
+.tb-hero:hover .hero-title {
+  color: var(--clay-deep);
+}
+.hero-deck {
+  margin: 0;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--ink-2);
+  max-width: 34em;
+}
+.hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 6px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.hero-meta li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.hero-meta li + li::before {
+  content: "·";
+  margin: 0 8px;
+  color: var(--clay);
+  font-weight: 700;
+}
+.hero-meta b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.hero-notes {
+  margin-top: auto;
+  padding-top: 16px;
+}
+.hero-notes .notes-label {
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  color: var(--ink-4);
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  margin-bottom: 6px;
+}
+.note {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 6px;
+  margin: 0 -6px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  font-family: var(--serif);
+  font-size: 14.5px;
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.note:hover {
+  background: var(--ivory);
+}
+.note .no {
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--clay);
+  flex: none;
+}
+.note .t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note .leader {
+  flex: 1;
+  border-bottom: 1px dotted var(--line);
+  min-width: 12px;
+}
+.note .lk {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ink-4);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.note .lk b {
+  color: var(--clay-deep);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+/* 头条封面：真实封面图压在品牌渐变底上，加载失败回退现有 placeholder */
+.hero-cover {
+  position: relative;
+  overflow: hidden;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 360px;
+  padding: 18px;
+  color: var(--ivory);
+  background:
+    radial-gradient(130% 90% at 82% 6%, rgba(233, 183, 158, 0.9) 0%, rgba(233, 183, 158, 0) 52%),
+    radial-gradient(120% 120% at 8% 100%, rgba(63, 92, 82, 0.38) 0%, rgba(63, 92, 82, 0) 55%),
+    linear-gradient(158deg, #cc785c 0%, #a85a40 56%, #7c4530 100%);
+}
+.hero-cover > img {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.hero-cover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(31, 31, 30, 0.18) 0%,
+    rgba(31, 31, 30, 0) 34%,
+    rgba(31, 31, 30, 0) 52%,
+    rgba(31, 31, 30, 0.62) 100%
+  );
+}
+.cover-wm {
+  position: absolute;
+  right: 2px;
+  top: 30%;
+  z-index: 0;
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 180px;
+  line-height: 1;
+  color: rgba(250, 249, 245, 0.13);
+  user-select: none;
+  pointer-events: none;
+}
+.cover-tag {
+  position: relative;
+  z-index: 3;
+  align-self: flex-start;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  border: 1px solid rgba(250, 249, 245, 0.55);
+  color: var(--ivory);
+  background: rgba(31, 31, 30, 0.25);
+  padding: 5px 9px;
+}
+.hero-cover figcaption {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  cursor: pointer;
+}
+.cover-title {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: clamp(19px, 1.55vw, 23px);
+  line-height: 1.5;
+  text-shadow: 0 1px 10px rgba(90, 40, 20, 0.35);
+}
+.like-chip {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(31, 31, 30, 0.38);
+  color: var(--ivory);
+  font-size: 12.5px;
+  padding: 5px 11px;
+  border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.like-chip i {
+  font-style: normal;
+  color: var(--clay-soft);
+}
+/* ---------- 侧边榜单 RAIL ---------- */
+.rail {
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+.rail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 13px 18px 11px;
+  border-bottom: 3px solid var(--ink);
+}
+.rail-head b {
+  font-family: var(--serif);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+.rail-head span {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--ink-4);
+}
+.rail-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 15px 18px 13px;
+  background: transparent;
+}
+.rail-item + .rail-item {
+  border-top: 1px solid var(--line);
+}
+.rail-item:hover {
+  background: var(--ivory);
+}
+.rail-item.selected {
+  background: var(--clay-tint);
+  box-shadow: inset 3px 0 0 var(--clay-deep);
+}
+.rail-item.selected::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 1px solid var(--clay-deep);
+}
+.ri-top {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.rail-item .rank {
+  width: 33px;
+  height: 33px;
+  font-size: 15px;
+  border-width: 1.5px;
+}
+.ri-name {
+  margin: 0;
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: 0.02em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.22s ease;
+}
+.rail-item:hover .ri-name {
+  color: var(--clay-deep);
+}
+.ri-top .badge {
+  margin-left: auto;
+}
+.ri-deck {
+  margin: 9px 0 0;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.ri-meta {
+  margin: 9px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.ri-deck + .ri-meta {
+  margin-top: 6px;
+}
+.ri-notes {
+  margin: 9px 0 0;
+  padding: 8px 0 0;
+  list-style: none;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ri-notes li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+  border-radius: 3px;
+  font-family: var(--serif);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.ri-notes li:hover {
+  background: var(--ivory);
+}
+.ri-notes li:hover .t {
+  color: var(--clay-deep);
+}
+.ri-notes .t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ri-notes .l {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--clay-deep);
+  font-variant-numeric: tabular-nums;
+}
+.ri-notes .l em {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--ink-4);
+  margin-left: 2px;
+}
+/* 下滑提示：不抢镜，点击平滑滚动到筛选区 */
+.scroll-hint {
+  align-self: center;
+  margin-top: auto;
+  padding: 26px 16px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 11.5px;
+  letter-spacing: 0.18em;
+  color: var(--ink-4);
+  transition: color 0.2s ease;
+}
+.scroll-hint:hover {
+  color: var(--clay-deep);
+}
+.scroll-hint .arrow {
+  animation: tb-float 2.4s ease-in-out infinite;
+}
+@keyframes tb-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(5px); }
+}
+/* 响应式：≤1024px 榜单收头条下方，≤800px 头条自身收单列 */
+@media (max-width: 1024px) {
+  .board {
+    grid-template-columns: 1fr;
+  }
+  .hero-cover {
+    min-height: 320px;
+  }
+}
+@media (max-width: 800px) {
+  .tb-hero {
+    grid-template-columns: 1fr;
+    padding: 20px;
+  }
+  .hero-cover {
+    min-height: 240px;
+  }
+  .cover-wm {
+    font-size: 130px;
+  }
+}
+
+/* 素材卡互动数据条：四格均分，数字放大 */
+.engagement {
+  display: flex;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.engagement .stat {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.engagement .stat b {
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.engagement .stat span {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+/* 详情弹窗：仿小红书网页端，居中平滑弹出；背景锁滚动但不回顶 */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(31, 31, 30, 0.45);
+  backdrop-filter: blur(3px);
+}
+.modal-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
+  width: min(920px, 100%);
+  height: min(660px, 88vh);
+  background: var(--paper);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 24px 80px rgba(31, 31, 30, 0.28);
+}
+.modal-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink-2);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.modal-media {
+  position: relative;
+  min-width: 0;
+  background: #17110e;
+  overflow: hidden;
+}
+/* 模糊底图铺满：任意封面比例都不露黑边 */
+.modal-media .bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(26px) brightness(0.55);
+  transform: scale(1.25);
+}
+.modal-media .fg {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.modal-side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.modal-author {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 44px 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.modal-author img {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bone);
+}
+.modal-author .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.modal-author a {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border: 1px solid var(--clay);
+  border-radius: 99px;
+  color: var(--clay-deep);
+  font-size: 12px;
+  text-decoration: none;
+}
+/* 右栏三段式：标题固定、正文滚动、tag+时间固定底部 */
+.modal-title {
+  margin: 0;
+  padding: 16px 16px 10px;
+  font: 700 18px/1.4 var(--serif);
+}
+.modal-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 16px 16px;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+.modal-tail {
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--line);
+}
+.modal-time {
+  margin-top: 10px;
+  color: var(--ink-4);
+  font-size: 12px;
+}
+.modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: 14px;
+}
+.modal-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+/* 简笔线条图标：心=赞 星=藏 气泡=评 分享=享 */
+.modal-foot .ic {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.modal-foot b {
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 平滑弹出/收起动画 */
+.xhs-modal-enter-active,
+.xhs-modal-leave-active {
+  transition: opacity 0.22s ease;
+}
+.xhs-modal-enter-from,
+.xhs-modal-leave-to {
+  opacity: 0;
+}
+.xhs-modal-enter-active .modal-card {
+  transition: transform 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.15), opacity 0.22s ease;
+}
+.xhs-modal-leave-active .modal-card {
+  transition: transform 0.18s ease-in, opacity 0.18s ease;
+}
+.xhs-modal-enter-from .modal-card,
+.xhs-modal-leave-to .modal-card {
+  opacity: 0;
+  transform: translateY(14px) scale(0.97);
+}
+@media (max-width: 800px) {
+  .modal-card {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 42%) 1fr;
+    height: 92vh;
+  }
+}
+</style>
+<!-- 滚动吸附挂在 <html> 上（页面滚动在 window），scoped 样式命中不到，需全局块；class 由脚本按 topics 有无动态加删 -->
+<!-- 另：刊头 sticky 依赖 #app overflow-x:clip（index.css 里 overflow-x:hidden 会让 #app 成为滚动容器、sticky 失效）；为把影响限定在本页，由脚本挂载时改、卸载时还原，不写全局 CSS -->
+<style>
+html.xhs-snap {
+  scroll-snap-type: y proximity;
+}
+html.xhs-snap .screen-one,
+html.xhs-snap .screen-two {
+  scroll-snap-align: start;
+}
+</style>

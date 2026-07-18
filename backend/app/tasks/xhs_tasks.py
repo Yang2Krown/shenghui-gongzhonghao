@@ -1,0 +1,107 @@
+"""小红书关键词采集、补全和动态词 Celery 任务。"""
+import asyncio
+import logging
+import random
+from collections import defaultdict
+from datetime import timedelta
+
+from celery import shared_task
+from sqlalchemy import select
+
+from app.core.config import settings
+from app.core.timezone import utcnow
+from app.db.session import SessionLocal
+from app.models.xhs import XhsKeyword, XhsNote, XhsNoteDiscovery, XhsProviderCall
+from app.services.llm.llm_client import ChatMessage, get_llm_client
+from app.services.xhs_collection import collect_keyword, normalize_keyword, refresh_note_image, reserve_tikhub_searches
+
+logger = logging.getLogger(__name__)
+
+
+@shared_task(name="xhs.collect_keyword")
+def collect_keyword_task(keyword_id: int, allow_paid: bool = True, retry_existing: bool = False):
+    if not settings.XHS_SERVER_COLLECTION_ENABLED: return {"skipped": True, "reason": "server_collection_disabled"}
+    with SessionLocal() as db: return asyncio.run(collect_keyword(db, keyword_id, allow_paid=allow_paid, retry_existing=retry_existing))
+
+
+@shared_task(name="xhs.refresh_note_image")
+def refresh_note_image_task(note_id: str, allow_paid: bool = False):
+    with SessionLocal() as db:return asyncio.run(refresh_note_image(db,note_id,allow_paid=allow_paid))
+
+
+@shared_task(name="xhs.dispatch_group")
+def dispatch_group_task(group: int):
+    if not settings.XHS_SERVER_COLLECTION_ENABLED: return {"skipped": True, "reason": "server_collection_disabled"}
+    with SessionLocal() as db:
+        rows=db.scalars(select(XhsKeyword).where(XhsKeyword.enabled.is_(True),XhsKeyword.keyword_type=="base",XhsKeyword.schedule_group==group).order_by(XhsKeyword.id)).all()
+        reserve_tikhub_searches(db,len(rows))
+        for index,row in enumerate(rows): collect_keyword_task.apply_async(args=[row.id],countdown=index*90+random.randint(10,30))
+        return {"group":group,"dispatched":len(rows)}
+
+
+@shared_task(name="xhs.dispatch_derived")
+def dispatch_derived_task():
+    if not settings.XHS_SERVER_COLLECTION_ENABLED: return {"skipped": True, "reason": "server_collection_disabled"}
+    today=utcnow().date()
+    with SessionLocal() as db:
+        rows=db.scalars(select(XhsKeyword).where(XhsKeyword.enabled.is_(True),XhsKeyword.keyword_type=="derived",(XhsKeyword.cooldown_until.is_(None)) | (XhsKeyword.cooldown_until<=today)).order_by(XhsKeyword.id).limit(5)).all()
+        reserve_tikhub_searches(db,len(rows))
+        for index,row in enumerate(rows): collect_keyword_task.apply_async(args=[row.id],countdown=index*90+random.randint(10,30))
+        return {"dispatched":len(rows)}
+
+
+async def _normalize_dynamic(candidates: list[str]) -> list[str]:
+    if not candidates: return []
+    try:
+        client=get_llm_client()
+        prompt="将这些小红书 AI 趋势词去重归一化，保留具体可搜索短语，排除 AI、工具等泛词，最多返回 5 个。仅返回 JSON：{\"keywords\":[...]}.\n"+"\n".join(candidates[:20])
+        result=await client.chat([ChatMessage(role="user",content=prompt)],temperature=.1,max_tokens=400,json_mode=True)
+        return [str(x).strip() for x in (result.parsed or {}).get("keywords",[]) if str(x).strip()][:5]
+    except Exception as exc:
+        logger.warning("动态词 AI 归一化不可用，使用确定性归一化: %s",exc)
+        return candidates[:5]
+
+
+@shared_task(name="xhs.generate_dynamic_keywords")
+def generate_dynamic_keywords_task():
+    """仅使用 72 小时内合格基础词帖子；至少 3 帖、2 作者，结果次日执行。"""
+    if not settings.XHS_COLLECTION_ENABLED: return {"skipped":True,"reason":"feature_disabled"}
+    cutoff=utcnow()-timedelta(hours=72);generic={"ai","工具","人工智能","教程","分享","干货"}
+    with SessionLocal() as db:
+        rows=db.execute(select(XhsNote,XhsKeyword).join(XhsNoteDiscovery,XhsNoteDiscovery.note_id==XhsNote.id).join(XhsKeyword,XhsKeyword.id==XhsNoteDiscovery.keyword_id).where(XhsKeyword.keyword_type=="base",XhsNote.quality_status.in_(["ready","ready_degraded","synced"]),XhsNote.published_at>=cutoff,XhsNote.like_count>2000)).all()
+        posts=defaultdict(set);authors=defaultdict(set)
+        for note,_keyword in rows:
+            for tag in list(note.native_tags or [])+list(note.ai_topics or []):
+                key=normalize_keyword(str(tag).lstrip("#"));
+                if len(key)<2 or key in generic: continue
+                posts[key].add(note.id);authors[key].add(note.author_id or note.author_nickname)
+        existing={x for x in db.scalars(select(XhsKeyword.normalized_keyword)).all()}
+        ranked=[k for k in sorted(posts,key=lambda x:(len(posts[x]),len(authors[x])),reverse=True) if len(posts[k])>=3 and len(authors[k])>=2 and k not in existing][:20]
+        normalized=asyncio.run(_normalize_dynamic(ranked))
+        created=[];tomorrow=utcnow().date()+timedelta(days=1)
+        for value in normalized[:5]:
+            key=normalize_keyword(value)
+            if key in existing or key in generic: continue
+            db.add(XhsKeyword(keyword=value,normalized_keyword=key,keyword_type="derived",enabled=True,derived_evidence={"post_count":len(posts.get(key,set())),"author_count":len(authors.get(key,set())),"generated_at":utcnow().isoformat()},next_run_at=utcnow().replace(hour=8,minute=5,second=0,microsecond=0)+timedelta(days=1)))
+            existing.add(key);created.append(value)
+        db.commit();return {"candidates":len(ranked),"created":created,"run_date":tomorrow.isoformat()}
+
+
+@shared_task(name="xhs.analyze_notes")
+def analyze_notes_task():
+    """每批 10 篇生成中文摘要和 3-5 个话题；失败不影响展示。"""
+    if not settings.XHS_COLLECTION_ENABLED: return {"skipped":True,"reason":"feature_disabled"}
+    with SessionLocal() as db:
+        notes=db.scalars(select(XhsNote).where(XhsNote.quality_status.in_(["ready","ready_degraded","synced"]),XhsNote.ai_summary.is_(None)).order_by(XhsNote.id).limit(100)).all();done=0
+        for start in range(0,len(notes),10):
+            batch=notes[start:start+10]
+            try:
+                client=get_llm_client();payload=[{"note_id":n.note_id,"title":n.title,"content":(n.content or "")[:1500]} for n in batch]
+                result=asyncio.run(client.chat([ChatMessage(role="user",content="为每篇小红书笔记输出中文摘要和3到5个具体AI话题。返回 JSON：{\"items\":[{\"note_id\":\"\",\"summary\":\"\",\"topics\":[]}]}\n"+str(payload))],temperature=.2,max_tokens=1800,json_mode=True))
+                by_id={str(x.get("note_id")):x for x in (result.parsed or {}).get("items",[])}
+                for n in batch:
+                    item=by_id.get(n.note_id)
+                    if item:n.ai_summary=str(item.get("summary") or "")[:2000];n.ai_topics=[str(x) for x in (item.get("topics") or [])][:5];done+=1
+                db.add(XhsProviderCall(provider="llm",operation="xhs_topic_extract",status="success",is_paid=True,request_count=1,estimated_cost=0,metadata_json={"batch_size":len(batch)}));db.commit()
+            except Exception as exc: logger.warning("小红书分析批次失败，不影响素材展示: %s",exc);db.rollback()
+        return {"selected":len(notes),"analyzed":done}

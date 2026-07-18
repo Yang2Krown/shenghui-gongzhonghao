@@ -50,9 +50,9 @@ def upgrade() -> None:
             RETURNING id, user_id, balance
         )
         INSERT INTO credit_transactions (
-            user_id, credit_account_id, type, amount, balance_after, description, created_at
+            user_id, credit_account_id, type, amount, balance_after, description, created_at, updated_at
         )
-        SELECT user_id, id, 'gift', 6000, balance, '历史管理员开通创作工具赠送积分', NOW()
+        SELECT user_id, id, 'gift', 6000, balance, '历史管理员开通创作工具赠送积分', NOW(), NOW()
         FROM granted
         """
     )

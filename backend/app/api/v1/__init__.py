@@ -1,8 +1,13 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate, wechat_draft, content_continuation, content_polish, wechat_accounts, credits, credit_purchase, practical, feishu_brief, images, commercial, admin, announcements, _test_gzh_fetch, courses
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate, wechat_draft, content_continuation, content_polish, wechat_accounts, credits, credit_purchase, practical, feishu_brief, images, commercial, admin, announcements, _test_gzh_fetch, courses, xhs, xhs_agent
 
 api_router = APIRouter()
+
+api_router.include_router(xhs.router, prefix="/xhs", tags=["小红书素材"])
+api_router.include_router(xhs.admin_router, prefix="/admin/xhs-monitoring", tags=["小红书采集监测"])
+api_router.include_router(xhs_agent.router, prefix="/xhs-agent", tags=["小红书本地采集节点"])
+api_router.include_router(xhs_agent.admin_router, prefix="/admin/xhs-monitoring", tags=["小红书本地采集节点管理"])
 
 # 通用进度轮询
 api_router.include_router(

@@ -91,6 +91,15 @@ x-backend-env: &backend-env
   WXPAY_PUBLIC_KEY_PATH: ${WXPAY_PUBLIC_KEY_PATH:-}
   WXPAY_PUBLIC_KEY_ID: ${WXPAY_PUBLIC_KEY_ID:-}
   WXPAY_NOTIFY_URL: ${WXPAY_NOTIFY_URL:-}
+  # 小红书关键词采集（封面/头像只存远程 URL，不使用 OSS）
+  XHS_COLLECTION_ENABLED: ${XHS_COLLECTION_ENABLED:-false}
+  XHS_SERVER_COLLECTION_ENABLED: ${XHS_SERVER_COLLECTION_ENABLED:-false}
+  TIKHUB_TOKEN: ${TIKHUB_TOKEN:-}
+  TIKHUB_API_BASE: ${TIKHUB_API_BASE:-https://api.tikhub.io}
+  TIKHUB_DAILY_LIMIT: ${TIKHUB_DAILY_LIMIT:-100}
+  TIKHUB_UNIT_PRICE_CNY: ${TIKHUB_UNIT_PRICE_CNY:-0}
+  XHS_CLI_COOKIE_FILE: /app/secrets/xhs/cookies.json
+  XHS_CLI_VERSION: "0.6.4"
 
 services:
 
@@ -159,6 +168,8 @@ services:
     volumes:
       - uploads_data:/app/uploads
       - ./backend/secrets:/app/secrets:ro
+      # 仅允许 web 容器在管理员扫码后原子更新 XHS Cookie；其他密钥仍只读。
+      - ./backend/secrets/xhs:/app/secrets/xhs
     depends_on:
       postgres:
         condition: service_healthy

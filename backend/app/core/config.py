@@ -213,6 +213,24 @@ class Settings(BaseSettings):
     SCRAPE_INTERVAL_HOURS: int = 24  # 每24小时抓取一次
     SCRAPE_TIMEOUT: int = 30  # 抓取超时时间（秒）
     SCRAPE_RETRY_COUNT: int = 3  # 抓取重试次数
+
+    # ====== 小红书关键词素材库 ======
+    XHS_COLLECTION_ENABLED: bool = False
+    # 本地 Agent 接管搜索后保持 false；不影响素材入库、分析和监测。
+    XHS_SERVER_COLLECTION_ENABLED: bool = False
+    TIKHUB_TOKEN: Optional[str] = None
+    TIKHUB_API_BASE: str = "https://api.tikhub.io"
+    TIKHUB_XHS_SEARCH_PATH: str = "/api/v1/xiaohongshu/app_v2/search_notes"
+    TIKHUB_XHS_DETAIL_PATH: str = "/api/v1/xiaohongshu/web_v3/fetch_note_detail"
+    TIKHUB_DAILY_LIMIT: int = 100
+    TIKHUB_UNIT_PRICE_CNY: float = 0.0
+    XHS_CLI_BIN: str = "xhs"
+    XHS_CLI_COOKIE_FILE: str = "/app/secrets/xhs/cookies.json"
+    XHS_CLI_VERSION: str = "0.6.4"
+    XHS_CLI_TIMEOUT_SECONDS: int = 120
+    XHS_CLI_COOLDOWN_MINUTES: int = 10
+    XHS_PROVIDER_CANDIDATE_LIMIT: int = 20
+    XHS_KEYWORD_FINAL_LIMIT: int = 10
     
     # 支持的平台
     SUPPORTED_PLATFORMS: List[str] = [

@@ -184,6 +184,13 @@
   background-color: var(--paper) !important;
 }
 
+/* html 常驻滚动条（overflow-y: scroll），锁屏时视口宽度不变；
+   抵消 Element Plus 锁屏时给 body 内联的 calc(100% - 滚动条) 宽度补偿，
+   否则弹窗一开一关内容会左右跳。 */
+body.el-popup-parent--hidden {
+  width: 100% !important;
+}
+
 /* 下拉菜单 / Popover */
 .el-popper,
 .el-select__popper,

@@ -12,7 +12,9 @@
           <a href="#price">报名</a>
         </div>
         <div class="camp-nav-cta">
-          <PublicLoginButton @authenticated="goToCourse" />
+          <button class="btn btn-ghost" @click="onLoginEntry">
+            {{ userStore.isAuthenticated ? '退出登录' : '登录 / 注册' }}
+          </button>
           <button class="btn btn-primary" @click="openModal('pay')">立即报名 <span class="btn-arrow">→</span></button>
         </div>
       </div>
@@ -144,7 +146,7 @@
       <div class="container">
         <div class="kicker fade-up">课程大纲</div>
         <h2 class="sec-title fade-up">12 章完整体系，从认知到收钱</h2>
-        <p class="sec-lead fade-up">每章讲义 + 实操作业，最后一章附 90 天行动计划。学完的标准不是"看懂了"，是账号做起来了。</p>
+        <p class="sec-lead fade-up nowrap">每章讲义 + 实操作业，最后一章附 90 天行动计划。学完的标准不是"看懂了"，是账号做起来了。</p>
         <div class="outline-wrap fade-up">
           <table class="outline">
             <thead>
@@ -308,16 +310,20 @@
         </div>
       </Transition>
     </Teleport>
+
+    <!-- ============ 登录弹窗（登录成功后继续报名流程） ============ -->
+    <PhoneLoginModal v-model:open="loginOpen" @success="onLoginSuccess" />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import { post, get } from '@/api/api'
 import { useUserStore } from '@/stores/user'
-import PublicLoginButton from '@/components/product/PublicLoginButton.vue'
+import PhoneLoginModal from '@/components/auth/PhoneLoginModal.vue'
+import { useBodyScrollLock } from '@/utils/bodyScrollLock'
 
 const router = useRouter()
 const route = useRoute()
@@ -350,10 +356,6 @@ const closeCampOrder = () => {
 }
 
 const createCampOrder = async () => {
-  if (!userStore.isAuthenticated) {
-    router.push({ name: 'Landing', query: { show: 'login', intent: 'practical_camp' } })
-    return
-  }
   if (userStore.hasProduct('practical_camp')) {
     router.push('/courses')
     return
@@ -387,7 +389,27 @@ const createCampOrder = async () => {
   }
 }
 
+// 未登录时先在页内弹登录框，登录成功后继续报名流程，不再跳转 Landing 登录。
+const loginOpen = ref(false)
+
+const onLoginEntry = () => {
+  if (userStore.isAuthenticated) {
+    userStore.logout()
+    return
+  }
+  loginOpen.value = true
+}
+
+const onLoginSuccess = () => {
+  openModal('pay')
+}
+
 const openModal = async (id) => {
+  // 未登录先走页内登录：不置 activeModal，避免弹窗态（及滚动锁）残留
+  if (id === 'pay' && !userStore.isAuthenticated) {
+    loginOpen.value = true
+    return
+  }
   activeModal.value = id
   if (id === 'pay') await createCampOrder()
 }
@@ -395,16 +417,11 @@ const closeModal = () => { stopPayPolling(); closeCampOrder(); activeModal.value
 const switchModal = (id) => { stopPayPolling(); closeCampOrder(); activeModal.value = id }
 
 const goLanding = () => { router.push('/landing') }
-const goToCourse = () => {
-  if (userStore.hasProduct('practical_camp') || userStore.isAdmin) router.push('/courses')
-}
 
 const onKeydown = (e) => { if (e.key === 'Escape') closeModal() }
 
-// 弹窗打开时锁定 body 滚动
-watch(activeModal, (v) => {
-  document.body.style.overflow = v ? 'hidden' : ''
-})
+// 弹窗打开时锁定 body 滚动（计数式共享锁，卸载自动释放，见 utils/bodyScrollLock）
+useBodyScrollLock(() => Boolean(activeModal.value) || loginOpen.value)
 
 /* ── 滚动进入动画 ── */
 let fadeObserver = null
@@ -441,7 +458,6 @@ onUnmounted(() => {
   if (fadeObserver) fadeObserver.disconnect()
   stopPayPolling()
   closeCampOrder()
-  document.body.style.overflow = ''
 })
 </script>
 
@@ -505,6 +521,10 @@ onUnmounted(() => {
 .sec-title { font-family: var(--serif); font-size: clamp(24px, 3.2vw, 32px); font-weight: 600; color: var(--text-100); letter-spacing: -.01em; margin: 0 0 14px; line-height: 1.32; }
 .sec-lead { font-size: 15.5px; color: var(--text-400); max-width: 640px; margin-bottom: 44px; line-height: 1.75; }
 .sec-lead.center { margin-left: auto; margin-right: auto; }
+/* 桌面端强制单行，避免短句末尾孤字换行；移动端保持自然换行防溢出 */
+@media (min-width: 821px) {
+  .sec-lead.nowrap { white-space: nowrap; }
+}
 
 /* Nav */
 .camp-nav {

@@ -1,0 +1,399 @@
+from __future__ import annotations
+
+import argparse
+import asyncio
+import getpass
+import json
+import os
+import platform
+import socket
+import subprocess
+import sys
+import uuid
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
+
+import httpx
+import websockets
+
+from client import ServerClient
+from collector import RiskBlocked, XhsCollector
+from qr_login import LocalQrLogin
+from scheduling import build_daily_plan, recover_interrupted_slots, select_daily_keywords, slot_due, slot_expired
+from storage import LocalStore
+
+VERSION = "0.3.4"
+PLAN_STRATEGY = "all_base_plus_random_derived"
+SERVICE = "com.midonghub.gzh.xhs-collector"
+APP_DIR = Path.home() / "Library/Application Support/GzhXhsCollector"
+CONFIG_PATH = APP_DIR / "config.json"
+DB_PATH = APP_DIR / "agent.sqlite3"
+
+
+def keychain_get() -> str:
+    result = subprocess.run(["security", "find-generic-password", "-a", getpass.getuser(), "-s", SERVICE, "-w"], capture_output=True, text=True)
+    if result.returncode: raise RuntimeError("本地采集节点尚未绑定")
+    return result.stdout.strip()
+
+
+def keychain_set(token: str) -> None:
+    subprocess.run(["security", "add-generic-password", "-U", "-a", getpass.getuser(), "-s", SERVICE, "-w", token], check=True, capture_output=True)
+
+
+def load_config() -> dict[str, Any]:
+    if not CONFIG_PATH.is_file(): raise RuntimeError("缺少本地 Agent 配置，请先执行绑定")
+    return json.loads(CONFIG_PATH.read_text())
+
+
+def save_config(value: dict[str, Any]) -> None:
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(value, ensure_ascii=False, indent=2))
+    CONFIG_PATH.chmod(0o600)
+
+
+class CollectorAgent:
+    def __init__(self):
+        self.config = load_config()
+        self.token = keychain_get()
+        self.server = ServerClient(self.config["server_url"], self.token)
+        self.store = LocalStore(DB_PATH)
+        self.collector = XhsCollector(Path(__file__).resolve().parent)
+        self.commands: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.collection_lock = asyncio.Lock()
+        self.paused = asyncio.Event(); self.paused.set()
+        self.stop_requested = asyncio.Event()
+        self.running_keyword: str | None = None
+        cookie_default = "valid" if (Path.home() / ".xiaohongshu-cli/cookies.json").is_file() else "missing"
+        self.cookie_status = self.store.get("cookie_status", cookie_default)
+
+    def today_plan(self) -> dict[str, Any] | None:
+        plan = self.store.get("daily_plan")
+        return plan if isinstance(plan, dict) and plan.get("date") == date.today().isoformat() else None
+
+    def save_plan(self, plan: dict[str, Any]) -> None:
+        self.store.set("daily_plan", plan)
+
+    async def report_status(self, status: str | None = None, last_error: str | None = None) -> None:
+        plan = self.today_plan()
+        default_status = (
+            "running" if self.running_keyword else
+            "risk_blocked" if self.cookie_status == "verification_required" else
+            "paused" if plan and plan.get("paused") else "idle"
+        )
+        payload = {
+            "status": status or default_status,
+            "cookie_status": self.cookie_status,
+            "current_keyword": self.running_keyword,
+            "last_error": last_error,
+            "agent_version": VERSION,
+            "daily_plan": plan,
+        }
+        try:
+            await asyncio.to_thread(self.server.heartbeat, payload)
+        except Exception as exc:
+            print(f"[heartbeat] {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+
+    async def upload_pending(self) -> None:
+        for row_id, endpoint, payload in self.store.pending():
+            try:
+                await asyncio.to_thread(self.server.request, "POST", endpoint, payload)
+                self.store.uploaded(row_id)
+            except Exception:
+                self.store.failed_attempt(row_id)
+                break
+
+    async def safe_upload(self, batch_id: str, payload: dict[str, Any]) -> None:
+        endpoint = f"/api/v1/xhs-agent/batches/{batch_id}/results"
+        try:
+            await asyncio.to_thread(self.server.upload, batch_id, payload)
+        except Exception:
+            self.store.enqueue(endpoint, payload)
+
+    async def safe_progress(self, batch_id: str, payload: dict[str, Any]) -> None:
+        try:
+            await asyncio.to_thread(self.server.progress, batch_id, payload)
+        except Exception as exc:
+            print(f"[progress] {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+
+    async def interruptible_gap(self, seconds: float) -> None:
+        deadline = asyncio.get_running_loop().time() + seconds
+        while asyncio.get_running_loop().time() < deadline:
+            if self.stop_requested.is_set(): return
+            await self.paused.wait()
+            await asyncio.sleep(min(5, deadline - asyncio.get_running_loop().time()))
+
+    async def run_batch(self, keywords: list[dict[str, Any]], mode: str, command_id: str | None = None) -> dict[str, Any]:
+        async with self.collection_lock:
+            return await self._run_batch(keywords, mode, command_id)
+
+    async def _run_batch(self, keywords: list[dict[str, Any]], mode: str, command_id: str | None = None) -> dict[str, Any]:
+        if not keywords: return {"completed": 0, "failed": 0}
+        self.stop_requested.clear()
+        identity = str(keywords[0]["id"]) if mode == "scheduled" else command_id or uuid.uuid4().hex[:12]
+        local_key = f"{date.today().isoformat()}-{mode}-{identity}"
+        body = {
+            "local_batch_key": local_key, "mode": mode, "schedule_date": date.today().isoformat(),
+            "schedule_group": keywords[0].get("group") if mode == "scheduled" else None,
+            "total_keywords": len(keywords), "command_id": command_id,
+        }
+        batch_id = (await asyncio.to_thread(self.server.create_batch, body))["batch_id"]
+        completed = failed = 0
+        last_error = None
+        try:
+            for index, keyword in enumerate(keywords):
+                if self.stop_requested.is_set(): break
+                await self.paused.wait()
+                self.running_keyword = keyword["keyword"]
+                await self.safe_progress(batch_id, {"status": "running", "current_keyword_id": keyword["id"], "completed_keywords": completed, "failed_keywords": failed})
+                try:
+                    collection = await asyncio.to_thread(self.collector.collect_keyword, keyword["keyword"])
+                    notes = collection.get("notes") if isinstance(collection, dict) else collection
+                    diagnostics = collection.get("diagnostics") if isinstance(collection, dict) else None
+                    payload = {"keyword_id": keyword["id"], "idempotency_key": f"{local_key}:{keyword['id']}", "status": "success", "notes": notes or [], "diagnostics": diagnostics or {}}
+                    await self.safe_upload(batch_id, payload)
+                    completed += 1
+                    self.cookie_status = "valid"
+                    self.store.set("cookie_status", self.cookie_status)
+                except RiskBlocked as exc:
+                    failed += 1
+                    self.cookie_status = "verification_required"
+                    self.store.set("cookie_status", self.cookie_status)
+                    await self.safe_upload(batch_id, {"keyword_id": keyword["id"], "idempotency_key": f"{local_key}:{keyword['id']}", "status": "risk_blocked", "error": str(exc), "notes": []})
+                    await self.safe_progress(batch_id, {"status": "risk_blocked", "current_keyword_id": keyword["id"], "completed_keywords": completed, "failed_keywords": failed, "error": str(exc)})
+                    await self.report_status("risk_blocked", str(exc))
+                    return {"completed": completed, "failed": failed, "risk_blocked": True}
+                except Exception as exc:
+                    failed += 1
+                    last_error = f"{type(exc).__name__}: {str(exc)[:500]}"
+                    await self.safe_upload(batch_id, {"keyword_id": keyword["id"], "idempotency_key": f"{local_key}:{keyword['id']}", "status": "failed", "error": str(exc), "notes": []})
+            status_value = "stopped" if self.stop_requested.is_set() else "completed" if not failed else "partial"
+            await self.safe_progress(batch_id, {"status": status_value, "current_keyword_id": None, "completed_keywords": completed, "failed_keywords": failed})
+            return {"completed": completed, "failed": failed, "error": last_error}
+        finally:
+            self.running_keyword = None
+
+    async def handle_command(self, command: dict[str, Any]) -> None:
+        command_id = command["id"]
+        command_type = command["command_type"]
+        if command_type == "test_keyword" and self.collection_lock.locked():
+            await asyncio.to_thread(self.server.command_status, command_id, {"status": "failed", "error": "本地采集节点正在执行其他批次，请等待或先停止"})
+            return
+        await asyncio.to_thread(self.server.command_status, command_id, {"status": "running"})
+        try:
+            if command_type == "pause":
+                self.paused.clear()
+                plan = self.today_plan()
+                if plan:
+                    plan["paused"] = True
+                    self.save_plan(plan)
+                result = {"paused": True}
+                await self.report_status("paused")
+            elif command_type == "resume":
+                if self.cookie_status != "valid":
+                    raise RuntimeError("请先完成小红书扫码或人机验证，再继续今日计划")
+                self.paused.set()
+                plan = self.today_plan()
+                if plan:
+                    plan["paused"] = False
+                    plan["risk_blocked"] = False
+                    self.save_plan(plan)
+                result = {"paused": False}
+                await self.report_status()
+            elif command_type == "stop":
+                self.stop_requested.set(); self.paused.set()
+                plan = self.today_plan()
+                if plan:
+                    plan["stopped"] = True
+                    plan["stop_reason"] = "manual"
+                    plan["paused"] = False
+                    for slot in plan.get("slots", []):
+                        if slot.get("status") == "pending": slot["status"] = "stopped"
+                    self.save_plan(plan)
+                cancelled = 0
+                while not self.commands.empty():
+                    queued = self.commands.get_nowait()
+                    await asyncio.to_thread(self.server.command_status, queued["id"], {"status": "cancelled", "error": "已由停止命令取消"})
+                    cancelled += 1
+                result = {"stopping": True, "cancelled_commands": cancelled}
+            elif command_type == "test_keyword":
+                payload = command.get("payload") or {}
+                result = await self.run_batch([{"id": payload["keyword_id"], "keyword": payload["keyword"], "group": None}], "test", command_id)
+                plan = self.today_plan()
+                if plan:
+                    slot = next((item for item in plan.get("slots", []) if int(item.get("keyword_id") or 0) == int(payload["keyword_id"]) and item.get("status") == "failed"), None)
+                    if slot and result.get("completed") and not result.get("failed"):
+                        slot["status"] = "completed"
+                        slot["finished_at"] = datetime.now().isoformat(timespec="seconds")
+                        slot["reason"] = "前端应急重试成功"
+                        slot.pop("error", None)
+                        self.save_plan(plan)
+                        await self.report_status()
+                    elif slot and result.get("failed"):
+                        slot["error"] = f"应急重试失败：{result.get('error') or 'CLI 未完成采集'}"
+                        self.save_plan(plan)
+                        await self.report_status(last_error=slot["error"])
+            elif command_type == "login":
+                def update_login(value):
+                    self.server.command_status(command_id, {"status": "running", "result": value})
+                result = await asyncio.to_thread(LocalQrLogin().run, update_login)
+                if result.get("status") != "authenticated":
+                    raise RuntimeError(result.get("message") or "本地扫码登录失败")
+                self.cookie_status = "valid"
+                self.store.set("cookie_status", self.cookie_status)
+                plan = self.today_plan()
+                if plan:
+                    plan["risk_blocked"] = False
+                    self.save_plan(plan)
+                await self.report_status("paused" if plan and plan.get("paused") else "idle")
+            else: raise RuntimeError("未知命令")
+            await asyncio.to_thread(self.server.command_status, command_id, {"status": "succeeded", "result": result})
+        except Exception as exc:
+            await asyncio.to_thread(self.server.command_status, command_id, {"status": "failed", "error": str(exc)})
+
+    async def command_worker(self) -> None:
+        while True:
+            await self.handle_command(await self.commands.get())
+
+    async def scheduler(self) -> None:
+        manifest = None
+        manifest_date = None
+        while True:
+            try:
+                today_key = date.today().isoformat()
+                if manifest is None or manifest_date != today_key:
+                    manifest = await asyncio.to_thread(self.server.manifest)
+                    manifest_date = today_key
+                schedule = manifest.get("schedule") or {}
+                now = datetime.now()
+                plan = self.today_plan()
+                if plan is None or plan.get("strategy") != PLAN_STRATEGY:
+                    keywords = select_daily_keywords(
+                        date.today(), manifest["keywords"], int(schedule.get("daily_derived_limit") or 5),
+                    )
+                    start = str(schedule.get("window_start") or "09:30")
+                    end = str(schedule.get("window_end") or "22:30")
+                    slots = build_daily_plan(date.today(), keywords, start, end, int(schedule.get("jitter_minutes") or 8))
+                    for slot in slots:
+                        keyword = next((item for item in keywords if int(item["id"]) == slot["keyword_id"]), None)
+                        if keyword and keyword.get("completed_today"):
+                            slot["status"] = "completed"
+                            slot["reason"] = "今天已通过其他任务完成"
+                    plan = {
+                        "date": today_key, "strategy": PLAN_STRATEGY,
+                        "window_start": start, "window_end": end,
+                        "base_count": sum(item.get("type") == "base" for item in keywords),
+                        "derived_count": sum(item.get("type") == "derived" for item in keywords),
+                        "paused": False, "stopped": False,
+                        "slots": slots,
+                    }
+                    self.save_plan(plan)
+                    await self.report_status()
+
+                # A scheduler iteration cannot coexist with its own scheduled
+                # collection. Therefore a persisted running slot seen here was
+                # interrupted by an exception or an Agent restart.
+                if recover_interrupted_slots(plan, now):
+                    self.save_plan(plan)
+                    await self.report_status(last_error="检测到未正常收尾的采集任务，已自动标记失败")
+
+                changed = False
+                for slot in plan.get("slots", []):
+                    if slot.get("status") == "pending" and slot_expired(now, slot["scheduled_at"]):
+                        slot["status"] = "skipped"
+                        slot["reason"] = "节点未在执行窗口内运行，不补跑"
+                        changed = True
+                if changed:
+                    self.save_plan(plan)
+                    await self.report_status()
+
+                if schedule.get("enabled", True) and not plan.get("paused") and not plan.get("stopped") and self.cookie_status == "valid":
+                    due = next((slot for slot in plan.get("slots", []) if slot.get("status") == "pending" and slot_due(now, slot["scheduled_at"])), None)
+                    if due and not self.collection_lock.locked():
+                        due["status"] = "running"
+                        due["started_at"] = datetime.now().isoformat(timespec="seconds")
+                        self.save_plan(plan)
+                        await self.report_status("running")
+                        result = None
+                        try:
+                            result = await self.run_batch([{"id": due["keyword_id"], "keyword": due["keyword"], "group": due.get("group")}], "scheduled")
+                        except Exception as exc:
+                            due["status"] = "failed"
+                            due["finished_at"] = datetime.now().isoformat(timespec="seconds")
+                            due["error"] = f"采集异常：{type(exc).__name__}: {str(exc)[:300]}"
+                            self.save_plan(plan)
+                            await self.report_status(last_error=due["error"])
+                        if result and result.get("risk_blocked"):
+                            due["status"] = "risk_blocked"
+                            plan["paused"] = True
+                            plan["risk_blocked"] = True
+                            plan["risk_blocked_at"] = datetime.now().isoformat(timespec="seconds")
+                        elif result and result.get("failed"):
+                            due["status"] = "failed"
+                        elif result:
+                            due["status"] = "completed"
+                        if result:
+                            due["finished_at"] = datetime.now().isoformat(timespec="seconds")
+                            self.save_plan(plan)
+                            await self.report_status("risk_blocked" if result.get("risk_blocked") else None)
+            except Exception as exc:
+                print(f"[scheduler] {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            await asyncio.sleep(60)
+
+    async def heartbeat(self) -> None:
+        while True:
+            await self.report_status()
+            await self.upload_pending()
+            await asyncio.sleep(300)
+
+    async def websocket(self) -> None:
+        base = self.config["server_url"].rstrip("/")
+        uri = ("wss://" + base[8:] if base.startswith("https://") else "ws://" + base[7:] if base.startswith("http://") else base) + "/api/v1/xhs-agent/ws"
+        while True:
+            try:
+                async with websockets.connect(uri, additional_headers={"Authorization": f"Bearer {self.token}"}, ping_interval=30, ping_timeout=30) as connection:
+                    async for raw in connection:
+                        message = json.loads(raw)
+                        if message.get("type") == "command":
+                            command = message["command"]
+                            if command.get("command_type") in {"pause", "resume", "stop"}:
+                                asyncio.create_task(self.handle_command(command))
+                            else:
+                                await self.commands.put(command)
+            except Exception as exc:
+                print(f"[websocket] {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+                await asyncio.sleep(10)
+
+    async def run(self) -> None:
+        await asyncio.gather(self.websocket(), self.command_worker(), self.scheduler(), self.heartbeat())
+
+
+def pair(server_url: str, code: str, name: str) -> None:
+    response = httpx.post(
+        server_url.rstrip("/") + "/api/v1/xhs-agent/pair",
+        json={"code": code, "name": name, "agent_version": VERSION, "platform": "macos"}, timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    keychain_set(payload["device_token"])
+    save_config({"server_url": server_url.rstrip("/"), "device_id": payload["device_id"], "name": name})
+    store = LocalStore(DB_PATH)
+    store.set("cookie_status", "valid" if (Path.home() / ".xiaohongshu-cli/cookies.json").is_file() else "missing")
+    print(f"绑定成功：{name}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="公众号智能体小红书本地采集节点")
+    sub = parser.add_subparsers(dest="command", required=True)
+    pair_parser = sub.add_parser("pair")
+    pair_parser.add_argument("--server", default="https://gzh.midonghub.com")
+    pair_parser.add_argument("--code", required=True)
+    pair_parser.add_argument("--name", default=f"{socket.gethostname()} · {platform.machine()}")
+    sub.add_parser("run")
+    args = parser.parse_args()
+    if args.command == "pair": pair(args.server, args.code, args.name)
+    else: asyncio.run(CollectorAgent().run())
+
+
+if __name__ == "__main__":
+    main()

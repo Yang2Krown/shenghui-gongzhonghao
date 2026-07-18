@@ -44,7 +44,8 @@ celery_app.conf.update(
         "title.*": {"queue": "ai"},
         "outline.*": {"queue": "ai"},
         "publish.*": {"queue": "publish"},
-        "xhs.*": {"queue": "publish"},
+        "xhs.publish*": {"queue": "publish"},
+        "xhs.*": {"queue": "scraping"},
     },
 )
 
@@ -56,6 +57,7 @@ import app.tasks.commercial_tasks  # noqa: F401,E402
 import app.tasks.cleanup_tasks  # noqa: F401,E402
 import app.tasks.subscription_tasks  # noqa: F401,E402
 import app.tasks.monitoring_tasks  # noqa: F401,E402
+import app.tasks.xhs_tasks  # noqa: F401,E402
 import app.core.celery_monitor  # noqa: F401,E402
 
 __all__ = ["celery_app"]

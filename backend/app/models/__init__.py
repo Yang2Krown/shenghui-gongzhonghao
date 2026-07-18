@@ -49,6 +49,12 @@ from app.models.celery_task_run import CeleryTaskRun
 
 # 课程资料
 from app.models.course import CourseChapter
+from app.models.xhs import (
+    XhsAgentBatch, XhsAgentCommand, XhsAgentPairing, XhsAgentUpload,
+    XhsCollectorDevice, XhsDailyQuota, XhsEngagementSnapshot,
+    XhsImageFailureReport, XhsKeyword, XhsKeywordRun, XhsNote,
+    XhsNoteDiscovery, XhsProviderCall,
+)
 
 __all__ = [
     # 旧模型（过渡期保留）
@@ -95,4 +101,6 @@ __all__ = [
     "CeleryTaskRun",
     # 课程资料
     "CourseChapter",
+    "XhsKeyword", "XhsKeywordRun", "XhsNote", "XhsNoteDiscovery",
+    "XhsProviderCall", "XhsEngagementSnapshot", "XhsDailyQuota", "XhsImageFailureReport",
 ]

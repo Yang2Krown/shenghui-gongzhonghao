@@ -24,6 +24,7 @@ COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 ENV_FILE="${ENV_FILE:-backend/.env.production}"
 DOMAIN="${DOMAIN:-https://gzh.midonghub.com}"
 WXPAY_SECRETS_DIR="${WXPAY_SECRETS_DIR:-backend/secrets/wxpay}"
+XHS_SECRETS_DIR="${XHS_SECRETS_DIR:-backend/secrets/xhs}"
 
 # ─── 参数解析 ───
 DEPLOY_FRONTEND=0
@@ -85,6 +86,28 @@ sync_wxpay_secrets() {
   echo
 }
 
+sync_xhs_secrets() {
+  # 上线后 Cookie 由「小红书采集监测」页的扫码登录在服务器端维护。
+  # 已存在时不再用本地副本覆盖，仅在服务器首次缺失时做初始化。
+  if ssh "$DEPLOY_HOST" "test -s '$DEPLOY_PATH/backend/secrets/xhs/cookies.json'"; then
+    echo "==> [后端] 服务器已有小红书 Cookie，保留扫码更新的服务器版本。"
+    echo
+    return 0
+  fi
+
+  if [ ! -f "$XHS_SECRETS_DIR/cookies.json" ]; then
+    echo "⚠  未找到小红书 Cookie 私密文件: $XHS_SECRETS_DIR/cookies.json"
+    echo "   代码仍可部署；XHS_COLLECTION_ENABLED 保持 false，配置后再灰度启用。"
+    return 0
+  fi
+
+  echo "==> [后端] 只读同步小红书 Cookie 私密文件..."
+  ssh "$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH/backend/secrets/xhs'"
+  rsync -az "$XHS_SECRETS_DIR/cookies.json" "$DEPLOY_HOST:$DEPLOY_PATH/backend/secrets/xhs/cookies.json"
+  ssh "$DEPLOY_HOST" "chown -R 1000:1000 '$DEPLOY_PATH/backend/secrets/xhs' && chmod 700 '$DEPLOY_PATH/backend/secrets/xhs' && chmod 600 '$DEPLOY_PATH/backend/secrets/xhs/cookies.json'"
+  echo
+}
+
 # ═══════════════════════════════════════════════════
 # A) 前端部署
 # ═══════════════════════════════════════════════════
@@ -96,6 +119,8 @@ if [ "$DEPLOY_FRONTEND" -eq 1 ]; then
 
   echo "==> [前端] 同步 dist/ 到服务器..."
   rsync -az --delete frontend/dist/ "$DEPLOY_HOST:$DEPLOY_PATH/frontend/dist/"
+  # WebSocket 等反向代理调整位于 nginx.conf，必须和静态产物一起同步。
+  rsync -az frontend/Dockerfile frontend/nginx.conf "$DEPLOY_HOST:$DEPLOY_PATH/frontend/"
   echo
 
   echo "==> [前端] 同步 compose 文件..."
@@ -137,6 +162,7 @@ if [ "$DEPLOY_BACKEND" -eq 1 ]; then
   echo
 
   sync_wxpay_secrets
+  sync_xhs_secrets
 
   echo "==> [后端] 重建后端服务（backend + celery）..."
   ssh "$DEPLOY_HOST" bash -s <<EOF
@@ -146,6 +172,8 @@ cd "$DEPLOY_PATH"
 find . -name '._*' -delete 2>/dev/null || true
 # 重建后端相关容器（不重建 postgres/frontend）
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build backend celery-worker celery-worker-scraping celery-worker-ai celery-worker-publish celery-beat
+# Nginx 启动时解析 backend 容器地址；后端重建后需重载，避免继续代理旧 IP 导致 502。
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart frontend
 # 清理本次构建产生的悬空镜像（预防磁盘堆积）
 docker image prune -f >/dev/null 2>&1 || true
 echo
@@ -178,8 +206,8 @@ cd "$DEPLOY_PATH"
 # 清掉 macOS 坏文件（会导致 alembic null bytes）
 find . -name '._*' -delete 2>/dev/null || true
 
-# 强制重建 init 容器（确保代码是最新的）
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build init
+# 强制构建并重建 init 容器（已退出的旧容器也必须使用最新迁移代码重新执行）
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build --force-recreate init
 # 清理本次构建产生的悬空镜像（预防磁盘堆积）
 docker image prune -f >/dev/null 2>&1 || true
 echo

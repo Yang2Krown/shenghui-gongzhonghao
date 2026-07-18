@@ -45,6 +45,12 @@ services:
       - OSS_ENDPOINT=${OSS_ENDPOINT:-}
       - OSS_BUCKET_NAME=${OSS_BUCKET_NAME:-}
       - OSS_DIR=${OSS_DIR:-gzh-images}
+      - XHS_COLLECTION_ENABLED=${XHS_COLLECTION_ENABLED:-false}
+      - XHS_SERVER_COLLECTION_ENABLED=${XHS_SERVER_COLLECTION_ENABLED:-false}
+      - TIKHUB_TOKEN=${TIKHUB_TOKEN:-}
+      - TIKHUB_DAILY_LIMIT=${TIKHUB_DAILY_LIMIT:-100}
+      - TIKHUB_UNIT_PRICE_CNY=${TIKHUB_UNIT_PRICE_CNY:-0}
+      - XHS_CLI_COOKIE_FILE=/app/secrets/xhs/cookies.json
     depends_on:
       - postgres
       - redis
@@ -83,6 +89,7 @@ services:
     command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4 --queues default,scraping,ai,publish
     volumes:
       - ./backend:/app
+      - ./backend/secrets/xhs:/app/secrets/xhs:ro
     environment:
       - POSTGRES_SERVER=postgres
       - POSTGRES_USER=postgres
@@ -93,6 +100,11 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - SUPER_ADMIN_PHONE=${SUPER_ADMIN_PHONE:-18021751281}
+      - XHS_COLLECTION_ENABLED=${XHS_COLLECTION_ENABLED:-false}
+      - XHS_SERVER_COLLECTION_ENABLED=${XHS_SERVER_COLLECTION_ENABLED:-false}
+      - TIKHUB_TOKEN=${TIKHUB_TOKEN:-}
+      - TIKHUB_DAILY_LIMIT=${TIKHUB_DAILY_LIMIT:-100}
+      - XHS_CLI_COOKIE_FILE=/app/secrets/xhs/cookies.json
     depends_on:
       - backend
       - redis
@@ -108,6 +120,7 @@ services:
     command: celery -A app.core.celery_app beat --loglevel=info
     volumes:
       - ./backend:/app
+      - ./backend/secrets/xhs:/app/secrets/xhs:ro
     environment:
       - POSTGRES_SERVER=postgres
       - POSTGRES_USER=postgres

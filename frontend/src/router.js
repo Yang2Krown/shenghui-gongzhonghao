@@ -36,6 +36,12 @@ const routes = [
         meta: { title: '实操案例', preset: '实操案例型', product: 'creation_tool' }
       },
       {
+        path: 'xhs-materials',
+        name: 'XhsMaterials',
+        component: () => import('@/pages/xhs/XhsMaterials.vue'),
+        meta: { title: '小红书素材', product: 'creation_tool', requiresAdmin: true }
+      },
+      {
         path: 'content-info/commercial',
         redirect: '/potential-commercial'
       },
@@ -155,6 +161,12 @@ const routes = [
         name: 'AdminSourceHealth',
         component: () => import('@/pages/admin/SourceHealth.vue'),
         meta: { title: '数据源健康', requiresAdmin: true }
+      },
+      {
+        path: 'admin/xhs-monitoring',
+        name: 'AdminXhsMonitoring',
+        component: () => import('@/pages/admin/XhsMonitoring.vue'),
+        meta: { title: '小红书采集监测', requiresAdmin: true }
       },
       {
         path: 'admin/commercial-diagnostics',

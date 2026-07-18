@@ -186,7 +186,8 @@ def _parse_xhs_state(state: dict, url: str) -> dict:
     # 提取内容
     title = note_data.get('title', '') or note_data.get('desc', '')
     content = note_data.get('desc', '') or note_data.get('content', '')
-    author = note_data.get('user', {}).get('nickname', '') if isinstance(note_data.get('user'), dict) else ''
+    user = note_data.get('user', {}) if isinstance(note_data.get('user'), dict) else {}
+    author = user.get('nickname', '')
 
     # 提取标签
     tags = []
@@ -200,12 +201,27 @@ def _parse_xhs_state(state: dict, url: str) -> dict:
     if title == content:
         title = ''
 
+    images = note_data.get('imageList') or note_data.get('image_list') or []
+    cover = images[0] if images and isinstance(images[0], dict) else {}
+    note_id = str(note_data.get('noteId') or note_data.get('note_id') or note_data.get('id') or _xhs_note_id_from_url(url) or '')
     return {
+        "note_id": note_id,
         "title": title,
         "content": content,
         "author": author,
+        "author_id": user.get('userId') or user.get('user_id') or user.get('id'),
+        "author_bio": user.get('desc') or user.get('bio') or '',
+        "avatar_url": user.get('image') or user.get('avatar'),
         "tags": tags,
-        "platform": "xhs"
+        "platform": "xhs",
+        "published_at": note_data.get('time') or note_data.get('publishTime') or note_data.get('published_at'),
+        "note_type": "video" if str(note_data.get('type') or '').lower() == 'video' else "image",
+        "cover_url": cover.get('urlDefault') or cover.get('url_default') or cover.get('url'),
+        "like_count": interact_info.get('likedCount') or interact_info.get('liked_count'),
+        "collect_count": interact_info.get('collectedCount') or interact_info.get('collected_count'),
+        "comment_count": interact_info.get('commentCount') or interact_info.get('comment_count'),
+        "share_count": interact_info.get('shareCount') or interact_info.get('share_count'),
+        "url": url,
     }
 
 
@@ -227,13 +243,27 @@ def _parse_xhs_html(html: str, url: str) -> dict:
     if author_match:
         author = author_match.group(1)
 
+    def meta(name: str) -> str:
+        match = re.search(rf'<meta[^>]+(?:property|name)=["\']{re.escape(name)}["\'][^>]+content=["\']([^"\']*)', html, re.I)
+        return match.group(1).strip() if match else ''
+
     return {
+        "note_id": _xhs_note_id_from_url(url) or '',
         "title": title,
         "content": content,
         "author": author,
         "tags": [],
-        "platform": "xhs"
+        "platform": "xhs",
+        "cover_url": meta('og:image'),
+        "published_at": meta('article:published_time'),
+        "url": url,
     }
+
+
+def _xhs_note_id_from_url(url: str) -> Optional[str]:
+    """分享参数可能过期，note_id 才是稳定身份。"""
+    match = re.search(r'/(?:explore|discovery/item)/([0-9a-zA-Z]+)', url or '')
+    return match.group(1) if match else None
 
 
 # ========== 微信公众号提取 ==========

@@ -16,6 +16,9 @@ from celery.schedules import crontab
 
 
 CELERY_BEAT_SCHEDULE = {
+    # 搜索采集已由本地 Mac Agent 接管；服务器只保留关键词生成和素材分析。
+    "xhs-dynamic-generate": {"task": "xhs.generate_dynamic_keywords", "schedule": crontab(minute=30, hour=21)},
+    "xhs-note-analysis": {"task": "xhs.analyze_notes", "schedule": crontab(minute=10, hour=22)},
     # ── 采集：每天 5 波，错峰派发每个源 ──
     "dispatch-fetch": {
         "task": "scraper.dispatch_fetch",

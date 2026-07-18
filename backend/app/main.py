@@ -10,6 +10,7 @@ import time
 import uvicorn
 
 from app.core.config import settings
+import app.core.celery_app  # noqa: F401  # 关键：让 API 进程内 @shared_task 发布时绑定正式 Celery 应用，否则任务进无人消费的 celery 默认队列
 from app.core.logging_security import install_sensitive_log_filter
 from app.core.product_access import (
     PRODUCT_CREATION_TOOL,
@@ -188,6 +189,7 @@ def _required_product_for_request(request: Request) -> Optional[str]:
         "/title-munger",
         "/standalone-title",
         "/wechat-to-xhs",
+        "/xhs",
         "/generation-records",
         "/image-proxy",
         "/xhs-publish",

@@ -36,7 +36,7 @@ X_KEYWORDS_CN = [
     "提示词", "MCP", "智能体", "多模态", "开源模型", "具身智能",
 ]
 X_KEYWORDS_EN = [
-    "AI agent", "LLM", "Claude AI", "GPT-5", "open source LLM", "RAG",
+    "generative AI", "LLM", "Claude AI", "GPT-5", "open source LLM", "RAG",
     "AI coding", "agentic AI", "fine-tuning", "multimodal", "prompt engineering",
     "MCP protocol", "AI startup", "LLM inference", "AI research",
 ]

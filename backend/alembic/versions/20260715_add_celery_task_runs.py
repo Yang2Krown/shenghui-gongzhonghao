@@ -4,6 +4,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 revision: str = "20260715_celery_task_runs"
@@ -13,6 +14,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Older application startups could create this model through metadata before
+    # Alembic reached this revision. Treat that schema as already provisioned.
+    if "celery_task_runs" in inspect(op.get_bind()).get_table_names():
+        return
     op.create_table(
         "celery_task_runs",
         sa.Column("id", sa.Integer(), nullable=False),
