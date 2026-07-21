@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.v1 import api_router
-from app.api.v1.xhs_agent import COMMAND_TYPES, _secret_hash
+from app.api.v1.xhs_agent import COMMAND_TYPES, CommandBody, _secret_hash
 from app.db.base import Base
 from app.models.xhs import XhsAgentBatch, XhsAgentUpload, XhsCollectorDevice, XhsKeyword, XhsKeywordRun, XhsNote, XhsProviderCall
 from app.services import xhs_agent_ingestion as ingestion
@@ -17,7 +17,7 @@ def test_agent_routes_and_command_whitelist_are_registered():
     assert ("/xhs-agent/batches/{batch_id}/results", "POST") in routes
     assert ("/admin/xhs-monitoring/agent/pairings", "POST") in routes
     assert ("/admin/xhs-monitoring/agent/commands", "POST") in routes
-    assert COMMAND_TYPES == {"test_keyword", "pause", "resume", "stop", "login"}
+    assert COMMAND_TYPES == {"test_keyword", "refresh_image", "pause", "resume", "stop", "login"}
 
 
 def test_agent_secret_hash_is_stable_and_does_not_store_raw_token():
@@ -25,6 +25,11 @@ def test_agent_secret_hash_is_stable_and_does_not_store_raw_token():
     assert _secret_hash(token) == _secret_hash(token)
     assert _secret_hash(token) != token
     assert len(_secret_hash(token)) == 64
+
+
+def test_manual_agent_command_can_explicitly_request_cooldown_override():
+    body=CommandBody(device_id="device-1",command_type="test_keyword",keyword_id=12,force=True)
+    assert body.force is True and body.keyword_id==12
 
 
 def test_agent_ingestion_is_idempotent_and_reuses_material_pipeline(monkeypatch):
@@ -74,6 +79,43 @@ def test_agent_ingestion_is_idempotent_and_reuses_material_pipeline(monkeypatch)
         assert run.rejection_counts["_search_diagnostics"] == 1
         assert run.rejection_counts["_detail_success"] == 1
         assert upload.raw_count == 12
+
+
+def test_agent_ingestion_accepts_all_qualified_notes_without_top_ten_cap(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    table_names = [
+        "source_registry", "raw_infos", "xhs_keywords", "xhs_collector_devices",
+        "xhs_agent_commands", "xhs_agent_batches", "xhs_keyword_runs",
+        "xhs_agent_uploads", "xhs_notes", "xhs_note_discoveries",
+        "xhs_engagement_snapshots", "xhs_provider_calls",
+    ]
+    Base.metadata.create_all(engine, tables=[Base.metadata.tables[name] for name in table_names])
+    factory = sessionmaker(bind=engine, class_=Session, expire_on_commit=False)
+    monkeypatch.setattr(ingestion, "SessionLocal", factory)
+    with factory() as db:
+        keyword = XhsKeyword(keyword="AI", normalized_keyword="ai", keyword_type="base", schedule_group=1, enabled=True)
+        device = XhsCollectorDevice(name="Test Mac", token_hash="hash", schedule_config={})
+        db.add_all([keyword, device]); db.flush()
+        batch = XhsAgentBatch(device_id=device.id, local_batch_key="unlimited-test", mode="test", status="running", schedule_date=date.today(), total_keywords=1, started_at=datetime.now())
+        db.add(batch); db.commit()
+        batch_id, device_id, keyword_id = batch.public_id, device.id, keyword.id
+
+    notes = [{
+        "note_id": f"unlimited-{index}", "title": f"标题 {index}", "content": "完整正文",
+        "published_at": datetime.now().isoformat(), "note_type": "image",
+        "author": {"id": f"u{index}", "nickname": f"作者 {index}"},
+        "cover_url": f"https://sns-webpic.xhscdn.com/{index}.jpg",
+        "engagement": {"likes": 3000 + index}, "provider_rank": index + 1,
+    } for index in range(12)]
+    result = ingestion.ingest_agent_result(
+        device_id=device_id, batch_public_id=batch_id, keyword_id=keyword_id,
+        idempotency_key="unlimited-test:keyword", payload={"status": "success", "notes": notes},
+    )
+    assert result["accepted"] == 12
+    with factory() as db:
+        assert db.query(XhsNote).count() == 12
+        run = db.query(XhsKeywordRun).one()
+        assert run.final_count == 12 and run.displayable_count == 12
 
 
 def test_agent_ingestion_labels_captcha_as_verification_required(monkeypatch):

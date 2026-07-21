@@ -4,18 +4,21 @@ import logging
 import random
 from collections import defaultdict
 from datetime import timedelta
+from pathlib import Path
 
 from celery import shared_task
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.timezone import utcnow
-from app.db.session import SessionLocal
+from app.db.session import AsyncSessionLocal, SessionLocal, engine as async_engine
 from app.models.xhs import XhsKeyword, XhsNote, XhsNoteDiscovery, XhsProviderCall
 from app.services.llm.llm_client import ChatMessage, get_llm_client
-from app.services.xhs_collection import collect_keyword, normalize_keyword, refresh_note_image, reserve_tikhub_searches
+from app.services.xhs_collection import collect_keyword, eligibility_clause, normalize_keyword, refresh_note_image, reserve_tikhub_searches
+from app.services.xhs_topics import evaluate_keyword_lifecycle, rebuild_semantic_topics
 
 logger = logging.getLogger(__name__)
+PUBLIC_XHS_STATUSES = ("ready", "ready_degraded", "synced")
 
 
 @shared_task(name="xhs.collect_keyword")
@@ -27,6 +30,55 @@ def collect_keyword_task(keyword_id: int, allow_paid: bool = True, retry_existin
 @shared_task(name="xhs.refresh_note_image")
 def refresh_note_image_task(note_id: str, allow_paid: bool = False):
     with SessionLocal() as db:return asyncio.run(refresh_note_image(db,note_id,allow_paid=allow_paid))
+
+
+@shared_task(name="xhs.cache_note_media")
+def cache_note_media_task(note_id: str):
+    """趁小红书 CDN URL 仍有效时预缓存；只写服务器本地盘，不上传 OSS。"""
+    from app.api.v1.xhs import fetch_media_to_cache, media_cache_base, media_cache_lookup_exact
+    from app.models.xhs import XhsNote
+    with SessionLocal() as db:
+        note=db.scalar(select(XhsNote).where(XhsNote.note_id==note_id))
+        if not note:return {"cached":0,"failed":0,"reason":"素材不存在"}
+        cached=failed=0
+        for kind,url in (("cover",note.cover_url),("avatar",note.avatar_url)):
+            if not url or media_cache_lookup_exact(note.id,kind,url):continue
+            try:
+                asyncio.run(fetch_media_to_cache(url,media_cache_base(note.id,kind,url)));cached+=1
+            except Exception:
+                failed+=1
+        return {"cached":cached,"failed":failed}
+
+
+def purge_xhs_media_cache_files(cache_dir: Path, keep_note_ids: set[int]) -> dict:
+    """删除不再展示的素材图片；文件名首段是 XhsNote 数据库主键。"""
+    deleted_files=deleted_bytes=0
+    if not cache_dir.is_dir():return {"deleted_files":0,"deleted_bytes":0}
+    for path in cache_dir.iterdir():
+        if not path.is_file():continue
+        try:note_pk=int(path.name.split("_",1)[0])
+        except (ValueError,IndexError):continue
+        if note_pk in keep_note_ids:continue
+        try:
+            deleted_bytes+=path.stat().st_size
+            path.unlink()
+            deleted_files+=1
+        except FileNotFoundError:pass
+    return {"deleted_files":deleted_files,"deleted_bytes":deleted_bytes}
+
+
+@shared_task(name="xhs.cleanup_media_cache")
+def cleanup_xhs_media_cache_task(days: int = 7):
+    """每日只保留仍会在前端展示的近 N 天小红书素材图片。"""
+    cutoff=utcnow()-timedelta(days=max(1,days))
+    with SessionLocal() as db:
+        keep_ids=set(db.scalars(select(XhsNote.id).where(
+            XhsNote.quality_status.in_(PUBLIC_XHS_STATUSES),
+            XhsNote.published_at.is_not(None),
+            XhsNote.published_at>=cutoff,
+        )).all())
+    cache_dir=Path(settings.UPLOAD_DIR)/"xhs_media"
+    return {**purge_xhs_media_cache_files(cache_dir,keep_ids),"kept_notes":len(keep_ids),"days":days}
 
 
 @shared_task(name="xhs.dispatch_group")
@@ -68,7 +120,7 @@ def generate_dynamic_keywords_task():
     if not settings.XHS_COLLECTION_ENABLED: return {"skipped":True,"reason":"feature_disabled"}
     cutoff=utcnow()-timedelta(hours=72);generic={"ai","工具","人工智能","教程","分享","干货"}
     with SessionLocal() as db:
-        rows=db.execute(select(XhsNote,XhsKeyword).join(XhsNoteDiscovery,XhsNoteDiscovery.note_id==XhsNote.id).join(XhsKeyword,XhsKeyword.id==XhsNoteDiscovery.keyword_id).where(XhsKeyword.keyword_type=="base",XhsNote.quality_status.in_(["ready","ready_degraded","synced"]),XhsNote.published_at>=cutoff,XhsNote.like_count>2000)).all()
+        rows=db.execute(select(XhsNote,XhsKeyword).join(XhsNoteDiscovery,XhsNoteDiscovery.note_id==XhsNote.id).join(XhsKeyword,XhsKeyword.id==XhsNoteDiscovery.keyword_id).where(XhsKeyword.keyword_type=="base",XhsNote.quality_status.in_(["ready","ready_degraded","synced"]),XhsNote.published_at>=cutoff,eligibility_clause(utcnow()))).all()
         posts=defaultdict(set);authors=defaultdict(set)
         for note,_keyword in rows:
             for tag in list(note.native_tags or [])+list(note.ai_topics or []):
@@ -82,7 +134,7 @@ def generate_dynamic_keywords_task():
         for value in normalized[:5]:
             key=normalize_keyword(value)
             if key in existing or key in generic: continue
-            db.add(XhsKeyword(keyword=value,normalized_keyword=key,keyword_type="derived",enabled=True,derived_evidence={"post_count":len(posts.get(key,set())),"author_count":len(authors.get(key,set())),"generated_at":utcnow().isoformat()},next_run_at=utcnow().replace(hour=8,minute=5,second=0,microsecond=0)+timedelta(days=1)))
+            db.add(XhsKeyword(keyword=value,normalized_keyword=key,keyword_type="derived",enabled=False,lifecycle_status="candidate",derived_evidence={"post_count":len(posts.get(key,set())),"author_count":len(authors.get(key,set())),"generated_at":utcnow().isoformat()},next_run_at=None))
             existing.add(key);created.append(value)
         db.commit();return {"candidates":len(ranked),"created":created,"run_date":tomorrow.isoformat()}
 
@@ -91,17 +143,41 @@ def generate_dynamic_keywords_task():
 def analyze_notes_task():
     """每批 10 篇生成中文摘要和 3-5 个话题；失败不影响展示。"""
     if not settings.XHS_COLLECTION_ENABLED: return {"skipped":True,"reason":"feature_disabled"}
-    with SessionLocal() as db:
-        notes=db.scalars(select(XhsNote).where(XhsNote.quality_status.in_(["ready","ready_degraded","synced"]),XhsNote.ai_summary.is_(None)).order_by(XhsNote.id).limit(100)).all();done=0
-        for start in range(0,len(notes),10):
-            batch=notes[start:start+10]
-            try:
-                client=get_llm_client();payload=[{"note_id":n.note_id,"title":n.title,"content":(n.content or "")[:1500]} for n in batch]
-                result=asyncio.run(client.chat([ChatMessage(role="user",content="为每篇小红书笔记输出中文摘要和3到5个具体AI话题。返回 JSON：{\"items\":[{\"note_id\":\"\",\"summary\":\"\",\"topics\":[]}]}\n"+str(payload))],temperature=.2,max_tokens=1800,json_mode=True))
-                by_id={str(x.get("note_id")):x for x in (result.parsed or {}).get("items",[])}
-                for n in batch:
-                    item=by_id.get(n.note_id)
-                    if item:n.ai_summary=str(item.get("summary") or "")[:2000];n.ai_topics=[str(x) for x in (item.get("topics") or [])][:5];done+=1
-                db.add(XhsProviderCall(provider="llm",operation="xhs_topic_extract",status="success",is_paid=True,request_count=1,estimated_cost=0,metadata_json={"batch_size":len(batch)}));db.commit()
-            except Exception as exc: logger.warning("小红书分析批次失败，不影响素材展示: %s",exc);db.rollback()
-        return {"selected":len(notes),"analyzed":done}
+    async def run():
+        await async_engine.dispose()
+        try:
+            with SessionLocal() as db:
+                notes=db.scalars(select(XhsNote).where(XhsNote.quality_status.in_(["ready","ready_degraded","synced"]),XhsNote.ai_summary.is_(None)).order_by(XhsNote.id).limit(100)).all();done=0
+                for start in range(0,len(notes),10):
+                    batch=notes[start:start+10]
+                    try:
+                        client=get_llm_client();payload=[{"note_id":n.note_id,"title":n.title,"content":(n.content or "")[:1500]} for n in batch]
+                        result=await client.chat([ChatMessage(role="user",content="为每篇小红书笔记输出中文摘要和3到5个具体AI话题。返回 JSON：{\"items\":[{\"note_id\":\"\",\"summary\":\"\",\"topics\":[]}]}\n"+str(payload))],temperature=.2,max_tokens=1800,json_mode=True)
+                        by_id={str(x.get("note_id")):x for x in (result.parsed or {}).get("items",[])}
+                        for n in batch:
+                            item=by_id.get(n.note_id)
+                            if item:n.ai_summary=str(item.get("summary") or "")[:2000];n.ai_topics=[str(x) for x in (item.get("topics") or [])][:5];done+=1
+                        db.add(XhsProviderCall(provider="llm",operation="xhs_topic_extract",status="success",is_paid=True,request_count=1,estimated_cost=0,metadata_json={"batch_size":len(batch)}));db.commit()
+                    except Exception as exc: logger.warning("小红书分析批次失败，不影响素材展示: %s",exc);db.rollback()
+                return {"selected":len(notes),"analyzed":done}
+        finally:
+            await async_engine.dispose()
+    return asyncio.run(run())
+
+
+@shared_task(name="xhs.rebuild_semantic_topics")
+def rebuild_semantic_topics_task(wave: str = "nightly"):
+    async def run():
+        await async_engine.dispose()
+        try:
+            async with AsyncSessionLocal() as db: return await rebuild_semantic_topics(db,wave)
+        finally:
+            await async_engine.dispose()
+    return asyncio.run(run())
+
+
+@shared_task(name="xhs.evaluate_keyword_lifecycle")
+def evaluate_keyword_lifecycle_task():
+    async def run():
+        async with AsyncSessionLocal() as db: return await evaluate_keyword_lifecycle(db)
+    return asyncio.run(run())

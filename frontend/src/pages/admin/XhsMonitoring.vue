@@ -122,9 +122,9 @@
           </div>
           <button
             v-if="item.action === 'retry'"
-            :disabled="recoveryBusy === item.key || !canAgentCollect || !!activeBatch || manualRetryWaitMinutes > 0"
+            :disabled="recoveryBusy === item.key || !canAgentCollect || !!activeBatch || (manualRetryWaitMinutes > 0 && !userStore.isSuperAdmin)"
             @click="retryFailedSlot(item.slot)"
-          >{{ recoveryBusy === item.key ? "正在重试…" : manualRetryWaitMinutes > 0 ? `安全冷却 ${manualRetryWaitMinutes} 分钟` : "重新执行这个词" }}</button>
+          >{{ recoveryBusy === item.key ? "正在重试…" : manualRetryWaitMinutes > 0 ? userStore.isSuperAdmin ? `跳过冷却并重试` : `安全冷却 ${manualRetryWaitMinutes} 分钟` : "重新执行这个词" }}</button>
           <button v-else-if="item.action === 'login'" :disabled="!primaryAgent.connected" @click="startLocalLogin">打开人工验证</button>
           <button v-else @click="refresh">重新检测状态</button>
         </section>
@@ -147,24 +147,30 @@
         </div>
       </div>
       <template v-if="primaryAgent">
-        <section :class="['active-task', { idle: !activeBatch, blocked: primaryAgent.cookie_status === 'verification_required' }]">
+        <section :class="['active-task', { idle: !hasActiveTask, blocked: primaryAgent.cookie_status === 'verification_required' }]">
           <div class="active-task-copy">
             <div class="task-label">
               <span class="status-dot"></span>
-              {{ activeBatch ? "正在采集" : primaryAgent.cookie_status === "verification_required" ? "采集已阻断" : "当前空闲" }}
+              {{ hasActiveTask ? "正在采集" : primaryAgent.cookie_status === "verification_required" ? "采集已阻断" : "当前空闲" }}
               <span v-if="activeBatch" class="auto-refresh">每 5 秒更新</span>
             </div>
-            <h3>{{ activeBatch ? (primaryAgent.current_keyword || "正在准备下一个关键词…") : agentIdleTitle }}</h3>
+            <h3>{{ hasActiveTask ? (activeBatch?.current_keyword || primaryAgent.current_keyword || runningPlanSlot?.keyword || "正在读取当前关键词…") : agentIdleTitle }}</h3>
             <p v-if="activeBatch">
               {{ batchMode(activeBatch.mode) }} · 已处理 {{ batchProcessed(activeBatch) }} / {{ activeBatch.total_keywords }} 个关键词
               <span class="phase-hint">最近进度 {{ shortTime(activeBatch.last_progress_at) }} · 当前只执行这一个关键词</span>
             </p>
+            <p v-else-if="runningPlanSlot">定时采集正在本地执行；后续到点任务会按顺序衔接。</p>
             <p v-else>{{ agentIdleDescription }}</p>
           </div>
           <div v-if="activeBatch" class="task-progress-card">
-            <strong>{{ batchPercent(activeBatch) }}%</strong>
-            <span>完成 {{ activeBatch.completed_keywords }} · 异常 {{ activeBatch.failed_keywords }}</span>
+            <strong>{{ batchProcessed(activeBatch) ? batchPercent(activeBatch) + "%" : "执行中" }}</strong>
+            <span>当前单词任务 · 完成 {{ activeBatch.completed_keywords }} · 异常 {{ activeBatch.failed_keywords }}</span>
             <i><b :style="{ width: batchPercent(activeBatch) + '%' }"></b></i>
+          </div>
+          <div v-else-if="runningPlanSlot" class="task-progress-card">
+            <strong>执行中</strong>
+            <span>{{ slotTime(runningPlanSlot) }} 开始 · 当前只执行这一个关键词</span>
+            <i><b style="width: 18%"></b></i>
           </div>
           <div v-else class="task-ready-card">
             <small>Cookie</small>
@@ -174,8 +180,8 @@
 
         <div class="agent-facts">
           <div><small>本地账号</small><strong>{{ agentCookieLabel(primaryAgent.cookie_status) }}</strong><span>Cookie 仅保存在 Mac</span></div>
-          <div><small>今日关键词</small><strong>{{ todayPlan ? `${todayPlan.base_count} + ${todayPlan.derived_count}` : "正在生成" }}</strong><span>全部基础词 + 随机总结词</span></div>
-          <div><small>下一次</small><strong>{{ nextPlanSlot ? slotTime(nextPlanSlot) : "今日已结束" }}</strong><span>{{ nextPlanSlot?.keyword || "没有待执行关键词" }}</span></div>
+          <div><small>今日关键词</small><strong>{{ todayPlan ? `${todayPlan.base_count} + ${todayPlan.derived_count}` : "正在生成" }}</strong><span>09:40 / 14:20 两波 · 重点词重复</span></div>
+          <div><small>{{ runningPlanSlot ? "当前任务" : "下一次" }}</small><strong>{{ runningPlanSlot ? "执行中" : nextPendingSlot ? slotTime(nextPendingSlot) : "今日已结束" }}</strong><span>{{ runningPlanSlot?.keyword || nextPendingSlot?.keyword || "没有待执行关键词" }}</span></div>
           <div><small>今日进度</small><strong>{{ planCompleted }} / {{ planTotal }}</strong><span>跳过 {{ planSkipped }} · 剩余 {{ planPending }}</span></div>
         </div>
       </template>
@@ -186,14 +192,14 @@
       <div v-if="!primaryAgent" class="agent-empty"><strong>尚未绑定本地采集节点</strong><p>生成绑定码后，在这台 Mac 上运行一次安装程序；之后自动启动。</p></div>
       <section v-if="primaryAgent && todayPlan" class="daily-plan">
         <div class="daily-plan-head">
-          <div><strong>今日采集时间轴</strong><span>每次只采一个词；错过执行窗口不会集中补跑</span></div>
+          <div><strong>今日采集时间轴</strong><span>每次只采一个词；到点后按队列串行执行</span></div>
           <em :class="{ paused: todayPlan.paused, stopped: todayPlan.stopped }">{{ planStateLabel }}</em>
         </div>
         <div class="plan-track">
-          <div v-for="slot in todayPlan.slots" :key="slot.keyword_id" :class="['plan-slot', slot.status]" :title="slot.error || slot.reason || ''">
+          <div v-for="slot in todayPlan.slots" :key="`${slot.wave || 'manual'}-${slot.keyword_id}-${slot.scheduled_at}`" :class="['plan-slot', slot.status]" :title="slot.error || slot.reason || ''">
             <time>{{ slotTime(slot) }}</time><span>{{ slot.keyword }}</span><b>{{ slotTypeLabel(slot) }} · {{ slotStatus(slot.status) }}</b>
             <small v-if="slot.error">{{ slot.error }}</small>
-            <button v-if="slot.status === 'failed'" :disabled="recoveryBusy === `slot-${slot.keyword_id}` || !canAgentCollect || !!activeBatch || manualRetryWaitMinutes > 0" @click="retryFailedSlot(slot)">{{ manualRetryWaitMinutes > 0 ? `${manualRetryWaitMinutes} 分钟后可重试` : "重试" }}</button>
+            <button v-if="slot.status === 'failed'" :disabled="recoveryBusy === `slot-${slot.keyword_id}` || !canAgentCollect || !!activeBatch || (manualRetryWaitMinutes > 0 && !userStore.isSuperAdmin)" @click="retryFailedSlot(slot)">{{ manualRetryWaitMinutes > 0 ? userStore.isSuperAdmin ? "跳过冷却并重试" : `${manualRetryWaitMinutes} 分钟后可重试` : "重试" }}</button>
           </div>
         </div>
       </section>
@@ -219,19 +225,25 @@
         </div>
       </div>
     </article>
-    <div v-if="data" class="funnel">
-      <div
-        v-for="(s, i) in funnelStages"
-        :key="s.label"
-        class="stage"
-        :class="{ final: i === funnelStages.length - 1 && s.value > 0 }"
-      >
-        <small>{{ s.label }}</small
-        ><strong>{{ s.value }}</strong
-        ><em v-if="s.conv" :class="{ zero: !s.value }">转化 {{ s.conv }}</em
-        ><em v-else-if="s.note" class="zero">{{ s.note }}</em>
+    <section v-if="data" class="funnel-section">
+      <div class="funnel-head">
+        <div><span>DATA FUNNEL · TODAY</span><h2>今日采集过滤漏斗</h2></div>
+        <p>仅保留关键节点；重复、过期和详情缺失等淘汰原因可在执行明细中查看</p>
       </div>
-    </div>
+      <div class="funnel">
+        <div
+          v-for="(s, i) in funnelStages"
+          :key="s.label"
+          class="stage"
+          :class="[s.kind, { final: i === funnelStages.length - 1 && s.value > 0 }]"
+        >
+          <small>{{ s.label }}</small
+          ><strong>{{ s.value }}</strong
+          ><em v-if="s.conv" :class="{ zero: !s.value }">转化 {{ s.conv }}</em>
+          <span v-if="s.note" class="stage-note">{{ s.note }}</span>
+        </div>
+      </div>
+    </section>
     <div v-if="data" class="grid">
       <article class="panel runs">
         <div class="panel-head">
@@ -249,13 +261,13 @@
                 <th>TikHub</th>
                 <th>CLI</th>
                 <th>搜索 / 解析</th>
-                <th>一周内 / 高赞 / 入库</th>
+                <th>今日合格 / 一周合格 / 入库</th>
                 <th>状态</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in runRows" :key="row.keyword_id">
+              <tr v-for="row in runRows" :key="row.id">
                 <td>
                   <b>{{ row.keyword }}</b
                   ><small>{{
@@ -317,7 +329,7 @@
               >{{ cliAuthLabel(data.providers.cli) }}</em
             >
             <p>
-              锁定 0.6.4 · 一周内 · 最多点赞 · 全局并发
+              锁定 0.6.4 · 一周内搜索 · 今日 &gt; 200 / 一周 &gt; 2000 · 最多点赞 · 全局并发
               1。验证码冷却最长 10 分钟，重新扫码可立即解除。
             </p>
             <button
@@ -345,7 +357,7 @@
       <div class="panel-head">
         <div>
           <h2>关键词管理</h2>
-          <p>{{ enabledBaseCount }} 个基础词每天全部执行；{{ enabledDerivedCount }} 个总结词中每天随机最多 5 个</p>
+          <p>{{ enabledBaseCount + enabledDerivedCount }} 个启用词参与两波采集；连续 3 个有效零产出日自动隔离，最多保留 30 个</p>
         </div>
         <div class="kw-tools">
           <el-input
@@ -368,19 +380,17 @@
         >
           <div class="kw-main">
             <b>{{ k.keyword }}</b
-            ><span class="kw-state">{{ k.enabled ? "启用中" : "已停用" }}</span>
+            ><span class="kw-state">{{ lifecycleLabel(k) }}{{ k.pinned ? " · 已置顶" : "" }}</span>
           </div>
-          <small>{{
-            k.type === "base"
-              ? "基础词 · 每日执行"
-              : `动态词 · 冷却至 ${k.cooldown_until || "待执行"}`
-          }}</small>
+          <small>近次产出 {{ k.last_yield_count || 0 }} 篇 · 连续零产出 {{ k.zero_yield_streak || 0 }} 天<span v-if="k.quarantine_reason"> · {{ k.quarantine_reason }}</span></small>
           <div class="kw-actions">
             <button @click="searchNow(k)">立即搜索</button
             ><template v-if="userStore.isSuperAdmin"
               ><button @click="openEdit(k)">修改</button
               ><button @click="toggle(k)">
                 {{ k.enabled ? "停用" : "启用" }}</button
+              ><button @click="pinKeyword(k)">{{ k.pinned ? "取消置顶" : "置顶" }}</button
+              ><button v-if="k.lifecycle_status === 'quarantined'" @click="restoreKeyword(k)">恢复试采</button
               ><button v-if="k.type === 'derived'" @click="promote(k)">
                 提升</button
               ><button class="danger" @click="removeKeyword(k)">
@@ -468,10 +478,13 @@
             {{ runDiagnosticSummary(runNotesRun) }}
           </p>
           <div class="diagnostic-grid">
+            <div><small>搜索线路</small><b>{{ searchRouteLabel(runNotesRun) }}</b></div>
             <div><small>搜索页返回</small><b>{{ runNotesRun.cli_raw_count }}</b></div>
             <div><small>成功解析</small><b>{{ runNotesRun.merged_count }}</b></div>
-            <div><small>一周内</small><b>{{ runNotesRun.within_week_count }}</b></div>
-            <div><small>点赞 &gt; 2000</small><b>{{ runNotesRun.eligible_like_count }}</b></div>
+            <div><small>今日候选</small><b>{{ levelStat(runNotesRun, "daily", "candidate_count") }}</b></div>
+            <div><small>今日赞 &gt; 200</small><b>{{ levelStat(runNotesRun, "daily", "eligible_count") }}</b></div>
+            <div><small>一周候选</small><b>{{ levelStat(runNotesRun, "weekly", "candidate_count") }}</b></div>
+            <div><small>一周赞 &gt; 2000</small><b>{{ levelStat(runNotesRun, "weekly", "eligible_count") }}</b></div>
             <div><small>详情成功</small><b>{{ runNotesRun.detail_success_count }} / {{ runNotesRun.detail_attempted_count }}</b></div>
             <div><small>最终入库</small><b>{{ runNotesRun.displayable_count }}</b></div>
           </div>
@@ -499,7 +512,7 @@
               <td>
                 <a
                   class="note-link"
-                  :href="n.stable_url"
+                  :href="n.original_url || n.stable_url"
                   target="_blank"
                   rel="noopener"
                   >{{ n.title || n.note_id }}</a
@@ -552,11 +565,12 @@
               <td>{{ r.failure_count }}</td>
               <td>{{ time(r.last_failed_at) }}</td>
               <td>
-                <button class="link" @click="refreshImage(r)">
-                  免费刷新图片</button
+                <button class="link" :disabled="imageRefreshBusy === r.note_id" @click="refreshImage(r)">
+                  {{ imageRefreshBusy === r.note_id ? "正在刷新…" : "免费刷新图片" }}</button
                 ><button class="link paid" @click="resolveFailure(r)">
                   标记已处理
                 </button>
+                <small v-if="imageRefreshFeedback[r.note_id]" class="refresh-feedback">{{ imageRefreshFeedback[r.note_id] }}</small>
               </td>
             </tr>
             <tr v-if="!failures.length">
@@ -619,6 +633,7 @@
         <div v-if="!localLoginQr" class="qr-placeholder">正在让本地 Mac 生成二维码…</div>
         <canvas v-show="localLoginQr" ref="localLoginCanvas"></canvas>
         <p :class="['auth-state', localLoginState]">{{ localLoginMessage }}</p>
+        <button v-if="localLoginState === 'failed'" class="retry-auth" @click="startLocalLogin">重新获取二维码</button>
         <div v-if="localLoginVerificationUrl" class="auth-verify">
           <a :href="localLoginVerificationUrl" target="_blank" rel="noopener noreferrer">打开小红书人机验证</a>
           <small>在新页面完成验证后回到这里等待“本地授权成功”，然后关闭窗口并点击“继续今日计划”。</small>
@@ -672,8 +687,10 @@ const userStore = useUserStore(),
   localLoginMessage = ref("等待本地节点响应…"),
   localLoginVerificationUrl = ref(""),
   localLoginCommandId = ref(""),
+  imageRefreshBusy = ref(""),
   recoveryBusy = ref(""),
-  recoveryResult = reactive({});
+  recoveryResult = reactive({}),
+  imageRefreshFeedback = reactive({});
 let authTimer = null;
 let monitorTimer = null;
 let localLoginTimer = null;
@@ -733,9 +750,11 @@ const planTotal = computed(() => planSlots.value.length);
 const planCompleted = computed(() => planSlots.value.filter((slot) => slot.status === "completed").length);
 const planSkipped = computed(() => planSlots.value.filter((slot) => ["skipped", "stopped", "blocked"].includes(slot.status)).length);
 const planPending = computed(() => planSlots.value.filter((slot) => ["pending", "running"].includes(slot.status)).length);
-const nextPlanSlot = computed(() => planSlots.value.find((slot) => ["running", "pending"].includes(slot.status)) || null);
+const runningPlanSlot = computed(() => planSlots.value.find((slot) => slot.status === "running") || null);
+const hasActiveTask = computed(() => Boolean(activeBatch.value || runningPlanSlot.value));
+const nextPendingSlot = computed(() => planSlots.value.find((slot) => slot.status === "pending") || null);
 const planWindow = computed(() => todayPlan.value ? `${todayPlan.value.window_start}–${todayPlan.value.window_end}` : "09:30–22:30");
-const planStateLabel = computed(() => todayPlan.value?.stopped ? "今日已停止" : todayPlan.value?.risk_blocked ? "等待人工验证" : todayPlan.value?.paused ? "已暂停" : activeBatch.value ? "正在执行" : planPending.value ? "等待下一词" : "今日完成");
+const planStateLabel = computed(() => todayPlan.value?.stopped ? "今日已停止" : todayPlan.value?.risk_blocked ? "等待人工验证" : todayPlan.value?.paused ? "已暂停" : hasActiveTask.value ? "正在执行" : planPending.value ? "等待下一词" : "今日完成");
 const slotTime = (slot) => slot?.scheduled_at?.slice(11, 16) || "—";
 const slotTypeLabel = (slot) => slot?.keyword_type === "derived" ? "总结词" : "基础词";
 const slotStatus = (value) => ({ pending: "待执行", running: "执行中", completed: "完成", failed: "失败", skipped: "已错过", stopped: "已停止", blocked: "风控停止", risk_blocked: "风控停止" })[value] || value;
@@ -744,7 +763,7 @@ const agentIdleTitle = computed(() => {
   if (primaryAgent.value.cookie_status === "verification_required") return "需要重新验证本地账号";
   if (todayPlan.value?.stopped) return "今日计划已经停止";
   if (todayPlan.value?.paused) return "今日计划已暂停";
-  if (nextPlanSlot.value) return `等待 ${slotTime(nextPlanSlot.value)} · ${nextPlanSlot.value.keyword}`;
+  if (nextPendingSlot.value) return `等待 ${slotTime(nextPendingSlot.value)} · ${nextPendingSlot.value.keyword}`;
   return "今日计划已执行完毕";
 });
 const agentIdleDescription = computed(() => {
@@ -840,8 +859,27 @@ const stopTodayPlan = async () => {
   );
   await sendAgentCommand("stop");
 };
+const confirmCooldownOverride = async () => {
+  if (!manualRetryWaitMinutes.value) return false;
+  if (!userStore.isSuperAdmin) {
+    ElMessage.warning(`请等待 ${manualRetryWaitMinutes.value} 分钟后再试`);
+    return null;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `当前仍在 15 分钟安全冷却期内，跳过可能增加验证码或风控概率。`,
+      "确认立即搜索？",
+      { confirmButtonText: "跳过冷却", cancelButtonText: "继续等待", type: "warning", lockScroll: false },
+    );
+    return true;
+  } catch {
+    return null;
+  }
+};
 const testKeywordWithAgent = async (keywordId) => {
-  await sendAgentCommand("test_keyword", { keyword_id: keywordId });
+  const force = await confirmCooldownOverride();
+  if (force === null) return;
+  await sendAgentCommand("test_keyword", { keyword_id: keywordId, force });
 };
 const waitForRecovery = async (commandId, itemKey) => {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -863,7 +901,9 @@ const retryFailedSlot = async (slot) => {
   recoveryBusy.value = itemKey;
   recoveryResult[itemKey] = "已发送到本地 Mac，正在等待采集结果…";
   try {
-    const command = await sendAgentCommand("test_keyword", { keyword_id: slot.keyword_id });
+    const force = await confirmCooldownOverride();
+    if (force === null) return;
+    const command = await sendAgentCommand("test_keyword", { keyword_id: slot.keyword_id, force });
     if (!command?.command_id) throw new Error("恢复命令没有成功创建");
     await waitForRecovery(command.command_id, itemKey);
   } catch (error) {
@@ -900,7 +940,10 @@ const pollLocalLogin = async () => {
     }
     if (command.status === "succeeded" || command.status === "failed") {
       if (command.status === "succeeded") ElMessage.success("本地 Cookie 已更新");
-      else localLoginMessage.value = command.error || "本地扫码登录失败";
+      else {
+        localLoginState.value = "failed";
+        localLoginMessage.value = command.error || "本地扫码登录失败";
+      }
       stopLocalLoginPoll();
       await loadAgent();
       return;
@@ -971,12 +1014,12 @@ const reasons = {
   invalid_payload: "无法解析",
   old: "超过 7 天",
   unknown_date: "发布时间未知",
-  low_like: "点赞不大于 2000",
+  low_like: "未达到所在层级点赞门槛",
   unknown_metric: "指标未知",
   unknown_type: "类型未知",
   core_incomplete: "核心详情缺失",
-  rank_overflow: "排名第 10 名后",
-  rank: "排名第 10 名后",
+  rank_overflow: "历史版本数量截断",
+  rank: "历史版本数量截断",
 };
 const reason = (k) => reasons[k] || k;
 const cliResultLabel = (row) => {
@@ -989,10 +1032,15 @@ const searchParseLabel = (row) =>
   row.run_source === "local_agent" && !row.has_search_diagnostics
     ? `未知 / 已上传 ${row.merged_count}`
     : `${row.tikhub_raw_count + row.cli_raw_count} / ${row.merged_count}`;
+const levelStat = (row, level, field) => row?.level_stats?.[level]?.[field] ?? "—";
+const searchRouteLabel = (row) => {
+  const sorts = (row?.searches || []).map((item) => item.sort).filter(Boolean);
+  return sorts.length ? sorts.join(" + ") : "历史批次";
+};
 const filterResultLabel = (row) =>
   row.run_source === "local_agent" && !row.has_search_diagnostics
     ? `未知 / 未知 / ${row.displayable_count}`
-    : `${row.within_week_count} / ${row.eligible_like_count} / ${row.displayable_count}`;
+    : `${levelStat(row, "daily", "eligible_count")} / ${levelStat(row, "weekly", "eligible_count")} / ${row.displayable_count}`;
 const diagnosticRejections = computed(() =>
   Object.entries(runNotesRun.value?.rejection_counts || {})
     .filter(([key, count]) => !key.startsWith("_") && Number(count) > 0)
@@ -1036,6 +1084,9 @@ const toggle = async (k) => {
   });
   load();
 };
+const lifecycleLabel = (k) => ({ candidate: "候选中", trial: "试采中", active: "启用中", quarantined: "已隔离" })[k.lifecycle_status] || (k.enabled ? "启用中" : "已停用");
+const pinKeyword = async (k) => { await api.patch(`/admin/xhs-monitoring/keywords/${k.id}/pin`,null,{params:{pinned:!k.pinned}});ElMessage.success(k.pinned ? "已取消置顶" : "已置顶");load() };
+const restoreKeyword = async (k) => { await api.post(`/admin/xhs-monitoring/keywords/${k.id}/restore`);ElMessage.success("已恢复为试采关键词");load() };
 const promote = async (k) => {
   await api.post(`/admin/xhs-monitoring/keywords/${k.id}/promote`);
   ElMessage.success("已提升为基础词");
@@ -1062,33 +1113,40 @@ const funnelStages = computed(() => {
   const f = data.value?.funnel || {},
     pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : null),
     raw = (f.tikhub_raw_count || 0) + (f.cli_raw_count || 0),
-    cliIncomplete = (f.cli_missing_diagnostics_count || 0) > 0;
+    cliIncomplete = (f.cli_missing_diagnostics_count || 0) > 0,
+    parsedOut = Math.max(0, raw - (f.merged_count || 0));
   return [
-    { label: "TikHub 候选", value: f.tikhub_raw_count || 0 },
     {
-      label: "CLI 搜索页返回",
-      value: cliIncomplete ? "未完整记录" : f.cli_raw_count || 0,
-      note: cliIncomplete ? `${f.cli_missing_diagnostics_count} 个历史批次未知` : null,
+      label: "搜索页返回",
+      value: cliIncomplete ? "未完整记录" : raw,
+      note: cliIncomplete
+        ? `${f.cli_missing_diagnostics_count} 个历史批次未知`
+        : f.tikhub_raw_count
+          ? `CLI ${f.cli_raw_count || 0} · TikHub ${f.tikhub_raw_count}`
+          : "本地 CLI",
     },
     {
-      label: "合并去重",
+      label: "解析并去重",
       value: f.merged_count || 0,
       conv: pct(f.merged_count, raw),
+      note: parsedOut ? `排除重复或无效 ${parsedOut}` : "已按 note_id 去重",
     },
     {
-      label: "过滤合格",
-      value: f.filtered_count || 0,
-      conv: pct(f.filtered_count, f.merged_count),
+      label: "点赞门槛合格",
+      value: f.eligible_like_count || 0,
+      conv: pct(f.eligible_like_count, f.merged_count),
+      note: "近 24h >200 · 1–7 天 >2000",
     },
     {
-      label: "最终前 10",
+      label: "完整入库",
       value: f.final_count || 0,
-      conv: pct(f.final_count, f.filtered_count),
+      conv: pct(f.final_count, f.eligible_like_count),
+      note: "标题、正文、作者与封面完整",
     },
     {
-      label: "入库",
-      value: f.displayable_count || 0,
-      conv: pct(f.displayable_count, f.final_count),
+      label: "今日新增素材",
+      value: f.unique_ingested_today_count || 0,
+      note: `当前可展示：24h ${f.current_daily_displayable_count || 0} · 7 天 ${f.current_displayable_count || 0}`,
     },
   ];
 });
@@ -1105,9 +1163,37 @@ const resolveFailure = async (r) => {
   load();
 };
 const refreshImage = async (r) => {
-  await api.post(`/admin/xhs-monitoring/notes/${r.note_id}/refresh-image-free`);
-  ElMessage.success("已提交图片刷新任务");
-  load();
+  if (!primaryAgent.value?.connected) return ElMessage.warning("本地采集节点当前离线");
+  if (primaryAgent.value.cookie_status !== "valid") return ElMessage.warning("请先完成本地节点扫码登录");
+  imageRefreshBusy.value = r.note_id;
+  imageRefreshFeedback[r.note_id] = "正在发送到本地 Mac，通常 10–30 秒…";
+  try {
+    const response = await api.post("/admin/xhs-monitoring/agent/commands", {
+      device_id: primaryAgent.value.id,
+      command_type: "refresh_image",
+      note_id: r.note_id,
+    });
+    const commandId = response.data.command_id;
+    imageRefreshFeedback[r.note_id] = "本地 Mac 正在读取小红书笔记…";
+    for (let attempt = 0; attempt < 75; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      const command = (await api.get(`/admin/xhs-monitoring/agent/commands/${commandId}`, { skipErrorToast: true })).data;
+      if (command.status === "succeeded") {
+        imageRefreshFeedback[r.note_id] = "刷新成功，封面已缓存";
+        ElMessage.success("封面已刷新并开始本地缓存");
+        await Promise.all([openFailures(), load()]);
+        return;
+      }
+      if (["failed", "cancelled"].includes(command.status)) throw new Error(command.error || "图片刷新失败");
+    }
+    throw new Error("图片刷新超时，请稍后查看失败报告");
+  } catch (error) {
+    const message = error?.response?.data?.detail || error?.message || "图片刷新失败";
+    imageRefreshFeedback[r.note_id] = `刷新失败：${message}`;
+    ElMessage.error(message);
+  } finally {
+    imageRefreshBusy.value = "";
+  }
 };
 const noteStatus = (s) =>
   ["ready", "ready_degraded", "synced"].includes(s)
@@ -1536,6 +1622,7 @@ onBeforeUnmount(() => {
 .fail-table table {
   min-width: 560px;
 }
+.refresh-feedback { display: block; margin-top: 5px; max-width: 190px; color: var(--ink-3); line-height: 1.45; }
 .notes-table {
   max-height: 420px;
 }
@@ -1566,16 +1653,47 @@ td em.bad {
   background: #e4eee9;
   color: var(--pine);
 }
+.funnel-section {
+  margin-top: 34px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.funnel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 28px;
+  margin-bottom: 14px;
+}
+.funnel-head span {
+  color: var(--clay-deep);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .16em;
+}
+.funnel-head h2 {
+  margin: 4px 0 0;
+  font: 700 20px var(--serif);
+}
+.funnel-head p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: right;
+}
 .funnel {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
 }
 .stage {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 11px 13px;
+  min-height: 92px;
+  padding: 13px 14px;
 }
 .stage small {
   color: var(--ink-3);
@@ -1600,23 +1718,44 @@ td em.bad {
   color: var(--clay-deep);
   background: var(--clay-tint);
 }
+.stage-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--ink-4);
+  font-size: 9px;
+  line-height: 1.4;
+}
 .stage.final {
   border-color: var(--pine);
 }
 .stage.final strong {
   color: var(--pine);
 }
+.stage.attrition {
+  border-color: #e7c9b7;
+  background: #fff8f2;
+}
+.stage.attrition strong {
+  color: var(--clay-deep);
+}
 .grid {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) 330px;
   gap: 13px;
-  margin-top: 13px;
+  margin-top: 28px;
 }
 .panel {
   margin-top: 13px;
 }
 .grid .panel {
   margin-top: 0;
+}
+.grid > aside {
+  display: flex;
+  min-width: 0;
+}
+.grid > aside > .panel {
+  flex: 1;
 }
 .panel-head {
   display: flex;
@@ -1914,6 +2053,8 @@ td em,
   .funnel {
     grid-template-columns: repeat(2, 1fr);
   }
+  .funnel-head { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .funnel-head p { text-align: left; }
   .diagnostic-grid {
     grid-template-columns: repeat(2, 1fr);
   }

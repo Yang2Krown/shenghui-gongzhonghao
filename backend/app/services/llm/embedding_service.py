@@ -32,15 +32,18 @@ class EmbeddingService:
         self.model = settings.EMBEDDING_MODEL
         self.dim = settings.EMBEDDING_DIM
         self._client: Optional[AsyncOpenAI] = None
+        self._client_loop = None
 
     def _get_client(self) -> AsyncOpenAI:
-        if self._client is None:
+        current_loop = asyncio.get_running_loop()
+        if self._client is None or self._client_loop is not current_loop:
             if not settings.EMBEDDING_API_KEY:
                 raise RuntimeError("EMBEDDING_API_KEY 未配置")
             self._client = AsyncOpenAI(
                 api_key=settings.EMBEDDING_API_KEY,
                 base_url=settings.EMBEDDING_API_BASE,
             )
+            self._client_loop = current_loop
         return self._client
 
     async def embed(self, text: str) -> Optional[List[float]]:

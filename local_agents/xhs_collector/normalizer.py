@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlparse
 
 
 def first(data: Any, *paths: str):
@@ -92,6 +92,31 @@ def find_note(value: Any, depth: int = 0) -> dict[str, Any] | None:
     return None
 
 
+def xsec_token(url: Any) -> str:
+    if not url: return ""
+    return (parse_qs(urlparse(str(url)).query).get("xsec_token") or [""])[0]
+
+
+def xsec_note_url(note_id: str, url: Any = None, token: Any = None, source: Any = None) -> str:
+    """将搜索结果中分开返回的 token 合并到可直达的笔记 URL。"""
+    raw_url = str(url or "").strip()
+    query = parse_qs(urlparse(raw_url).query) if raw_url else {}
+    resolved_token = str(token or (query.get("xsec_token") or [""])[0]).strip()
+    resolved_source = str(source or (query.get("xsec_source") or [""])[0] or "pc_search").strip()
+    stable_url = f"https://www.xiaohongshu.com/explore/{note_id}"
+    if not resolved_token: return raw_url or stable_url
+    return stable_url + "?" + urlencode({"xsec_token": resolved_token, "xsec_source": resolved_source})
+
+
+def remote_image_url(value: Any) -> str | None:
+    if not value:
+        return None
+    url = str(value).strip()
+    if url.startswith("http://") and ".xhscdn.com/" in url:
+        return "https://" + url[len("http://"):]
+    return url
+
+
 def normalize(raw: dict[str, Any], provider_rank: int = 1) -> dict[str, Any] | None:
     if raw.get("model_type") not in (None, "", "note"): return None
     note = raw.get("note") if isinstance(raw.get("note"), dict) else find_note(raw) or raw
@@ -101,12 +126,11 @@ def normalize(raw: dict[str, Any], provider_rank: int = 1) -> dict[str, Any] | N
     interact = first(note, "interact_info", "interactInfo", "note_card.interact_info") or {}
     note_type = str(first(note, "type", "note_type", "note_card.type") or "").lower()
     note_type = "video" if "video" in note_type else "image" if note_type else None
-    cover = first(note, "cover.url_default", "cover.url", "cover_url", "image_list.0.url_default", "note_card.cover.url_default")
-    url = first(note, "url", "share_url", "note_url")
-    if not url:
-        url = f"https://www.xiaohongshu.com/explore/{note_id}"
-        token = first(raw, "xsec_token", "note_card.xsec_token")
-        if token: url += "?" + urlencode({"xsec_token": str(token), "xsec_source": "pc_search"})
+    cover = remote_image_url(first(note, "cover.url_default", "cover.url", "cover_url", "image_list.0.url_default", "note_card.cover.url_default"))
+    raw_url = first(note, "url", "share_url", "note_url") or first(raw, "url", "share_url", "note_url")
+    token = first(note, "xsec_token", "xsecToken") or first(raw, "xsec_token", "xsecToken", "note_card.xsec_token", "note_card.xsecToken")
+    source = first(note, "xsec_source", "xsecSource") or first(raw, "xsec_source", "xsecSource", "note_card.xsec_source", "note_card.xsecSource")
+    url = xsec_note_url(str(note_id), raw_url, token, source)
     metric = lambda *keys: count_value(first(interact, *keys) if first(interact, *keys) is not None else first(note, *keys))
     return {
         "note_id": str(note_id),
@@ -114,7 +138,7 @@ def normalize(raw: dict[str, Any], provider_rank: int = 1) -> dict[str, Any] | N
         "content": str(first(note, "desc", "content", "note_card.desc") or ""),
         "published_at": (dt_value(first(note, "published_at", "time", "publish_time", "note_card.time")) or search_time(raw)),
         "note_type": note_type,
-        "author": {"id": first(user, "user_id", "id", "userid"), "nickname": first(user, "nickname", "nick_name", "name") or "", "bio": first(user, "desc", "bio") or "", "avatar_url": first(user, "avatar", "image")},
+        "author": {"id": first(user, "user_id", "id", "userid"), "nickname": first(user, "nickname", "nick_name", "name") or "", "bio": first(user, "desc", "bio") or "", "avatar_url": remote_image_url(first(user, "avatar", "image"))},
         "cover_url": cover,
         "engagement": {"likes": metric("liked_count", "like_count", "likedCount", "likes"), "collects": metric("collected_count", "collect_count", "collectedCount", "collects"), "comments": metric("comment_count", "commentCount", "comments"), "shares": metric("share_count", "shared_count", "shareCount", "shares"), "views": metric("view_count", "viewCount", "views")},
         "tags": [str(x.get("name") if isinstance(x, dict) else x) for x in (first(note, "tag_list", "tags") or []) if x],
@@ -126,8 +150,13 @@ def normalize(raw: dict[str, Any], provider_rank: int = 1) -> dict[str, Any] | N
 def merge(search_item: dict[str, Any], detail_item: dict[str, Any] | None) -> dict[str, Any]:
     if not detail_item: return search_item
     merged = dict(search_item)
-    for key in ("title", "content", "published_at", "note_type", "cover_url", "original_url"):
+    for key in ("title", "content", "published_at", "note_type", "cover_url"):
         if detail_item.get(key) not in (None, ""): merged[key] = detail_item[key]
+    # 详情 JSON 通常只返回裸 URL，不能用它覆盖搜索卡片的 token 链接。
+    search_url = search_item.get("original_url")
+    detail_url = detail_item.get("original_url")
+    if xsec_token(detail_url) or not search_url:
+        merged["original_url"] = detail_url
     merged["author"] = {**(search_item.get("author") or {}), **{k: v for k, v in (detail_item.get("author") or {}).items() if v not in (None, "")}}
     merged["engagement"] = {**(search_item.get("engagement") or {}), **{k: v for k, v in (detail_item.get("engagement") or {}).items() if v is not None}}
     merged["tags"] = list(dict.fromkeys((search_item.get("tags") or []) + (detail_item.get("tags") or [])))

@@ -15,8 +15,9 @@ from app.models.xhs import (
     XhsKeywordRun, XhsProviderCall,
 )
 from app.services.xhs_collection import (
-    Candidate, count_value, dt_value, rank, record_discoveries, rejection_reason,
-    sync_raw_info, upsert_note,
+    Candidate, DAILY_MIN_LIKES_EXCLUSIVE, WEEKLY_MIN_LIKES_EXCLUSIVE, collection_level,
+    count_value, dt_value, qualifies_by_time_and_likes, rank, record_discoveries,
+    rejection_reason, remote_image_url, sync_raw_info, upsert_engagement_snapshot, upsert_note,
 )
 
 LOCAL_PROVIDER = "local_cli"
@@ -46,8 +47,8 @@ def _candidate(raw: dict[str, Any], fallback_rank: int) -> Candidate:
         author_id=str(author.get("id") or raw.get("author_id") or "") or None,
         author_nickname=str(author.get("nickname") or raw.get("author_nickname") or "")[:200],
         author_bio=str(author.get("bio") or raw.get("author_bio") or ""),
-        avatar_url=author.get("avatar_url") or raw.get("avatar_url"),
-        cover_url=raw.get("cover_url"),
+        avatar_url=remote_image_url(author.get("avatar_url") or raw.get("avatar_url")),
+        cover_url=remote_image_url(raw.get("cover_url")),
         like_count=count_value(engagement.get("likes", raw.get("like_count"))),
         collect_count=count_value(engagement.get("collects", raw.get("collect_count"))),
         comment_count=count_value(engagement.get("comments", raw.get("comment_count"))),
@@ -90,9 +91,10 @@ def ingest_agent_result(
         if not keyword or not keyword.enabled:
             raise ValueError("关键词不存在或已停用")
 
-        run = db.scalar(select(XhsKeywordRun).where(XhsKeywordRun.keyword_id == keyword.id, XhsKeywordRun.run_date == now.date()))
+        wave = str((batch.metadata_json or {}).get("wave") or "manual")
+        run = db.scalar(select(XhsKeywordRun).where(XhsKeywordRun.keyword_id == keyword.id, XhsKeywordRun.run_date == now.date(),XhsKeywordRun.wave == wave))
         if not run:
-            run = XhsKeywordRun(keyword_id=keyword.id, run_date=now.date(), started_at=now)
+            run = XhsKeywordRun(keyword_id=keyword.id, run_date=now.date(), wave=wave, scheduled_for=batch.started_at, started_at=now)
             db.add(run)
             db.flush()
         run.run_source = "local_agent"
@@ -130,21 +132,13 @@ def ingest_agent_result(
                 eligible.append(candidate)
 
         eligible.sort(key=lambda item: item.score, reverse=True)
-        selected = eligible[:10]
-        rejections["rank_overflow"] = max(0, len(eligible) - len(selected))
-        for candidate in eligible[10:]:
-            note = upsert_note(db, candidate, "rejected_rank", now)
-            record_discoveries(db, run.id, keyword.id, note, candidate, now)
+        selected = eligible
+        selected_note_ids: list[str] = []
         for candidate in selected:
             note = upsert_note(db, candidate, "ready_degraded" if candidate.title_generated else "ready", now)
+            selected_note_ids.append(note.note_id)
             record_discoveries(db, run.id, keyword.id, note, candidate, now)
-            snapshot = db.scalar(select(XhsEngagementSnapshot).where(XhsEngagementSnapshot.note_id == note.id, XhsEngagementSnapshot.snapshot_date == now.date()))
-            if not snapshot:
-                db.add(XhsEngagementSnapshot(
-                    note_id=note.id, snapshot_date=now.date(), like_count=note.like_count,
-                    collect_count=note.collect_count, comment_count=note.comment_count,
-                    share_count=note.share_count, view_count=note.view_count,
-                ))
+            upsert_engagement_snapshot(db,note,now.date())
             sync_raw_info(db, note)
 
         agent_status = str(payload.get("status") or "success")
@@ -155,18 +149,28 @@ def ingest_agent_result(
         run.cli_raw_count = search_raw_count
         run.merged_count = max(0, int(diagnostics.get("normalized_count") or 0)) if has_diagnostics else len(candidates)
         run.within_week_count = max(0, int(diagnostics.get("within_week_count") or 0)) if has_diagnostics else sum(1 for item in candidates if item.published_at and item.published_at >= now - timedelta(days=7))
-        run.eligible_like_count = max(0, int(diagnostics.get("eligible_like_count") or 0)) if has_diagnostics else sum(1 for item in candidates if (item.like_count or 0) > 2000)
+        run.eligible_like_count = max(0, int(diagnostics.get("eligible_like_count") or 0)) if has_diagnostics else sum(qualifies_by_time_and_likes(item.published_at,item.like_count,now) for item in candidates)
         run.filtered_count = len(eligible)
         run.final_count = len(selected)
         run.displayable_count = len(selected)
+        level_diagnostics=diagnostics.get("levels") if isinstance(diagnostics.get("levels"),dict) else None
+        if level_diagnostics is None:
+            daily=[item for item in candidates if collection_level(item.published_at,now)=="daily"]
+            weekly=[item for item in candidates if collection_level(item.published_at,now)=="weekly"]
+            level_diagnostics={
+                "daily":{"candidate_count":len(daily),"eligible_count":sum(qualifies_by_time_and_likes(item.published_at,item.like_count,now) for item in daily),"likes_gt":DAILY_MIN_LIKES_EXCLUSIVE},
+                "weekly":{"candidate_count":len(weekly),"eligible_count":sum(qualifies_by_time_and_likes(item.published_at,item.like_count,now) for item in weekly),"likes_gt":WEEKLY_MIN_LIKES_EXCLUSIVE},
+            }
         run.rejection_counts = {
             **rejections,
+            "_levels":level_diagnostics,
             **({
                 "_search_diagnostics": 1,
                 "_search_state_empty": int(diagnostics.get("search_state") == "empty"),
                 "_search_state_unrecognized": int(diagnostics.get("search_state") == "unrecognized"),
                 "_detail_attempted": max(0, int(diagnostics.get("detail_attempted_count") or 0)),
                 "_detail_success": max(0, int(diagnostics.get("detail_success_count") or 0)),
+                "_searches": diagnostics.get("searches") if isinstance(diagnostics.get("searches"),list) else [],
             } if has_diagnostics else {}),
         }
         run.cli_status = "verification_required" if risk_blocked else "success" if agent_status == "success" else "failed"
@@ -174,9 +178,7 @@ def ingest_agent_result(
         run.error_message = error_message
         run.finished_at = now
         keyword.last_run_at = now
-        if keyword.keyword_type == "derived":
-            keyword.cooldown_until = now.date() + timedelta(days=3)
-            keyword.next_run_at = None
+        keyword.next_run_at = None
 
         upload = XhsAgentUpload(
             batch_id=batch.id, keyword_id=keyword.id, run_id=run.id,
@@ -200,4 +202,11 @@ def ingest_agent_result(
         batch.last_progress_at = now
         db.commit()
         db.refresh(upload)
+        # CDN URL 寿命很短；入库后立即异步落到服务器本地缓存，不阻塞 Agent 上传。
+        try:
+            from app.tasks.xhs_tasks import cache_note_media_task
+            for note_id in selected_note_ids:
+                cache_note_media_task.apply_async(args=[note_id])
+        except Exception:
+            pass
         return {"upload_id": upload.id, "duplicate": False, "accepted": len(selected), "rejections": rejections, "run_id": run.id}

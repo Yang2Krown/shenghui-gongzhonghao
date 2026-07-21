@@ -16,6 +16,7 @@ from app.services import xhs_topic_highlights as hl_module
 from app.services.llm import deepseek_client as deepseek_module
 from app.services.llm.llm_client import ChatResult
 from app.services.xhs_topic_highlights import attach_highlights
+from app.tasks.xhs_tasks import purge_xhs_media_cache_files
 
 
 def test_media_proxy_route_registered():
@@ -32,7 +33,17 @@ def test_media_cache_key_stable_and_url_sensitive(tmp_path,monkeypatch):
     assert a1==a2 and a1!=other_url and a1!=other_kind
     stored=a1.with_suffix(".webp");stored.write_bytes(b"x")
     assert xhs_module.media_cache_lookup(1,"cover","https://cdn.example/a.webp")==stored
-    assert xhs_module.media_cache_lookup(1,"cover","https://cdn.example/b.webp") is None
+    assert xhs_module.media_cache_lookup_exact(1,"cover","https://cdn.example/b.webp") is None
+    assert xhs_module.media_cache_lookup(1,"cover","https://cdn.example/b.webp")==stored
+
+
+def test_media_cache_cleanup_keeps_only_displayable_note_ids(tmp_path):
+    keep=(tmp_path/"7_cover_keep.webp");keep.write_bytes(b"keep")
+    stale=(tmp_path/"8_cover_stale.webp");stale.write_bytes(b"stale")
+    unrelated=(tmp_path/"README.txt");unrelated.write_bytes(b"untouched")
+    result=purge_xhs_media_cache_files(tmp_path,{7})
+    assert keep.exists() and unrelated.exists() and not stale.exists()
+    assert result=={"deleted_files":1,"deleted_bytes":5}
 
 
 class _FakeResponse:
@@ -100,6 +111,13 @@ def test_public_payload_contains_remote_urls_and_no_oss_fields():
     assert payload["note_id"]=="abc" and payload["providers"]==["cli","tikhub"]
 
 
+def test_public_payload_prefers_tokenized_search_url():
+    now=datetime(2026,7,16,12,0,0)
+    tokenized="https://www.xiaohongshu.com/explore/abc?xsec_token=search-token%3D&xsec_source=pc_search"
+    note=XhsNote(note_id="abc",stable_url="https://www.xiaohongshu.com/explore/abc",latest_xsec_url=tokenized,first_discovered_at=now,last_discovered_at=now,quality_status="ready",source_payload={})
+    assert note_payload(note)["original_url"]==tokenized
+
+
 
 async def test_topic_boards_split_filter_and_shape(monkeypatch):
     now=datetime(2026,7,17,12,0,0);ref=datetime(2026,7,16,8,0,0)  # utcnow 已是 07-17，最近采集停留在 07-16
@@ -116,7 +134,7 @@ async def test_topic_boards_split_filter_and_shape(monkeypatch):
         (note("f1",6000,1,ref,ref),["大模型","AI"]),
         (note("f2",3000,2,ref,ref),["大模型"]),
         (note("s1",4000,1,ref+timedelta(hours=12),ref+timedelta(hours=12)),["AI"]),
-        (note("g1",9000,5,now-timedelta(days=3),ref,xsec="https://xsec.example/g1"),["AI coding"]),
+        (note("g1",9000,5,now-timedelta(days=3),ref,xsec="https://www.xiaohongshu.com/explore/g1?xsec_token=test-token&xsec_source=pc_search"),["AI coding"]),
         (note("g2",8000,6,now-timedelta(days=3),ref),["AI coding"]),
         (note("g3",7000,1,now-timedelta(days=2),ref),["AI coding"]),
         (note("g4",6000,2,now-timedelta(days=2),ref),["AI coding"]),
@@ -124,7 +142,7 @@ async def test_topic_boards_split_filter_and_shape(monkeypatch):
         (note("solo",9000,1,ref,ref),["Claude"]),
         (note("old1",9000,4,now-timedelta(days=5),now-timedelta(days=1,hours=13)),["AI工作流"]),
         (note("old2",8000,4,now-timedelta(days=5),now-timedelta(days=1,hours=14)),["AI工作流"]),
-        (note("low",2000,1,ref,ref),["ghost"]),
+        (note("low",200,1,ref,ref),["ghost"]),
         (note("ancient",9000,8,ref,ref),["ghost"]),
         (note("pending",9000,1,ref,ref,status="pending"),["ghost"]),
     ]
@@ -140,21 +158,8 @@ async def test_topic_boards_split_filter_and_shape(monkeypatch):
         result=await topic_boards(db=db)
     fresh={b["topic"]:b for b in result["fresh"]};fermenting={b["topic"]:b for b in result["fermenting"]}
     assert result["generated_at"]==now.isoformat()
-    assert set(fresh)=={"大模型","AI"}  # 按采集关键词分组，f1 命中两个词分别计入；锚点是最近采集日 07-16 而非 utcnow 当天
-    assert set(fermenting)=={"AI coding"}  # 之前已成立且最近采集日仍活跃
-    assert "Claude" not in fresh  # sample_count<2 被过滤
-    assert "AI工作流" not in fermenting and "ghost" not in fermenting  # 最近采集日无新增/不满足列表硬过滤的不上榜
-    assert fresh["大模型"]["sample_count"]==2 and fresh["大模型"]["recent_3d_count"]==2
-    assert fresh["大模型"]["first_seen_at"]==ref.isoformat() and fresh["大模型"]["max_likes"]==6000
-    board=fermenting["AI coding"]
-    assert board["sample_count"]==5 and board["recent_3d_count"]==3 and board["max_likes"]==9000
-    assert board["first_seen_at"]==(now-timedelta(days=3)).isoformat() and board["last_seen_at"]==ref.isoformat()
-    assert [n["note_id"] for n in board["notes"]]==["g1","g2","g3","g4"]  # 只取点赞前 4 且降序
-    assert [n["likes"] for n in board["notes"]]==[9000,8000,7000,6000]
-    top=board["notes"][0]
-    assert top["author"]=="作者g1" and top["original_url"]=="https://xsec.example/g1" and top["note_type"]=="image"
-    assert "cover_url" in top and board["ai_highlight"] is None
-    assert board["notes"][1]["original_url"]=="https://www.xiaohongshu.com/explore/g2"
+    # 没有语义话题表时也不允许退回采集关键词冒充内容话题。
+    assert fresh=={} and fermenting=={}
 
 
 async def test_topic_boards_requires_monitoring_read():
@@ -223,7 +228,7 @@ async def _seed_board_db(db,now):
     kw=XhsKeyword(keyword="AI coding",normalized_keyword="ai coding");db.add(kw);await db.flush()
     run=XhsKeywordRun(keyword_id=kw.id,run_date=now.date());db.add(run);await db.flush()
     for nid,likes,cover in (("c1",9000,"https://cdn.example/c1.jpg"),("c2",8000,None)):
-        n=XhsNote(note_id=nid,title=f"标题{nid}",content="正文内容"*80,note_type="image",author_nickname="作者",cover_url=cover,stable_url=f"https://www.xiaohongshu.com/explore/{nid}",like_count=likes,published_at=now-timedelta(days=1),first_discovered_at=now,last_discovered_at=now,quality_status="ready")
+        n=XhsNote(note_id=nid,title=f"标题{nid}",content="正文内容"*80,note_type="image",author_nickname=f"作者{nid}",cover_url=cover,stable_url=f"https://www.xiaohongshu.com/explore/{nid}",like_count=likes,published_at=now-timedelta(days=1),first_discovered_at=now,last_discovered_at=now,quality_status="ready")
         db.add(n);await db.flush()
         db.add(XhsNoteDiscovery(note_id=n.id,keyword_id=kw.id,run_id=run.id,provider="cli",discovered_at=now))
     await db.commit()
@@ -243,16 +248,12 @@ async def _board_result(monkeypatch,client):
         return await topic_boards(db=db)
 
 
-async def test_topic_boards_ai_highlight_and_cover_url(monkeypatch):
+async def test_topic_boards_does_not_generate_keyword_highlight(monkeypatch):
     _FakeDeepSeek.text="这个话题值得写。"
     result=await _board_result(monkeypatch,_FakeDeepSeek)
-    board=result["fresh"][0]
-    assert board["ai_highlight"]=="这个话题值得写。"
-    assert board["notes"][0]["cover_url"]=="https://cdn.example/c1.jpg" and board["notes"][1]["cover_url"] is None
-    assert len(_FakeDeepSeek.calls)==1
+    assert result["fresh"]==[] and _FakeDeepSeek.calls==[]
 
 
-async def test_topic_boards_ai_highlight_failure_still_returns(monkeypatch):
+async def test_topic_boards_without_semantic_schema_still_returns(monkeypatch):
     result=await _board_result(monkeypatch,_BoomDeepSeek)  # LLM 未配置/抛错 → 接口正常返回，亮点为 None
-    board=result["fresh"][0]
-    assert board["ai_highlight"] is None and board["notes"][0]["cover_url"]=="https://cdn.example/c1.jpg"
+    assert result["fresh"]==[] and result["fermenting"]==[]

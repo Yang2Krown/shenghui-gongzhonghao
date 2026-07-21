@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 import redis.asyncio as aioredis
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,33 @@ logger = logging.getLogger(__name__)
 PUBLIC_STATUSES = {"ready", "ready_degraded", "synced"}
 PAID_PROVIDER = "tikhub"
 FREE_PROVIDER = "cli"
+DAILY_MIN_LIKES_EXCLUSIVE = 200
+WEEKLY_MIN_LIKES_EXCLUSIVE = 2000
+
+
+def collection_level(published_at: datetime | None, now: datetime) -> str | None:
+    if published_at is None or published_at < now - timedelta(days=7):
+        return None
+    return "daily" if published_at >= now - timedelta(hours=24) else "weekly"
+
+
+def minimum_likes_exclusive(published_at: datetime | None, now: datetime) -> int:
+    return DAILY_MIN_LIKES_EXCLUSIVE if collection_level(published_at, now) == "daily" else WEEKLY_MIN_LIKES_EXCLUSIVE
+
+
+def qualifies_by_time_and_likes(published_at: datetime | None, like_count: int | None, now: datetime) -> bool:
+    level = collection_level(published_at, now)
+    return level is not None and like_count is not None and like_count > minimum_likes_exclusive(published_at, now)
+
+
+def eligibility_clause(now: datetime):
+    """SQL equivalent of the two mutually exclusive collection levels."""
+    day_cutoff = now - timedelta(hours=24)
+    week_cutoff = now - timedelta(days=7)
+    return or_(
+        and_(XhsNote.published_at >= day_cutoff, XhsNote.like_count > DAILY_MIN_LIKES_EXCLUSIVE),
+        and_(XhsNote.published_at >= week_cutoff, XhsNote.published_at < day_cutoff, XhsNote.like_count > WEEKLY_MIN_LIKES_EXCLUSIVE),
+    )
 CLI_AUTH_INVALID_KEY = "xhs:cli:auth_invalid"
 CLI_COOLDOWN_KEY = "xhs:cli:cooldown"
 
@@ -98,6 +125,28 @@ def remote_image_url(value: Any) -> str | None:
     return url
 
 
+def xsec_note_url(
+    note_id: str,
+    url: Any = None,
+    token: Any = None,
+    source: Any = None,
+) -> str:
+    """生成可从搜索结果直达的笔记链接。
+
+    xiaohongshu-cli 的搜索卡片可能同时返回裸 URL 和单独的
+    xsec_token。裸 /explore/{note_id} 在未登录浏览器中常会被小红书转到
+    300031 验证页，因此不能因为已有 url 字段就丢掉 token。
+    """
+    raw_url = str(url or "").strip()
+    query = parse_qs(urlparse(raw_url).query) if raw_url else {}
+    xsec_token = str(token or (query.get("xsec_token") or [""])[0]).strip()
+    xsec_source = str(source or (query.get("xsec_source") or [""])[0] or "pc_search").strip()
+    stable_url = f"https://www.xiaohongshu.com/explore/{note_id}"
+    if not xsec_token:
+        return raw_url or stable_url
+    return stable_url + "?" + urlencode({"xsec_token": xsec_token, "xsec_source": xsec_source})
+
+
 def search_publish_time(payload: dict, now: datetime | None = None) -> datetime | None:
     """解析 CLI 搜索卡片中的相对日期或 MM-DD；详情时间仍优先使用精确时间戳。"""
     now=now or utcnow()
@@ -144,8 +193,13 @@ class Candidate:
     title_generated: bool = False
 
     def merge(self, other: "Candidate") -> None:
-        for name in ("title","content","published_at","note_type","author_id","author_nickname","author_bio","avatar_url","cover_url","like_count","collect_count","comment_count","share_count","view_count","xsec_url"):
+        for name in ("title","content","published_at","note_type","author_id","author_nickname","author_bio","avatar_url","cover_url","like_count","collect_count","comment_count","share_count","view_count"):
             if getattr(self, name) in (None, "", []): setattr(self, name, getattr(other, name))
+        # 后续来源/详情补全到 token 时，允许它替换先到的裸链接。
+        if not _xsec_token(self.xsec_url) and _xsec_token(other.xsec_url):
+            self.xsec_url = other.xsec_url
+        elif not self.xsec_url:
+            self.xsec_url = other.xsec_url
         self.tags = list(dict.fromkeys(self.tags + other.tags))
         self.ranks.update(other.ranks); self.payloads.update(other.payloads)
         self.title_generated = self.title_generated or other.title_generated
@@ -162,11 +216,10 @@ def normalize_candidate(raw: dict, provider: str, rank: int) -> Candidate | None
     cover = remote_image_url(first(envelope, "cover.url_default", "cover.url", "cover_url", "image_list.0.url_default", "note_card.cover.url_default"))
     note_type = str(first(envelope, "type", "note_type", "note_card.type") or "").lower()
     note_type = "video" if "video" in note_type else "image" if note_type else None
-    url = first(envelope, "url", "share_url", "note_url")
-    if not url:
-        url = f"https://www.xiaohongshu.com/explore/{note_id}"
-        token=first(raw,"xsec_token","note_card.xsec_token")
-        if token:url += "?"+urlencode({"xsec_token":str(token),"xsec_source":"pc_search"})
+    raw_url = first(envelope, "url", "share_url", "note_url") or first(raw, "url", "share_url", "note_url")
+    token = first(envelope, "xsec_token", "xsecToken") or first(raw, "xsec_token", "xsecToken", "note_card.xsec_token", "note_card.xsecToken")
+    source = first(envelope, "xsec_source", "xsecSource") or first(raw, "xsec_source", "xsecSource", "note_card.xsec_source", "note_card.xsecSource")
+    url = xsec_note_url(str(note_id), raw_url, token, source)
     def metric(*paths: str, fallback: tuple[str, ...]) -> int | None:
         value=first(interact,*paths)
         if value is None:value=first(envelope,*fallback)
@@ -450,7 +503,7 @@ def fill_title_from_content(c: Candidate, limit: int = 80) -> bool:
 def rejection_reason(c: Candidate, now: datetime) -> str | None:
     if c.published_at is None or c.like_count is None: return "unknown_metric"
     if c.published_at < now - timedelta(days=7): return "old"
-    if c.like_count <= 2000: return "low_like"
+    if c.like_count <= minimum_likes_exclusive(c.published_at, now): return "low_like"
     if c.note_type not in {"image","video"}: return "unknown_type"
     fill_title_from_content(c)
     if not all((c.title,c.content,c.author_nickname,c.cover_url)): return "core_incomplete"
@@ -460,7 +513,7 @@ def rejection_reason(c: Candidate, now: datetime) -> str | None:
 def pre_hydration_rejection(c: Candidate, now: datetime) -> str | None:
     """只用搜索卡片已有硬指标提前淘汰，避免为明确不合格候选请求详情。"""
     if c.published_at is not None and c.published_at < now-timedelta(days=7):return "old"
-    if c.like_count is not None and c.like_count <= 2000:return "low_like"
+    if c.like_count is not None and c.published_at is not None and c.like_count <= minimum_likes_exclusive(c.published_at,now):return "low_like"
     if c.note_type is not None and c.note_type not in {"image","video"}:return "unknown_type"
     return None
 
@@ -481,8 +534,24 @@ def upsert_note(db: Session, c: Candidate, quality_status: str, now: datetime) -
     for field_name in ("title","content","published_at","note_type","author_id","author_nickname","author_bio","avatar_url","cover_url","like_count","collect_count","comment_count","share_count","view_count"):
         value=getattr(c,field_name)
         if value is not None and value!="": setattr(row,field_name,value)
-    row.native_tags=c.tags;row.latest_xsec_url=c.xsec_url;row.last_discovered_at=now;row.detail_status="hydrated";row.media_status="remote_ok" if c.cover_url else "missing";row.quality_status=quality_status;row.comprehensive_score=c.score;row.source_payload={"providers":list(c.ranks),"ranks":c.ranks,"generated_title":c.title_generated}
+    row.native_tags=c.tags
+    # 新一轮偶尔只拿到裸 URL 时，不要覆盖库里仍可用的最新 token 链接。
+    if _xsec_token(c.xsec_url) or not row.latest_xsec_url:
+        row.latest_xsec_url=c.xsec_url
+    row.last_discovered_at=now;row.detail_status="hydrated";row.media_status="remote_ok" if c.cover_url else "missing";row.quality_status=quality_status;row.comprehensive_score=c.score;row.source_payload={"providers":list(c.ranks),"ranks":c.ranks,"generated_title":c.title_generated}
     db.flush();return row
+
+
+def upsert_engagement_snapshot(db: Session, note: XhsNote, snapshot_date: date) -> XhsEngagementSnapshot:
+    """同一笔记当天再次命中时刷新互动数据，不把当日首次值当成最终值。"""
+    snapshot=db.execute(select(XhsEngagementSnapshot).where(XhsEngagementSnapshot.note_id==note.id,XhsEngagementSnapshot.snapshot_date==snapshot_date)).scalar_one_or_none()
+    if not snapshot:
+        snapshot=XhsEngagementSnapshot(note_id=note.id,snapshot_date=snapshot_date)
+        db.add(snapshot)
+    for field_name in ("like_count","collect_count","comment_count","share_count","view_count"):
+        value=getattr(note,field_name)
+        if value is not None:setattr(snapshot,field_name,value)
+    return snapshot
 
 
 def sync_raw_info(db: Session, note: XhsNote) -> None:
@@ -505,13 +574,13 @@ def record_discoveries(db: Session, run_id: int, keyword_id: int, note: XhsNote,
 async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = True, retry_existing: bool = False) -> dict:
     now=utcnow(); keyword=db.get(XhsKeyword,keyword_id)
     if not keyword or not keyword.enabled: raise ValueError("关键词不存在或已停用")
-    run=db.execute(select(XhsKeywordRun).where(XhsKeywordRun.keyword_id==keyword.id,XhsKeywordRun.run_date==now.date())).scalar_one_or_none()
+    run=db.execute(select(XhsKeywordRun).where(XhsKeywordRun.keyword_id==keyword.id,XhsKeywordRun.run_date==now.date(),XhsKeywordRun.wave=="manual")).scalar_one_or_none()
     if run:
         # 已完成拦截在 API 层（retry 接口 409，force=true 放行）；到这里说明允许重跑
         if not retry_existing: return {"skipped":True,"reason":"same_keyword_same_day"}
         run.status="running";run.started_at=now;run.finished_at=None;run.error_message=None
     else:
-        run=XhsKeywordRun(keyword_id=keyword.id,run_date=now.date(),status="running",started_at=now);db.add(run)
+        run=XhsKeywordRun(keyword_id=keyword.id,run_date=now.date(),wave="manual",status="running",started_at=now);db.add(run)
     try: db.commit()
     except IntegrityError: db.rollback(); return {"skipped":True,"reason":"same_keyword_same_day"}
     db.refresh(run); cli=CliProvider(); tikhub=TikHubProvider(); batches={FREE_PROVIDER:[],PAID_PROVIDER:[]}
@@ -540,15 +609,19 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
         await hydrate(c,cli,tikhub,db,run.id,allow_paid=allow_paid);reason=rejection_reason(c,now);c.score=rank(c,now)
         if reason: rejections[reason]+=1;record_discoveries(db,run.id,keyword.id,upsert_note(db,c,"rejected_"+reason,now),c,now)
         else: eligible.append(c)
-    eligible.sort(key=lambda x:x.score,reverse=True);selected=eligible[:settings.XHS_KEYWORD_FINAL_LIMIT];rejections["rank_overflow"]=max(0,len(eligible)-len(selected))
-    for c in eligible[settings.XHS_KEYWORD_FINAL_LIMIT:]: record_discoveries(db,run.id,keyword.id,upsert_note(db,c,"rejected_rank",now),c,now)
+    eligible.sort(key=lambda x:x.score,reverse=True);selected=eligible
     for c in selected:
         note=upsert_note(db,c,"ready_degraded" if c.title_generated else "ready",now);record_discoveries(db,run.id,keyword.id,note,c,now)
-        snapshot=db.execute(select(XhsEngagementSnapshot).where(XhsEngagementSnapshot.note_id==note.id,XhsEngagementSnapshot.snapshot_date==now.date())).scalar_one_or_none()
-        if not snapshot: db.add(XhsEngagementSnapshot(note_id=note.id,snapshot_date=now.date(),like_count=note.like_count,collect_count=note.collect_count,comment_count=note.comment_count,share_count=note.share_count,view_count=note.view_count))
+        upsert_engagement_snapshot(db,note,now.date())
         sync_raw_info(db,note)
     effective_errors=[x for x in (cli_error,tikhub_error if allow_paid else None) if x]
-    run.within_week_count=sum(1 for c in merged.values() if c.published_at and c.published_at>=now-timedelta(days=7));run.eligible_like_count=sum(1 for c in merged.values() if (c.like_count or 0)>2000);run.filtered_count=len(eligible);run.final_count=len(selected);run.displayable_count=len(selected);run.paid_call_count=db.scalar(select(func.coalesce(func.sum(XhsProviderCall.request_count),0)).where(XhsProviderCall.run_id==run.id,XhsProviderCall.is_paid.is_(True))) or 0;run.rejection_counts=rejections;run.status="completed" if not effective_errors else "partial";run.error_message="; ".join(str(x)[:300] for x in effective_errors) or None;run.finished_at=utcnow();keyword.last_run_at=run.finished_at
+    daily=[c for c in merged.values() if collection_level(c.published_at,now)=="daily"]
+    weekly=[c for c in merged.values() if collection_level(c.published_at,now)=="weekly"]
+    rejections["_levels"]={
+        "daily":{"candidate_count":len(daily),"eligible_count":sum(qualifies_by_time_and_likes(c.published_at,c.like_count,now) for c in daily),"likes_gt":DAILY_MIN_LIKES_EXCLUSIVE},
+        "weekly":{"candidate_count":len(weekly),"eligible_count":sum(qualifies_by_time_and_likes(c.published_at,c.like_count,now) for c in weekly),"likes_gt":WEEKLY_MIN_LIKES_EXCLUSIVE},
+    }
+    run.within_week_count=len(daily)+len(weekly);run.eligible_like_count=sum(qualifies_by_time_and_likes(c.published_at,c.like_count,now) for c in merged.values());run.filtered_count=len(eligible);run.final_count=len(selected);run.displayable_count=len(selected);run.paid_call_count=db.scalar(select(func.coalesce(func.sum(XhsProviderCall.request_count),0)).where(XhsProviderCall.run_id==run.id,XhsProviderCall.is_paid.is_(True))) or 0;run.rejection_counts=rejections;run.status="completed" if not effective_errors else "partial";run.error_message="; ".join(str(x)[:300] for x in effective_errors) or None;run.finished_at=utcnow();keyword.last_run_at=run.finished_at
     if keyword.keyword_type=="derived": keyword.cooldown_until=now.date()+timedelta(days=3)
     db.commit();return {"run_id":run.id,"keyword":keyword.keyword,"status":run.status,"merged":run.merged_count,"eligible":run.filtered_count,"final":run.final_count,"rejections":rejections}
 

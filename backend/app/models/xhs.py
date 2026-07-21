@@ -18,6 +18,13 @@ class XhsKeyword(BaseModel):
     cooldown_until = Column(Date, nullable=True, index=True)
     last_run_at = Column(DateTime, nullable=True)
     next_run_at = Column(DateTime, nullable=True)
+    lifecycle_status = Column(String(20), nullable=False, default="active", index=True)
+    pinned = Column(Boolean, nullable=False, default=False, index=True)
+    zero_yield_streak = Column(Integer, nullable=False, default=0)
+    last_yield_count = Column(Integer, nullable=False, default=0)
+    lifecycle_started_at = Column(DateTime, nullable=True)
+    trial_started_at = Column(DateTime, nullable=True)
+    quarantine_reason = Column(Text, nullable=True)
 
 
 class XhsKeywordRun(BaseModel):
@@ -43,8 +50,10 @@ class XhsKeywordRun(BaseModel):
     finished_at = Column(DateTime, nullable=True)
     run_source = Column(String(30), nullable=False, default="server_cli", index=True)
     agent_batch_id = Column(Integer, ForeignKey("xhs_agent_batches.id", ondelete="SET NULL"), nullable=True, index=True)
+    wave = Column(String(20), nullable=False, default="manual", index=True)
+    scheduled_for = Column(DateTime, nullable=True, index=True)
 
-    __table_args__ = (UniqueConstraint("keyword_id", "run_date", name="uq_xhs_keyword_run_day"),)
+    __table_args__ = (UniqueConstraint("keyword_id", "run_date", "wave", name="uq_xhs_keyword_run_wave"),)
 
 
 class XhsNote(BaseModel):
@@ -78,6 +87,8 @@ class XhsNote(BaseModel):
     comprehensive_score = Column(Float, nullable=False, default=0, index=True)
     raw_info_id = Column(Integer, ForeignKey("raw_infos.id", ondelete="SET NULL"), nullable=True, index=True)
     source_payload = Column(JSONField, nullable=False, default=dict)
+    topic_embedding = Column(JSONField, nullable=True)
+    semantic_analyzed_at = Column(DateTime, nullable=True, index=True)
 
     __table_args__ = (
         Index("ix_xhs_notes_public", "quality_status", "published_at", "like_count"),
@@ -126,6 +137,50 @@ class XhsEngagementSnapshot(BaseModel):
     view_count = Column(Integer, nullable=True)
 
     __table_args__ = (UniqueConstraint("note_id", "snapshot_date", name="uq_xhs_note_snapshot_day"),)
+
+
+class XhsSemanticTopic(BaseModel):
+    """由笔记正文语义形成的话题；名称不等同于采集关键词。"""
+    __tablename__ = "xhs_semantic_topics"
+
+    public_id = Column(String(36), nullable=False, unique=True, index=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String(200), nullable=False)
+    summary = Column(Text, nullable=True)
+    centroid = Column(JSONField, nullable=False, default=list)
+    status = Column(String(20), nullable=False, default="active", index=True)
+    first_seen_at = Column(DateTime, nullable=False, index=True)
+    last_seen_at = Column(DateTime, nullable=False, index=True)
+    active_days = Column(Integer, nullable=False, default=1)
+
+
+class XhsTopicMember(BaseModel):
+    __tablename__ = "xhs_topic_members"
+
+    topic_id = Column(Integer, ForeignKey("xhs_semantic_topics.id", ondelete="CASCADE"), nullable=False, index=True)
+    note_id = Column(Integer, ForeignKey("xhs_notes.id", ondelete="CASCADE"), nullable=False, index=True)
+    similarity = Column(Float, nullable=False, default=0)
+    assigned_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (UniqueConstraint("topic_id", "note_id", name="uq_xhs_topic_member"),)
+
+
+class XhsTopicSnapshot(BaseModel):
+    __tablename__ = "xhs_topic_snapshots"
+
+    topic_id = Column(Integer, ForeignKey("xhs_semantic_topics.id", ondelete="CASCADE"), nullable=False, index=True)
+    snapshot_date = Column(Date, nullable=False, index=True)
+    wave = Column(String(20), nullable=False, default="nightly")
+    snapshot_at = Column(DateTime, nullable=False, index=True)
+    note_count = Column(Integer, nullable=False, default=0)
+    author_count = Column(Integer, nullable=False, default=0)
+    new_notes_24h = Column(Integer, nullable=False, default=0)
+    new_authors_24h = Column(Integer, nullable=False, default=0)
+    engagement_total = Column(Integer, nullable=False, default=0)
+    engagement_growth = Column(Float, nullable=False, default=0)
+    fermentation_score = Column(Float, nullable=False, default=0, index=True)
+    evidence = Column(JSONField, nullable=False, default=list)
+
+    __table_args__ = (UniqueConstraint("topic_id", "snapshot_date", "wave", name="uq_xhs_topic_snapshot_wave"),)
 
 
 class XhsDailyQuota(BaseModel):

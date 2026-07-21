@@ -10,7 +10,8 @@ import socket
 import subprocess
 import sys
 import uuid
-from datetime import date, datetime
+import random
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -19,12 +20,14 @@ import websockets
 
 from client import ServerClient
 from collector import RiskBlocked, XhsCollector
+from normalizer import normalize, unwrap
 from qr_login import LocalQrLogin
-from scheduling import build_daily_plan, recover_interrupted_slots, select_daily_keywords, slot_due, slot_expired
+from scheduling import build_daily_plan, build_two_wave_plan, recover_interrupted_slots, select_daily_keywords, slot_due, slot_expired
 from storage import LocalStore
 
-VERSION = "0.3.4"
-PLAN_STRATEGY = "all_base_plus_random_derived"
+VERSION = "0.4.0"
+PLAN_STRATEGY = "two_waves_office_hours_v2"
+LEGACY_PLAN_STRATEGY = "server_legacy_single_wave"
 SERVICE = "com.midonghub.gzh.xhs-collector"
 APP_DIR = Path.home() / "Library/Application Support/GzhXhsCollector"
 CONFIG_PATH = APP_DIR / "config.json"
@@ -61,7 +64,10 @@ class CollectorAgent:
         self.collector = XhsCollector(Path(__file__).resolve().parent)
         self.commands: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.collection_lock = asyncio.Lock()
-        self.paused = asyncio.Event(); self.paused.set()
+        self.paused = asyncio.Event()
+        saved_plan = self.today_plan()
+        if not saved_plan or not saved_plan.get("paused"):
+            self.paused.set()
         self.stop_requested = asyncio.Event()
         self.running_keyword: str | None = None
         cookie_default = "valid" if (Path.home() / ".xiaohongshu-cli/cookies.json").is_file() else "missing"
@@ -130,12 +136,14 @@ class CollectorAgent:
     async def _run_batch(self, keywords: list[dict[str, Any]], mode: str, command_id: str | None = None) -> dict[str, Any]:
         if not keywords: return {"completed": 0, "failed": 0}
         self.stop_requested.clear()
-        identity = str(keywords[0]["id"]) if mode == "scheduled" else command_id or uuid.uuid4().hex[:12]
+        wave = str(keywords[0].get("wave") or "manual")
+        attempt = int(keywords[0].get("attempt") or 1)
+        identity = f"{keywords[0]['id']}-{wave}-a{attempt}" if mode == "scheduled" else command_id or uuid.uuid4().hex[:12]
         local_key = f"{date.today().isoformat()}-{mode}-{identity}"
         body = {
             "local_batch_key": local_key, "mode": mode, "schedule_date": date.today().isoformat(),
             "schedule_group": keywords[0].get("group") if mode == "scheduled" else None,
-            "total_keywords": len(keywords), "command_id": command_id,
+            "wave": wave, "total_keywords": len(keywords), "command_id": command_id,
         }
         batch_id = (await asyncio.to_thread(self.server.create_batch, body))["batch_id"]
         completed = failed = 0
@@ -162,6 +170,7 @@ class CollectorAgent:
                     await self.safe_upload(batch_id, {"keyword_id": keyword["id"], "idempotency_key": f"{local_key}:{keyword['id']}", "status": "risk_blocked", "error": str(exc), "notes": []})
                     await self.safe_progress(batch_id, {"status": "risk_blocked", "current_keyword_id": keyword["id"], "completed_keywords": completed, "failed_keywords": failed, "error": str(exc)})
                     await self.report_status("risk_blocked", str(exc))
+                    self.notify_verification()
                     return {"completed": completed, "failed": failed, "risk_blocked": True}
                 except Exception as exc:
                     failed += 1
@@ -173,10 +182,31 @@ class CollectorAgent:
         finally:
             self.running_keyword = None
 
+    def notify_verification(self) -> None:
+        """Bring XHS to the front and issue a native notification; failures never break collection."""
+        try:
+            subprocess.run(["open", "https://www.xiaohongshu.com/"], check=False, capture_output=True)
+            subprocess.run(["osascript", "-e", 'display notification "请立即完成人机验证，验证后任务会自动续跑" with title "小红书采集已暂停"'], check=False, capture_output=True)
+        except OSError:
+            pass
+
+    def requeue_risk_slots(self, plan: dict[str, Any]) -> int:
+        resume_at = datetime.now() + timedelta(minutes=random.randint(5, 10))
+        count = 0
+        for slot in plan.get("slots", []):
+            if slot.get("status") != "risk_blocked": continue
+            slot["status"] = "pending"; slot["attempt"] = int(slot.get("attempt") or 1) + 1
+            slot["scheduled_at"] = resume_at.isoformat(timespec="minutes")
+            slot["reason"] = "验证完成，冷却后自动续跑"
+            count += 1
+        plan["paused"] = False; plan["risk_blocked"] = False
+        plan["resume_after"] = resume_at.isoformat(timespec="minutes") if count else None
+        return count
+
     async def handle_command(self, command: dict[str, Any]) -> None:
         command_id = command["id"]
         command_type = command["command_type"]
-        if command_type == "test_keyword" and self.collection_lock.locked():
+        if command_type in {"test_keyword", "refresh_image"} and self.collection_lock.locked():
             await asyncio.to_thread(self.server.command_status, command_id, {"status": "failed", "error": "本地采集节点正在执行其他批次，请等待或先停止"})
             return
         await asyncio.to_thread(self.server.command_status, command_id, {"status": "running"})
@@ -195,8 +225,7 @@ class CollectorAgent:
                 self.paused.set()
                 plan = self.today_plan()
                 if plan:
-                    plan["paused"] = False
-                    plan["risk_blocked"] = False
+                    self.requeue_risk_slots(plan)
                     self.save_plan(plan)
                 result = {"paused": False}
                 await self.report_status()
@@ -233,6 +262,23 @@ class CollectorAgent:
                         slot["error"] = f"应急重试失败：{result.get('error') or 'CLI 未完成采集'}"
                         self.save_plan(plan)
                         await self.report_status(last_error=slot["error"])
+            elif command_type == "refresh_image":
+                payload = command.get("payload") or {}
+                note_id = str(payload.get("note_id") or "")
+                url = str(payload.get("url") or "")
+                if not note_id or not url:
+                    raise RuntimeError("封面刷新参数不完整")
+                response = await asyncio.to_thread(self.collector._run_cli, "read", url)
+                rows = unwrap(response)
+                raw = rows[0] if rows else response
+                item = normalize(raw, 1) if isinstance(raw, dict) else None
+                if not item or item.get("note_id") != note_id or not item.get("cover_url"):
+                    raise RuntimeError("小红书未返回新的封面图")
+                result = {
+                    "note_id": note_id,
+                    "cover_url": item["cover_url"],
+                    "avatar_url": (item.get("author") or {}).get("avatar_url"),
+                }
             elif command_type == "login":
                 def update_login(value):
                     self.server.command_status(command_id, {"status": "running", "result": value})
@@ -241,9 +287,13 @@ class CollectorAgent:
                     raise RuntimeError(result.get("message") or "本地扫码登录失败")
                 self.cookie_status = "valid"
                 self.store.set("cookie_status", self.cookie_status)
+                # A successful login is also the user's authorization to leave
+                # the verification pause. Keep the in-memory gate aligned with
+                # the persisted plan before any slot can be marked running.
+                self.paused.set()
                 plan = self.today_plan()
                 if plan:
-                    plan["risk_blocked"] = False
+                    self.requeue_risk_slots(plan)
                     self.save_plan(plan)
                 await self.report_status("paused" if plan and plan.get("paused") else "idle")
             else: raise RuntimeError("未知命令")
@@ -267,21 +317,24 @@ class CollectorAgent:
                 schedule = manifest.get("schedule") or {}
                 now = datetime.now()
                 plan = self.today_plan()
-                if plan is None or plan.get("strategy") != PLAN_STRATEGY:
+                two_wave_enabled = "morning_start" in schedule and "afternoon_start" in schedule
+                desired_strategy = PLAN_STRATEGY if two_wave_enabled else LEGACY_PLAN_STRATEGY
+                if plan is None or plan.get("strategy") != desired_strategy:
                     keywords = select_daily_keywords(
                         date.today(), manifest["keywords"], int(schedule.get("daily_derived_limit") or 5),
                     )
-                    start = str(schedule.get("window_start") or "09:30")
-                    end = str(schedule.get("window_end") or "22:30")
-                    slots = build_daily_plan(date.today(), keywords, start, end, int(schedule.get("jitter_minutes") or 8))
+                    morning = str(schedule.get("morning_start") or schedule.get("window_start") or "09:30")
+                    afternoon = str(schedule.get("afternoon_start") or "14:20")
+                    slots = build_two_wave_plan(date.today(), keywords, morning, afternoon, int(schedule.get("priority_keyword_limit") or 8)) if two_wave_enabled else build_daily_plan(date.today(),keywords,morning,str(schedule.get("window_end") or "22:30"),int(schedule.get("jitter_minutes") or 8))
                     for slot in slots:
                         keyword = next((item for item in keywords if int(item["id"]) == slot["keyword_id"]), None)
-                        if keyword and keyword.get("completed_today"):
+                        completed = bool(keyword and (slot.get("wave") in (keyword.get("completed_waves") or []) if two_wave_enabled else keyword.get("completed_today")))
+                        if keyword and completed:
                             slot["status"] = "completed"
-                            slot["reason"] = "今天已通过其他任务完成"
+                            slot["reason"] = "本波已通过其他任务完成"
                     plan = {
-                        "date": today_key, "strategy": PLAN_STRATEGY,
-                        "window_start": start, "window_end": end,
+                        "date": today_key, "strategy": desired_strategy,
+                        "morning_start": morning, "afternoon_start": afternoon,
                         "base_count": sum(item.get("type") == "base" for item in keywords),
                         "derived_count": sum(item.get("type") == "derived" for item in keywords),
                         "paused": False, "stopped": False,
@@ -297,18 +350,16 @@ class CollectorAgent:
                     self.save_plan(plan)
                     await self.report_status(last_error="检测到未正常收尾的采集任务，已自动标记失败")
 
-                changed = False
-                for slot in plan.get("slots", []):
-                    if slot.get("status") == "pending" and slot_expired(now, slot["scheduled_at"]):
-                        slot["status"] = "skipped"
-                        slot["reason"] = "节点未在执行窗口内运行，不补跑"
-                        changed = True
-                if changed:
-                    self.save_plan(plan)
-                    await self.report_status()
+                expired=0
+                for slot in plan.get("slots",[]):
+                    if slot.get("status")=="pending" and slot_expired(now,slot["scheduled_at"]):
+                        slot["status"]="skipped";slot["finished_at"]=now.isoformat(timespec="seconds");slot["reason"]="Mac 休眠或错过执行窗口，不集中补跑"
+                        expired+=1
+                if expired:
+                    self.save_plan(plan);await self.report_status()
 
-                if schedule.get("enabled", True) and not plan.get("paused") and not plan.get("stopped") and self.cookie_status == "valid":
-                    due = next((slot for slot in plan.get("slots", []) if slot.get("status") == "pending" and slot_due(now, slot["scheduled_at"])), None)
+                if schedule.get("enabled", True) and self.paused.is_set() and not plan.get("paused") and not plan.get("stopped") and self.cookie_status == "valid":
+                    due = next((slot for slot in plan.get("slots", []) if slot.get("status") == "pending" and slot_due(now,slot["scheduled_at"])), None)
                     if due and not self.collection_lock.locked():
                         due["status"] = "running"
                         due["started_at"] = datetime.now().isoformat(timespec="seconds")
@@ -316,7 +367,7 @@ class CollectorAgent:
                         await self.report_status("running")
                         result = None
                         try:
-                            result = await self.run_batch([{"id": due["keyword_id"], "keyword": due["keyword"], "group": due.get("group")}], "scheduled")
+                            result = await self.run_batch([{"id": due["keyword_id"], "keyword": due["keyword"], "group": due.get("group"), "wave": due.get("wave"), "attempt": due.get("attempt", 1)}], "scheduled")
                         except Exception as exc:
                             due["status"] = "failed"
                             due["finished_at"] = datetime.now().isoformat(timespec="seconds")
@@ -325,7 +376,6 @@ class CollectorAgent:
                             await self.report_status(last_error=due["error"])
                         if result and result.get("risk_blocked"):
                             due["status"] = "risk_blocked"
-                            plan["paused"] = True
                             plan["risk_blocked"] = True
                             plan["risk_blocked_at"] = datetime.now().isoformat(timespec="seconds")
                         elif result and result.get("failed"):

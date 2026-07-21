@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_super_admin_user
@@ -21,23 +21,23 @@ from app.db.session import AsyncSessionLocal, get_db
 from app.models.user import User
 from app.models.xhs import (
     XhsAgentBatch, XhsAgentCommand, XhsAgentPairing, XhsCollectorDevice,
-    XhsKeyword, XhsKeywordRun,
+    XhsImageFailureReport, XhsKeyword, XhsKeywordRun, XhsNote,
 )
 from app.services.xhs_agent_ingestion import AgentIngestionConflict, ingest_agent_result
+from app.services.xhs_collection import DAILY_MIN_LIKES_EXCLUSIVE, WEEKLY_MIN_LIKES_EXCLUSIVE, remote_image_url
 
 router = APIRouter()
 admin_router = APIRouter()
-COMMAND_TYPES = {"test_keyword", "pause", "resume", "stop", "login"}
+COMMAND_TYPES = {"test_keyword", "refresh_image", "pause", "resume", "stop", "login"}
 DEFAULT_SCHEDULE = {
     "enabled": True,
-    "window_start": "09:30",
-    "window_end": "22:30",
-    "jitter_minutes": 8,
-    "daily_derived_limit": 5,
-    "grace_minutes": 12,
-    "no_catch_up": True,
+    "morning_start": "09:40",
+    "afternoon_start": "14:20",
+    "priority_keyword_limit": 8,
+    "max_active_keywords": 30,
     "detail_gap_seconds": [20, 40],
-    "stop_on_risk": True,
+    "resume_after_verification": True,
+    "verification_cooldown_minutes": [5, 10],
 }
 STALE_BATCH_MINUTES = 15
 MANUAL_RETRY_GAP_MINUTES = 15
@@ -164,7 +164,7 @@ async def get_agent(
 class PairBody(BaseModel):
     code: str = Field(..., min_length=6, max_length=32)
     name: str = Field(..., min_length=1, max_length=120)
-    agent_version: str = Field("0.3.4", max_length=40)
+    agent_version: str = Field("0.4.0", max_length=40)
     platform: str = Field("macos", max_length=40)
 
 
@@ -182,6 +182,7 @@ class BatchBody(BaseModel):
     mode: str = Field(..., pattern="^(scheduled|manual|test)$")
     schedule_date: date
     schedule_group: int | None = Field(None, ge=1, le=3)
+    wave: str = Field("manual", pattern="^(morning|afternoon|manual)$")
     total_keywords: int = Field(0, ge=0, le=100)
     command_id: str | None = None
 
@@ -213,7 +214,9 @@ class CommandBody(BaseModel):
     device_id: str
     command_type: str
     keyword_id: int | None = None
+    note_id: str | None = Field(None, max_length=100)
     schedule_group: int | None = Field(None, ge=1, le=3)
+    force: bool = False
 
 
 @admin_router.post("/agent/pairings")
@@ -248,13 +251,19 @@ async def pair_agent(body: PairBody, db: AsyncSession = Depends(get_db)):
 @router.get("/manifest")
 async def manifest(agent: XhsCollectorDevice = Depends(get_agent), db: AsyncSession = Depends(get_db)):
     now = utcnow()
-    keywords = (await db.scalars(select(XhsKeyword).where(XhsKeyword.enabled.is_(True)).order_by(XhsKeyword.keyword_type, XhsKeyword.schedule_group, XhsKeyword.id))).all()
-    completed_today = set((await db.scalars(
-        select(XhsKeywordRun.keyword_id).where(
+    keywords = (await db.scalars(select(XhsKeyword).where(XhsKeyword.enabled.is_(True),XhsKeyword.lifecycle_status.in_(("active","trial"))).order_by(XhsKeyword.pinned.desc(),XhsKeyword.id).limit(30))).all()
+    completed_rows = (await db.execute(
+        select(XhsKeywordRun.keyword_id,XhsKeywordRun.wave).where(
             XhsKeywordRun.run_date == now.date(),
-            XhsKeywordRun.status.in_(("completed", "partial")),
+            XhsKeywordRun.status == "completed",
         )
-    )).all())
+    )).all()
+    completed_waves: dict[int,list[str]] = {}
+    for keyword_id,wave in completed_rows: completed_waves.setdefault(keyword_id,[]).append(wave)
+    yield_rows = (await db.execute(select(XhsKeywordRun.keyword_id,func.coalesce(func.sum(XhsKeywordRun.final_count),0)).where(XhsKeywordRun.run_date>=now.date()-timedelta(days=7),XhsKeywordRun.status=="completed").group_by(XhsKeywordRun.keyword_id))).all()
+    yield_scores={keyword_id:float(total or 0) for keyword_id,total in yield_rows}
+    ranked=sorted(keywords,key=lambda item:(not item.pinned,-yield_scores.get(item.id,0),item.id))
+    priority_ids={item.id for item in ranked[:8]}
     return {
         "device": _device_payload(agent, manager.connected(agent.id)),
         "keywords": [{
@@ -263,9 +272,17 @@ async def manifest(agent: XhsCollectorDevice = Depends(get_agent), db: AsyncSess
                 (item.cooldown_until is None or item.cooldown_until <= now.date())
                 and (item.next_run_at is None or item.next_run_at <= now)
             ),
-            "completed_today": item.id in completed_today,
+            "completed_waves": completed_waves.get(item.id,[]),
+            "priority": item.id in priority_ids, "pinned":item.pinned,
+            "yield_score":yield_scores.get(item.id,0), "lifecycle_status":item.lifecycle_status,
         } for item in keywords],
-        "rules": {"max_age_days": 7, "likes_gt": 2000, "max_per_keyword": 10, "sort": "popular"},
+        "rules": {
+            "max_age_days": 7, "max_per_keyword": None, "sort": "popular",
+            "levels": {
+                "daily": {"max_age_hours": 24, "likes_gt": DAILY_MIN_LIKES_EXCLUSIVE},
+                "weekly": {"min_age_hours": 24, "max_age_days": 7, "likes_gt": WEEKLY_MIN_LIKES_EXCLUSIVE},
+            },
+        },
         "schedule": _schedule_payload(agent),
     }
 
@@ -304,6 +321,7 @@ async def create_batch(body: BatchBody, agent: XhsCollectorDevice = Depends(get_
         local_batch_key=body.local_batch_key, mode=body.mode, status="running",
         schedule_date=body.schedule_date, schedule_group=body.schedule_group,
         total_keywords=body.total_keywords, started_at=now, last_progress_at=now,
+        metadata_json={"wave":body.wave},
     )
     db.add(batch)
     await db.commit()
@@ -354,7 +372,30 @@ async def update_command(command_id: str, body: CommandStatusBody, agent: XhsCol
     if body.status == "delivered": command.delivered_at = now
     if body.status == "running": command.started_at = now
     if body.status in {"succeeded", "failed", "cancelled"}: command.finished_at = now
+    if body.status == "succeeded" and command.command_type == "refresh_image":
+        requested_note_id = str((command.payload or {}).get("note_id") or "")
+        returned_note_id = str(body.result.get("note_id") or "")
+        note = (await db.execute(select(XhsNote).where(XhsNote.note_id == requested_note_id))).scalar_one_or_none()
+        cover_url = remote_image_url(body.result.get("cover_url"))
+        if not note or returned_note_id != requested_note_id or not cover_url:
+            raise HTTPException(400, "本地节点返回的封面刷新结果无效")
+        note.cover_url = cover_url
+        avatar_url = remote_image_url(body.result.get("avatar_url"))
+        if avatar_url: note.avatar_url = avatar_url
+        note.media_status = "remote_ok"
+        note.last_discovered_at = now
+        reports = (await db.scalars(select(XhsImageFailureReport).where(
+            XhsImageFailureReport.note_id == note.id,
+            XhsImageFailureReport.status == "open",
+        ))).all()
+        for report in reports: report.status = "resolved"
     await db.commit()
+    if body.status == "succeeded" and command.command_type == "refresh_image":
+        try:
+            from app.tasks.xhs_tasks import cache_note_media_task
+            cache_note_media_task.apply_async(args=[str((command.payload or {}).get("note_id") or "")])
+        except Exception:
+            pass
     return {"ok": True}
 
 
@@ -363,6 +404,8 @@ async def list_devices(_admin: User = Depends(require_admin_permission("monitori
     await _close_stale_batches(db)
     devices = (await db.scalars(select(XhsCollectorDevice).order_by(desc(XhsCollectorDevice.id)))).all()
     batches = (await db.scalars(select(XhsAgentBatch).order_by(desc(XhsAgentBatch.id)).limit(20))).all()
+    current_keyword_ids={item.current_keyword_id for item in batches if item.current_keyword_id}
+    current_keywords={item.id:item.keyword for item in (await db.scalars(select(XhsKeyword).where(XhsKeyword.id.in_(current_keyword_ids)))).all()} if current_keyword_ids else {}
     return {
         "devices": [_device_payload(item, manager.connected(item.id)) for item in devices],
         "batches": [{
@@ -370,6 +413,7 @@ async def list_devices(_admin: User = Depends(require_admin_permission("monitori
             "mode": item.mode, "status": item.status, "schedule_date": item.schedule_date.isoformat(),
             "total_keywords": item.total_keywords, "completed_keywords": item.completed_keywords,
             "failed_keywords": item.failed_keywords, "last_progress_at": item.last_progress_at.isoformat() if item.last_progress_at else None,
+            "current_keyword_id":item.current_keyword_id,"current_keyword":current_keywords.get(item.current_keyword_id),
             "error": (item.metadata_json or {}).get("last_error"),
         } for item in batches],
     }
@@ -384,7 +428,7 @@ async def create_command(body: CommandBody, admin: User = Depends(require_admin_
         raise HTTPException(404, "本地采集节点不存在")
     if not manager.connected(device.id):
         raise HTTPException(409, "本地采集节点当前离线，未创建命令")
-    if body.command_type == "test_keyword" and device.cookie_status != "valid":
+    if body.command_type in {"test_keyword", "refresh_image"} and device.cookie_status != "valid":
         raise HTTPException(409, "本地 Cookie 需要重新扫码或完成人机验证后才能采集")
     payload: dict[str, Any] = {}
     if body.command_type == "test_keyword":
@@ -395,18 +439,30 @@ async def create_command(body: CommandBody, admin: User = Depends(require_admin_
             .limit(1)
         )
         retry_at = latest_progress + timedelta(minutes=MANUAL_RETRY_GAP_MINUTES) if latest_progress else None
-        if retry_at and retry_at > utcnow():
+        if body.force and not (admin.is_superuser and admin.phone == settings.SUPER_ADMIN_PHONE):
+            raise HTTPException(403, "只有最高管理员可以跳过手动重试冷却期")
+        if retry_at and retry_at > utcnow() and not body.force:
             remaining = max(1, int((retry_at - utcnow()).total_seconds() / 60) + 1)
             raise HTTPException(409, f"为降低小红书风控风险，请等待约 {remaining} 分钟后再重新执行")
         keyword = await db.get(XhsKeyword, body.keyword_id)
         if not keyword or not keyword.enabled:
             raise HTTPException(404, "关键词不存在或已停用")
-        payload = {"keyword_id": keyword.id, "keyword": keyword.keyword}
+        payload = {"keyword_id": keyword.id, "keyword": keyword.keyword, "force_cooldown_override": body.force}
+    elif body.command_type == "refresh_image":
+        note = (await db.execute(select(XhsNote).where(XhsNote.note_id == body.note_id))).scalar_one_or_none()
+        if not note: raise HTTPException(404, "素材不存在")
+        payload = {
+            "note_id": note.note_id,
+            "url": note.latest_xsec_url or note.stable_url,
+        }
     command = XhsAgentCommand(
         device_id=device.id, command_type=body.command_type, payload=payload,
         requested_by_user_id=admin.id, expires_at=utcnow() + timedelta(minutes=10),
     )
     db.add(command)
+    if body.command_type == "test_keyword" and body.force:
+        from app.models.admin_audit import AdminAuditLog
+        db.add(AdminAuditLog(actor_user_id=admin.id,action="xhs_manual_cooldown_override",target_type="xhs_keyword",target_id=str(body.keyword_id),summary="最高管理员跳过 15 分钟手动重试冷却",metadata_json={"device_id":body.device_id}))
     await db.commit()
     await db.refresh(command)
     delivered = await manager.send_command(device.id, command)

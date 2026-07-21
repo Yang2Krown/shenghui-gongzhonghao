@@ -8,6 +8,7 @@ import logging
 from typing import Any, Optional
 
 from celery.signals import after_task_publish, task_failure, task_postrun, task_prerun, task_retry
+from sqlalchemy.exc import IntegrityError
 
 from app.core.timezone import utcnow
 from app.db.session import SessionLocal
@@ -65,28 +66,34 @@ def _body_args_kwargs(body: Any) -> tuple:
 def _upsert(task_id: str, **values: Any) -> None:
     if not task_id:
         return
-    db = None
-    try:
+    # Beat 发布和 Worker 开始信号可能在不同进程同时创建同一 task_id。
+    # 唯一键竞争时重读已由另一进程创建的行，再更新当前状态。
+    for attempt in range(2):
         db = SessionLocal()
-        row = db.query(CeleryTaskRun).filter(CeleryTaskRun.task_id == task_id).first()
-        if row is None:
-            row = CeleryTaskRun(
-                task_id=task_id,
-                task_name=values.pop("task_name", "unknown"),
-                category=values.pop("category", "default"),
-                queue=values.pop("queue", "default"),
-            )
-            db.add(row)
-        for key, value in values.items():
-            if hasattr(row, key):
-                setattr(row, key, value)
-        db.commit()
-    except Exception:
-        if db is not None:
+        try:
+            row = db.query(CeleryTaskRun).filter(CeleryTaskRun.task_id == task_id).first()
+            if row is None:
+                row = CeleryTaskRun(
+                    task_id=task_id,
+                    task_name=values.get("task_name", "unknown"),
+                    category=values.get("category", "default"),
+                    queue=values.get("queue", "default"),
+                )
+                db.add(row)
+            for key, value in values.items():
+                if hasattr(row, key):
+                    setattr(row, key, value)
+            db.commit()
+            return
+        except IntegrityError:
             db.rollback()
-        logger.warning("写入 Celery 任务监控记录失败", exc_info=True)
-    finally:
-        if db is not None:
+            if attempt:
+                logger.warning("写入 Celery 任务监控记录失败", exc_info=True)
+        except Exception:
+            db.rollback()
+            logger.warning("写入 Celery 任务监控记录失败", exc_info=True)
+            return
+        finally:
             db.close()
 
 

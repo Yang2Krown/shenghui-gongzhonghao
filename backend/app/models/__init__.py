@@ -53,7 +53,8 @@ from app.models.xhs import (
     XhsAgentBatch, XhsAgentCommand, XhsAgentPairing, XhsAgentUpload,
     XhsCollectorDevice, XhsDailyQuota, XhsEngagementSnapshot,
     XhsImageFailureReport, XhsKeyword, XhsKeywordRun, XhsNote,
-    XhsNoteDiscovery, XhsProviderCall,
+    XhsNoteDiscovery, XhsProviderCall, XhsSemanticTopic, XhsTopicMember,
+    XhsTopicSnapshot,
 )
 
 __all__ = [

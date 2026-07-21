@@ -15,20 +15,74 @@ from xhs_cli.qr_login import (
 )
 
 
+QR_NETWORK_ATTEMPTS = 2
+QR_REQUEST_TIMEOUT_SECONDS = 15
+
+
+def _is_transient_network_error(exc: Exception) -> bool:
+    """兼容 httpx 包装异常和 Python SSL/socket 原始异常。"""
+    current: BaseException | None = exc
+    while current is not None:
+        name = type(current).__name__.lower()
+        message = str(current).lower()
+        if (
+            "timeout" in name
+            or "network" in name
+            or "connecterror" in name
+            or "timed out" in message
+            or "handshake operation" in message
+            or "connection reset" in message
+            or "temporary failure" in message
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _network_error_message(exc: Exception) -> str:
+    if _is_transient_network_error(exc):
+        return "连接小红书超时，请检查这台 Mac 的网络或代理后重试"
+    return str(exc) or type(exc).__name__
+
+
 class LocalQrLogin:
     def __init__(self, cookie_path: Path | None = None):
         self.cookie_path = cookie_path or Path.home() / ".xiaohongshu-cli/cookies.json"
 
     def run(self, on_update, ttl_seconds: int = 240) -> dict:
-        a1, webid = _generate_a1(), _generate_webid()
-        client = XhsClient({"a1": a1, "webId": webid}, request_delay=0)
+        client = None
+        qr_data = None
+        a1 = webid = ""
+        for attempt in range(1, QR_NETWORK_ATTEMPTS + 1):
+            a1, webid = _generate_a1(), _generate_webid()
+            client = XhsClient(
+                {"a1": a1, "webId": webid},
+                timeout=QR_REQUEST_TIMEOUT_SECONDS,
+                request_delay=0,
+                max_retries=1,
+            )
+            try:
+                try:
+                    _apply_session_cookies(client, client.login_activate())
+                except Exception:
+                    pass
+                qr_data = client.create_qr_login()
+                break
+            except Exception as exc:
+                client.close()
+                client = None
+                if attempt >= QR_NETWORK_ATTEMPTS or not _is_transient_network_error(exc):
+                    raise RuntimeError(_network_error_message(exc)) from exc
+                on_update({
+                    "status": "retrying",
+                    "message": "网络连接超时，正在重新连接小红书…",
+                })
+                time.sleep(2)
+
+        if client is None or qr_data is None:
+            raise RuntimeError("未能创建小红书登录会话")
         deadline = time.time() + ttl_seconds
         try:
-            try:
-                _apply_session_cookies(client, client.login_activate())
-            except Exception:
-                pass
-            qr_data = client.create_qr_login()
             qr_id, code = str(qr_data["qr_id"]), str(qr_data["code"])
             on_update({"status": "waiting", "qr_url": str(qr_data["url"]), "expires_in": ttl_seconds})
             while time.time() < deadline:
@@ -52,6 +106,10 @@ class LocalQrLogin:
                 except NeedVerifyError as exc:
                     query = urlencode({"redirectPath": "https://www.xiaohongshu.com/explore", "verifyUuid": exc.verify_uuid, "verifyType": exc.verify_type, "verifyBiz": "461"})
                     on_update({"status": "verification_required", "message": "请完成人机验证", "verification_url": f"https://www.xiaohongshu.com/website-login/captcha?{query}"})
+                except Exception as exc:
+                    if not _is_transient_network_error(exc):
+                        raise
+                    on_update({"status": "retrying", "message": "网络短暂超时，正在继续检查扫码状态…"})
                 time.sleep(2)
             return {"status": "expired", "message": "二维码已过期"}
         finally:

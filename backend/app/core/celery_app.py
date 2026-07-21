@@ -45,6 +45,10 @@ celery_app.conf.update(
         "outline.*": {"queue": "ai"},
         "publish.*": {"queue": "publish"},
         "xhs.publish*": {"queue": "publish"},
+        "xhs.analyze_notes": {"queue": "ai"},
+        "xhs.rebuild_semantic_topics": {"queue": "ai"},
+        "xhs.generate_dynamic_keywords": {"queue": "ai"},
+        "xhs.evaluate_keyword_lifecycle": {"queue": "ai"},
         "xhs.*": {"queue": "scraping"},
     },
 )

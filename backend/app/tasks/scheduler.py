@@ -17,8 +17,11 @@ from celery.schedules import crontab
 
 CELERY_BEAT_SCHEDULE = {
     # 搜索采集已由本地 Mac Agent 接管；服务器只保留关键词生成和素材分析。
-    "xhs-dynamic-generate": {"task": "xhs.generate_dynamic_keywords", "schedule": crontab(minute=30, hour=21)},
-    "xhs-note-analysis": {"task": "xhs.analyze_notes", "schedule": crontab(minute=10, hour=22)},
+    "xhs-note-analysis": {"task": "xhs.analyze_notes", "schedule": crontab(minute=0, hour="13,18")},
+    "xhs-topic-after-morning": {"task":"xhs.rebuild_semantic_topics","schedule":crontab(minute=15,hour=13),"kwargs":{"wave":"morning"}},
+    "xhs-topic-after-afternoon": {"task":"xhs.rebuild_semantic_topics","schedule":crontab(minute=15,hour=18),"kwargs":{"wave":"afternoon"}},
+    "xhs-dynamic-generate": {"task": "xhs.generate_dynamic_keywords", "schedule": crontab(minute=20, hour=18)},
+    "xhs-keyword-lifecycle": {"task":"xhs.evaluate_keyword_lifecycle","schedule":crontab(minute=25,hour=18)},
     # ── 采集：每天 5 波，错峰派发每个源 ──
     "dispatch-fetch": {
         "task": "scraper.dispatch_fetch",
@@ -99,6 +102,13 @@ CELERY_BEAT_SCHEDULE = {
         "task": "cleanup.purge_stale_clusters",
         "schedule": crontab(minute=10, hour=4),
         "kwargs": {"days": 14},
+    },
+
+    # 小红书前端只展示近 7 天；同步删除更早或已淘汰素材的本地图片缓存。
+    "xhs-cleanup-media-cache": {
+        "task": "xhs.cleanup_media_cache",
+        "schedule": crontab(minute=25, hour=4),
+        "kwargs": {"days": 7},
     },
 
     # ── 创作工具订阅到期：每天凌晨 4:20 处理到期订阅（仅移除权益，积分永久保留）──

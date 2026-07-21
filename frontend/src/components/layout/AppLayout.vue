@@ -273,8 +273,13 @@ const navItems = [
       { id: 'content-info', label: '选题列表' },
       { id: 'content-info-news', label: '资讯信息' },
       { id: 'content-info-cases', label: '实操案例' },
-      { id: 'xhs-materials', label: '小红书素材', adminOnly: true },
     ],
+  },
+  {
+    id: 'xhs-materials',
+    label: '小红书选题',
+    icon: 'TrendCharts',
+    adminOnly: true,
   },
   {
     id: 'potential-commercial',

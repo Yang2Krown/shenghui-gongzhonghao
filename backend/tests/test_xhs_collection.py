@@ -12,7 +12,7 @@ from app.db.seeds.seed_accounts_from_table2 import X_KEYWORDS
 from app.services.xhs_collection import (
     Candidate, CliProvider, TikHubBudgetExhausted, _xsec_token, consume_tikhub_quota, count_value,
     hydrate, merge_provider_candidates, normalize_candidate, pre_hydration_rejection, rank,
-    rejection_reason, reserve_tikhub_searches,
+    rejection_reason, reserve_tikhub_searches, upsert_engagement_snapshot, upsert_note, xsec_note_url,
 )
 from app.services.xhs_cli_entrypoint import XHS_SEARCH_FILTERS, main as xhs_cli_main
 
@@ -54,10 +54,13 @@ def test_cli_entrypoint_calls_installed_click_cli(monkeypatch):
     assert client_mixins._SEARCH_DEFAULT_FILTERS == XHS_SEARCH_FILTERS
 
 
-def test_strict_eligibility_excludes_equal_2000_old_and_unknown():
+def test_strict_eligibility_uses_daily_200_and_weekly_2000_levels():
     now=datetime(2026,7,16,12,0,0)
     base=dict(note_id="n",title="完整标题",content="完整正文",author_nickname="作者",cover_url="https://sns-webpic.xhscdn.com/a.jpg",note_type="image")
-    assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=1),like_count=2000),now)=="low_like"
+    assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=1),like_count=200),now)=="low_like"
+    assert rejection_reason(Candidate(**base,published_at=now-timedelta(hours=23),like_count=201),now) is None
+    assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=2),like_count=2000),now)=="low_like"
+    assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=2),like_count=2001),now) is None
     assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=8),like_count=9000),now)=="old"
     assert rejection_reason(Candidate(**base,published_at=None,like_count=9000),now)=="unknown_metric"
     assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=1),like_count=None),now)=="unknown_metric"
@@ -122,10 +125,33 @@ def test_cli_search_card_schema_preserves_token_date_shares_and_https_images(mon
     assert _xsec_token(c.xsec_url)=="token-with-equals="
 
 
+def test_bare_search_url_is_rebuilt_with_separate_xsec_token():
+    raw={
+        "id":"6a57633a0000000021019bc5",
+        "url":"https://www.xiaohongshu.com/explore/6a57633a0000000021019bc5",
+        "xsec_token":"ABZC7Wl4Gb4YIaf4alGHhvcVNDgPRfGIVjx5_DeFoMTfA=",
+        "xsec_source":"pc_search",
+        "title":"可直达笔记",
+    }
+    candidate=normalize_candidate(raw,"cli",1)
+    assert candidate.xsec_url == (
+        "https://www.xiaohongshu.com/explore/6a57633a0000000021019bc5"
+        "?xsec_token=ABZC7Wl4Gb4YIaf4alGHhvcVNDgPRfGIVjx5_DeFoMTfA%3D"
+        "&xsec_source=pc_search"
+    )
+
+
+def test_tokenized_candidate_replaces_bare_url_during_provider_merge():
+    bare=Candidate(note_id="note-1",xsec_url="https://www.xiaohongshu.com/explore/note-1")
+    tokenized=Candidate(note_id="note-1",xsec_url=xsec_note_url("note-1",token="search-token="))
+    bare.merge(tokenized)
+    assert _xsec_token(bare.xsec_url)=="search-token="
+
+
 def test_search_card_prefilter_avoids_details_for_definitely_ineligible_notes():
     now=datetime(2026,7,16,12,0,0)
     old=Candidate(note_id="old",published_at=datetime(2026,6,23),like_count=22916,note_type="video")
-    low=Candidate(note_id="low",published_at=datetime(2026,7,15),like_count=709,note_type="video")
+    low=Candidate(note_id="low",published_at=datetime(2026,7,14),like_count=2000,note_type="video")
     possible=Candidate(note_id="possible",published_at=datetime(2026,7,15),like_count=3000,note_type="image")
     assert pre_hydration_rejection(old,now)=="old"
     assert pre_hydration_rejection(low,now)=="low_like"
@@ -173,6 +199,21 @@ def test_keyword_run_has_same_day_unique_constraint():
         try:db.commit()
         except Exception:db.rollback()
         else:raise AssertionError("同一关键词当天只能有一个逻辑轮次")
+
+
+def test_repeated_note_refreshes_metrics_and_same_day_snapshot():
+    engine=create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine,tables=[Base.metadata.tables["xhs_notes"],Base.metadata.tables["xhs_engagement_snapshots"]])
+    now=datetime(2026,7,18,12,0,0)
+    with Session(engine) as db:
+        first=Candidate(note_id="repeat-note",like_count=300,collect_count=20,comment_count=5,share_count=2,view_count=1000)
+        note=upsert_note(db,first,"ready",now);upsert_engagement_snapshot(db,note,now.date());db.commit()
+        second=Candidate(note_id="repeat-note",like_count=560,collect_count=44,comment_count=9,share_count=7,view_count=1800)
+        note=upsert_note(db,second,"ready",now+timedelta(hours=2));upsert_engagement_snapshot(db,note,now.date());db.commit()
+        db.refresh(note)
+        snapshot=db.query(Base.metadata.tables["xhs_engagement_snapshots"]).one()
+        assert (note.like_count,note.collect_count,note.comment_count,note.share_count,note.view_count)==(560,44,9,7,1800)
+        assert (snapshot.like_count,snapshot.collect_count,snapshot.comment_count,snapshot.share_count,snapshot.view_count)==(560,44,9,7,1800)
 
 
 def test_free_hydration_never_calls_tikhub(monkeypatch):

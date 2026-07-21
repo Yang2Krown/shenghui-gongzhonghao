@@ -230,7 +230,6 @@ class Settings(BaseSettings):
     XHS_CLI_TIMEOUT_SECONDS: int = 120
     XHS_CLI_COOLDOWN_MINUTES: int = 10
     XHS_PROVIDER_CANDIDATE_LIMIT: int = 20
-    XHS_KEYWORD_FINAL_LIMIT: int = 10
     
     # 支持的平台
     SUPPORTED_PLATFORMS: List[str] = [

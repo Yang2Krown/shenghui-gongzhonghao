@@ -16,9 +16,15 @@ class RiskBlocked(RuntimeError):
     pass
 
 
-class XhsCollector:
-    COLLECTION_TIMEOUT_SECONDS = 8 * 60
+DAILY_MIN_LIKES_EXCLUSIVE = 200
+WEEKLY_MIN_LIKES_EXCLUSIVE = 2000
 
+
+def collection_level(published_at: datetime, now: datetime) -> str:
+    return "daily" if published_at >= now - timedelta(hours=24) else "weekly"
+
+
+class XhsCollector:
     def __init__(self, root: Path):
         self.entrypoint = root / "cli_entrypoint.py"
 
@@ -44,60 +50,88 @@ class XhsCollector:
         return payload if isinstance(payload, dict) else {"data": payload}
 
     def collect_keyword(self, keyword: str) -> dict:
-        deadline = time.monotonic() + self.COLLECTION_TIMEOUT_SECONDS
-        search_payload = self._run_cli("search", keyword, "--sort", "popular")
-        search_rows = unwrap(search_payload)
-        recognized_results = has_result_list(search_payload)
+        searches = []
+        for level, sort in (("daily", "latest"), ("weekly", "popular")):
+            payload = self._run_cli("search", keyword, "--sort", sort)
+            rows = unwrap(payload)
+            searches.append({
+                "level": level,
+                "sort": sort,
+                "payload": payload,
+                "rows": rows,
+                "recognized": has_result_list(payload),
+            })
+        recognized_count = sum(item["recognized"] for item in searches)
+        returned_count = sum(len(item["rows"]) for item in searches)
         diagnostics = {
-            "version": 1,
-            "search_state": "empty" if recognized_results and not search_rows else "ok" if recognized_results else "unrecognized",
-            "search_returned_count": len(search_rows),
-            "considered_count": min(20, len(search_rows)),
+            "version": 2,
+            "search_state": "empty" if recognized_count == len(searches) and returned_count == 0 else "ok" if recognized_count else "unrecognized",
+            "search_returned_count": returned_count,
+            "considered_count": sum(len(item["rows"]) for item in searches),
+            "searches": [
+                {"level": item["level"], "sort": item["sort"], "returned_count": len(item["rows"]), "recognized": item["recognized"]}
+                for item in searches
+            ],
             "normalized_count": 0,
             "within_week_count": 0,
             "eligible_like_count": 0,
+            "levels": {
+                "daily": {"candidate_count": 0, "eligible_count": 0, "likes_gt": DAILY_MIN_LIKES_EXCLUSIVE},
+                "weekly": {"candidate_count": 0, "eligible_count": 0, "likes_gt": WEEKLY_MIN_LIKES_EXCLUSIVE},
+            },
             "detail_attempted_count": 0,
             "detail_success_count": 0,
             "final_candidate_count": 0,
-            "rejection_counts": {"invalid_payload": 0, "old": 0, "unknown_date": 0, "low_like": 0, "unknown_metric": 0},
+            "rejection_counts": {"invalid_payload": 0, "duplicate": 0, "level_mismatch": 0, "old": 0, "unknown_date": 0, "low_like": 0, "unknown_metric": 0},
         }
-        candidates = []
-        cutoff = datetime.now() - timedelta(days=7)
-        for rank, raw in enumerate(search_rows[:20], 1):
-            item = normalize(raw, rank)
-            if not item:
-                diagnostics["rejection_counts"]["invalid_payload"] += 1
-                continue
-            diagnostics["normalized_count"] += 1
-            published = item.get("published_at")
-            likes = (item.get("engagement") or {}).get("likes")
-            if published is None:
-                diagnostics["rejection_counts"]["unknown_date"] += 1
-                continue
-            if published < cutoff:
-                diagnostics["rejection_counts"]["old"] += 1
-                continue
-            diagnostics["within_week_count"] += 1
-            if likes is None:
-                diagnostics["rejection_counts"]["unknown_metric"] += 1
-                continue
-            if likes <= 2000:
-                diagnostics["rejection_counts"]["low_like"] += 1
-                continue
-            diagnostics["eligible_like_count"] += 1
-            candidates.append(item)
+        candidates_by_level = {"daily": [], "weekly": []}
+        seen_note_ids = set()
+        now = datetime.now()
+        cutoff = now - timedelta(days=7)
+        for search in searches:
+            for rank, raw in enumerate(search["rows"], 1):
+                item = normalize(raw, rank)
+                if not item:
+                    diagnostics["rejection_counts"]["invalid_payload"] += 1
+                    continue
+                note_id = item["note_id"]
+                if note_id in seen_note_ids:
+                    diagnostics["rejection_counts"]["duplicate"] += 1
+                    continue
+                published = item.get("published_at")
+                if published is None:
+                    diagnostics["rejection_counts"]["unknown_date"] += 1
+                    continue
+                if published < cutoff:
+                    diagnostics["rejection_counts"]["old"] += 1
+                    continue
+                level = collection_level(published, now)
+                seen_note_ids.add(note_id)
+                diagnostics["normalized_count"] += 1
+                diagnostics["within_week_count"] += 1
+                diagnostics["levels"][level]["candidate_count"] += 1
+                likes = (item.get("engagement") or {}).get("likes")
+                if likes is None:
+                    diagnostics["rejection_counts"]["unknown_metric"] += 1
+                    continue
+                threshold = diagnostics["levels"][level]["likes_gt"]
+                if likes <= threshold:
+                    diagnostics["rejection_counts"]["low_like"] += 1
+                    continue
+                diagnostics["eligible_like_count"] += 1
+                diagnostics["levels"][level]["eligible_count"] += 1
+                item["collection_level"] = level
+                item["collection_sort"] = search["sort"]
+                candidates_by_level[level].append(item)
+
+        candidates = candidates_by_level["daily"] + candidates_by_level["weekly"]
         candidates.sort(key=lambda item: ((item.get("engagement") or {}).get("likes") or 0), reverse=True)
         results = []
-        for item in candidates[:10]:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
+        for item in candidates:
             detail = None
             diagnostics["detail_attempted_count"] += 1
             try:
-                detail_payload = self._run_cli(
-                    "read", item["original_url"], timeout_seconds=min(120, remaining),
-                )
+                detail_payload = self._run_cli("read", item["original_url"])
                 detail_rows = unwrap(detail_payload)
                 detail = normalize(detail_rows[0], item["provider_rank"]) if detail_rows else normalize(detail_payload, item["provider_rank"])
                 if detail:
@@ -110,10 +144,7 @@ class XhsCollector:
             if isinstance(merged.get("published_at"), datetime):
                 merged["published_at"] = merged["published_at"].isoformat()
             results.append(merged)
-            if len(results) < min(10, len(candidates)):
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                time.sleep(min(random.uniform(20, 40), remaining))
+            if len(results) < len(candidates):
+                time.sleep(random.uniform(20, 40))
         diagnostics["final_candidate_count"] = len(results)
         return {"notes": results, "diagnostics": diagnostics}
