@@ -28,16 +28,17 @@ from app.services.xhs_collection import DAILY_MIN_LIKES_EXCLUSIVE, WEEKLY_MIN_LI
 
 router = APIRouter()
 admin_router = APIRouter()
-COMMAND_TYPES = {"test_keyword", "refresh_image", "pause", "resume", "stop", "login"}
+COMMAND_TYPES = {"test_keyword", "refresh_image", "pause", "resume", "stop", "login", "browser_login", "verify_session"}
 DEFAULT_SCHEDULE = {
     "enabled": True,
-    "morning_start": "09:40",
-    "afternoon_start": "14:20",
-    "priority_keyword_limit": 8,
-    "max_active_keywords": 30,
+    "strategy": "all_day",
+    "window_start": "00:30",
+    "window_end": "23:30",
+    "daily_derived_limit": 5,
+    "jitter_minutes": 8,
     "detail_gap_seconds": [20, 40],
     "resume_after_verification": True,
-    "verification_cooldown_minutes": [5, 10],
+    "verification_cooldown_minutes": [8, 12],
 }
 STALE_BATCH_MINUTES = 15
 MANUAL_RETRY_GAP_MINUTES = 15
@@ -48,7 +49,15 @@ def _secret_hash(value: str) -> str:
 
 
 def _schedule_payload(device: XhsCollectorDevice) -> dict[str, Any]:
-    return {**DEFAULT_SCHEDULE, **(device.schedule_config or {})}
+    payload = {**DEFAULT_SCHEDULE, **(device.schedule_config or {})}
+    # These values are risk controls, not per-device preferences. Old rows may
+    # still contain the previous aggressive schedule and must not override them.
+    for key in (
+        "strategy", "window_start", "window_end", "daily_derived_limit", "jitter_minutes",
+        "detail_gap_seconds", "verification_cooldown_minutes",
+    ):
+        payload[key] = DEFAULT_SCHEDULE[key]
+    return payload
 
 
 def _device_payload(device: XhsCollectorDevice, connected: bool = False) -> dict[str, Any]:
@@ -164,7 +173,7 @@ async def get_agent(
 class PairBody(BaseModel):
     code: str = Field(..., min_length=6, max_length=32)
     name: str = Field(..., min_length=1, max_length=120)
-    agent_version: str = Field("0.4.0", max_length=40)
+    agent_version: str = Field("0.6.1", max_length=40)
     platform: str = Field("macos", max_length=40)
 
 
@@ -251,7 +260,11 @@ async def pair_agent(body: PairBody, db: AsyncSession = Depends(get_db)):
 @router.get("/manifest")
 async def manifest(agent: XhsCollectorDevice = Depends(get_agent), db: AsyncSession = Depends(get_db)):
     now = utcnow()
-    keywords = (await db.scalars(select(XhsKeyword).where(XhsKeyword.enabled.is_(True),XhsKeyword.lifecycle_status.in_(("active","trial"))).order_by(XhsKeyword.pinned.desc(),XhsKeyword.id).limit(30))).all()
+    keywords = (await db.scalars(
+        select(XhsKeyword)
+        .where(XhsKeyword.enabled.is_(True), XhsKeyword.lifecycle_status.in_(("active", "trial")))
+        .order_by(XhsKeyword.keyword_type, XhsKeyword.pinned.desc(), XhsKeyword.id)
+    )).all()
     completed_rows = (await db.execute(
         select(XhsKeywordRun.keyword_id,XhsKeywordRun.wave).where(
             XhsKeywordRun.run_date == now.date(),
@@ -428,6 +441,17 @@ async def create_command(body: CommandBody, admin: User = Depends(require_admin_
         raise HTTPException(404, "本地采集节点不存在")
     if not manager.connected(device.id):
         raise HTTPException(409, "本地采集节点当前离线，未创建命令")
+    if body.command_type in {"login", "browser_login", "verify_session"}:
+        active_auth = (await db.execute(
+            select(XhsAgentCommand).where(
+                XhsAgentCommand.device_id == device.id,
+                XhsAgentCommand.command_type == body.command_type,
+                XhsAgentCommand.status.in_(("queued", "delivered", "running")),
+                XhsAgentCommand.expires_at > utcnow(),
+            ).order_by(desc(XhsAgentCommand.id)).limit(1)
+        )).scalar_one_or_none()
+        if active_auth:
+            return {"command_id": active_auth.public_id, "status": active_auth.status, "reused": True}
     if body.command_type in {"test_keyword", "refresh_image"} and device.cookie_status != "valid":
         raise HTTPException(409, "本地 Cookie 需要重新扫码或完成人机验证后才能采集")
     payload: dict[str, Any] = {}

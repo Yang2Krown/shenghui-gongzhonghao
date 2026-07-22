@@ -75,11 +75,13 @@ def test_local_store_persists_failed_uploads(tmp_path):
 
 
 def test_collector_stops_immediately_on_captcha(tmp_path, monkeypatch):
-    payload = {"ok": False, "error": {"code": "verification_required", "message": "Captcha required"}}
+    payload = {"ok": False, "error": {"code": "verification_required", "message": "Captcha required: type=slider, uuid=verify-123"}}
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args=[], returncode=1, stdout=json.dumps(payload), stderr=""))
     collector = XhsCollector(tmp_path)
-    with pytest.raises(RiskBlocked):
+    with pytest.raises(RiskBlocked) as captured:
         collector.collect_keyword("AI Agent")
+    assert "verifyUuid=verify-123" in captured.value.verification_url
+    assert "verifyType=slider" in captured.value.verification_url
 
 
 def test_empty_result_list_is_distinguished_from_unrecognized_response():
@@ -95,7 +97,9 @@ def test_collector_reports_true_search_zero(tmp_path, monkeypatch):
     assert result["notes"] == []
     assert result["diagnostics"]["search_state"] == "empty"
     assert result["diagnostics"]["search_returned_count"] == 0
-    assert [item["sort"] for item in result["diagnostics"]["searches"]] == ["latest", "popular"]
+    assert [(item["sort"], item["page"]) for item in result["diagnostics"]["searches"]] == [
+        ("latest", 1), ("popular", 1),
+    ]
 
 
 def test_collector_preserves_raw_count_when_every_result_is_filtered(tmp_path, monkeypatch):
@@ -113,11 +117,59 @@ def test_collector_preserves_raw_count_when_every_result_is_filtered(tmp_path, m
     diagnostics = result["diagnostics"]
     assert result["notes"] == []
     assert diagnostics["search_state"] == "ok"
-    assert diagnostics["search_returned_count"] == 2
+    assert diagnostics["search_returned_count"] == 3
     assert diagnostics["within_week_count"] == 1
     assert diagnostics["eligible_like_count"] == 0
     assert diagnostics["rejection_counts"]["low_like"] == 1
-    assert diagnostics["rejection_counts"]["duplicate"] == 1
+    assert diagnostics["rejection_counts"]["duplicate"] == 2
+
+
+def test_daily_latest_fetches_third_page_only_when_yield_is_low_and_page_two_is_new(tmp_path, monkeypatch):
+    collector = XhsCollector(tmp_path)
+    calls = []
+
+    def fake_cli(*args, **kwargs):
+        calls.append(args)
+        sort = args[args.index("--sort") + 1]
+        page = int(args[args.index("--page") + 1])
+        if sort == "popular":
+            return {"ok": True, "data": []}
+        return {"ok": True, "data": [{
+            "id": f"daily-{page}", "model_type": "note",
+            "note_card": {
+                "display_title": f"第 {page} 页", "corner_tag_info": [{"type": "publish_time", "text": "今天"}],
+                "interact_info": {"liked_count": "201"},
+            },
+        }]}
+
+    monkeypatch.setattr(collector, "_run_cli", fake_cli)
+    monkeypatch.setattr("collector.time.sleep", lambda *_: None)
+    result = collector.collect_keyword("AI")
+    assert result["diagnostics"]["pagination"] == {"daily_pages": [1, 2, 3], "weekly_pages": [1]}
+    assert [note["note_id"] for note in result["notes"]] == ["daily-1", "daily-2", "daily-3"]
+
+
+def test_weekly_popular_stops_after_first_page_when_no_item_exceeds_threshold(tmp_path, monkeypatch):
+    collector = XhsCollector(tmp_path)
+    calls = []
+
+    def fake_cli(*args, **kwargs):
+        calls.append(args)
+        sort = args[args.index("--sort") + 1]
+        if sort == "latest":
+            return {"ok": True, "data": []}
+        return {"ok": True, "data": [{
+            "id": "weekly-low", "model_type": "note",
+            "note_card": {
+                "display_title": "低赞", "corner_tag_info": [{"type": "publish_time", "text": "2天前"}],
+                "interact_info": {"liked_count": "2000"},
+            },
+        }]}
+
+    monkeypatch.setattr(collector, "_run_cli", fake_cli)
+    result = collector.collect_keyword("AI")
+    assert result["diagnostics"]["pagination"]["weekly_pages"] == [1]
+    assert len([call for call in calls if call[call.index("--sort") + 1] == "popular"]) == 1
 
 
 def test_collector_uses_latest_for_daily_and_popular_for_weekly(tmp_path, monkeypatch):
@@ -142,7 +194,10 @@ def test_collector_uses_latest_for_daily_and_popular_for_weekly(tmp_path, monkey
     monkeypatch.setattr(collector, "_run_cli", fake_cli)
     monkeypatch.setattr("collector.time.sleep", lambda *_: None)
     result = collector.collect_keyword("AI")
-    assert [(call[0], call[3]) for call in calls[:2]] == [("search", "latest"), ("search", "popular")]
+    assert [(call[0], call[3], call[5]) for call in calls[:4]] == [
+        ("search", "latest", "1"), ("search", "latest", "2"),
+        ("search", "popular", "1"), ("search", "popular", "2"),
+    ]
     assert {note["note_id"] for note in result["notes"]} == {"daily-note", "weekly-note"}
     assert result["diagnostics"]["levels"]["daily"]["eligible_count"] == 1
     assert result["diagnostics"]["levels"]["weekly"]["eligible_count"] == 1
@@ -207,7 +262,7 @@ def test_scheduler_never_catches_up_after_grace_window():
     assert slot_expired(datetime(2026, 7, 17, 9, 42), "2026-07-17T09:30") is True
 
 
-def test_daily_selection_caps_active_pool_at_thirty():
+def test_daily_selection_keeps_all_base_words_and_adds_summary_words():
     keywords = [
         *[{"id": index, "keyword": f"基础{index}", "type": "base"} for index in range(1, 31)],
         *[{"id": index, "keyword": f"总结{index}", "type": "derived", "eligible": index != 36} for index in range(31, 38)],
@@ -215,9 +270,9 @@ def test_daily_selection_caps_active_pool_at_thirty():
     first = select_daily_keywords(date(2026, 7, 17), keywords)
     second = select_daily_keywords(date(2026, 7, 17), list(reversed(keywords)))
     assert [item["id"] for item in first] == [item["id"] for item in second]
-    assert len(first) == 30
+    assert len(first) == 35
     assert len([item for item in first if item["type"] == "base"]) == 30
-    assert len([item for item in first if item["type"] == "derived"]) == 0
+    assert len([item for item in first if item["type"] == "derived"]) == 5
     assert all(item["id"] != 36 for item in first)
 
 
@@ -227,14 +282,19 @@ def test_daily_selection_uses_every_available_derived_when_fewer_than_five():
     assert [item["id"] for item in selected] == [1, 2]
 
 
-def test_two_wave_plan_repeats_eight_priority_words_and_runs_38_searches():
+def test_two_wave_legacy_plan_repeats_four_priority_words():
     keywords=[{"id":i,"keyword":f"词{i}","type":"base","priority":i<=8,"yield_score":100-i} for i in range(1,31)]
-    plan=build_two_wave_plan(date(2026,7,18),keywords)
-    assert len(plan)==38
+    selected=select_daily_keywords(date(2026,7,18),keywords)
+    plan=build_two_wave_plan(date(2026,7,18),selected)
+    assert len(selected)==30
+    assert len(plan)==34
     counts={i:sum(slot["keyword_id"]==i for slot in plan) for i in range(1,31)}
-    assert all(counts[i]==2 for i in range(1,9)) and all(counts[i]==1 for i in range(9,31))
+    assert all(counts[i]==2 for i in range(1,5)) and all(counts[i]==1 for i in range(5,31))
     assert min(datetime.fromisoformat(s["scheduled_at"]) for s in plan if s["wave"]=="morning").strftime("%H:%M")=="09:40"
     assert min(datetime.fromisoformat(s["scheduled_at"]) for s in plan if s["wave"]=="afternoon").strftime("%H:%M")=="14:20"
+    for wave in ("morning", "afternoon"):
+        times=sorted(datetime.fromisoformat(s["scheduled_at"]) for s in plan if s["wave"]==wave)
+        assert all((right-left).total_seconds() >= 20*60 for left,right in zip(times,times[1:]))
 
 
 def test_scheduler_recovers_persisted_running_slot_without_retrying_it():

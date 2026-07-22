@@ -172,7 +172,7 @@ async def rebuild_semantic_topics(db: AsyncSession, wave: str = "nightly") -> di
 
 
 async def evaluate_keyword_lifecycle(db: AsyncSession, run_date: date | None = None) -> dict:
-    """Count only fully successful days; all old base words obey the same rule."""
+    """Keep the base pool stable; rotate summary words after three zero-yield days."""
     today=run_date or utcnow().date(); quarantined=[]; activated=[]
     keywords=(await db.scalars(select(XhsKeyword))).all()
     for keyword in keywords:
@@ -181,12 +181,12 @@ async def evaluate_keyword_lifecycle(db: AsyncSession, run_date: date | None = N
         if not runs or any(run.status!="completed" for run in runs): continue
         produced=sum(run.final_count or 0 for run in runs); keyword.last_yield_count=produced
         keyword.zero_yield_streak=0 if produced else keyword.zero_yield_streak+1
-        if not produced and keyword.zero_yield_streak>=3 and not keyword.pinned:
+        if keyword.keyword_type=="derived" and not produced and keyword.zero_yield_streak>=3 and not keyword.pinned:
             keyword.enabled=False; keyword.lifecycle_status="quarantined"; keyword.quarantine_reason="连续 3 个有效采集日无合格笔记"; quarantined.append(keyword.keyword)
         elif produced and keyword.lifecycle_status=="trial": keyword.lifecycle_status="active"
-    active_count=sum(k.enabled and k.lifecycle_status in ("active","trial") for k in keywords)
+    active_count=sum(k.keyword_type=="derived" and k.enabled and k.lifecycle_status in ("active","trial") for k in keywords)
     candidates=sorted((k for k in keywords if k.lifecycle_status=="candidate"),key=lambda k:(-(k.derived_evidence or {}).get("post_count",0),k.id))
-    for keyword in candidates[:max(0,30-active_count)]:
+    for keyword in candidates[:max(0,5-active_count)]:
         keyword.enabled=True; keyword.lifecycle_status="trial"; keyword.trial_started_at=utcnow(); keyword.zero_yield_streak=0; activated.append(keyword.keyword)
     await db.commit()
     return {"date":today.isoformat(),"quarantined":quarantined,"activated":activated}

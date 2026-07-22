@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.v1 import api_router
-from app.api.v1.xhs_agent import COMMAND_TYPES, CommandBody, _secret_hash
+from app.api.v1.xhs_agent import COMMAND_TYPES, CommandBody, _schedule_payload, _secret_hash
 from app.db.base import Base
 from app.models.xhs import XhsAgentBatch, XhsAgentUpload, XhsCollectorDevice, XhsKeyword, XhsKeywordRun, XhsNote, XhsProviderCall
 from app.services import xhs_agent_ingestion as ingestion
@@ -17,7 +17,7 @@ def test_agent_routes_and_command_whitelist_are_registered():
     assert ("/xhs-agent/batches/{batch_id}/results", "POST") in routes
     assert ("/admin/xhs-monitoring/agent/pairings", "POST") in routes
     assert ("/admin/xhs-monitoring/agent/commands", "POST") in routes
-    assert COMMAND_TYPES == {"test_keyword", "refresh_image", "pause", "resume", "stop", "login"}
+    assert COMMAND_TYPES == {"test_keyword", "refresh_image", "pause", "resume", "stop", "login", "browser_login", "verify_session"}
 
 
 def test_agent_secret_hash_is_stable_and_does_not_store_raw_token():
@@ -30,6 +30,22 @@ def test_agent_secret_hash_is_stable_and_does_not_store_raw_token():
 def test_manual_agent_command_can_explicitly_request_cooldown_override():
     body=CommandBody(device_id="device-1",command_type="test_keyword",keyword_id=12,force=True)
     assert body.force is True and body.keyword_id==12
+
+
+def test_old_device_schedule_cannot_override_risk_controls():
+    device = XhsCollectorDevice(schedule_config={
+        "priority_keyword_limit": 8,
+        "max_active_keywords": 30,
+        "verification_cooldown_minutes": [5, 10],
+        "groups": [1, 2, 3],
+    })
+    schedule = _schedule_payload(device)
+    assert schedule["strategy"] == "all_day"
+    assert schedule["window_start"] == "00:30"
+    assert schedule["window_end"] == "23:30"
+    assert schedule["daily_derived_limit"] == 5
+    assert schedule["verification_cooldown_minutes"] == [8, 12]
+    assert schedule["groups"] == [1, 2, 3]
 
 
 def test_agent_ingestion_is_idempotent_and_reuses_material_pipeline(monkeypatch):

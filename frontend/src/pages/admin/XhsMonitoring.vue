@@ -125,7 +125,7 @@
             :disabled="recoveryBusy === item.key || !canAgentCollect || !!activeBatch || (manualRetryWaitMinutes > 0 && !userStore.isSuperAdmin)"
             @click="retryFailedSlot(item.slot)"
           >{{ recoveryBusy === item.key ? "正在重试…" : manualRetryWaitMinutes > 0 ? userStore.isSuperAdmin ? `跳过冷却并重试` : `安全冷却 ${manualRetryWaitMinutes} 分钟` : "重新执行这个词" }}</button>
-          <button v-else-if="item.action === 'login'" :disabled="!primaryAgent.connected" @click="startLocalLogin">打开人工验证</button>
+          <button v-else-if="item.action === 'login'" :disabled="!primaryAgent.connected" @click="openAgentVerification">打开人工验证</button>
           <button v-else @click="refresh">重新检测状态</button>
         </section>
       </div>
@@ -180,14 +180,18 @@
 
         <div class="agent-facts">
           <div><small>本地账号</small><strong>{{ agentCookieLabel(primaryAgent.cookie_status) }}</strong><span>Cookie 仅保存在 Mac</span></div>
-          <div><small>今日关键词</small><strong>{{ todayPlan ? `${todayPlan.base_count} + ${todayPlan.derived_count}` : "正在生成" }}</strong><span>09:40 / 14:20 两波 · 重点词重复</span></div>
+          <div><small>今日关键词</small><strong>{{ todayPlan ? `${todayPlan.base_count} + ${todayPlan.derived_count}` : "正在生成" }}</strong><span>基础 30 词 + 总结词 · 全天分散执行</span></div>
           <div><small>{{ runningPlanSlot ? "当前任务" : "下一次" }}</small><strong>{{ runningPlanSlot ? "执行中" : nextPendingSlot ? slotTime(nextPendingSlot) : "今日已结束" }}</strong><span>{{ runningPlanSlot?.keyword || nextPendingSlot?.keyword || "没有待执行关键词" }}</span></div>
           <div><small>今日进度</small><strong>{{ planCompleted }} / {{ planTotal }}</strong><span>跳过 {{ planSkipped }} · 剩余 {{ planPending }}</span></div>
         </div>
       </template>
       <div v-if="primaryAgent?.cookie_status === 'verification_required'" class="agent-risk-alert">
-        <div><strong>小红书要求人机验证</strong><span>今日计划已暂停。先完成验证；Cookie 恢复正常后，再点击“继续今日计划”。</span></div>
-        <button @click="startLocalLogin">打开人工验证</button>
+        <div><strong>小红书要求人机验证</strong><span>如果验证页提示“异常行为”或无法操作，可直接改用浏览器同步或重新扫码，不会卡住今日计划。</span></div>
+        <div class="risk-actions">
+          <button @click="openAgentVerification">打开人机验证</button>
+          <button class="secondary" @click="startLocalBrowserLogin">从浏览器同步</button>
+          <button class="secondary" @click="startLocalLogin">重新扫码</button>
+        </div>
       </div>
       <div v-if="!primaryAgent" class="agent-empty"><strong>尚未绑定本地采集节点</strong><p>生成绑定码后，在这台 Mac 上运行一次安装程序；之后自动启动。</p></div>
       <section v-if="primaryAgent && todayPlan" class="daily-plan">
@@ -357,7 +361,7 @@
       <div class="panel-head">
         <div>
           <h2>关键词管理</h2>
-          <p>{{ enabledBaseCount + enabledDerivedCount }} 个启用词参与两波采集；连续 3 个有效零产出日自动隔离，最多保留 30 个</p>
+          <p>{{ enabledBaseCount }} 个基础词全部参与，另加最多 5 个总结词；总结词连续 3 个有效零产出日自动淘汰</p>
         </div>
         <div class="kw-tools">
           <el-input
@@ -628,16 +632,25 @@
       </div>
       <template #footer><el-button @click="showAgentPairing = false">关闭</el-button></template>
     </el-dialog>
-    <el-dialog v-model="showLocalLogin" title="本地节点扫码登录" width="430px" append-to-body :lock-scroll="false" @closed="stopLocalLoginPoll">
+    <el-dialog v-model="showLocalLogin" title="本地节点账号验证" width="430px" append-to-body :lock-scroll="false" @closed="stopLocalLoginPoll">
       <div class="qr-auth">
-        <div v-if="!localLoginQr" class="qr-placeholder">正在让本地 Mac 生成二维码…</div>
+        <div v-if="!localLoginQr && localLoginMode !== 'verify_session'" class="qr-placeholder">{{ localLoginMode === 'browser_login' ? '正在从本机浏览器同步 Cookie…' : '正在让本地 Mac 生成二维码…' }}</div>
         <canvas v-show="localLoginQr" ref="localLoginCanvas"></canvas>
         <p :class="['auth-state', localLoginState]">{{ localLoginMessage }}</p>
-        <button v-if="localLoginState === 'failed'" class="retry-auth" @click="startLocalLogin">重新获取二维码</button>
+        <div v-if="localLoginState === 'failed'" class="local-auth-actions">
+          <button class="retry-auth" @click="startLocalBrowserLogin">从浏览器同步</button>
+          <button class="retry-auth" @click="startLocalLogin">重新获取二维码</button>
+        </div>
         <div v-if="localLoginVerificationUrl" class="auth-verify">
           <a :href="localLoginVerificationUrl" target="_blank" rel="noopener noreferrer">打开小红书人机验证</a>
-          <small>在新页面完成验证后回到这里等待“本地授权成功”，然后关闭窗口并点击“继续今日计划”。</small>
+          <button class="retry-auth" @click="confirmRiskVerification">我已完成验证</button>
+          <small>若验证页显示“系统检测到异常行为”，说明这条验证链接不可继续使用，请选择下面的兜底方式。</small>
+          <div class="verification-fallbacks">
+            <button class="retry-auth" @click="startLocalBrowserLogin">从当前浏览器同步 Cookie</button>
+            <button class="retry-auth" @click="startLocalLogin">放弃此链接，重新扫码</button>
+          </div>
         </div>
+        <button v-if="localLoginMode !== 'browser_login' && localLoginMode !== 'verify_session' && !localLoginQr" class="retry-auth" @click="startLocalBrowserLogin">我已在浏览器登录，直接同步 Cookie</button>
         <small>Cookie 只写入本地 Mac，不会上传服务器。</small>
       </div>
     </el-dialog>
@@ -683,6 +696,7 @@ const userStore = useUserStore(),
   showLocalLogin = ref(false),
   localLoginCanvas = ref(null),
   localLoginQr = ref(""),
+  localLoginMode = ref("login"),
   localLoginState = ref("waiting"),
   localLoginMessage = ref("等待本地节点响应…"),
   localLoginVerificationUrl = ref(""),
@@ -753,8 +767,10 @@ const planPending = computed(() => planSlots.value.filter((slot) => ["pending", 
 const runningPlanSlot = computed(() => planSlots.value.find((slot) => slot.status === "running") || null);
 const hasActiveTask = computed(() => Boolean(activeBatch.value || runningPlanSlot.value));
 const nextPendingSlot = computed(() => planSlots.value.find((slot) => slot.status === "pending") || null);
-const planWindow = computed(() => todayPlan.value ? `${todayPlan.value.window_start}–${todayPlan.value.window_end}` : "09:30–22:30");
-const planStateLabel = computed(() => todayPlan.value?.stopped ? "今日已停止" : todayPlan.value?.risk_blocked ? "等待人工验证" : todayPlan.value?.paused ? "已暂停" : hasActiveTask.value ? "正在执行" : planPending.value ? "等待下一词" : "今日完成");
+const planWindow = computed(() => todayPlan.value ? `${todayPlan.value.window_start}–${todayPlan.value.window_end}` : "00:30–23:30");
+const riskResumeAt = computed(() => todayPlan.value?.pause_reason === "risk_cooldown" && todayPlan.value?.resume_after ? new Date(todayPlan.value.resume_after) : null);
+const riskCooldownMinutes = computed(() => riskResumeAt.value ? Math.max(0, Math.ceil((riskResumeAt.value.getTime() - Date.now()) / 60000)) : 0);
+const planStateLabel = computed(() => todayPlan.value?.stopped ? "今日已停止" : todayPlan.value?.risk_blocked ? "等待人工验证" : riskCooldownMinutes.value ? `风控冷却 ${riskCooldownMinutes.value} 分钟` : todayPlan.value?.paused ? "已暂停" : hasActiveTask.value ? "正在执行" : planPending.value ? "等待下一词" : "今日完成");
 const slotTime = (slot) => slot?.scheduled_at?.slice(11, 16) || "—";
 const slotTypeLabel = (slot) => slot?.keyword_type === "derived" ? "总结词" : "基础词";
 const slotStatus = (value) => ({ pending: "待执行", running: "执行中", completed: "完成", failed: "失败", skipped: "已错过", stopped: "已停止", blocked: "风控停止", risk_blocked: "风控停止" })[value] || value;
@@ -762,6 +778,7 @@ const agentIdleTitle = computed(() => {
   if (!primaryAgent.value?.connected) return "本地节点已离线";
   if (primaryAgent.value.cookie_status === "verification_required") return "需要重新验证本地账号";
   if (todayPlan.value?.stopped) return "今日计划已经停止";
+  if (riskCooldownMinutes.value) return `风控冷却中，约 ${riskCooldownMinutes.value} 分钟后自动续跑`;
   if (todayPlan.value?.paused) return "今日计划已暂停";
   if (nextPendingSlot.value) return `等待 ${slotTime(nextPendingSlot.value)} · ${nextPendingSlot.value.keyword}`;
   return "今日计划已执行完毕";
@@ -769,6 +786,7 @@ const agentIdleTitle = computed(() => {
 const agentIdleDescription = computed(() => {
   if (!primaryAgent.value?.connected) return "请保持这台 Mac 开机并检查 Agent 运行状态。";
   if (primaryAgent.value.cookie_status === "verification_required") return "完成扫码或人机验证后才能重新采集。";
+  if (riskCooldownMinutes.value) return "Cookie 已更新，但账号/IP 风控不会立即消失，冷却结束后系统会自动恢复。";
   if (!todayPlan.value) return "本地节点正在生成今天的分散采集时间表。";
   return "全天自动分散执行，不需要手动启动整组。";
 });
@@ -813,7 +831,7 @@ const recoveryItems = computed(() => {
   if (primaryAgent.value?.cookie_status === "verification_required") items.push({
     key: "verification", level: "critical", label: "账号验证", title: "小红书要求人工验证",
     cause: "系统已暂停后续请求，避免继续触发风控。",
-    solution: "打开人工验证并完成扫码，成功后点击继续今日计划。", action: "login",
+    solution: todayPlan.value?.verification_url ? "打开当前 Cookie 的人机验证，完成后直接检查并续跑，无需扫码。" : "本次未取到验证链接，可从已登录的本机浏览器同步 Cookie，扫码仅作兜底。", action: "login",
   });
   for (const slot of failedPlanSlots.value) {
     const guide = failureGuide(slot);
@@ -939,7 +957,13 @@ const pollLocalLogin = async () => {
       await QRCode.toCanvas(localLoginCanvas.value, result.qr_url, { width: 240, margin: 1 });
     }
     if (command.status === "succeeded" || command.status === "failed") {
-      if (command.status === "succeeded") ElMessage.success("本地 Cookie 已更新");
+      if (command.status === "succeeded" && result.status === "verification_required") {
+        localLoginState.value = "verification_required";
+        localLoginMessage.value = result.message || "请完成小红书人机验证";
+      } else if (command.status === "succeeded") {
+        ElMessage.success(result.message || "本地 Cookie 已恢复");
+        showLocalLogin.value = false;
+      }
       else {
         localLoginState.value = "failed";
         localLoginMessage.value = command.error || "本地扫码登录失败";
@@ -954,21 +978,45 @@ const pollLocalLogin = async () => {
     stopLocalLoginPoll();
   }
 };
-const startLocalLogin = async () => {
+const startLocalAuth = async (commandType) => {
   if (!primaryAgent.value?.connected) return ElMessage.warning("本地采集节点当前离线");
   stopLocalLoginPoll();
   showLocalLogin.value = true;
+  localLoginMode.value = commandType;
   localLoginQr.value = "";
   localLoginState.value = "waiting";
-  localLoginMessage.value = "正在让本地 Mac 生成二维码…";
-  localLoginVerificationUrl.value = "";
-  const response = await api.post("/admin/xhs-monitoring/agent/commands", {
-    device_id: primaryAgent.value.id,
-    command_type: "login",
-  });
-  localLoginCommandId.value = response.data.command_id;
-  localLoginTimer = window.setTimeout(pollLocalLogin, 800);
+  localLoginMessage.value = commandType === "verify_session"
+    ? "正在检查当前 Cookie 的人机验证结果…"
+    : commandType === "browser_login"
+      ? "正在读取本机浏览器的小红书 Cookie…"
+      : "正在让本地 Mac 生成二维码…";
+  if (commandType !== "verify_session") localLoginVerificationUrl.value = "";
+  try {
+    const response = await api.post("/admin/xhs-monitoring/agent/commands", {
+      device_id: primaryAgent.value.id,
+      command_type: commandType,
+    });
+    localLoginCommandId.value = response.data.command_id;
+    localLoginTimer = window.setTimeout(pollLocalLogin, 800);
+  } catch (error) {
+    localLoginState.value = "failed";
+    localLoginMessage.value = error?.response?.data?.detail || "本地验证命令创建失败";
+  }
 };
+const startLocalLogin = () => startLocalAuth("login");
+const startLocalBrowserLogin = () => startLocalAuth("browser_login");
+const openAgentVerification = () => {
+  const verificationUrl = todayPlan.value?.verification_url;
+  if (!verificationUrl) return startLocalAuth("verify_session");
+  stopLocalLoginPoll();
+  showLocalLogin.value = true;
+  localLoginMode.value = "verify_session";
+  localLoginQr.value = "";
+  localLoginState.value = "verification_required";
+  localLoginMessage.value = "请先在新页面完成小红书人机验证";
+  localLoginVerificationUrl.value = verificationUrl;
+};
+const confirmRiskVerification = () => startLocalAuth("verify_session");
 const runRows = computed(() => data.value?.runs || []);
 const filteredKeywords = computed(() => {
   const q = kwFilter.value.trim().toLowerCase(),
@@ -1429,6 +1477,8 @@ onBeforeUnmount(() => {
 .agent-risk-alert span { display: block; }
 .agent-risk-alert span { margin-top: 3px; font-size: 12px; }
 .agent-risk-alert button { flex: none; border: 0; border-radius: 8px; padding: 8px 11px; color: white; background: var(--clay-deep); cursor: pointer; }
+.risk-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.agent-risk-alert button.secondary { border: 1px solid #c98969; color: #8b3f24; background: transparent; }
 .agent-empty { padding: 16px; margin: 12px 0; border: 1px dashed var(--line); border-radius: 10px; color: var(--ink-3); }
 .agent-empty p { margin-bottom: 0; }
 .daily-plan { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.68); }
@@ -1987,6 +2037,7 @@ td em,
   color: var(--ink-3);
   line-height: 1.6;
 }
+.local-auth-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
 .retry-auth {
   margin-top: 14px;
 }
@@ -2011,6 +2062,8 @@ td em,
   color: var(--ink-3);
   line-height: 1.6;
 }
+.verification-fallbacks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.verification-fallbacks .retry-auth { min-height: 38px; }
 .auth-success {
   height: 250px;
   display: flex;
@@ -2053,6 +2106,8 @@ td em,
   .recent-batch-list { grid-template-columns: 1fr; }
   .recent-batches-head { align-items: flex-start; flex-direction: column; }
   .agent-risk-alert { align-items: flex-start; flex-direction: column; }
+  .risk-actions { justify-content: flex-start; }
+  .verification-fallbacks { grid-template-columns: 1fr; }
   .funnel {
     grid-template-columns: repeat(2, 1fr);
   }

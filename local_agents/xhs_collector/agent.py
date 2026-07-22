@@ -6,11 +6,12 @@ import getpass
 import json
 import os
 import platform
+import random
 import socket
 import subprocess
 import sys
+import threading
 import uuid
-import random
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -21,13 +22,14 @@ import websockets
 from client import ServerClient
 from collector import RiskBlocked, XhsCollector
 from normalizer import normalize, unwrap
-from qr_login import LocalQrLogin
+from qr_login import LocalBrowserLogin, LocalQrLogin
 from scheduling import build_daily_plan, build_two_wave_plan, recover_interrupted_slots, select_daily_keywords, slot_due, slot_expired
 from storage import LocalStore
 
-VERSION = "0.4.0"
-PLAN_STRATEGY = "two_waves_office_hours_v2"
-LEGACY_PLAN_STRATEGY = "server_legacy_single_wave"
+VERSION = "0.6.1"
+PLAN_STRATEGY = "all_day_base30_plus_summary_v7"
+LEGACY_PLAN_STRATEGY = PLAN_STRATEGY
+RISK_COOLDOWN_MINUTES = (8, 12)
 SERVICE = "com.midonghub.gzh.xhs-collector"
 APP_DIR = Path.home() / "Library/Application Support/GzhXhsCollector"
 CONFIG_PATH = APP_DIR / "config.json"
@@ -63,6 +65,7 @@ class CollectorAgent:
         self.store = LocalStore(DB_PATH)
         self.collector = XhsCollector(Path(__file__).resolve().parent)
         self.commands: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.auth_cancel = threading.Event()
         self.collection_lock = asyncio.Lock()
         self.paused = asyncio.Event()
         saved_plan = self.today_plan()
@@ -167,11 +170,17 @@ class CollectorAgent:
                     failed += 1
                     self.cookie_status = "verification_required"
                     self.store.set("cookie_status", self.cookie_status)
+                    self.store.set(
+                        "risk_cooldown_until",
+                        (datetime.now() + timedelta(minutes=random.randint(*RISK_COOLDOWN_MINUTES))).isoformat(timespec="minutes"),
+                    )
+                    self.store.set("verification_url", exc.verification_url)
+                    self.paused.clear()
                     await self.safe_upload(batch_id, {"keyword_id": keyword["id"], "idempotency_key": f"{local_key}:{keyword['id']}", "status": "risk_blocked", "error": str(exc), "notes": []})
                     await self.safe_progress(batch_id, {"status": "risk_blocked", "current_keyword_id": keyword["id"], "completed_keywords": completed, "failed_keywords": failed, "error": str(exc)})
                     await self.report_status("risk_blocked", str(exc))
                     self.notify_verification()
-                    return {"completed": completed, "failed": failed, "risk_blocked": True}
+                    return {"completed": completed, "failed": failed, "risk_blocked": True, "verification_url": exc.verification_url}
                 except Exception as exc:
                     failed += 1
                     last_error = f"{type(exc).__name__}: {str(exc)[:500]}"
@@ -183,23 +192,25 @@ class CollectorAgent:
             self.running_keyword = None
 
     def notify_verification(self) -> None:
-        """Bring XHS to the front and issue a native notification; failures never break collection."""
+        """Notify locally without opening a generic XHS page that cannot clear the challenge."""
         try:
-            subprocess.run(["open", "https://www.xiaohongshu.com/"], check=False, capture_output=True)
-            subprocess.run(["osascript", "-e", 'display notification "请立即完成人机验证，验证后任务会自动续跑" with title "小红书采集已暂停"'], check=False, capture_output=True)
+            subprocess.run(["osascript", "-e", 'display notification "请回到采集监测页打开人机验证链接" with title "小红书采集已暂停"'], check=False, capture_output=True)
         except OSError:
             pass
 
     def requeue_risk_slots(self, plan: dict[str, Any]) -> int:
-        resume_at = datetime.now() + timedelta(minutes=random.randint(5, 10))
+        stored_resume = self.store.get("risk_cooldown_until")
+        resume_at = datetime.fromisoformat(stored_resume) if stored_resume else datetime.now() + timedelta(minutes=random.randint(*RISK_COOLDOWN_MINUTES))
         count = 0
         for slot in plan.get("slots", []):
             if slot.get("status") != "risk_blocked": continue
             slot["status"] = "pending"; slot["attempt"] = int(slot.get("attempt") or 1) + 1
             slot["scheduled_at"] = resume_at.isoformat(timespec="minutes")
-            slot["reason"] = "验证完成，冷却后自动续跑"
+            remaining = max(1, int((resume_at - datetime.now()).total_seconds() / 60) + 1)
+            slot["reason"] = f"验证完成，约 {remaining} 分钟后自动续跑"
             count += 1
-        plan["paused"] = False; plan["risk_blocked"] = False
+        plan["paused"] = bool(count); plan["pause_reason"] = "risk_cooldown" if count else None
+        plan["risk_blocked"] = False
         plan["resume_after"] = resume_at.isoformat(timespec="minutes") if count else None
         return count
 
@@ -222,11 +233,20 @@ class CollectorAgent:
             elif command_type == "resume":
                 if self.cookie_status != "valid":
                     raise RuntimeError("请先完成小红书扫码或人机验证，再继续今日计划")
-                self.paused.set()
                 plan = self.today_plan()
                 if plan:
-                    self.requeue_risk_slots(plan)
+                    if plan.get("risk_blocked"):
+                        self.requeue_risk_slots(plan)
+                    resume_after = datetime.fromisoformat(plan["resume_after"]) if plan.get("resume_after") else None
+                    if resume_after and datetime.now() < resume_after:
+                        remaining = max(1, int((resume_after - datetime.now()).total_seconds() / 60) + 1)
+                        self.paused.clear()
+                        self.save_plan(plan)
+                        raise RuntimeError(f"刚触发过风控，需要再冷却约 {remaining} 分钟；到时会自动续跑")
+                    plan["paused"] = False
+                    plan["pause_reason"] = None
                     self.save_plan(plan)
+                self.paused.set()
                 result = {"paused": False}
                 await self.report_status()
             elif command_type == "stop":
@@ -279,23 +299,63 @@ class CollectorAgent:
                     "cover_url": item["cover_url"],
                     "avatar_url": (item.get("author") or {}).get("avatar_url"),
                 }
-            elif command_type == "login":
+            elif command_type in {"login", "browser_login", "verify_session"}:
                 def update_login(value):
                     self.server.command_status(command_id, {"status": "running", "result": value})
-                result = await asyncio.to_thread(LocalQrLogin().run, update_login)
-                if result.get("status") != "authenticated":
+                self.auth_cancel.clear()
+                if command_type == "verify_session":
+                    try:
+                        await asyncio.to_thread(self.collector._run_cli, "status", timeout_seconds=30)
+                        result = {"status": "authenticated", "source": "captcha", "message": "人机验证已通过，当前 Cookie 继续使用"}
+                    except RiskBlocked as exc:
+                        result = {
+                            "status": "verification_required",
+                            "message": "小红书仍要求完成人机验证",
+                            "verification_url": exc.verification_url,
+                        }
+                        if not self.store.get("risk_cooldown_until"):
+                            self.store.set(
+                                "risk_cooldown_until",
+                                (datetime.now() + timedelta(minutes=random.randint(*RISK_COOLDOWN_MINUTES))).isoformat(timespec="minutes"),
+                            )
+                        self.store.set("verification_url", exc.verification_url)
+                        plan = self.today_plan()
+                        if plan:
+                            plan["verification_url"] = exc.verification_url
+                            plan["risk_blocked"] = True
+                            plan["paused"] = True
+                            plan["pause_reason"] = "human_verification"
+                            self.save_plan(plan)
+                        await self.report_status("risk_blocked", str(exc))
+                elif command_type == "browser_login":
+                    result = await asyncio.to_thread(LocalBrowserLogin().run, update_login)
+                else:
+                    result = await asyncio.to_thread(LocalQrLogin().run, update_login, 240, self.auth_cancel)
+                if result.get("status") == "verification_required":
+                    pass
+                elif result.get("status") != "authenticated":
                     raise RuntimeError(result.get("message") or "本地扫码登录失败")
-                self.cookie_status = "valid"
-                self.store.set("cookie_status", self.cookie_status)
-                # A successful login is also the user's authorization to leave
-                # the verification pause. Keep the in-memory gate aligned with
-                # the persisted plan before any slot can be marked running.
-                self.paused.set()
-                plan = self.today_plan()
-                if plan:
-                    self.requeue_risk_slots(plan)
-                    self.save_plan(plan)
-                await self.report_status("paused" if plan and plan.get("paused") else "idle")
+                else:
+                    self.cookie_status = "valid"
+                    self.store.set("cookie_status", self.cookie_status)
+                    plan = self.today_plan()
+                    if plan:
+                        self.requeue_risk_slots(plan)
+                        stored_resume = self.store.get("risk_cooldown_until")
+                        resume_after = datetime.fromisoformat(stored_resume) if stored_resume else None
+                        if resume_after and datetime.now() < resume_after:
+                            plan["paused"] = True
+                            plan["pause_reason"] = "risk_cooldown"
+                            plan["risk_blocked"] = False
+                            plan["resume_after"] = resume_after.isoformat(timespec="minutes")
+                        plan["verification_url"] = None
+                        self.save_plan(plan)
+                    self.store.set("verification_url", None)
+                    if plan and plan.get("pause_reason") == "risk_cooldown":
+                        self.paused.clear()
+                    else:
+                        self.paused.set()
+                    await self.report_status("paused" if plan and plan.get("paused") else "idle")
             else: raise RuntimeError("未知命令")
             await asyncio.to_thread(self.server.command_status, command_id, {"status": "succeeded", "result": result})
         except Exception as exc:
@@ -317,15 +377,15 @@ class CollectorAgent:
                 schedule = manifest.get("schedule") or {}
                 now = datetime.now()
                 plan = self.today_plan()
-                two_wave_enabled = "morning_start" in schedule and "afternoon_start" in schedule
-                desired_strategy = PLAN_STRATEGY if two_wave_enabled else LEGACY_PLAN_STRATEGY
+                two_wave_enabled = schedule.get("strategy") == "two_waves"
+                desired_strategy = "two_waves_legacy_v5" if two_wave_enabled else PLAN_STRATEGY
                 if plan is None or plan.get("strategy") != desired_strategy:
                     keywords = select_daily_keywords(
                         date.today(), manifest["keywords"], int(schedule.get("daily_derived_limit") or 5),
                     )
-                    morning = str(schedule.get("morning_start") or schedule.get("window_start") or "09:30")
+                    morning = str(schedule.get("morning_start") or schedule.get("window_start") or "00:30")
                     afternoon = str(schedule.get("afternoon_start") or "14:20")
-                    slots = build_two_wave_plan(date.today(), keywords, morning, afternoon, int(schedule.get("priority_keyword_limit") or 8)) if two_wave_enabled else build_daily_plan(date.today(),keywords,morning,str(schedule.get("window_end") or "22:30"),int(schedule.get("jitter_minutes") or 8))
+                    slots = build_two_wave_plan(date.today(), keywords, morning, afternoon, int(schedule.get("priority_keyword_limit") or 4)) if two_wave_enabled else build_daily_plan(date.today(),keywords,str(schedule.get("window_start") or "00:30"),str(schedule.get("window_end") or "23:30"),int(schedule.get("jitter_minutes") or 8))
                     for slot in slots:
                         keyword = next((item for item in keywords if int(item["id"]) == slot["keyword_id"]), None)
                         completed = bool(keyword and (slot.get("wave") in (keyword.get("completed_waves") or []) if two_wave_enabled else keyword.get("completed_today")))
@@ -335,6 +395,8 @@ class CollectorAgent:
                     plan = {
                         "date": today_key, "strategy": desired_strategy,
                         "morning_start": morning, "afternoon_start": afternoon,
+                        "window_start": str(schedule.get("window_start") or "00:30"),
+                        "window_end": str(schedule.get("window_end") or "23:30"),
                         "base_count": sum(item.get("type") == "base" for item in keywords),
                         "derived_count": sum(item.get("type") == "derived" for item in keywords),
                         "paused": False, "stopped": False,
@@ -350,6 +412,14 @@ class CollectorAgent:
                     self.save_plan(plan)
                     await self.report_status(last_error="检测到未正常收尾的采集任务，已自动标记失败")
 
+                if self.cookie_status == "verification_required" and not plan.get("paused"):
+                    plan["risk_blocked"] = True
+                    plan["paused"] = True
+                    plan["pause_reason"] = "human_verification"
+                    self.paused.clear()
+                    self.save_plan(plan)
+                    await self.report_status("risk_blocked")
+
                 expired=0
                 for slot in plan.get("slots",[]):
                     if slot.get("status")=="pending" and slot_expired(now,slot["scheduled_at"]):
@@ -357,6 +427,19 @@ class CollectorAgent:
                         expired+=1
                 if expired:
                     self.save_plan(plan);await self.report_status()
+
+                resume_after = datetime.fromisoformat(plan["resume_after"]) if plan.get("resume_after") else None
+                if (
+                    plan.get("paused") and plan.get("pause_reason") == "risk_cooldown"
+                    and resume_after and now >= resume_after and self.cookie_status == "valid"
+                ):
+                    plan["paused"] = False
+                    plan["pause_reason"] = None
+                    plan["resume_after"] = None
+                    self.store.set("risk_cooldown_until", None)
+                    self.paused.set()
+                    self.save_plan(plan)
+                    await self.report_status()
 
                 if schedule.get("enabled", True) and self.paused.is_set() and not plan.get("paused") and not plan.get("stopped") and self.cookie_status == "valid":
                     due = next((slot for slot in plan.get("slots", []) if slot.get("status") == "pending" and slot_due(now,slot["scheduled_at"])), None)
@@ -377,7 +460,10 @@ class CollectorAgent:
                         if result and result.get("risk_blocked"):
                             due["status"] = "risk_blocked"
                             plan["risk_blocked"] = True
+                            plan["paused"] = True
+                            plan["pause_reason"] = "human_verification"
                             plan["risk_blocked_at"] = datetime.now().isoformat(timespec="seconds")
+                            plan["verification_url"] = result.get("verification_url")
                         elif result and result.get("failed"):
                             due["status"] = "failed"
                         elif result:
@@ -409,6 +495,8 @@ class CollectorAgent:
                             if command.get("command_type") in {"pause", "resume", "stop"}:
                                 asyncio.create_task(self.handle_command(command))
                             else:
+                                if command.get("command_type") in {"login", "browser_login", "verify_session"}:
+                                    self.auth_cancel.set()
                                 await self.commands.put(command)
             except Exception as exc:
                 print(f"[websocket] {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)

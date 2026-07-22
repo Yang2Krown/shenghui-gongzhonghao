@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlencode
 
 from xhs_cli.client import XhsClient
+from xhs_cli.commands.auth import normalize_xhs_user_payload
+from xhs_cli.cookies import get_cookies
 from xhs_cli.exceptions import NeedVerifyError
 from xhs_cli.qr_login import (
     _apply_session_cookies, _build_saved_cookies, _complete_confirmed_session,
@@ -49,7 +52,7 @@ class LocalQrLogin:
     def __init__(self, cookie_path: Path | None = None):
         self.cookie_path = cookie_path or Path.home() / ".xiaohongshu-cli/cookies.json"
 
-    def run(self, on_update, ttl_seconds: int = 240) -> dict:
+    def run(self, on_update, ttl_seconds: int = 240, cancel_event: threading.Event | None = None) -> dict:
         client = None
         qr_data = None
         a1 = webid = ""
@@ -86,6 +89,8 @@ class LocalQrLogin:
             qr_id, code = str(qr_data["qr_id"]), str(qr_data["code"])
             on_update({"status": "waiting", "qr_url": str(qr_data["url"]), "expires_in": ttl_seconds})
             while time.time() < deadline:
+                if cancel_event and cancel_event.is_set():
+                    return {"status": "cancelled", "message": "已切换到新的验证方式"}
                 try:
                     status_data = client.check_qr_status(qr_id, code)
                     code_status = int(status_data.get("codeStatus", -1))
@@ -114,3 +119,30 @@ class LocalQrLogin:
             return {"status": "expired", "message": "二维码已过期"}
         finally:
             client.close()
+
+
+class LocalBrowserLogin:
+    """Refresh the CLI session from a browser already logged in to XHS."""
+
+    def run(self, on_update) -> dict:
+        on_update({
+            "status": "syncing_browser",
+            "message": "正在从本机浏览器读取小红书登录状态…",
+        })
+        try:
+            browser, cookies = get_cookies("auto", force_refresh=True)
+            with XhsClient(cookies, timeout=QR_REQUEST_TIMEOUT_SECONDS, request_delay=0, max_retries=1) as client:
+                user = normalize_xhs_user_payload(client.get_self_info())
+            if user.get("guest"):
+                raise RuntimeError("浏览器中的小红书登录已失效")
+            return {
+                "status": "authenticated",
+                "user_id": str(user.get("id") or ""),
+                "source": f"browser:{browser}",
+                "message": f"已从 {browser} 同步 Cookie",
+            }
+        except Exception as exc:
+            raise RuntimeError(
+                "未能从浏览器同步 Cookie。请先在 Chrome/Safari 打开小红书并完成登录或人机验证，"
+                "再重试；若 macOS 询问钥匙串权限，请选择允许。"
+            ) from exc

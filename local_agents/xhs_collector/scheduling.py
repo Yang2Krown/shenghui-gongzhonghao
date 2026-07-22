@@ -7,8 +7,9 @@ from typing import Any
 
 
 SCHEDULE_GRACE_MINUTES = 12
-PRIORITY_KEYWORD_LIMIT = 8
-MAX_ACTIVE_KEYWORDS = 30
+PRIORITY_KEYWORD_LIMIT = 4
+MAX_DERIVED_KEYWORDS = 5
+TWO_WAVE_GAP_MINUTES = 20
 
 
 def _clock_minutes(value: str) -> int:
@@ -17,10 +18,15 @@ def _clock_minutes(value: str) -> int:
 
 
 def select_daily_keywords(day: date, keywords: list[dict[str, Any]], derived_limit: int = 5) -> list[dict[str, Any]]:
-    """Select at most 30 active/trial keywords; server priority controls the repeated eight."""
-    del day, derived_limit  # selection/lifecycle is server-owned; kept for old callers
+    """Keep every eligible base word and add the best eligible summary words."""
+    del day  # lifecycle and yield ranking are server-owned
     eligible = [item for item in keywords if item.get("eligible", True)]
-    return sorted(eligible, key=lambda item: (not item.get("priority"), -float(item.get("yield_score") or 0), int(item["id"])))[:MAX_ACTIVE_KEYWORDS]
+    base = sorted((item for item in eligible if item.get("type") == "base"), key=lambda item: int(item["id"]))
+    derived = sorted(
+        (item for item in eligible if item.get("type") == "derived"),
+        key=lambda item: (not item.get("pinned"), -float(item.get("yield_score") or 0), int(item["id"])),
+    )[:max(0, min(int(derived_limit), MAX_DERIVED_KEYWORDS))]
+    return base + derived
 
 
 def build_daily_plan(
@@ -76,17 +82,20 @@ def build_two_wave_plan(
     priority_limit: int = PRIORITY_KEYWORD_LIMIT,
 ) -> list[dict[str, Any]]:
     """Build two restart-stable queues: eight priority words repeat, all others run once."""
-    selected = sorted(keywords[:MAX_ACTIVE_KEYWORDS], key=lambda item: int(item["id"]))
+    selected = sorted(keywords, key=lambda item: int(item["id"]))
     priority = sorted(selected, key=lambda item: (not item.get("pinned"), not item.get("priority"), -float(item.get("yield_score") or 0), int(item["id"])))[:min(priority_limit, len(selected))]
     priority_ids = {int(item["id"]) for item in priority}
     regular = [item for item in selected if int(item["id"]) not in priority_ids]
     seed = int(hashlib.sha256(f"waves:{day.isoformat()}".encode()).hexdigest()[:16], 16)
     rng = random.Random(seed); rng.shuffle(regular)
     split = (len(regular) + 1) // 2
-    # 19 slots per wave at maximum. A 10-minute cadence keeps both waves inside
-    # office hours (09:40-12:40 and 14:20-17:20) with over an hour of buffer
-    # before the user's Mac normally sleeps at 18:30.
-    waves = [("morning", morning_start, priority + regular[:split], 10), ("afternoon", afternoon_start, priority + regular[split:], 10)]
+    # Each keyword now fetches two pages for both daily and weekly searches.
+    # Eight selected words plus four repeated priority words produce six slots
+    # per wave, keeping the Mac-side work inside short awake windows.
+    waves = [
+        ("morning", morning_start, priority + regular[:split], TWO_WAVE_GAP_MINUTES),
+        ("afternoon", afternoon_start, priority + regular[split:], TWO_WAVE_GAP_MINUTES),
+    ]
     result: list[dict[str, Any]] = []
     for wave, start_value, items, gap in waves:
         wave_rng = random.Random(seed ^ (1 if wave == "morning" else 2))

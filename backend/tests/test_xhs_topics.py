@@ -23,7 +23,7 @@ def test_average_link_does_not_chain_two_unrelated_topics_through_a_bridge():
 
 
 @pytest.mark.asyncio
-async def test_existing_base_keyword_is_quarantined_after_three_successful_zero_yield_days():
+async def test_existing_base_keyword_is_kept_after_three_successful_zero_yield_days():
     engine=create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         for table in ("xhs_keywords","xhs_keyword_runs"): await conn.run_sync(Base.metadata.tables[table].create)
@@ -33,6 +33,22 @@ async def test_existing_base_keyword_is_quarantined_after_three_successful_zero_
         for offset in range(3):
             day=date(2026,7,18)+timedelta(days=offset)
             db.add(XhsKeywordRun(keyword_id=keyword.id,run_date=day,wave="morning",status="completed",final_count=0));await db.commit()
+            await evaluate_keyword_lifecycle(db,day)
+        assert keyword.enabled is True
+        assert keyword.lifecycle_status=="active" and keyword.zero_yield_streak==3
+
+
+@pytest.mark.asyncio
+async def test_derived_keyword_is_quarantined_after_three_successful_zero_yield_days():
+    engine=create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        for table in ("xhs_keywords","xhs_keyword_runs"): await conn.run_sync(Base.metadata.tables[table].create)
+    async with AsyncSession(engine,expire_on_commit=False) as db:
+        keyword=XhsKeyword(keyword="低效总结词",normalized_keyword="低效总结词",keyword_type="derived",enabled=True,lifecycle_status="trial")
+        db.add(keyword);await db.flush()
+        for offset in range(3):
+            day=date(2026,7,18)+timedelta(days=offset)
+            db.add(XhsKeywordRun(keyword_id=keyword.id,run_date=day,wave="manual",status="completed",final_count=0));await db.commit()
             await evaluate_keyword_lifecycle(db,day)
         assert keyword.enabled is False
         assert keyword.lifecycle_status=="quarantined" and keyword.zero_yield_streak==3
