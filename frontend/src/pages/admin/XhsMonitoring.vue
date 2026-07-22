@@ -482,11 +482,11 @@
             <div><small>搜索页返回</small><b>{{ runNotesRun.cli_raw_count }}</b></div>
             <div><small>成功解析</small><b>{{ runNotesRun.merged_count }}</b></div>
             <div><small>今日候选</small><b>{{ levelStat(runNotesRun, "daily", "candidate_count") }}</b></div>
-            <div><small>今日赞 &gt; 200</small><b>{{ levelStat(runNotesRun, "daily", "eligible_count") }}</b></div>
+            <div><small>搜索页初筛 · 24h赞 &gt; 200</small><b>{{ levelStat(runNotesRun, "daily", "eligible_count") }}</b></div>
             <div><small>一周候选</small><b>{{ levelStat(runNotesRun, "weekly", "candidate_count") }}</b></div>
-            <div><small>一周赞 &gt; 2000</small><b>{{ levelStat(runNotesRun, "weekly", "eligible_count") }}</b></div>
-            <div><small>详情成功</small><b>{{ runNotesRun.detail_success_count }} / {{ runNotesRun.detail_attempted_count }}</b></div>
-            <div><small>最终入库</small><b>{{ runNotesRun.displayable_count }}</b></div>
+            <div><small>搜索页初筛 · 7天赞 &gt; 2000</small><b>{{ levelStat(runNotesRun, "weekly", "eligible_count") }}</b></div>
+            <div><small>详情解析成功</small><b>{{ runNotesRun.detail_success_count }} / {{ runNotesRun.detail_attempted_count }}</b></div>
+            <div><small>详情复核后入库</small><b>{{ runNotesRun.displayable_count }}</b></div>
           </div>
           <div v-if="diagnosticRejections.length" class="diagnostic-rejections">
             <span v-for="item in diagnosticRejections" :key="item.key">{{ reason(item.key) }} <b>{{ item.count }}</b></span>
@@ -1052,7 +1052,10 @@ const runDiagnosticSummary = (run) => {
   if (run.cli_raw_count === 0) return "小红书搜索页本次真实返回 0 条。";
   if (run.displayable_count === 0)
     return `搜索页返回 ${run.cli_raw_count} 条，但结果均在解析、时间、点赞或详情规则中被过滤。`;
-  return `搜索页返回 ${run.cli_raw_count} 条，最终入库 ${run.displayable_count} 条。`;
+  const initialEligible =
+    Number(levelStat(run, "daily", "eligible_count") || 0) +
+    Number(levelStat(run, "weekly", "eligible_count") || 0);
+  return `搜索页初筛 ${initialEligible} 条进入详情，详情复核后入库 ${run.displayable_count} 条；详情页的真实发布时间和点赞会覆盖搜索卡片初值。`;
 };
 const emptyRunNotesMessage = computed(() => {
   const run = runNotesRun.value;

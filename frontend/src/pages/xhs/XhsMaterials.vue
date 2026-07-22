@@ -1,9 +1,9 @@
 <template>
   <section class="xhs-page">
-    <header class="hero masthead"><div class="masthead-left"><div class="kicker">XHS · AI TOPIC INDEX</div><h1>小红书素材库</h1></div><nav class="topic-tabs" aria-label="小红书选题视图"><button v-for="tab in tabs" :key="tab.id" type="button" :class="{active:activeTab===tab.id}" @click="activeTab=tab.id">{{ tab.label }}<small>{{ tab.hint }}</small></button></nav><div class="masthead-date">选题号外 · {{ todayEdition }}版</div></header>
-    <div v-if="activeTab==='hot'" class="screen-one" :class="{'screen-one--full':topics.length}">
+    <header class="hero masthead"><div class="masthead-brand"><span class="kicker">XHS · AI TOPIC INDEX</span><h1>小红书素材库</h1></div><span class="band-rule"></span><nav class="topic-tabs" aria-label="小红书选题视图"><button v-for="tab in tabs" :key="tab.id" type="button" :class="{active:activeTab===tab.id}" @click="selectTab(tab.id)">{{ tab.label }}<small>{{ tab.hint }}</small></button></nav><div class="masthead-right"><span class="masthead-date">选题号外 · {{ todayEdition }}版</span><span class="live-dot"><i></i>监测中 · 每 2 小时更新</span></div></header>
+    <div class="monitor-strip"><div class="ms-item"><b>{{ monitor.topicCount }}</b>个话题在监测</div><span class="ms-sep"></span><div class="ms-item"><b>{{ monitor.sampleCount }}</b>篇样本笔记 <em>今日 +{{ monitor.todayNewNotes }}</em></div><span class="ms-sep"></span><div class="ms-item"><b>{{ monitor.freshCount }}</b>个新切口信号</div><span class="ms-sep"></span><div class="ms-item"><b>{{ compact(monitor.maxLikes) }}</b>单篇最高赞</div><div class="ms-right">DESK EDITION · 数据来源：小红书公开笔记采样</div></div>
+    <div v-if="activeTab==='hot'" class="screen-one">
     <section v-if="topics.length" class="topic-board">
-      <div class="tb-head"><div class="sec-kicker"><span class="ex">EXTRA · 号外</span><span class="sep"></span><span>每日早间选题速递</span></div><div class="sec-title-row"><h2>今日具体选题</h2><div v-if="boards.generated_at" class="sec-update"><span class="pulse"></span>更新于 {{ dateTime(boards.generated_at) }}</div></div></div>
       <div class="board" :class="{solo:!railTopics.length}">
         <article class="tb-topic tb-hero" :class="{selected:filters.semantic_topic_id===headline.topic_id,'no-cover':!topNote}" role="button" tabindex="0" :aria-pressed="filters.semantic_topic_id===headline.topic_id" @click="openTopic(headline)" @keydown.enter.prevent="openTopic(headline)" @keydown.space.prevent="openTopic(headline)">
           <span class="sel-chip">✓ 筛选中</span><div class="hero-main"><div class="hero-top"><span class="rank">01</span><span class="badge badge-new">今日新切口</span><span class="page-tag">A1 · 头条</span></div><h3 class="hero-title">{{ headline.topic }}</h3><p class="hero-deck">{{ headline.ai_highlight || evidence(headline) }}</p>
@@ -17,16 +17,18 @@
       </div>
     </section><el-empty v-else description="今日暂无形成规模的内容话题"/></div>
     <section v-if="activeTab==='fermenting'" class="signals-section">
-      <div class="signals-head"><div><span class="sec-kicker">TREND SIGNALS · 近 7 日</span><h2>持续发酵话题</h2><p><span class="pulse"></span>更新于 {{ dateTime(boards.generated_at) }}</p></div><span class="content-rule">按文章内容聚合 · 非搜索关键词</span></div>
+      <div class="page-marker"><span class="pm-no">A2</span><span class="pm-name">趋势版</span><span class="pm-note">近 7 日趋势 · {{ fermentTopics.length }} 组信号追踪<template v-if="boards.generated_at"> · 更新于 {{ dateTime(boards.generated_at) }}</template></span></div>
       <div v-if="boardsLoading" class="signal-grid"><el-skeleton v-for="i in 4" :key="i" animated class="signal-skeleton"/></div>
       <div v-else-if="visibleFermentTopics.length" class="signal-grid">
         <article v-for="(t,i) in visibleFermentTopics" :key="t.topic_id" class="signal-card" role="button" tabindex="0" @click="openTopic(t)" @keydown.enter.prevent="openTopic(t)" @keydown.space.prevent="openTopic(t)">
-          <div class="signal-head"><span class="signal-rank">{{ String(i+1).padStart(2,'0') }}<small>SIGNAL</small></span><h3>{{ t.topic }}</h3><span class="topic-badge is-ferment">DAY {{ t.active_days>=7?'7+':t.active_days }}</span></div>
-          <p v-if="t.ai_highlight" class="signal-summary">{{ t.ai_highlight }}</p>
-          <div class="signal-metrics"><div class="max-likes"><span>最高赞 · MAX LIKES</span><strong>{{ compact(t.max_likes) }}</strong><em>累计 {{ t.sample_count }} 篇 · {{ t.author_count }} 位作者</em></div><div class="spark-wrap"><svg viewBox="0 0 220 72" aria-label="近 7 次监测互动走势"><polygon :points="sparkGeometry(t).area" class="spark-area"/><polyline :points="sparkGeometry(t).line" class="spark-line"/><circle :cx="sparkGeometry(t).last.x" :cy="sparkGeometry(t).last.y" r="3.5" class="spark-dot"/></svg><span>近 7 次监测 · 互动走势</span></div></div>
-          <div class="evidence-chips"><span v-for="e in topicEvidence(t)" :key="e">{{ e }}</span></div>
-          <ul class="signal-notes"><li class="notes-heading"><span></span><b>代表笔记 · TOP NOTES</b><em>赞</em></li><li v-for="(n,ni) in (t.notes||[]).slice(0,3)" :key="n.note_id" @click.stop="openDetail({note_id:n.note_id})"><span>N{{ ni+1 }}</span><b>「{{ n.title }}」</b><em>{{ compact(n.likes) }}</em><i :style="{width:`${Math.max(5,(n.likes||0)/Math.max(1,t.max_likes)*100)}%`}"></i></li></ul>
-          <footer><span>点击查看该内容话题的全部文章</span><b>查看话题 →</b></footer>
+          <div class="sc-top"><span class="sc-signal"><b>{{ String(i+1).padStart(2,'0') }}</b>SIGNAL</span><span class="sc-day">DAY {{ t.active_days>=7?'7+':t.active_days }}</span></div>
+          <h3 class="sc-topic">{{ t.topic }}</h3>
+          <p v-if="t.ai_highlight" class="sc-sub">{{ t.ai_highlight }}</p>
+          <div class="sc-numbers"><span class="sc-big">{{ t.sample_count }}<small>篇</small></span><span class="sc-numtext">近 24 小时新增 <b>{{ t.new_notes_24h }} 篇</b> / <b>{{ t.new_authors_24h }} 位</b>新作者<br>累计 {{ t.sample_count }} 篇 · {{ t.author_count }} 位作者 · 最高 {{ compact(t.max_likes) }} 赞</span></div>
+          <div class="sc-chart"><div class="sc-chart-head"><span>近 7 次监测</span><b>互动走势</b></div><div class="sc-chart-plot"><svg viewBox="0 0 100 90" preserveAspectRatio="none" aria-label="近 7 次监测互动走势"><defs><linearGradient :id="`trend-area-${i}`" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#cc785c" stop-opacity=".24"/><stop offset="100%" stop-color="#cc785c" stop-opacity="0"/></linearGradient></defs><line v-for="y in [22,50,78]" :key="y" x1="2" :y1="y" x2="98" :y2="y" class="grid-line"/><path :d="sparkGeometry(t).area" :fill="`url(#trend-area-${i})`" class="spark-area"/><path :d="sparkGeometry(t).line" class="spark-line"/></svg><span class="spark-end" :style="{left:`${sparkGeometry(t).last.x}%`,top:`${sparkGeometry(t).last.y/90*100}%`}"></span></div></div>
+          <div class="sc-chips"><span v-for="e in topicEvidence(t)" :key="e" class="chip">{{ e }}</span></div>
+          <div class="sc-notes"><div v-for="n in (t.notes||[]).slice(0,3)" :key="n.note_id" class="note-item" @click.stop="openDetail({note_id:n.note_id})"><span class="ni-title">「{{ n.title }}」</span><span class="ni-like"><b>{{ compact(n.likes) }}</b> 赞</span></div></div>
+          <div class="sc-foot"><span>最高 <b>{{ compact(t.max_likes) }}</b> 赞</span><a @click.stop="openTopic(t)">查看趋势与全部笔记 →</a></div>
         </article>
       </div>
       <el-empty v-else description="暂无持续发酵的内容话题"/><button v-if="fermentTopics.length>visibleFerment" type="button" class="more-ferment" @click="visibleFerment+=6">查看更多发酵话题</button>
@@ -44,12 +46,13 @@
 <script setup>
 import { computed,onMounted,onUnmounted,reactive,ref,watch } from 'vue';import api from '@/api/api'
 const tabs=[{id:'hot',label:'今日热榜',hint:'滚动 24 小时'},{id:'fermenting',label:'持续发酵',hint:'近 7 日趋势'},{id:'all',label:'全部',hint:'高赞素材'}];const activeTab=ref('hot'),visibleFerment=ref(6),activeTopicName=ref('');
+const selectTab=id=>{const leavingFilteredResults=id!=='all'&&filters.semantic_topic_id;if(leavingFilteredResults){filters.semantic_topic_id='';activeTopicName.value='';load()}if(activeTab.value!==id)activeTab.value=id;window.scrollTo({top:0,behavior:'smooth'})};
 const loading=ref(false),boardsLoading=ref(false),items=ref([]),total=ref(0),drawer=ref(false),selected=ref(null);const failed=new Set();const placeholder='/brand/xhs-placeholder.svg';const filters=reactive({range:'7d',keyword:'',topic:'',semantic_topic_id:'',note_type:'all',sort:'comprehensive',q:'',page_size:100})
 const load=async()=>{loading.value=true;try{const {data}=await api.get('/xhs/notes',{params:filters});items.value=data.items;total.value=data.total}catch{items.value=[];total.value=0}finally{loading.value=false}};const reset=()=>{Object.assign(filters,{range:'7d',keyword:'',topic:'',semantic_topic_id:'',note_type:'all',sort:'comprehensive',q:''});activeTopicName.value='';load()};const openDetail=async n=>{try{selected.value=(await api.get(`/xhs/notes/${n.note_id}`)).data}catch{selected.value=n}drawer.value=true};const mediaHash=s=>{let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))|0;return(h>>>0).toString(36)};const mediaUrl=(u,n,kind)=>u?`/api/v1/xhs/media/${n.note_id}/${kind}?v=${mediaHash(u)}`:placeholder;const imageUrl=n=>mediaUrl(n.cover_url,n,'cover');const avatarUrl=n=>mediaUrl(n.author.avatar_url,n,'avatar');const imageFailed=(event,note,kind)=>{const original=event.target.src;if(original.endsWith('xhs-placeholder.svg'))return;event.target.src=placeholder;const key=`${note.note_id}:${kind}:${original}`;if(failed.has(key))return;failed.add(key);api.post(`/xhs/notes/${note.note_id}/image-failures`,{image_kind:kind,failed_url:kind==='cover'?note.cover_url:note.author.avatar_url},{skipErrorToast:true}).catch(()=>{})};const metric=n=>n===null||n===undefined?'—':compact(n);const compact=n=>n>=10000?`${(n/10000).toFixed(n>=100000?0:1)}万`:String(n||0);const dateTime=v=>v?new Date(v).toLocaleString('zh-CN',{hour12:false}):'—';const relative=v=>{if(!v)return '时间未知';const d=Math.floor((Date.now()-new Date(v))/86400000);return d<=0?'今天':`${d} 天前`};const keywordHeat=computed(()=>{const map={};items.value.forEach(n=>n.keywords.forEach(k=>map[k]=(map[k]||0)+1));return Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,10)});const keywordCount=computed(()=>keywordHeat.value.length);const videoCount=computed(()=>items.value.filter(n=>n.note_type==='video').length);const imageCount=computed(()=>items.value.length-videoCount.value);const cleanTag=t=>(t||'').replace(/\[话题\]/g,'').replace(/^#+|#+$/g,'').trim();const cleanContent=c=>(c||'').replace(/#[^#\[\]\s]{1,40}\[话题\]#/g,'').replace(/[^\S\n]+/g,' ').replace(/ *\n */g,'\n').replace(/\n{3,}/g,'\n\n').trim();const maxLikes=computed(()=>Math.max(0,...items.value.map(n=>n.engagement.likes||0)));const rangeLabel=computed(()=>({'1d':'近 1 天','3d':'近 3 天','7d':'近 7 天'})[filters.range]);const typeLabel=computed(()=>filters.note_type==='video'?'视频':filters.note_type==='image'?'图文':'全部类型');
-// 今日具体选题：独立于筛选器拉取，失败静默降级为空，不阻塞页面
-const boards=ref({generated_at:null,edition_date:null,hot:[],fermenting:[]});const loadBoards=async()=>{boardsLoading.value=true;try{const {data}=await api.get('/xhs/topic-boards',{skipErrorToast:true});boards.value={generated_at:data.generated_at||null,edition_date:data.edition_date||null,hot:data.hot||data.fresh||[],fermenting:data.fermenting||[]}}catch{boards.value={generated_at:null,edition_date:null,hot:[],fermenting:[]}}finally{boardsLoading.value=false}};
+// 热榜看板：独立于筛选器拉取，失败静默降级为空，不阻塞页面
+const boards=ref({generated_at:null,edition_date:null,hot:[],fermenting:[],monitor:null,today_new_notes:0});const loadBoards=async()=>{boardsLoading.value=true;try{const {data}=await api.get('/xhs/topic-boards',{skipErrorToast:true});boards.value={generated_at:data.generated_at||null,edition_date:data.edition_date||null,hot:data.hot||data.fresh||[],fermenting:data.fermenting||[],monitor:data.monitor||null,today_new_notes:data.today_new_notes||0}}catch{boards.value={generated_at:null,edition_date:null,hot:[],fermenting:[],monitor:null,today_new_notes:0}}finally{boardsLoading.value=false}};
 const topics=computed(()=>boards.value.hot.map(t=>({...t,status:'fresh'})).slice(0,6));const fermentTopics=computed(()=>boards.value.fermenting);const visibleFermentTopics=computed(()=>fermentTopics.value.slice(0,visibleFerment.value));
-const sparkGeometry=t=>{let values=(t.trend_points||[]).slice(-7).map(p=>Number(p.score||p.new_notes||0));if(!values.length)values=[0,0];if(values.length===1)values=[values[0],values[0]];const min=Math.min(...values),max=Math.max(...values),points=values.map((v,i)=>({x:8+i*204/(values.length-1),y:64-(v-min)/Math.max(1,max-min)*52})),line=points.map(p=>`${p.x},${p.y}`).join(' ');return{line,area:`8,64 ${line} 212,64`,last:points[points.length-1]}};
+const sparkGeometry=t=>{let values=(t.trend_points||[]).slice(-7).map(p=>Number(p.score||p.new_notes||0));if(!values.length)values=[0,0];if(values.length===1)values=[values[0],values[0]];const min=Math.min(...values),max=Math.max(...values),points=values.map((v,i)=>({x:2+i*96/(values.length-1),y:72-(v-min)/Math.max(1,max-min)*50}));let line=`M ${points[0].x} ${points[0].y}`;for(let i=1;i<points.length;i++){const prev=points[i-1],point=points[i],mid=(prev.x+point.x)/2;line+=` C ${mid} ${prev.y}, ${mid} ${point.y}, ${point.x} ${point.y}`}const last=points[points.length-1];return{line,area:`${line} L ${last.x} 82 L ${points[0].x} 82 Z`,last}};
 const topicEvidence=t=>(t.evidence||[]).slice(0,3).length?(t.evidence||[]).slice(0,3):[`内容样本 ${t.sample_count} 篇`,`涉及 ${t.author_count} 位作者`,`今日监测 ${t.new_notes_24h} 篇`];
 // 发酵天数的参考日：所有上榜话题 last_seen_at 的最大值
 const referenceTime=computed(()=>Math.max(0,...topics.value.map(t=>+new Date(t.last_seen_at)||0)));
@@ -59,71 +62,92 @@ const evidence=t=>{if(t.status==='fresh')return `${t.fallback_source==='keyword'
 const headline=computed(()=>topics.value[0]||null);const railTopics=computed(()=>topics.value.slice(1,4));const topNote=computed(()=>headline.value?.notes?.[0]||null);const heroMoreNotes=computed(()=>(headline.value?.notes||[]).slice(1,3));const filtersEl=ref(null);
 // 刊头版期：优先用看板实际锚定的采集日（后端 edition_date），无数据时回退当天 →「选题号外 · 07月17日版」
 const todayEdition=computed(()=>{if(boards.value.edition_date){const[,m,d]=boards.value.edition_date.split('-');return `${m}月${d}日`}const d=new Date();return `${String(d.getMonth()+1).padStart(2,'0')}月${String(d.getDate()).padStart(2,'0')}日`});
-// 两屏吸附：页面滚动在 window（AppLayout 顶栏固定、无内部滚动容器），snap class 挂 <html>；仅选题区存在时启用
-watch(()=>topics.value.length,n=>document.documentElement.classList.toggle('xhs-snap',n>0));
+// 监测状态条：由看板数据汇总，接口不可用时全为 0
+const monitor=computed(()=>{const all=[...boards.value.hot,...boards.value.fermenting],server=boards.value.monitor||{};return{topicCount:server.topic_count??all.length,sampleCount:server.sample_count??all.reduce((s,t)=>s+(t.sample_count||0),0),freshCount:server.fresh_count??boards.value.hot.length,maxLikes:server.max_likes??Math.max(0,...all.map(t=>t.max_likes||0)),todayNewNotes:server.today_new_notes??boards.value.today_new_notes??0}});
 // 卡片只按内容语义话题筛选，采集关键词不参与话题展示或跳转。
 const openTopic=t=>{filters.semantic_topic_id=t.topic_id;filters.keyword='';activeTopicName.value=t.topic;activeTab.value='all';load().then(()=>setTimeout(()=>document.querySelector('.body-grid')?.scrollIntoView({behavior:'smooth',block:'start'})))};const clearSemanticFilter=()=>{filters.semantic_topic_id='';activeTopicName.value='';load()};onMounted(()=>{load();loadBoards()})
 // 弹窗打开时锁定背景滚动：补偿滚动条宽度防止布局晃动，不改 scrollTop（不回顶），Esc 关闭
 watch(drawer,v=>{const de=document.documentElement;if(v){const sw=window.innerWidth-de.clientWidth;de.style.paddingRight=sw>0?sw+'px':'';de.style.overflow='hidden'}else{de.style.overflow='';de.style.paddingRight=''}});const onKey=e=>{if(e.key==='Escape')drawer.value=false};
-// 页面级 sticky 前提：#app 的 overflow-x:hidden 会让它成为滚动容器导致 sticky 失效（headless Chromium 已复现）；overflow-x:clip 不生成滚动容器且视觉效果一致，仅本页挂载期间生效，卸载还原
-const appEl=document.getElementById('app');onMounted(()=>{window.addEventListener('keydown',onKey);if(appEl)appEl.style.overflowX='clip'});onUnmounted(()=>{window.removeEventListener('keydown',onKey);if(appEl)appEl.style.overflowX='';const de=document.documentElement;de.classList.remove('xhs-snap');de.style.overflow='';de.style.paddingRight=''})
+// #app 默认的 overflow-x:hidden 会让 sticky 工作带失效；clip 不会制造额外滚动容器。
+const appEl=document.getElementById('app');onMounted(()=>{window.addEventListener('keydown',onKey);if(appEl)appEl.style.overflowX='clip'});onUnmounted(()=>{window.removeEventListener('keydown',onKey);if(appEl)appEl.style.overflowX='';const de=document.documentElement;de.style.overflow='';de.style.paddingRight=''})
 </script>
 <style scoped>
-.xhs-page{max-width:1540px;margin:auto;color:var(--ink)}.hero{margin-bottom:20px}.kicker{font-size:12px;letter-spacing:.12em;color:var(--clay-deep);font-weight:700}.hero h1{font-family:"PingFang SC","Helvetica Neue","Microsoft YaHei",Arial,sans-serif;font-size:36px;font-weight:650;letter-spacing:-.035em;line-height:1.2;margin:6px 0}.chips span{background:var(--clay-tint);color:var(--clay-deep);border-radius:99px;padding:5px 9px;font-size:12px}.filters{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) 1.6fr auto;gap:9px;padding:14px;margin:12px 0;background:var(--paper);border:1px solid var(--line);border-radius:14px}.reset{border:1px solid var(--line);background:white;border-radius:8px;padding:0 14px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.metrics article,.side-card{padding:16px;background:var(--paper);border:1px solid var(--line);border-radius:14px}.metrics span{color:var(--ink-3);font-size:12px}.metrics strong{display:block;font:700 26px var(--serif);margin-top:4px}.section-title{display:flex;justify-content:space-between;align-items:end;margin:24px 0 10px}.section-title h2{font:700 22px var(--serif);margin:0}.section-title span{color:var(--ink-3);font-size:12px}.body-grid{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:14px}.material-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}.material-card{background:var(--paper);border:1px solid var(--line);border-radius:14px;overflow:hidden;transition:.18s;cursor:pointer;display:flex;flex-direction:column}.material-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-card)}.cover{position:relative;aspect-ratio:4/5;background:var(--bone);overflow:hidden}.cover>img{width:100%;height:100%;object-fit:cover}.type{position:absolute;left:9px;top:9px;padding:4px 8px;border-radius:99px;font-size:11px;background:rgba(255,255,255,.9)}.content{padding:13px;display:flex;flex-direction:column;flex:1}.content h3{font:700 15px/1.45 var(--serif);margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.chips{display:flex;gap:5px;flex-wrap:wrap;margin:9px 0}.chips span{font-size:10px;padding:3px 7px}.meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;margin-bottom:9px}.meta .chips{flex:1;min-width:0;margin:0}.author{display:flex;align-items:center;gap:6px;flex-shrink:0;max-width:48%;min-width:0;color:var(--ink-3);font-size:11px}.author img{width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0}.author span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.engagement{display:flex;justify-content:space-between;border-top:1px solid var(--line);margin-top:auto;padding-top:9px;color:var(--ink-3);font-size:12px}.engagement b{color:var(--ink);font-weight:600;font-size:13px;font-variant-numeric:tabular-nums}.side-card{margin-bottom:12px}.side-card h3{font:700 16px var(--serif);margin:0 0 10px}.side-card p{color:var(--ink-3)}.side-card button{display:flex;justify-content:space-between;width:100%;border:0;border-bottom:1px solid var(--line);background:none;padding:9px 0}@media(max-width:1200px){.filters{grid-template-columns:repeat(3,1fr)}.material-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:800px){.metrics{grid-template-columns:repeat(2,1fr)}.body-grid{grid-template-columns:1fr}.body-grid aside{grid-row:1}.material-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){.filters,.metrics,.material-grid{grid-template-columns:1fr}.hero h1{font-size:30px}}
-/* 刊头 masthead：sticky 钉在顶栏下方；min-height 自适应（嵌入了视图切换 tab，中窄屏换行时刊头随内容增高），背景用页面底色 var(--ivory)（body/AppLayout 同色），不透出下方滚动内容；底部报纸式双细线（粗线在上、细线在下，都在盒内保证背景覆盖） */
+.xhs-page{box-sizing:border-box;width:100%;max-width:1440px;min-width:0;margin:-32px auto 0;color:var(--ink);container-type:inline-size}.xhs-page *{box-sizing:border-box}.hero{margin-bottom:20px}.kicker{font-size:12px;letter-spacing:.12em;color:var(--clay-deep);font-weight:700}.hero h1{font-family:"PingFang SC","Helvetica Neue","Microsoft YaHei",Arial,sans-serif;font-size:36px;font-weight:650;letter-spacing:-.035em;line-height:1.2;margin:6px 0}.chips span{background:var(--clay-tint);color:var(--clay-deep);border-radius:99px;padding:5px 9px;font-size:12px}.filters{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) 1.6fr auto;gap:9px;padding:14px;margin:12px 0;background:var(--paper);border:1px solid var(--line);border-radius:14px}.reset{border:1px solid var(--line);background:white;border-radius:8px;padding:0 14px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.metrics article,.side-card{padding:16px;background:var(--paper);border:1px solid var(--line);border-radius:14px}.metrics span{color:var(--ink-3);font-size:12px}.metrics strong{display:block;font:700 26px var(--serif);margin-top:4px}.section-title{display:flex;justify-content:space-between;align-items:end;margin:24px 0 10px}.section-title h2{font:700 22px var(--serif);margin:0}.section-title span{color:var(--ink-3);font-size:12px}.body-grid{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:14px}.material-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}.material-card{background:var(--paper);border:1px solid var(--line);border-radius:14px;overflow:hidden;transition:.18s;cursor:pointer;display:flex;flex-direction:column}.material-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-card)}.cover{position:relative;aspect-ratio:4/5;background:var(--bone);overflow:hidden}.cover>img{width:100%;height:100%;object-fit:cover}.type{position:absolute;left:9px;top:9px;padding:4px 8px;border-radius:99px;font-size:11px;background:rgba(255,255,255,.9)}.content{padding:13px;display:flex;flex-direction:column;flex:1}.content h3{font:700 15px/1.45 var(--serif);margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.chips{display:flex;gap:5px;flex-wrap:wrap;margin:9px 0}.chips span{font-size:10px;padding:3px 7px}.meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;margin-bottom:9px}.meta .chips{flex:1;min-width:0;margin:0}.author{display:flex;align-items:center;gap:6px;flex-shrink:0;max-width:48%;min-width:0;color:var(--ink-3);font-size:11px}.author img{width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0}.author span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.engagement{display:flex;justify-content:space-between;border-top:1px solid var(--line);margin-top:auto;padding-top:9px;color:var(--ink-3);font-size:12px}.engagement b{color:var(--ink);font-weight:600;font-size:13px;font-variant-numeric:tabular-nums}.side-card{margin-bottom:12px}.side-card h3{font:700 16px var(--serif);margin:0 0 10px}.side-card p{color:var(--ink-3)}.side-card button{display:flex;justify-content:space-between;width:100%;border:0;border-bottom:1px solid var(--line);background:none;padding:9px 0}@media(max-width:1200px){.filters{grid-template-columns:repeat(3,1fr)}.material-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:800px){.metrics{grid-template-columns:repeat(2,1fr)}.body-grid{grid-template-columns:1fr}.body-grid aside{grid-row:1}.material-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){.filters,.metrics,.material-grid{grid-template-columns:1fr}.hero h1{font-size:30px}}
+/* v4 编辑室工作带：完整复刻 brand / rule / tabs / issue 的横向骨架。 */
 .hero.masthead {
   position: sticky;
-  top: var(--topbar-h);
+  top: 60px;
   z-index: 50;
   box-sizing: border-box;
-  min-height: var(--masthead-box);
   display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  flex-wrap: wrap;
-  gap: 10px 18px;
-  margin-bottom: var(--masthead-gap);
-  padding-bottom: 14px;
-  background: var(--ivory);
-  border-bottom: 1px solid var(--ink);
+  align-items: center;
+  gap: 36px;
+  height: 76px;
+  margin: 0 -32px 39px;
+  padding: 0 32px;
+  background: var(--paper);
+  border-bottom: 3px solid var(--ink);
 }
 .hero.masthead::after {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 5px;
-  height: 3px;
+  bottom: -7px;
+  height: 1px;
   background: var(--ink);
 }
-@media (max-width: 768px) {
-  /* 窄屏日期可能换行，刊头高度自适应（最小 86px），scroll-margin 按换行后的高度留量 */
-  .hero.masthead {
-    height: auto;
-    min-height: var(--masthead-box);
-  }
-}
-.hero h1 {
-  margin: 6px 0 0;
+.masthead-brand { display: flex; align-items: baseline; gap: 14px; flex: none; min-width: 0; }
+.hero.masthead .kicker { font-size: 10px; letter-spacing: 0.22em; white-space: nowrap; text-transform: uppercase; }
+.hero.masthead h1 {
+  margin: 0;
   font-family: "Source Han Serif SC", "Songti SC", "STSong", "Noto Serif SC", Georgia, serif;
-  font-size: clamp(32px, 3.4vw, 44px);
+  font-size: 26px;
   font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: 0.01em;
+  line-height: 1.2;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.band-rule { width: 1px; height: 28px; background: var(--line); flex: none; }
+.masthead-right { flex: none; text-align: right; font-size: 11px; color: var(--ink-3); letter-spacing: 0.08em; line-height: 1.5; }
+.masthead-date { display: block; font: 600 13px var(--serif); color: var(--ink); letter-spacing: 0.1em; }
+.live-dot { display: flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+.live-dot i { width: 7px; height: 7px; border-radius: 50%; background: var(--clay); animation: tb-pulse 2.2s ease-out infinite; }
+@media (max-width: 768px) {
+  /* 窄屏工作带换行：tab 组占整行，右侧状态与日期并成一行 */
+  .xhs-page { margin-top: -18px; }
+  .hero.masthead { top: 58px; flex-wrap: wrap; gap: 10px 14px; height: auto; min-height: 108px; margin: 0 -14px 25px; padding: 12px 14px; }
+  .masthead-right { flex-direction: row; align-items: center; gap: 10px; margin-left: auto; text-align: left; }
+  .band-rule { display: none; }
+}
+
+/* 监测状态条：话题/样本/新切口/最高赞一览 */
+.monitor-strip {
+  display: flex; align-items: center; gap: 24px;
+  background: var(--paper); border: 1px solid var(--line);
+  padding: 11px 22px; margin-bottom: 18px; overflow-x: auto;
+}
+.monitor-strip .ms-item { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.monitor-strip .ms-item b { font: 700 20px var(--serif); color: var(--ink); }
+.monitor-strip .ms-item em { font-style: normal; color: var(--clay-deep); font-weight: 600; }
+.monitor-strip .ms-sep { width: 1px; height: 22px; background: var(--line); flex: none; }
+.monitor-strip .ms-right { margin-left: auto; font-size: 11px; color: var(--ink-4); letter-spacing: .06em; white-space: nowrap; }
+@media (max-width: 900px) {
+  .monitor-strip .ms-right { display: none; }
 }
 .hero .kicker {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   line-height: 1.4;
   letter-spacing: 0.24em;
   color: var(--clay-deep);
 }
-.masthead-date {
+.masthead-right .masthead-date {
   flex: none;
-  padding-bottom: 4px;
-  font-size: 12.5px;
-  letter-spacing: 0.08em;
-  color: var(--ink-3);
+  padding-bottom: 0;
+  font: 600 13px var(--serif);
+  letter-spacing: 0.1em;
+  color: var(--ink);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -149,102 +173,21 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   }
 }
 
-/* ============ 今日具体选题 v3 · 报纸头版风 ============ */
-/* 高度对账变量：顶栏 60/58px + 内容上 padding 32/18px（见 AppLayout）+ 刊头盒高 104/86px + 刊头下间距 16px */
-.xhs-page {
-  --topbar-h: 60px;
-  --content-pad: 32px;
-  --masthead-box: 104px;
-  --masthead-gap: 16px;
-}
-@media (max-width: 768px) {
-  .xhs-page {
-    --topbar-h: 58px;
-    --content-pad: 18px;
-    --masthead-box: 86px;
-  }
-}
-/* 两屏布局：sticky 刊头（文档流占位）+ .screen-one（选题区）= 第一屏；.filters 起 = 第二屏 */
+/* ============ 今日热榜 v4 · 自然文档流 ============ */
 .screen-one {
   display: flex;
   flex-direction: column;
 }
-/* 吸附对账：第一屏起点 = 文档流自然位置（顶栏+padding+刊头+间距，对应 scroll 0）；
-   第二屏及滚动锚点 = 顶栏+刊头+呼吸间距，保证不被 sticky 刊头遮住 */
-.screen-one {
-  scroll-margin-top: calc(var(--topbar-h) + var(--content-pad) + var(--masthead-box) + var(--masthead-gap));
-}
 .screen-two,
 .filters,
 .body-grid {
-  scroll-margin-top: calc(var(--topbar-h) + var(--masthead-box) + 16px);
+  scroll-margin-top: 152px;
 }
 @media (max-width: 768px) {
-  /* 移动端刊头 height:auto（换行后约 108px），统一按 58+108+12 留量 */
   .screen-two,
   .filters,
   .body-grid {
     scroll-margin-top: 178px;
-  }
-}
-/* 严格一屏模式：仅宽屏且视口高度充足时启用；窄屏（≤1024px）或低高度屏（≤760px）保持自然文档流，允许超高滚动，不裁内容 */
-@media (min-width: 1025px) and (min-height: 761px) {
-  .screen-one--full {
-    height: calc(100svh - var(--topbar-h) - var(--content-pad) - var(--masthead-box) - var(--masthead-gap));
-  }
-  .screen-one--full .topic-board {
-    flex: 1;
-    min-height: 0;
-  }
-  .screen-one--full .board {
-    min-height: 0;
-    margin-top: 16px;
-  }
-  .screen-one--full .tb-hero,
-  .screen-one--full .hero-main,
-  .screen-one--full .rail,
-  .screen-one--full .rail-item {
-    min-height: 0;
-  }
-  /* 封面为弹性元素：随可用空间变高变矮（img 本就 absolute 铺满封面） */
-  .screen-one--full .hero-cover {
-    min-height: 0;
-  }
-  /* 头条位与要闻榜间距收紧，保证 1440×900 恰好一屏 */
-  .screen-one--full .tb-hero {
-    padding: 20px 22px 18px;
-  }
-  .screen-one--full .hero-title {
-    margin: 12px 0 8px;
-  }
-  .screen-one--full .hero-meta {
-    margin-top: 12px;
-  }
-  .screen-one--full .hero-notes {
-    padding-top: 12px;
-  }
-  .screen-one--full .hero-notes .notes-label {
-    padding-top: 10px;
-    margin-bottom: 4px;
-  }
-  .screen-one--full .rail-item {
-    padding: 10px 16px 8px;
-  }
-  .screen-one--full .ri-deck {
-    margin-top: 6px;
-    line-height: 1.6;
-  }
-  .screen-one--full .ri-meta {
-    margin-top: 5px;
-    line-height: 1.5;
-  }
-  .screen-one--full .ri-deck + .ri-meta {
-    margin-top: 4px;
-  }
-  .screen-one--full .ri-notes {
-    margin-top: 6px;
-    padding-top: 5px;
-    gap: 3px;
   }
 }
 .topic-board {
@@ -252,57 +195,7 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   --sans: "PingFang SC", "Helvetica Neue", "Microsoft YaHei", Arial, sans-serif;
   display: flex;
   flex-direction: column;
-  margin-top: 8px;
-}
-/* 区块头 */
-.sec-kicker {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 11px;
-  letter-spacing: 0.24em;
-  color: var(--ink-3);
-}
-.sec-kicker .ex {
-  color: var(--clay-deep);
-  font-weight: 700;
-}
-.sec-kicker .sep {
-  width: 26px;
-  height: 1px;
-  background: var(--ink-4);
-}
-.sec-title-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-top: 10px;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.sec-title-row h2 {
-  margin: 0;
-  font-family: var(--serif);
-  font-weight: 700;
-  font-size: clamp(28px, 3vw, 38px);
-  letter-spacing: 0.03em;
-  line-height: 1.15;
-}
-.sec-update {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-}
-.pulse {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--clay);
-  flex: none;
-  animation: tb-pulse 2.2s ease-out infinite;
+  margin-top: 0;
 }
 @keyframes tb-pulse {
   0% { box-shadow: 0 0 0 0 rgba(204, 120, 92, 0.45); }
@@ -314,9 +207,9 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   flex: 1;
   display: grid;
   grid-template-columns: minmax(0, 7.2fr) minmax(0, 4.8fr);
-  gap: 26px;
+  gap: 18px;
   align-items: stretch;
-  margin-top: 24px;
+  margin-top: 16px;
 }
 .board.solo {
   grid-template-columns: 1fr;
@@ -449,10 +342,15 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
 .hero-title {
   font-family: var(--serif);
   font-weight: 700;
-  font-size: clamp(40px, 4.2vw, 64px);
-  line-height: 1.08;
+  font-size: clamp(30px, 3.1vw, 58px);
+  line-height: 1.1;
   letter-spacing: 0.02em;
   margin: 18px 0 12px;
+  /* 小屏长标题最多 4 行，超出截断，防止头条卡被撑爆 */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   overflow-wrap: anywhere;
   transition: color 0.25s ease;
 }
@@ -467,6 +365,11 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   line-height: 1.8;
   color: var(--ink-2);
   max-width: 34em;
+  /* 导语最多 3 行，避免超长文本压缩右侧要闻栏 */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .hero-meta {
   display: flex;
@@ -677,11 +580,15 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   color: var(--ink-4);
 }
 .rail-item {
-  flex: 1;
+  /* flex 基准用 auto 而非 0：自然流里网格按内容撑高，各卡等量分配剩余空间，
+     空隙统一留在 meta 与钉底笔记之间（与素材卡同理），不再出现卡底大留白 */
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   padding: 15px 18px 13px;
   background: transparent;
+  /* 内容多时裁剪在本卡内，绝不溢出到相邻卡 */
+  overflow: hidden;
 }
 .rail-item + .rail-item {
   border-top: 1px solid var(--line);
@@ -748,7 +655,7 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   margin-top: 6px;
 }
 .ri-notes {
-  margin: 9px 0 0;
+  margin: auto 0 0;
   padding: 8px 0 0;
   list-style: none;
   border-top: 1px dashed var(--line);
@@ -1028,31 +935,63 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
     height: 92vh;
   }
 }
-/* 视图切换：嵌在刊头中（标题与版期之间），编辑排版式文字 tab；选中态下划线压在刊头细线上 */
-.topic-tabs{display:flex;gap:26px;align-items:flex-end}
-.topic-tabs button{position:relative;border:0;background:transparent;padding:2px 2px 0;color:var(--ink-3);font:600 15px var(--serif);cursor:pointer;transition:color .2s;line-height:1.3;white-space:nowrap}
-.topic-tabs button small{display:block;margin-top:2px;font:500 10px var(--sans);letter-spacing:.1em;color:var(--ink-4)}
+/* 视图切换：骨底槽 + 陶土 pill 分段控件（hint 内联单行），嵌在工作带正中 */
+.topic-tabs{display:flex;gap:4px;padding:4px;background:var(--bone);border:1px solid var(--line);border-radius:999px;margin:0 auto}
+.topic-tabs button{border:0;border-radius:999px;padding:7px 18px;background:transparent;color:var(--ink-3);font:400 13px/1.4 var(--sans);letter-spacing:.02em;cursor:pointer;transition:all .18s;white-space:nowrap;outline:none}
+.topic-tabs button small{font-size:10px;opacity:.62;margin-left:5px;letter-spacing:.04em}
 .topic-tabs button:hover{color:var(--ink)}
-.topic-tabs button.active{color:var(--clay-deep)}
-.topic-tabs button.active::after{content:"";position:absolute;left:0;right:0;bottom:-15px;height:2px;background:var(--clay)}
-.ferment-section{padding:10px 0 50px}.ferment-head{display:flex;justify-content:space-between;align-items:flex-end;padding:12px 0 18px;border-bottom:1px solid var(--line)}.ferment-head h2{margin:5px 0 6px;font:700 clamp(28px,3vw,38px) var(--serif)}.ferment-head p{margin:0;color:var(--ink-3);font-size:12px}.heat-legend{display:flex;align-items:center;gap:9px;color:var(--ink-3);font-size:11px}.heat-legend i{width:100px;height:9px;border-radius:9px;background:linear-gradient(90deg,var(--sand),var(--clay),var(--clay-deep))}.heat-legend b{font-weight:500}
-.ferment-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:22px}.ferment-card{position:relative;padding:22px;background:var(--paper);border:1px solid var(--line);border-radius:12px;cursor:pointer;transition:.22s}.ferment-card:hover,.ferment-card:focus-visible{transform:translateY(-3px);border-color:var(--clay-soft);box-shadow:0 15px 36px rgba(168,90,64,.13);outline:none}.fc-head{display:flex;align-items:flex-start;gap:14px}.signal-rank{font:700 30px/1 var(--serif);color:var(--clay-deep)}.signal-rank small{display:block;margin-top:5px;font:9px var(--sans);letter-spacing:.18em;color:var(--ink-4)}.fc-head h3{flex:1;margin:3px 0 0;font:700 23px var(--serif)}.day-badge{padding:7px 10px;border:1px solid var(--pine);border-radius:5px;color:var(--pine);font-size:12px;font-weight:700;letter-spacing:.12em}.fc-metrics{display:grid;grid-template-columns:1fr 1fr;align-items:end;gap:24px;margin-top:16px;padding:16px 0 14px;border-block:1px solid var(--line)}.fc-metrics span{display:block;font-size:10px;letter-spacing:.14em;color:var(--ink-4)}.fc-metrics strong{display:block;margin-top:7px;font:700 48px/.95 var(--serif)}.fc-metrics strong small{font-size:18px}.fc-metrics em{display:block;margin-top:9px;color:var(--pine);font-size:11px;font-style:normal}.fc-metrics svg{width:100%;height:72px;color:var(--clay-deep)}.heat-row{display:flex;justify-content:space-between;align-items:end;margin-top:14px;color:var(--ink-3);font-size:11px}.heat-row b{font:700 20px var(--serif);color:var(--ink)}.heat-row small{margin-left:3px;font:10px var(--sans);color:var(--ink-4)}.heat-track{height:10px;margin-top:7px;overflow:hidden;background:var(--bone);border-radius:6px}.heat-track i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--sand),var(--clay) 55%,var(--clay-deep))}.evidence-chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:14px}.evidence-chips span{padding:4px 10px;border:1px solid var(--line);border-radius:99px;background:var(--bone);color:var(--ink-3);font-size:11px}.ferment-notes{list-style:none;margin:14px 0 0;padding:10px 0 0;border-top:1px dashed var(--line)}.ferment-notes li{display:grid;grid-template-columns:28px 1fr auto;gap:8px;padding:5px 0;align-items:center}.ferment-notes span{font-size:10px;color:var(--ink-4)}.ferment-notes b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:500 13px var(--serif)}.ferment-notes em{font-size:11px;font-style:normal}.ferment-card footer{display:flex;justify-content:space-between;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);color:var(--ink-4);font-size:11px}.ferment-card footer b{color:var(--clay-deep)}.more-ferment{display:block;margin:24px auto 0;padding:10px 22px;border:1px solid var(--clay);border-radius:99px;background:transparent;color:var(--clay-deep);cursor:pointer}.ferment-skeleton{min-height:360px;padding:24px;background:var(--paper);border:1px solid var(--line);border-radius:12px}.semantic-filter{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--clay-tint);border:1px solid var(--clay-soft);border-radius:10px;color:var(--clay-deep)}.semantic-filter button{border:0;background:transparent;color:inherit;font-weight:700;cursor:pointer}
-@media(max-width:800px){.topic-tabs{order:3;width:100%}.topic-tabs button{flex:1;padding:7px 4px;font-size:13px}.ferment-head{align-items:flex-start;flex-direction:column;gap:12px}.ferment-grid{grid-template-columns:1fr}.fc-metrics{grid-template-columns:1fr}.heat-legend i{width:70px}}
-/* 内容话题卡：对应选定的双栏趋势卡设计；今日与发酵共用同一信息结构。 */
-.signals-section{padding:10px 0 50px}.signals-head{display:flex;justify-content:space-between;align-items:flex-end;padding:12px 0 18px;border-bottom:1px solid var(--line)}.signals-head h2{margin:5px 0 6px;font:700 clamp(28px,3vw,38px) var(--serif)}.signals-head p{margin:0;color:var(--ink-3);font-size:12px}.content-rule{padding:6px 11px;border:1px solid var(--line);border-radius:99px;color:var(--ink-3);font-size:11px;letter-spacing:.06em}
-.signal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:22px}.signal-card{position:relative;padding:22px;background:var(--paper);border:1px solid var(--line);border-radius:12px;cursor:pointer;transition:.22s}.signal-card:hover,.signal-card:focus-visible{transform:translateY(-3px);border-color:var(--clay-soft);box-shadow:0 15px 36px rgba(168,90,64,.13);outline:none}.signal-head{display:flex;align-items:flex-start;gap:14px}.signal-head h3{flex:1;min-width:0;margin:3px 0 0;font:700 23px/1.25 var(--serif)}.topic-badge{flex:none;padding:7px 10px;border-radius:5px;font-size:11px;font-weight:700;letter-spacing:.08em}.topic-badge.is-new{background:var(--clay-deep);border:1px solid var(--clay-deep);color:#fff}.topic-badge.is-ferment{border:1px dashed var(--pine);color:var(--pine)}.signal-summary{min-height:42px;margin:12px 0 0;color:var(--ink-3);font:500 13px/1.65 var(--serif)}
-.signal-metrics{display:grid;grid-template-columns:minmax(150px,.85fr) minmax(180px,1.15fr);align-items:end;gap:24px;margin-top:15px;padding:16px 0 14px;border-block:1px solid var(--line)}.max-likes>span,.spark-wrap>span{display:block;font-size:10px;letter-spacing:.14em;color:var(--ink-4)}.max-likes strong{display:block;margin-top:7px;font:700 48px/.95 var(--serif);font-variant-numeric:tabular-nums}.max-likes em{display:block;margin-top:9px;color:var(--clay-deep);font-size:11px;font-style:normal}.spark-wrap svg{display:block;width:100%;height:72px;overflow:visible}.spark-wrap>span{margin-top:5px;text-align:right}.spark-area{fill:rgba(168,90,64,.11)}.spark-line{fill:none;stroke:var(--clay-deep);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}.spark-dot{fill:var(--clay);stroke:var(--paper);stroke-width:2}
-.signal-notes{list-style:none;margin:14px 0 0;padding:10px 0 0;border-top:1px dashed var(--line)}.signal-notes li{position:relative;display:grid;grid-template-columns:28px 1fr auto;gap:8px;padding:6px 0 9px;align-items:center}.signal-notes span{font-size:10px;color:var(--ink-4)}.signal-notes b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:500 13px var(--serif)}.signal-notes em{font-size:11px;font-style:normal}.signal-notes i{position:absolute;left:36px;bottom:3px;height:2px;max-width:calc(100% - 36px);border-radius:2px;background:linear-gradient(90deg,var(--sand),var(--clay))}.signal-notes .notes-heading{padding-bottom:7px;color:var(--ink-4)}.signal-notes .notes-heading b{font:500 9px var(--sans);letter-spacing:.14em}.signal-notes .notes-heading em{font-size:9px}.signal-card footer{display:flex;justify-content:space-between;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);color:var(--ink-4);font-size:11px}.signal-card footer b{color:var(--clay-deep)}.signal-skeleton{min-height:360px;padding:24px;background:var(--paper);border:1px solid var(--line);border-radius:12px}
-@media(max-width:800px){.signals-head{align-items:flex-start;flex-direction:column;gap:12px}.signal-grid{grid-template-columns:1fr}.signal-metrics{grid-template-columns:1fr}.spark-wrap>span{text-align:left}}
-</style>
-<!-- 滚动吸附挂在 <html> 上（页面滚动在 window），scoped 样式命中不到，需全局块；class 由脚本按 topics 有无动态加删 -->
-<!-- 另：刊头 sticky 依赖 #app overflow-x:clip（index.css 里 overflow-x:hidden 会让 #app 成为滚动容器、sticky 失效）；为把影响限定在本页，由脚本挂载时改、卸载时还原，不写全局 CSS -->
-<style>
-html.xhs-snap {
-  scroll-snap-type: y proximity;
-}
-html.xhs-snap .screen-one,
-html.xhs-snap .screen-two {
-  scroll-snap-align: start;
-}
+.topic-tabs button.active{background:var(--clay);color:#fff;font-weight:600;box-shadow:0 2px 8px rgba(204,120,92,.3)}
+.topic-tabs button.active small{opacity:.85;color:#fff}
+.topic-tabs button:focus-visible{box-shadow:0 0 0 2px var(--clay-soft)}
+/* ============ 持续发酵（报纸趋势版排版：合并边框信号卡） ============ */
+.semantic-filter{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--clay-tint);border:1px solid var(--clay-soft);border-radius:10px;color:var(--clay-deep)}.semantic-filter button{border:0;background:transparent;color:inherit;font-weight:700;cursor:pointer}
+.signals-section{padding:4px 0 50px}
+.page-marker{display:flex;align-items:baseline;gap:16px;margin:8px 0 26px}
+.page-marker .pm-no{font:900 15px var(--serif);letter-spacing:.08em}
+.page-marker .pm-name{font:400 15px var(--serif);letter-spacing:.28em;color:var(--ink)}
+.page-marker .pm-note{font-size:11px;color:var(--ink-3);letter-spacing:.14em}
+.page-marker::after{content:"";flex:1;height:1px;background:var(--line);align-self:center}
+.signal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;max-width:100%;min-width:0;gap:0;margin-top:22px}
+.signal-card{min-width:0;max-width:100%;overflow:hidden;background:var(--paper);border:1px solid var(--line);padding:28px 30px 24px;margin:-1px 0 0 -1px;display:flex;flex-direction:column;cursor:pointer;transition:background .2s}
+.signal-card:hover,.signal-card:focus-visible{background:var(--ivory);outline:none}
+.sc-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.sc-signal{font-size:11px;letter-spacing:.3em;color:var(--ink-3)}
+.sc-signal b{font:700 15px var(--serif);color:var(--ink);letter-spacing:.06em;margin-right:8px}
+.sc-day{font-size:10.5px;letter-spacing:.18em;padding:3px 10px 2px;border:1px solid var(--clay-deep);color:var(--clay-deep);font-weight:600;line-height:1.5}
+.sc-topic{margin:0 0 10px;font-family:"Source Han Serif SC","Songti SC","STSong","Noto Serif SC",Georgia,serif;font-size:clamp(36px,2.6vw,42px);font-weight:700;line-height:1.22;letter-spacing:-.015em;color:var(--ink);-webkit-text-stroke:.35px currentColor;font-synthesis:weight}
+.sc-sub{margin:0 0 16px;font:500 13px/1.7 var(--serif);color:var(--ink-3)}
+.sc-numbers{display:flex;min-width:0;align-items:baseline;gap:12px;border-top:1px solid var(--ink);padding-top:14px;margin-bottom:6px}
+.sc-big{font:700 46px/1 var(--serif);letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.sc-big small{font-size:15px;font-weight:400;color:var(--ink-3);margin-left:4px}
+.sc-numtext{min-width:0;font-size:12.5px;color:var(--ink-3);line-height:1.6;overflow-wrap:anywhere}
+.sc-numtext b{color:var(--clay-deep);font-weight:600}
+.sc-chart{margin:14px 0 18px;padding:12px 14px 8px;background:linear-gradient(180deg,var(--ivory),rgba(248,245,239,.36));border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.sc-chart-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;font-size:10px;line-height:1.4;letter-spacing:.18em;color:var(--ink-4)}
+.sc-chart-head b{font-weight:600;color:var(--clay-deep)}
+.sc-chart-plot{position:relative;height:92px;overflow:hidden}
+.sc-chart svg{display:block;width:100%;height:100%;overflow:hidden}
+.grid-line{stroke:var(--line);stroke-width:.7;stroke-dasharray:1.5 2.5;vector-effect:non-scaling-stroke}
+.spark-area{stroke:none}
+.spark-line{fill:none;stroke:var(--clay);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.spark-end{position:absolute;width:10px;height:10px;border:3px solid var(--clay-deep);border-radius:50%;background:var(--paper);box-shadow:0 0 0 3px rgba(204,120,92,.14);transform:translate(-50%,-50%);pointer-events:none}
+.sc-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.chip{font-size:11px;color:var(--ink-3);letter-spacing:.05em;border:1px solid var(--line);padding:3px 10px;line-height:1.5;background:none}
+.sc-notes{border-top:1px solid var(--line);margin-bottom:6px}
+.note-item{display:flex;align-items:baseline;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.note-item:last-child{border-bottom:none}
+.note-item .ni-title{flex:1;min-width:0;font-size:13.5px;line-height:1.55;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note-item:hover .ni-title{color:var(--clay-deep)}
+.ni-like{font:400 13px var(--serif);color:var(--ink-3);white-space:nowrap}
+.ni-like b{color:var(--clay-deep);font-weight:700}
+.sc-foot{margin-top:auto;padding-top:14px;display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:space-between;align-items:center;font-size:12px;color:var(--ink-3);letter-spacing:.06em}
+.sc-foot b{font:700 14px var(--serif);color:var(--clay-deep)}
+.sc-foot a{color:var(--ink);cursor:pointer;font:400 12.5px var(--serif);letter-spacing:.1em;border-bottom:1px solid var(--clay);padding-bottom:1px}
+.sc-foot a:hover{color:var(--clay-deep)}
+.signal-skeleton{min-height:360px;padding:24px;background:var(--paper);border:1px solid var(--line)}
+.more-ferment{display:block;margin:26px auto 0;padding:10px 28px;background:transparent;border:1px solid var(--ink);color:var(--ink);font:600 13px var(--serif);letter-spacing:.1em;cursor:pointer;transition:.2s}
+.more-ferment:hover{background:var(--ink);color:var(--ivory)}
+@container (max-width:1100px){.signal-grid{grid-template-columns:minmax(0,1fr)}.topic-tabs button small{display:none}.hero.masthead{gap:18px}.topic-tabs button{padding-inline:14px}}
+@container (max-width:860px){.masthead-right{display:none}.masthead-brand{gap:8px}.hero.masthead h1{font-size:22px}.band-rule{display:none}}
+@container (max-width:520px){.sc-topic{font-size:30px;letter-spacing:-.015em}}
+@media(max-width:800px){.topic-tabs{order:3;width:100%}.topic-tabs button{flex:1;padding:7px 4px;font-size:13px}.signal-grid{grid-template-columns:minmax(0,1fr)}.page-marker{flex-wrap:wrap;gap:8px 14px}}
 </style>

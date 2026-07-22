@@ -1,6 +1,6 @@
 from app.api.v1 import api_router
 from app.api.v1.xhs import note_payload, topic_boards
-from app.models.xhs import XhsKeyword, XhsKeywordRun, XhsNote, XhsNoteDiscovery
+from app.models.xhs import XhsEngagementSnapshot, XhsKeyword, XhsKeywordRun, XhsNote, XhsNoteDiscovery, XhsSemanticTopic, XhsTopicMember, XhsTopicSnapshot
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -157,9 +157,11 @@ async def test_topic_boards_split_filter_and_shape(monkeypatch):
         await db.commit()
         result=await topic_boards(db=db)
     fresh={b["topic"]:b for b in result["fresh"]};fermenting={b["topic"]:b for b in result["fermenting"]}
-    assert result["generated_at"]==now.isoformat()
-    # 没有语义话题表时也不允许退回采集关键词冒充内容话题。
-    assert fresh=={} and fermenting=={}
+    assert result["edition_date"]=="2026-07-16"
+    assert result["legacy_fallback"] is True
+    assert {"AI","AI coding","大模型"}<=set(fresh) and "AI coding" in fermenting
+    assert result["monitor"]["today_new_notes"]==11
+    assert result["today_new_notes"]==11
 
 
 async def test_topic_boards_requires_monitoring_read():
@@ -251,9 +253,49 @@ async def _board_result(monkeypatch,client):
 async def test_topic_boards_does_not_generate_keyword_highlight(monkeypatch):
     _FakeDeepSeek.text="这个话题值得写。"
     result=await _board_result(monkeypatch,_FakeDeepSeek)
-    assert result["fresh"]==[] and _FakeDeepSeek.calls==[]
+    assert result["legacy_fallback"] is True
+    assert result["fresh"][0]["ai_highlight"] is None and _FakeDeepSeek.calls==[]
 
 
 async def test_topic_boards_without_semantic_schema_still_returns(monkeypatch):
     result=await _board_result(monkeypatch,_BoomDeepSeek)  # LLM 未配置/抛错 → 接口正常返回，亮点为 None
-    assert result["fresh"]==[] and result["fermenting"]==[]
+    assert result["legacy_fallback"] is True and len(result["fresh"])==1
+    assert result["fresh"][0]["ai_highlight"] is None
+
+
+async def test_topic_boards_empty_semantic_table_falls_back_without_llm(monkeypatch):
+    now=datetime(2026,7,17,12,0,0);monkeypatch.setattr(xhs_module,"utcnow",lambda:now)
+    _FakeDeepSeek.calls=[];monkeypatch.setattr(deepseek_module,"DeepSeekClient",_FakeDeepSeek)
+    engine=create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        for table in ("xhs_keywords","xhs_keyword_runs","xhs_notes","xhs_note_discoveries","xhs_semantic_topics"):await conn.run_sync(Base.metadata.tables[table].create)
+    async with AsyncSession(engine) as db:
+        await _seed_board_db(db,now)
+        result=await topic_boards(db=db)
+    assert result["legacy_fallback"] is True and len(result["hot"])==1
+    assert result["monitor"]["topic_count"]==1 and _FakeDeepSeek.calls==[]
+
+
+async def test_topic_boards_semantic_payload_has_monitor_and_snapshot_score(monkeypatch):
+    now=datetime(2026,7,22,9,0,0);edition=datetime(2026,7,21,8,0,0)
+    monkeypatch.setattr(xhs_module,"utcnow",lambda:now)
+    engine=create_async_engine("sqlite+aiosqlite:///:memory:")
+    tables=("xhs_notes","xhs_engagement_snapshots","xhs_semantic_topics","xhs_topic_members","xhs_topic_snapshots")
+    async with engine.begin() as conn:
+        for table in tables:await conn.run_sync(Base.metadata.tables[table].create)
+    async with AsyncSession(engine) as db:
+        topic=XhsSemanticTopic(public_id="topic-1",name="Agent 工具更新",summary="从工具升级切入",centroid=[1.0,0.0],first_seen_at=edition-timedelta(days=2),last_seen_at=edition,active_days=3)
+        db.add(topic);await db.flush()
+        notes=[]
+        for index,likes in enumerate((3200,2800),1):
+            note=XhsNote(note_id=f"s{index}",title=f"语义笔记{index}",note_type="image",author_nickname=f"作者{index}",stable_url=f"https://www.xiaohongshu.com/explore/s{index}",like_count=likes,published_at=edition-timedelta(hours=2),first_discovered_at=edition,last_discovered_at=edition,quality_status="ready")
+            db.add(note);await db.flush();notes.append(note)
+            db.add(XhsTopicMember(topic_id=topic.id,note_id=note.id,similarity=.9,assigned_at=edition))
+            db.add(XhsEngagementSnapshot(note_id=note.id,snapshot_date=edition.date(),like_count=likes,collect_count=10,comment_count=5,share_count=1))
+        db.add(XhsTopicSnapshot(topic_id=topic.id,snapshot_date=edition.date(),wave="morning",snapshot_at=edition,note_count=2,author_count=2,new_notes_24h=2,new_authors_24h=2,engagement_total=6032,engagement_growth=12.5,fermentation_score=76.0,evidence=["今日再次监测到 2 篇"]))
+        await db.commit()
+        result=await topic_boards(db=db)
+    assert result["edition_date"]=="2026-07-21"
+    assert result["hot"][0]["fermentation_score"]==76.0
+    assert result["hot"][0]["trend_points"][0]["score"]==6032
+    assert result["monitor"]=={"topic_count":1,"sample_count":2,"fresh_count":1,"max_likes":3200,"today_new_notes":2}

@@ -173,27 +173,82 @@ async def topic_boards(_admin:User=Depends(require_admin_permission("monitoring:
     now=utcnow()
     try: topics=(await db.scalars(select(XhsSemanticTopic).where(XhsSemanticTopic.status=="active").order_by(desc(XhsSemanticTopic.last_seen_at)))).all()
     except OperationalError:
-        await db.rollback();return {"generated_at":now.isoformat(),"edition_date":now.date().isoformat(),"hot":[],"fermenting":[],"fresh":[]}
-    day_start=now.replace(hour=0,minute=0,second=0,microsecond=0)
+        await db.rollback()
+        legacy=await _legacy_topic_boards(db,now,attach_ai=False)
+        return await _attach_board_monitor(db,legacy,datetime.fromisoformat(legacy["edition_date"]))
+    if not topics:
+        legacy=await _legacy_topic_boards(db,now,attach_ai=False)
+        return await _attach_board_monitor(db,legacy,datetime.fromisoformat(legacy["edition_date"]))
+    # 以最近采集日为"今天"锚点：新一波采集未跑时，看板沿用最近一版，不整版空白
+    anchor=max((t.last_seen_at for t in topics if t.last_seen_at),default=None)
+    day_start=(anchor or now).replace(hour=0,minute=0,second=0,microsecond=0)
+    topic_ids=[topic.id for topic in topics]
+    member_rows=(await db.execute(
+        select(XhsTopicMember.topic_id,XhsNote)
+        .join(XhsNote,XhsNote.id==XhsTopicMember.note_id)
+        .where(XhsTopicMember.topic_id.in_(topic_ids))
+        .order_by(XhsTopicMember.topic_id,desc(XhsNote.like_count))
+    )).all()
+    notes_by_topic={topic_id:[] for topic_id in topic_ids};note_by_id={}
+    for topic_id,note in member_rows:
+        notes_by_topic[topic_id].append(note);note_by_id[note.id]=note
+    snapshots=(await db.scalars(
+        select(XhsTopicSnapshot)
+        .where(XhsTopicSnapshot.topic_id.in_(topic_ids))
+        .order_by(XhsTopicSnapshot.topic_id,desc(XhsTopicSnapshot.snapshot_at))
+    )).all()
+    latest_snapshot={}
+    for snapshot in snapshots:latest_snapshot.setdefault(snapshot.topic_id,snapshot)
+    interactions=(await db.scalars(
+        select(XhsEngagementSnapshot)
+        .where(XhsEngagementSnapshot.note_id.in_(list(note_by_id)),XhsEngagementSnapshot.snapshot_date>=day_start.date()-timedelta(days=6))
+        .order_by(XhsEngagementSnapshot.snapshot_date)
+    )).all() if note_by_id else []
+    interactions_by_topic={topic_id:[] for topic_id in topic_ids}
+    topic_ids_by_note={}
+    for topic_id,note in member_rows:topic_ids_by_note.setdefault(note.id,[]).append(topic_id)
+    for interaction in interactions:
+        for topic_id in topic_ids_by_note.get(interaction.note_id,[]):interactions_by_topic[topic_id].append(interaction)
     hot=[];fermenting=[]
     for topic in topics:
-        notes=(await db.scalars(select(XhsNote).join(XhsTopicMember,XhsTopicMember.note_id==XhsNote.id).where(XhsTopicMember.topic_id==topic.id).order_by(desc(XhsNote.like_count)))).all()
+        notes=notes_by_topic[topic.id]
         recent=[n for n in notes if n.last_discovered_at>=day_start]
         authors={n.author_id or n.author_nickname for n in notes if n.author_id or n.author_nickname};recent_authors={n.author_id or n.author_nickname for n in recent if n.author_id or n.author_nickname}
-        snapshot=(await db.scalars(select(XhsTopicSnapshot).where(XhsTopicSnapshot.topic_id==topic.id).order_by(desc(XhsTopicSnapshot.snapshot_at)).limit(1))).first()
-        note_ids=[n.id for n in notes]
-        interactions=(await db.scalars(select(XhsEngagementSnapshot).where(XhsEngagementSnapshot.note_id.in_(note_ids),XhsEngagementSnapshot.snapshot_date>=now.date()-timedelta(days=6)).order_by(XhsEngagementSnapshot.snapshot_date))).all() if note_ids else []
+        snapshot=latest_snapshot.get(topic.id)
         daily={}
-        for item in interactions:
+        for item in interactions_by_topic[topic.id]:
             point=daily.setdefault(item.snapshot_date,{"score":0,"notes":set()})
             point["score"]+=sum(value or 0 for value in (item.like_count,item.collect_count,item.comment_count,item.share_count));point["notes"].add(item.note_id)
         trend_points=[{"at":date.isoformat(),"score":value["score"],"new_notes":len(value["notes"])} for date,value in sorted(daily.items())]
-        payload={"topic_id":topic.public_id,"topic":topic.name,"ai_highlight":topic.summary,"sample_count":len(notes),"author_count":len(authors),"new_notes_24h":len(recent),"new_authors_24h":len(recent_authors),"max_likes":max((n.like_count or 0 for n in notes),default=0),"first_seen_at":topic.first_seen_at.isoformat(),"last_seen_at":topic.last_seen_at.isoformat(),"active_days":topic.active_days,"engagement_growth":snapshot.engagement_growth if snapshot else 0,"evidence":snapshot.evidence if snapshot else [],"trend_points":trend_points,"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)} for n in notes[:4]]}
+        payload={"topic_id":topic.public_id,"topic":topic.name,"ai_highlight":topic.summary,"sample_count":len(notes),"author_count":len(authors),"new_notes_24h":len(recent),"new_authors_24h":len(recent_authors),"max_likes":max((n.like_count or 0 for n in notes),default=0),"first_seen_at":topic.first_seen_at.isoformat(),"last_seen_at":topic.last_seen_at.isoformat(),"active_days":topic.active_days,"engagement_growth":snapshot.engagement_growth if snapshot else 0,"fermentation_score":snapshot.fermentation_score if snapshot else 0,"evidence":snapshot.evidence if snapshot else [],"trend_points":trend_points,"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)} for n in notes[:4]]}
         if len(recent)>=2 and len(recent_authors)>=2:hot.append(payload)
         if topic.first_seen_at<day_start and topic.active_days>=2 and len(notes)>=2 and len(authors)>=2 and recent:fermenting.append(payload)
     hot.sort(key=lambda item:(item["new_notes_24h"],item["max_likes"]),reverse=True);fermenting.sort(key=lambda item:(item["new_notes_24h"],item["max_likes"]),reverse=True)
-    generated=max((s.snapshot_at for s in (await db.scalars(select(XhsTopicSnapshot).order_by(desc(XhsTopicSnapshot.snapshot_at)).limit(1))).all()),default=now)
-    return {"generated_at":generated.isoformat(),"edition_date":now.date().isoformat(),"hot":hot[:6],"fermenting":fermenting[:20],"fresh":hot[:6]}
+    generated=max((s.snapshot_at for s in latest_snapshot.values()),default=now)
+    result={"generated_at":generated.isoformat(),"edition_date":day_start.date().isoformat(),"hot":hot[:6],"fermenting":fermenting[:20],"fresh":hot[:6]}
+    return await _attach_board_monitor(db,result,day_start,topic_count=len(topics),sample_count=len(note_by_id),max_likes=max((n.like_count or 0 for n in note_by_id.values()),default=0))
+
+
+async def _attach_board_monitor(db:AsyncSession,result:dict,day_start:datetime,*,topic_count:int|None=None,sample_count:int|None=None,max_likes:int|None=None)->dict:
+    """补齐看板刊头统计；统计日与 edition_date 使用同一个北京时间锚点。"""
+    boards={}
+    for item in [*(result.get("hot") or []),*(result.get("fermenting") or [])]:
+        key=item.get("topic_id") or item.get("keyword") or item.get("topic")
+        boards.setdefault(key,item)
+    today_new_notes=(await db.scalar(select(func.count(XhsNote.id)).where(
+        XhsNote.last_discovered_at>=day_start,
+        XhsNote.last_discovered_at<day_start+timedelta(days=1),
+        XhsNote.quality_status.in_(PUBLIC_STATUSES),
+    ))) or 0
+    result["today_new_notes"]=today_new_notes
+    result["monitor"]={
+        "topic_count":topic_count if topic_count is not None else len(boards),
+        "sample_count":sample_count if sample_count is not None else sum(item.get("sample_count") or 0 for item in boards.values()),
+        "fresh_count":len(result.get("hot") or []),
+        "max_likes":max_likes if max_likes is not None else max((item.get("max_likes") or 0 for item in boards.values()),default=0),
+        "today_new_notes":today_new_notes,
+    }
+    return result
 
 
 async def _legacy_topic_boards(db:AsyncSession,now:datetime,attach_ai:bool=True)->dict:
