@@ -111,6 +111,14 @@ CELERY_BEAT_SCHEDULE = {
         "kwargs": {"days": 7},
     },
 
+    # 封面/头像自愈：媒体原本懒加载（查看时才拉取），而 xhscdn 签名 URL 短时效，
+    # 过期即 403 → 封面失败。周期性为可展示素材补齐缺失缓存，趁 URL 相对新鲜预取。
+    "xhs-warm-media-cache": {
+        "task": "xhs.warm_media_cache",
+        "schedule": crontab(minute=15, hour="*/3"),
+        "kwargs": {"days": 7},
+    },
+
     # ── 创作工具订阅到期：每天凌晨 4:20 处理到期订阅（仅移除权益，积分永久保留）──
     "subscription-expire-due": {
         "task": "subscription.expire_due",

@@ -536,17 +536,17 @@ const formatFreshness = (val) => {
   padding: 0 8px;
 }
 
-/* 小时级时间轴：左侧时间定位，右侧保留原卡片阅读密度。 */
+/* 小时级时间轴：时间、轴点和竖线共用同一条对齐轴。 */
 .timeline-list { position: relative; }
-.timeline-group { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 24px; position: relative; padding-bottom: 28px; }
-.timeline-group::before { content: ''; position: absolute; left: 123px; top: 24px; bottom: -4px; width: 1px; background: var(--line); }
+.timeline-group { --timeline-axis: 124px; display: grid; grid-template-columns: var(--timeline-axis) minmax(0, 1fr); gap: 24px; position: relative; padding-bottom: 28px; }
+.timeline-group::before { content: ''; position: absolute; left: calc(var(--timeline-axis) - 1px); top: 24px; bottom: -4px; width: 1px; background: var(--line); }
 .timeline-group:last-child::before { bottom: 38px; }
-.timeline-aside { position: relative; padding-top: 6px; text-align: right; color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; }
-.timeline-aside time { white-space: nowrap; }
-.timeline-dot { position: absolute; right: -29px; top: 11px; width: 10px; height: 10px; border-radius: 50%; background: var(--clay); border: 3px solid var(--ivory); box-sizing: content-box; z-index: 1; }
+.timeline-aside { position: relative; padding-top: 8px; text-align: right; color: var(--ink-3); font-size: 13px; line-height: 20px; font-variant-numeric: tabular-nums; }
+.timeline-aside time { display: block; padding-right: 20px; white-space: nowrap; }
+.timeline-dot { position: absolute; right: -8px; top: 10px; width: 10px; height: 10px; border-radius: 50%; background: var(--clay); border: 3px solid var(--ivory); box-sizing: content-box; z-index: 1; }
 .timeline-cards { min-width: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 @media (max-width: 1180px) { .timeline-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 720px) { .timeline-group { grid-template-columns: 82px minmax(0, 1fr); gap: 16px; }.timeline-group::before { left: 81px; }.timeline-dot { right: -21px; }.timeline-cards { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .timeline-group { --timeline-axis: 82px; gap: 16px; }.timeline-aside time { padding-right: 16px; }.timeline-cards { grid-template-columns: 1fr; } }
 
 @media (max-width: 768px) {
   .filter-row { flex-wrap: wrap; }

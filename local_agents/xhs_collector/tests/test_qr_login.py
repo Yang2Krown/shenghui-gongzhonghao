@@ -44,7 +44,11 @@ def test_qr_login_retries_ssl_timeout_and_succeeds(tmp_path, monkeypatch):
 
     result = qr_login.LocalQrLogin(tmp_path / "cookies.json").run(updates.append)
 
-    assert result == {"status": "authenticated", "user_id": "user-1"}
+    assert result == {
+        "status": "authenticated",
+        "user_id": "user-1",
+        "message": "登录成功，本地 Cookie 已保存并验证",
+    }
     assert FakeClient.created == 2
     assert updates[0]["status"] == "retrying"
     assert updates[1]["status"] == "waiting"
@@ -77,7 +81,7 @@ def test_qr_login_can_be_cancelled_when_switching_auth_method(tmp_path, monkeypa
     assert result["status"] == "cancelled"
 
 
-def test_browser_login_refreshes_existing_browser_cookie(monkeypatch):
+def test_browser_login_refreshes_existing_browser_cookie(tmp_path, monkeypatch):
     class BrowserClient:
         def __init__(self, cookies, **kwargs):
             assert cookies["web_session"] == "browser-session"
@@ -92,21 +96,21 @@ def test_browser_login_refreshes_existing_browser_cookie(monkeypatch):
             return {"user_id": "user-2"}
 
     updates = []
-    monkeypatch.setattr(qr_login, "get_cookies", lambda *_, **__: ("chrome", {"web_session": "browser-session"}))
+    cookie_path = tmp_path / "cookies.json"
+    monkeypatch.setattr(qr_login, "extract_browser_cookies", lambda *_, **__: ("chrome", {"web_session": "browser-session"}))
     monkeypatch.setattr(qr_login, "XhsClient", BrowserClient)
     monkeypatch.setattr(qr_login, "normalize_xhs_user_payload", lambda _: {"id": "user-2", "guest": False})
 
-    result = qr_login.LocalBrowserLogin().run(updates.append)
+    result = qr_login.LocalBrowserLogin(cookie_path).run(updates.append)
 
     assert result["status"] == "authenticated"
     assert result["source"] == "browser:chrome"
     assert updates[0]["status"] == "syncing_browser"
+    # 浏览器同步必须通过原子写落盘，供后续采集读取。
+    assert cookie_path.exists()
 
 
 def test_browser_login_explains_how_to_recover_when_no_cookie(monkeypatch):
-    def fail(*_, **__):
-        raise RuntimeError("no browser cookie")
-
-    monkeypatch.setattr(qr_login, "get_cookies", fail)
+    monkeypatch.setattr(qr_login, "extract_browser_cookies", lambda *_, **__: None)
     with pytest.raises(RuntimeError, match="Chrome/Safari"):
         qr_login.LocalBrowserLogin().run(lambda *_: None)

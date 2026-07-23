@@ -1,12 +1,12 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.v1 import api_router
-from app.api.v1.xhs_agent import COMMAND_TYPES, CommandBody, _schedule_payload, _secret_hash
+from app.api.v1.xhs_agent import COMMAND_TYPES, CommandBody, _auth_command_reusable, _merge_command_result, _schedule_payload, _secret_hash
 from app.db.base import Base
-from app.models.xhs import XhsAgentBatch, XhsAgentUpload, XhsCollectorDevice, XhsKeyword, XhsKeywordRun, XhsNote, XhsProviderCall
+from app.models.xhs import XhsAgentBatch, XhsAgentCommand, XhsAgentUpload, XhsCollectorDevice, XhsKeyword, XhsKeywordRun, XhsNote, XhsProviderCall
 from app.services import xhs_agent_ingestion as ingestion
 
 
@@ -32,6 +32,45 @@ def test_manual_agent_command_can_explicitly_request_cooldown_override():
     assert body.force is True and body.keyword_id==12
 
 
+def test_auth_command_result_keeps_qr_url_across_later_state_updates():
+    waiting = {"status": "waiting", "qr_url": "xhs://login/qr-1", "expires_in": 240}
+    scanned = _merge_command_result(waiting, {"status": "scanned", "message": "已扫码"})
+    assert scanned["qr_url"] == "xhs://login/qr-1"
+    assert scanned["status"] == "scanned"
+    authenticated = _merge_command_result(
+        {**scanned, "verification_url": "https://verify.example", "message": "已扫码"},
+        {"status": "authenticated", "user_id": "user-1"},
+    )
+    assert authenticated["qr_url"] == "xhs://login/qr-1"
+    assert authenticated["message"] == "登录成功，Cookie 已验证"
+    assert "verification_url" not in authenticated
+
+
+def test_login_command_is_not_reused_after_actual_qr_expiry():
+    now = datetime.now()
+    command = XhsAgentCommand(
+        command_type="login",
+        status="running",
+        created_at=now - timedelta(minutes=5),
+        updated_at=now - timedelta(seconds=20),
+        result={"status": "waiting", "qr_url": "xhs://expired", "expires_in": 13},
+    )
+    assert _auth_command_reusable(command, "login", now) is False
+
+
+def test_login_command_can_be_reused_while_qr_is_still_live():
+    now = datetime.now()
+    command = XhsAgentCommand(
+        command_type="login",
+        status="running",
+        created_at=now - timedelta(minutes=1),
+        updated_at=now - timedelta(seconds=2),
+        result={"status": "waiting", "qr_url": "xhs://live", "expires_in": 30},
+    )
+    assert _auth_command_reusable(command, "login", now) is True
+    assert _auth_command_reusable(command, "browser_login", now) is False
+
+
 def test_old_device_schedule_cannot_override_risk_controls():
     device = XhsCollectorDevice(schedule_config={
         "priority_keyword_limit": 8,
@@ -46,6 +85,30 @@ def test_old_device_schedule_cannot_override_risk_controls():
     assert schedule["daily_derived_limit"] == 5
     assert schedule["verification_cooldown_minutes"] == [8, 12]
     assert schedule["groups"] == [1, 2, 3]
+
+
+def test_valid_window_and_limit_overrides_are_applied():
+    device = XhsCollectorDevice(schedule_config={
+        "window_start": "08:00",
+        "window_end": "22:30",
+        "daily_derived_limit": 8,
+    })
+    schedule = _schedule_payload(device)
+    assert schedule["window_start"] == "08:00"
+    assert schedule["window_end"] == "22:30"
+    assert schedule["daily_derived_limit"] == 8
+
+
+def test_invalid_editable_overrides_fall_back_to_defaults():
+    device = XhsCollectorDevice(schedule_config={
+        "window_start": "8点",
+        "window_end": "25:99",
+        "daily_derived_limit": -3,
+    })
+    schedule = _schedule_payload(device)
+    assert schedule["window_start"] == "00:30"
+    assert schedule["window_end"] == "23:30"
+    assert schedule["daily_derived_limit"] == 5
 
 
 def test_agent_ingestion_is_idempotent_and_reuses_material_pipeline(monkeypatch):

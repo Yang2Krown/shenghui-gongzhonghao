@@ -29,6 +29,8 @@ from app.services.xhs_collection import DAILY_MIN_LIKES_EXCLUSIVE, WEEKLY_MIN_LI
 router = APIRouter()
 admin_router = APIRouter()
 COMMAND_TYPES = {"test_keyword", "refresh_image", "pause", "resume", "stop", "login", "browser_login", "verify_session"}
+AUTH_COMMAND_TYPES = {"login", "browser_login", "verify_session"}
+TERMINAL_COMMAND_STATUSES = {"succeeded", "failed", "cancelled"}
 DEFAULT_SCHEDULE = {
     "enabled": True,
     "strategy": "all_day",
@@ -42,20 +44,56 @@ DEFAULT_SCHEDULE = {
 }
 STALE_BATCH_MINUTES = 15
 MANUAL_RETRY_GAP_MINUTES = 15
+AUTH_COMMAND_STARTUP_GRACE_SECONDS = 30
 
 
 def _secret_hash(value: str) -> str:
     return hmac.new(settings.SECRET_KEY.encode(), value.encode(), hashlib.sha256).hexdigest()
 
 
+# Admin-editable per-device schedule knobs. Only these may be overridden via
+# device.schedule_config; everything else stays a hard risk-control constant.
+EDITABLE_SCHEDULE_KEYS = ("window_start", "window_end", "daily_derived_limit")
+# Values that must always come from DEFAULT_SCHEDULE (risk controls, not preferences).
+LOCKED_SCHEDULE_KEYS = (
+    "strategy", "jitter_minutes", "detail_gap_seconds", "verification_cooldown_minutes",
+)
+
+
+def _valid_window(value: Any) -> bool:
+    """Accept only 'HH:MM' 24h strings so a malformed edit can't break the agent."""
+    if not isinstance(value, str):
+        return False
+    parts = value.split(":")
+    if len(parts) != 2:
+        return False
+    try:
+        hour, minute = int(parts[0]), int(parts[1])
+    except ValueError:
+        return False
+    return 0 <= hour <= 23 and 0 <= minute <= 59
+
+
+def _valid_derived_limit(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 50
+
+
 def _schedule_payload(device: XhsCollectorDevice) -> dict[str, Any]:
-    payload = {**DEFAULT_SCHEDULE, **(device.schedule_config or {})}
-    # These values are risk controls, not per-device preferences. Old rows may
-    # still contain the previous aggressive schedule and must not override them.
-    for key in (
-        "strategy", "window_start", "window_end", "daily_derived_limit", "jitter_minutes",
-        "detail_gap_seconds", "verification_cooldown_minutes",
-    ):
+    config = device.schedule_config or {}
+    # Start from defaults overlaid with the device's config so unknown keys
+    # (groups, priority_keyword_limit, today_plan, ...) pass through untouched.
+    payload = {**DEFAULT_SCHEDULE, **config}
+    # Editable knobs: take the device's override only when it passes validation,
+    # otherwise fall back to the default so a bad stored value can't wedge collection.
+    if not _valid_window(config.get("window_start")):
+        payload["window_start"] = DEFAULT_SCHEDULE["window_start"]
+    if not _valid_window(config.get("window_end")):
+        payload["window_end"] = DEFAULT_SCHEDULE["window_end"]
+    if not _valid_derived_limit(config.get("daily_derived_limit")):
+        payload["daily_derived_limit"] = DEFAULT_SCHEDULE["daily_derived_limit"]
+    # Locked risk controls always come from the constant; old rows may still contain
+    # the previous aggressive schedule and must not override them.
+    for key in LOCKED_SCHEDULE_KEYS:
         payload[key] = DEFAULT_SCHEDULE[key]
     return payload
 
@@ -92,14 +130,25 @@ async def _close_stale_batches(db: AsyncSession, device_id: int | None = None, c
     if not batches:
         return 0
     now = utcnow()
+    reason = (
+        "本地 Agent 已停止或重启，本次任务已中断"
+        if close_running_now else
+        f"本地 Agent 超过 {STALE_BATCH_MINUTES} 分钟未上报进度，已自动结束"
+    )
     for batch in batches:
         batch.status = "failed"
         batch.finished_at = now
         batch.current_keyword_id = None
         batch.metadata_json = {
             **(batch.metadata_json or {}),
-            "last_error": "本地 Agent 超过 15 分钟未上报进度，已自动结束",
+            "last_error": reason,
         }
+        if batch.command_id:
+            command = await db.get(XhsAgentCommand, batch.command_id)
+            if command and command.status not in TERMINAL_COMMAND_STATUSES:
+                command.status = "failed"
+                command.error_message = reason
+                command.finished_at = now
     await db.commit()
     return len(batches)
 
@@ -149,6 +198,37 @@ def _command_payload(command: XhsAgentCommand) -> dict[str, Any]:
         "payload": command.payload or {},
         "expires_at": command.expires_at.isoformat(),
     }
+
+
+def _merge_command_result(current: dict[str, Any] | None, incoming: dict[str, Any] | None) -> dict[str, Any]:
+    """Keep durable QR fields when a later status update only carries `scanned` or a message."""
+    merged = {**(current or {}), **(incoming or {})}
+    if (incoming or {}).get("status") == "authenticated":
+        merged.pop("verification_url", None)
+        merged["message"] = (incoming or {}).get("message") or "登录成功，Cookie 已验证"
+    return merged
+
+
+def _auth_command_reusable(command: XhsAgentCommand, command_type: str, now: datetime) -> bool:
+    """Only reuse an auth command while its actual QR/session attempt is still live."""
+    if command.command_type != command_type or command.status in TERMINAL_COMMAND_STATUSES:
+        return False
+    result = command.result or {}
+    if command_type == "login" and result.get("qr_url"):
+        try:
+            remaining = max(0, int(result.get("expires_in") or 0))
+        except (TypeError, ValueError):
+            remaining = 0
+        return remaining > 0 and command.updated_at + timedelta(seconds=remaining) > now
+    return command.created_at + timedelta(seconds=AUTH_COMMAND_STARTUP_GRACE_SECONDS) > now
+
+
+def _expire_auth_command(command: XhsAgentCommand, now: datetime, *, switched: bool = False) -> None:
+    command.status = "cancelled"
+    command.finished_at = now
+    message = "已切换到新的验证方式" if switched else "二维码已过期，请重新获取"
+    command.error_message = message
+    command.result = {**(command.result or {}), "status": "expired", "message": message}
 
 
 async def _agent_from_token(db: AsyncSession, authorization: str | None) -> XhsCollectorDevice:
@@ -226,6 +306,17 @@ class CommandBody(BaseModel):
     note_id: str | None = Field(None, max_length=100)
     schedule_group: int | None = Field(None, ge=1, le=3)
     force: bool = False
+
+
+class ScheduleBody(BaseModel):
+    """Only the conservative, admin-editable schedule knobs (EDITABLE_SCHEDULE_KEYS).
+
+    Risk-control knobs (jitter/detail_gap/verification_cooldown) stay locked server-side.
+    All fields optional; omitted keys keep their current value.
+    """
+    window_start: str | None = None
+    window_end: str | None = None
+    daily_derived_limit: int | None = Field(None, ge=0, le=50)
 
 
 @admin_router.post("/agent/pairings")
@@ -378,13 +469,27 @@ async def update_command(command_id: str, body: CommandStatusBody, agent: XhsCol
     command = (await db.execute(select(XhsAgentCommand).where(XhsAgentCommand.public_id == command_id, XhsAgentCommand.device_id == agent.id))).scalar_one_or_none()
     if not command:
         raise HTTPException(404, "命令不存在")
+    if command.status in TERMINAL_COMMAND_STATUSES:
+        return {"ok": True, "status": command.status, "ignored": "terminal_command"}
     command.status = body.status
-    command.result = body.result
+    command.result = _merge_command_result(command.result, body.result)
     command.error_message = body.error
     now = utcnow()
     if body.status == "delivered": command.delivered_at = now
-    if body.status == "running": command.started_at = now
-    if body.status in {"succeeded", "failed", "cancelled"}: command.finished_at = now
+    if body.status == "running" and command.started_at is None: command.started_at = now
+    if body.status in TERMINAL_COMMAND_STATUSES: command.finished_at = now
+    if command.command_type in AUTH_COMMAND_TYPES:
+        auth_status = str((command.result or {}).get("status") or "")
+        if auth_status == "authenticated":
+            agent.cookie_status = "valid"
+            agent.current_status = "idle"
+            agent.last_error = None
+        elif auth_status == "verification_required":
+            agent.cookie_status = "verification_required"
+            agent.current_status = "risk_blocked"
+        elif auth_status == "expired":
+            agent.cookie_status = "expired"
+            agent.current_status = "needs_login"
     if body.status == "succeeded" and command.command_type == "refresh_image":
         requested_note_id = str((command.payload or {}).get("note_id") or "")
         returned_note_id = str(body.result.get("note_id") or "")
@@ -432,6 +537,34 @@ async def list_devices(_admin: User = Depends(require_admin_permission("monitori
     }
 
 
+@admin_router.put("/agent/devices/{device_id}/schedule")
+async def update_schedule(device_id: str, body: ScheduleBody, _admin: User = Depends(require_admin_permission("tasks:retry")), db: AsyncSession = Depends(get_db)):
+    device = (await db.execute(select(XhsCollectorDevice).where(XhsCollectorDevice.public_id == device_id))).scalar_one_or_none()
+    if not device:
+        raise HTTPException(404, "本地采集节点不存在")
+    config = dict(device.schedule_config or {})
+    provided = body.model_dump(exclude_unset=True)
+    if not provided:
+        raise HTTPException(400, "没有需要更新的采集策略字段")
+    if "window_start" in provided:
+        if not _valid_window(provided["window_start"]):
+            raise HTTPException(400, "采集开始时间格式应为 HH:MM（24 小时制）")
+        config["window_start"] = provided["window_start"]
+    if "window_end" in provided:
+        if not _valid_window(provided["window_end"]):
+            raise HTTPException(400, "采集结束时间格式应为 HH:MM（24 小时制）")
+        config["window_end"] = provided["window_end"]
+    if "daily_derived_limit" in provided:
+        config["daily_derived_limit"] = provided["daily_derived_limit"]
+    start = config.get("window_start") or DEFAULT_SCHEDULE["window_start"]
+    end = config.get("window_end") or DEFAULT_SCHEDULE["window_end"]
+    if _valid_window(start) and _valid_window(end) and start >= end:
+        raise HTTPException(400, "采集开始时间必须早于结束时间")
+    device.schedule_config = config
+    await db.commit()
+    return {"ok": True, "schedule": _schedule_payload(device)}
+
+
 @admin_router.post("/agent/commands", status_code=202)
 async def create_command(body: CommandBody, admin: User = Depends(require_admin_permission("tasks:retry")), db: AsyncSession = Depends(get_db)):
     if body.command_type not in COMMAND_TYPES:
@@ -441,17 +574,20 @@ async def create_command(body: CommandBody, admin: User = Depends(require_admin_
         raise HTTPException(404, "本地采集节点不存在")
     if not manager.connected(device.id):
         raise HTTPException(409, "本地采集节点当前离线，未创建命令")
-    if body.command_type in {"login", "browser_login", "verify_session"}:
+    if body.command_type in AUTH_COMMAND_TYPES:
+        now = utcnow()
         active_auth = (await db.execute(
             select(XhsAgentCommand).where(
                 XhsAgentCommand.device_id == device.id,
-                XhsAgentCommand.command_type == body.command_type,
+                XhsAgentCommand.command_type.in_(AUTH_COMMAND_TYPES),
                 XhsAgentCommand.status.in_(("queued", "delivered", "running")),
                 XhsAgentCommand.expires_at > utcnow(),
             ).order_by(desc(XhsAgentCommand.id)).limit(1)
         )).scalar_one_or_none()
-        if active_auth:
+        if active_auth and _auth_command_reusable(active_auth, body.command_type, now):
             return {"command_id": active_auth.public_id, "status": active_auth.status, "reused": True}
+        if active_auth:
+            _expire_auth_command(active_auth, now, switched=active_auth.command_type != body.command_type)
     if body.command_type in {"test_keyword", "refresh_image"} and device.cookie_status != "valid":
         raise HTTPException(409, "本地 Cookie 需要重新扫码或完成人机验证后才能采集")
     payload: dict[str, Any] = {}
@@ -502,6 +638,11 @@ async def get_command(command_id: str, _admin: User = Depends(require_admin_perm
     command = (await db.execute(select(XhsAgentCommand).where(XhsAgentCommand.public_id == command_id))).scalar_one_or_none()
     if not command:
         raise HTTPException(404, "本地采集命令不存在")
+    now = utcnow()
+    if command.command_type in AUTH_COMMAND_TYPES and command.status not in TERMINAL_COMMAND_STATUSES:
+        if not _auth_command_reusable(command, command.command_type, now):
+            _expire_auth_command(command, now)
+            await db.commit()
     return {
         "id": command.public_id, "command_type": command.command_type,
         "status": command.status, "result": command.result or {},
@@ -536,7 +677,14 @@ async def agent_websocket(websocket: WebSocket):
         device.last_connected_at = now
         device.last_seen_at = now
         await db.commit()
-        queued = (await db.scalars(select(XhsAgentCommand).where(XhsAgentCommand.device_id == device_id, XhsAgentCommand.status == "queued", XhsAgentCommand.expires_at > now).order_by(XhsAgentCommand.id))).all()
+        # `send_json()` only confirms that bytes reached the socket, not that
+        # the Agent queued the command. Redeliver non-started commands after a
+        # reconnect; the Agent deduplicates commands already in its live queue.
+        queued = (await db.scalars(select(XhsAgentCommand).where(
+            XhsAgentCommand.device_id == device_id,
+            XhsAgentCommand.status.in_(("queued", "delivered")),
+            XhsAgentCommand.expires_at > now,
+        ).order_by(XhsAgentCommand.id))).all()
         for command in queued:
             await websocket.send_json({"type": "command", "command": _command_payload(command)})
             command.status = "delivered"

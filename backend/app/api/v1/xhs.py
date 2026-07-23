@@ -23,7 +23,7 @@ from app.core.timezone import utcnow
 from app.db.session import get_db
 from app.models.admin_audit import AdminAuditLog
 from app.models.user import User
-from app.models.xhs import XhsDailyQuota, XhsEngagementSnapshot, XhsImageFailureReport, XhsKeyword, XhsKeywordRun, XhsNote, XhsNoteDiscovery, XhsProviderCall, XhsSemanticTopic, XhsTopicMember, XhsTopicSnapshot
+from app.models.xhs import XhsAgentBatch, XhsDailyQuota, XhsEngagementSnapshot, XhsImageFailureReport, XhsKeyword, XhsKeywordRun, XhsNote, XhsNoteDiscovery, XhsProviderCall, XhsSemanticTopic, XhsTopicMember, XhsTopicSnapshot
 from app.services.xhs_cli_auth import XhsQrLoginManager
 from app.services.xhs_collection import (
     CLI_AUTH_INVALID_KEY, CLI_COOLDOWN_KEY, DAILY_MIN_LIKES_EXCLUSIVE,
@@ -359,9 +359,9 @@ async def monitoring(_admin:User=Depends(require_admin_permission("monitoring:re
     if image_open:alerts.append({"level":"warning" if image_open<20 else "critical","key":"image_failures","message":f"存在 {image_open} 条未处理图片失败报告"})
     for label,item in (("TikHub",tikhub_health),("CLI",cli_health)):
         if item["success_rate"] is not None and item["success_rate"]<70:alerts.append({"level":"critical" if item["success_rate"]<40 else "warning","message":f"{label} 最近 10 次成功率仅 {item['success_rate']}%"})
-    if not cookie_configured:alerts.append({"level":"critical","key":"cli_auth","message":"xiaohongshu-cli 未授权，请扫码登录"})
-    elif auth_error:alerts.append({"level":"critical","key":"cli_auth","message":"xiaohongshu-cli 登录已失效，已停止后续请求，请重新扫码"})
-    elif cooldown_remaining:alerts.append({"level":"warning","key":"cli_cooldown","message":f"xiaohongshu-cli 触发验证码，约 {(cooldown_remaining+59)//60} 分钟后可重试；重新扫码可立即解除"})
+    if not cookie_configured:alerts.append({"level":"critical","key":"cli_auth","message":"服务器备用 CLI 未授权，请扫码登录"})
+    elif auth_error:alerts.append({"level":"critical","key":"cli_auth","message":"服务器备用 CLI 登录已失效，已停止后续请求，请重新扫码"})
+    elif cooldown_remaining:alerts.append({"level":"warning","key":"cli_cooldown","message":f"服务器备用 CLI 触发验证码，约 {(cooldown_remaining+59)//60} 分钟后可重试；重新扫码可立即解除"})
     display_rate=(funnel["displayable_count"]/funnel["final_count"]*100) if funnel["final_count"] else 100
     if display_rate<90:alerts.append({"level":"critical" if display_rate<75 else "warning","message":f"合格素材最终可展示率仅 {display_rate:.1f}%"})
     if utcnow().hour>=23 and base_total and base_done<base_total:alerts.append({"level":"critical" if base_done/base_total<.8 else "warning","message":f"23:00 后基础词完成率为 {base_done/base_total*100:.1f}%"})
@@ -476,6 +476,61 @@ async def run_notes(run_id:int,admin:User=Depends(require_admin_permission("moni
         item=grouped.setdefault(n.id,{"note_id":n.note_id,"title":n.title,"author":n.author_nickname,"like_count":n.like_count,"published_at":n.published_at.isoformat() if n.published_at else None,"status":n.quality_status,"stable_url":n.stable_url,"original_url":original_note_url(n),"providers":[]})
         item["providers"].append({"provider":d.provider,"rank":d.provider_rank})
     return {"run":run_payload(run,keyword),"notes":sorted(grouped.values(),key=lambda x:x["like_count"] or 0,reverse=True)}
+
+
+@admin_router.get("/stats/daily")
+async def daily_stats(days:int=Query(14,ge=1,le=90),_admin:User=Depends(require_admin_permission("monitoring:read")),db:AsyncSession=Depends(get_db)):
+    """按天聚合的采集健康趋势：成功率 / 入库数 / 验证码(风控)事件。数据来自已落库的
+    XhsKeywordRun / XhsAgentBatch / XhsProviderCall，只按天 bucket，不建新表。"""
+    start_date=utcnow().date()-timedelta(days=days-1)
+    notes_rows=(await db.execute(select(
+        XhsKeywordRun.run_date,
+        func.coalesce(func.sum(XhsKeywordRun.final_count),0).label("notes"),
+    ).where(XhsKeywordRun.run_date>=start_date).group_by(XhsKeywordRun.run_date))).all()
+    # 成功/失败分开统计，避免方言相关的条件聚合。
+    status_rows=(await db.execute(select(XhsKeywordRun.run_date,XhsKeywordRun.status,func.count(XhsKeywordRun.id)).where(XhsKeywordRun.run_date>=start_date).group_by(XhsKeywordRun.run_date,XhsKeywordRun.status))).all()
+    captcha_rows=(await db.execute(select(
+        func.date(XhsProviderCall.created_at).label("day"),func.count(XhsProviderCall.id)
+    ).where(XhsProviderCall.provider=="local_cli",XhsProviderCall.error_code=="AgentVerificationRequired",XhsProviderCall.created_at>=datetime.combine(start_date,datetime.min.time())).group_by(func.date(XhsProviderCall.created_at)))).all()
+    captcha_by_day={str(day):count for day,count in captcha_rows}
+    notes_by_day={row.run_date:int(row.notes or 0) for row in notes_rows}
+    status_by_day:dict={}
+    for day,status,count in status_rows:
+        bucket=status_by_day.setdefault(day,{"completed":0,"partial":0,"failed":0,"risk_blocked":0,"other":0})
+        if status in ("completed","partial","failed","risk_blocked"):bucket[status]+=count
+        else:bucket["other"]+=count
+    series=[]
+    for offset in range(days):
+        day=start_date+timedelta(days=offset)
+        counts=status_by_day.get(day,{"completed":0,"partial":0,"failed":0,"risk_blocked":0,"other":0})
+        total=sum(counts.values());succeeded=counts["completed"]+counts["partial"]
+        series.append({
+            "date":day.isoformat(),
+            "runs":total,
+            "succeeded":succeeded,
+            "failed":counts["failed"],
+            "risk_blocked":counts["risk_blocked"],
+            "success_rate":round(succeeded/total,3) if total else None,
+            "notes_collected":notes_by_day.get(day,0),
+            "captcha_events":captcha_by_day.get(day.isoformat(),0),
+        })
+    return {"days":days,"series":series}
+
+
+@admin_router.get("/keywords/{keyword_id}/runs")
+async def keyword_runs(keyword_id:int,days:int=Query(30,ge=1,le=180),_admin:User=Depends(require_admin_permission("monitoring:read")),db:AsyncSession=Depends(get_db)):
+    """单关键词跨多天的执行历史（今日视图只给当天，这里补多日下钻）。"""
+    keyword=await db.get(XhsKeyword,keyword_id)
+    if not keyword:raise HTTPException(404,"关键词不存在")
+    start_date=utcnow().date()-timedelta(days=days-1)
+    rows=(await db.scalars(select(XhsKeywordRun).where(XhsKeywordRun.keyword_id==keyword_id,XhsKeywordRun.run_date>=start_date).order_by(desc(XhsKeywordRun.run_date),desc(XhsKeywordRun.id)))).all()
+    return {"keyword_id":keyword_id,"keyword":keyword.keyword,"runs":[{
+        "id":r.id,"run_date":r.run_date.isoformat(),"wave":r.wave,"status":r.status,
+        "final_count":r.final_count,"cli_raw_count":r.cli_raw_count,"eligible_like_count":r.eligible_like_count,
+        "displayable_count":r.displayable_count,"error_message":r.error_message,
+        "finished_at":r.finished_at.isoformat() if r.finished_at else None,
+    } for r in rows]}
+
 
 
 @admin_router.post("/image-failures/{report_id}/resolve")

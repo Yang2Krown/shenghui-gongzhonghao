@@ -610,10 +610,18 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
         if reason: rejections[reason]+=1;record_discoveries(db,run.id,keyword.id,upsert_note(db,c,"rejected_"+reason,now),c,now)
         else: eligible.append(c)
     eligible.sort(key=lambda x:x.score,reverse=True);selected=eligible
+    selected_ids=[]
     for c in selected:
         note=upsert_note(db,c,"ready_degraded" if c.title_generated else "ready",now);record_discoveries(db,run.id,keyword.id,note,c,now)
         upsert_engagement_snapshot(db,note,now.date())
         sync_raw_info(db,note)
+        selected_ids.append(note.note_id)
+    # 趁 CDN 签名 URL 仍新鲜即预缓存封面/头像，避免查看时过期导致封面失败。
+    try:
+        from app.tasks.xhs_tasks import cache_note_media_task
+        for nid in selected_ids: cache_note_media_task.apply_async(args=[nid])
+    except Exception:
+        logger.warning("小红书媒体预缓存入队失败 keyword=%s notes=%d", keyword.keyword, len(selected_ids), exc_info=True)
     effective_errors=[x for x in (cli_error,tikhub_error if allow_paid else None) if x]
     daily=[c for c in merged.values() if collection_level(c.published_at,now)=="daily"]
     weekly=[c for c in merged.values() if collection_level(c.published_at,now)=="weekly"]
@@ -650,4 +658,11 @@ async def refresh_note_image(db: Session, note_identity: str, *, allow_paid: boo
     from app.models.xhs import XhsImageFailureReport
     for report in db.scalars(select(XhsImageFailureReport).where(XhsImageFailureReport.note_id==note.id,XhsImageFailureReport.status=="open")):
         report.status="resolved"
-    db.commit();return {"refreshed":True,"paid_request":provider_used=="tikhub","provider":provider_used,"cover_url":note.cover_url}
+    db.commit()
+    # 新封面 URL 立刻预缓存，否则下次查看又退化为懒加载过期 URL。
+    try:
+        from app.tasks.xhs_tasks import cache_note_media_task
+        cache_note_media_task.apply_async(args=[note.note_id])
+    except Exception:
+        logger.warning("小红书刷新后媒体预缓存入队失败 note=%s", note.note_id, exc_info=True)
+    return {"refreshed":True,"paid_request":provider_used=="tikhub","provider":provider_used,"cover_url":note.cover_url}

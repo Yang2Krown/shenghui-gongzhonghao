@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import timedelta
 from typing import Any
 
@@ -19,6 +20,8 @@ from app.services.xhs_collection import (
     count_value, dt_value, qualifies_by_time_and_likes, rank, record_discoveries,
     rejection_reason, remote_image_url, sync_raw_info, upsert_engagement_snapshot, upsert_note,
 )
+
+logger = logging.getLogger(__name__)
 
 LOCAL_PROVIDER = "local_cli"
 
@@ -208,5 +211,5 @@ def ingest_agent_result(
             for note_id in selected_note_ids:
                 cache_note_media_task.apply_async(args=[note_id])
         except Exception:
-            pass
+            logger.warning("小红书媒体预缓存入队失败 batch=%s notes=%d", batch.public_id, len(selected_note_ids), exc_info=True)
         return {"upload_id": upload.id, "duplicate": False, "accepted": len(selected), "rejections": rejections, "run_id": run.id}
