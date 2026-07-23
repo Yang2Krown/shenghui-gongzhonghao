@@ -39,7 +39,7 @@ const routes = [
         path: 'xhs-materials',
         name: 'XhsMaterials',
         component: () => import('@/pages/xhs/XhsMaterials.vue'),
-        meta: { title: '小红书素材', product: 'creation_tool', requiresAdmin: true }
+        meta: { title: '小红书选题', product: 'xhs_topic' }
       },
       {
         path: 'content-info/commercial',
