@@ -59,16 +59,20 @@ def cache_note_media_task(self, note_id: str):
 
 
 @shared_task(name="xhs.warm_media_cache")
-def warm_media_cache_task(days: int = 7, limit: int = 300):
+def warm_media_cache_task(days: int = 7, limit: int = 300, max_fetch: int = 120):
     """周期性自愈：为「可展示且近 N 天」的素材补齐缺失的封面/头像缓存。
 
     封面失败的根因是媒体懒加载——只有查看时才拉取，而 xhscdn 签名 URL 早已过期。
     本任务周期性把仍缺缓存的素材趁 URL 相对新鲜时预取，把「一次性尽力而为」变成
     「自愈」。与 cleanup_media_cache 用同一 keep 集合逻辑，互为镜像。
+
+    max_fetch 是单次实际回源拉取的硬上限：已缓存的直接跳过，真正发请求的通常只有
+    漏网几张；该上限防止历史积压一次性打向 CDN，避免触发风控。
     """
     from app.api.v1.xhs import fetch_media_to_cache, media_cache_base, media_cache_lookup_exact
     cutoff=utcnow()-timedelta(days=max(1,days))
     with SessionLocal() as db:
+        # 最新优先：刚入库的 URL 最新鲜、最该先补；旧 URL 多半已过期，补了也易失败。
         notes=db.scalars(select(XhsNote).where(
             XhsNote.quality_status.in_(PUBLIC_XHS_STATUSES),
             XhsNote.published_at.is_not(None),
@@ -79,11 +83,15 @@ def warm_media_cache_task(days: int = 7, limit: int = 300):
             for kind,url in (("cover",note.cover_url),("avatar",note.avatar_url)):
                 if not url or media_cache_lookup_exact(note.id,kind,url):
                     skipped+=1;continue
+                if warmed+failed>=max_fetch:
+                    continue
                 try:
                     asyncio.run(fetch_media_to_cache(url,media_cache_base(note.id,kind,url)));warmed+=1
                 except Exception as exc:
                     failed+=1
                     logger.info("小红书媒体周期预热失败 note=%s kind=%s: %s",note.note_id,kind,exc)
+        if warmed+failed>=max_fetch:
+            logger.info("小红书媒体预热达单次拉取上限 max_fetch=%d，剩余留待下一周期", max_fetch)
         return {"notes":len(notes),"warmed":warmed,"skipped":skipped,"failed":failed}
 
 

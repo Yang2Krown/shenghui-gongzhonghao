@@ -113,9 +113,10 @@ CELERY_BEAT_SCHEDULE = {
 
     # 封面/头像自愈：媒体原本懒加载（查看时才拉取），而 xhscdn 签名 URL 短时效，
     # 过期即 403 → 封面失败。周期性为可展示素材补齐缺失缓存，趁 URL 相对新鲜预取。
+    # 每小时跑一次 + 单次拉取硬上限，已缓存的跳过，实际回源量极小，对 CDN 无压力。
     "xhs-warm-media-cache": {
         "task": "xhs.warm_media_cache",
-        "schedule": crontab(minute=15, hour="*/3"),
+        "schedule": crontab(minute=15),
         "kwargs": {"days": 7},
     },
 
