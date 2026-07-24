@@ -58,6 +58,12 @@
           @click="openFailures"
         >
           去处理</button
+        ><button
+          v-else-if="a.key === 'tikhub_quota' && userStore.isSuperAdmin"
+          class="alert-action"
+          @click="scrollToTikhub"
+        >
+          去提额</button
         >
       </div>
       <div v-if="!data.alerts.length" class="ok">
@@ -105,6 +111,74 @@
         </section>
       </div>
       <div v-else class="recovery-ok"><strong>采集链路正常</strong><span>本地节点在线、Cookie 正常，今天没有待处理失败。</span></div>
+    </article>
+    <article v-if="data && data.tikhub" ref="tikhubPanel" class="panel tikhub-panel">
+      <div class="panel-head">
+        <div>
+          <div class="kicker">PAID CHANNEL · TIKHUB</div>
+          <h2>TikHub 付费通道</h2>
+          <p>配额、成本与调用健康；CLI 被风控时这是付费兜底来源</p>
+        </div>
+        <div class="tikhub-head-side">
+          <span :class="['tikhub-token-badge', data.tikhub.token_configured ? 'ok' : 'bad']">
+            {{ data.tikhub.token_configured ? "Token 已配置" : "Token 未配置" }}
+          </span>
+          <button v-if="userStore.isSuperAdmin" class="quiet" @click="openQuotaEditor">调整每日额度</button>
+        </div>
+      </div>
+      <div class="tikhub-grid">
+        <div class="tikhub-quota-card">
+          <small>今日额度</small>
+          <strong>{{ data.tikhub.today.used }}<em>/ {{ data.tikhub.today.limit }}</em></strong>
+          <i><b :class="{ warn: quotaPercent(data.tikhub.today) >= 80 }" :style="{ width: quotaPercent(data.tikhub.today) + '%' }"></b></i>
+          <span class="tikhub-quota-sub">剩余 {{ data.tikhub.today.remaining }} · 预留搜索 {{ data.tikhub.today.reserved_searches }}</span>
+        </div>
+        <div class="tikhub-cost-card">
+          <small>今日成本</small>
+          <strong>¥{{ (data.tikhub.today.estimated_cost_cny || 0).toFixed(2) }}</strong>
+          <span class="tikhub-quota-sub">累计 ¥{{ (data.tikhub.totals.total_cost || 0).toFixed(2) }} · {{ data.tikhub.totals.total_calls }} 次</span>
+        </div>
+        <div class="tikhub-trend-card">
+          <small>近 7 天成本</small>
+          <svg viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true">
+            <polyline v-if="tikhubCostSparkline" :points="tikhubCostSparkline" fill="none" stroke="var(--pine,#35695a)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" />
+          </svg>
+          <span class="tikhub-quota-sub">{{ tikhubCostSummary }}</span>
+        </div>
+        <div class="tikhub-op-card">
+          <small>今日按操作</small>
+          <p v-for="op in data.tikhub.by_operation" :key="op.operation">
+            <span>{{ opLabel(op.operation) }}</span><b>{{ op.count }} 次 · ¥{{ op.cost.toFixed(2) }}</b>
+          </p>
+          <p v-if="!data.tikhub.by_operation.length" class="tikhub-op-empty">今日暂无付费调用</p>
+        </div>
+      </div>
+      <div class="tikhub-calls">
+        <div class="tikhub-calls-head"><strong>付费调用明细</strong><span>仅 TikHub 通道,含每笔成本</span></div>
+        <div class="table table-scroll tikhub-calls-table">
+          <table>
+            <thead>
+              <tr><th>时间</th><th>操作</th><th>状态</th><th>成本</th><th>延迟</th><th>错误</th></tr>
+            </thead>
+            <tbody>
+              <template v-for="c in tikhubCalls" :key="c.id">
+                <tr :class="{ clickable: c.error_message }" @click="toggleCallExpand(c.id)">
+                  <td>{{ time(c.created_at) }}</td>
+                  <td>{{ opLabel(c.operation) }}</td>
+                  <td><em :class="{ bad: c.status !== 'success' }">{{ status(c.status) }}</em></td>
+                  <td>{{ c.status === 'success' && c.estimated_cost ? '¥' + c.estimated_cost.toFixed(3) : '—' }}</td>
+                  <td>{{ c.latency_ms == null ? '—' : c.latency_ms + 'ms' }}</td>
+                  <td class="err">{{ callError(c) }}</td>
+                </tr>
+                <tr v-if="expandedCall === c.id && c.error_message" class="call-detail">
+                  <td colspan="6">{{ c.error_message }}</td>
+                </tr>
+              </template>
+              <tr v-if="!tikhubCalls.length"><td colspan="6">近 24 小时暂无 TikHub 调用</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </article>
     <article v-if="data" class="panel agent-panel">
       <div class="panel-head">
@@ -355,7 +429,11 @@
           </div>
           <small>近次产出 {{ k.last_yield_count || 0 }} 篇 · 连续零产出 {{ k.zero_yield_streak || 0 }} 天<span v-if="k.quarantine_reason"> · {{ k.quarantine_reason }}</span></small>
           <div class="kw-actions">
-            <button @click="searchNow(k)">立即搜索</button
+            <button
+              :disabled="searchBusy === `kw-${k.id}` || !userStore.isSuperAdmin"
+              :title="userStore.isSuperAdmin ? '通过 TikHub 付费接口实时采集' : '仅最高管理员可用'"
+              @click="searchNow(k)"
+              >{{ searchBusy === `kw-${k.id}` ? "搜索中…" : "立即搜索" }}</button
             ><button @click="openKeywordHistory(k)">历史</button
             ><template v-if="userStore.isSuperAdmin"
               ><button @click="openEdit(k)">修改</button
@@ -687,8 +765,11 @@ const userStore = useUserStore(),
   imageRefreshBusy = ref(""),
   recoveryBusy = ref(""),
   recoveryResult = reactive({}),
+  searchBusy = ref(""),
   imageRefreshFeedback = reactive({}),
   recoveryCenter = ref(null),
+  tikhubPanel = ref(null),
+  expandedCall = ref(null),
   trendDays = ref(14),
   trendSeries = ref([]),
   showSchedule = ref(false),
@@ -892,6 +973,7 @@ const healthSubtitle = computed(() => {
   return `今日进度 ${planCompleted.value}/${planTotal.value} · 跳过 ${planSkipped.value} · 剩余 ${planPending.value}`;
 });
 const scrollToRecovery = () => recoveryCenter.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+const scrollToTikhub = () => tikhubPanel.value?.scrollIntoView({ behavior: "smooth", block: "start" });
 // 采集策略（只放开窗口与总结词上限；风控参数服务器固定）
 const openSchedule = () => {
   const s = primaryAgent.value?.schedule || {};
@@ -944,6 +1026,44 @@ const trendPaths = computed(() => ({
   notes: sparkline(trendSeries.value.map((d) => d.notes_collected || 0)),
   captcha: sparkline(trendSeries.value.map((d) => d.captcha_events || 0)),
 }));
+// ── TikHub 付费通道 ──
+const tikhub = computed(() => data.value?.tikhub || null);
+const quotaPercent = (today) => (today?.limit ? Math.min(100, Math.round((today.used / today.limit) * 100)) : 0);
+const tikhubCostSparkline = computed(() => sparkline((tikhub.value?.daily_cost_7d || []).map((d) => d.cost || 0)));
+const tikhubCostSummary = computed(() => {
+  const days = tikhub.value?.daily_cost_7d || [];
+  const total = days.reduce((a, d) => a + (d.cost || 0), 0);
+  const calls = days.reduce((a, d) => a + (d.calls || 0), 0);
+  return `7 天 ¥${total.toFixed(2)} · ${calls} 次`;
+});
+const tikhubCalls = computed(() => (data.value?.calls || []).filter((c) => c.provider === "tikhub"));
+const opLabel = (op) => ({ search: "搜索", detail: "详情补全", image_refresh: "图片刷新", agent_upload: "本地上报" })[op] || op || "—";
+const toggleCallExpand = (id) => { expandedCall.value = expandedCall.value === id ? null : id; };
+const openQuotaEditor = async () => {
+  const current = tikhub.value?.today?.limit ?? 100;
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `当前每日上限 ${current} 次。提高额度会增加今日 TikHub 付费上限,立即生效(仅当天)。`,
+      "调整 TikHub 每日额度",
+      {
+        confirmButtonText: "确认调整",
+        cancelButtonText: "取消",
+        inputValue: String(current),
+        inputPattern: /^([1-9]\d{0,3}|10000)$/,
+        inputErrorMessage: "请输入 1–10000 的整数",
+        lockScroll: false,
+      },
+    );
+    const limit = parseInt(value, 10);
+    await api.post("/admin/xhs-monitoring/tikhub-quota", { limit_count: limit });
+    ElMessage.success(`每日额度已调整为 ${limit} 次`);
+    await load();
+  } catch (error) {
+    if (error !== "cancel" && error?.action !== "cancel") {
+      ElMessage.error(error?.response?.data?.detail || "调整额度失败");
+    }
+  }
+};
 const trendSummary = computed(() => {
   const s = trendSeries.value;
   const runs = s.reduce((a, d) => a + (d.runs || 0), 0);
@@ -1276,8 +1396,51 @@ const promote = async (k) => {
   ElMessage.success("已提升为基础词");
   load();
 };
+const waitForKeywordRun = async (keywordId) => {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 3000));
+    const runs = (
+      await api.get(`/admin/xhs-monitoring/keywords/${keywordId}/runs`, { params: { days: 1 }, skipErrorToast: true })
+    ).data.runs || [];
+    const latest = runs[0];
+    if (!latest || latest.status === "running") continue;
+    await load();
+    if (latest.status === "failed") throw new Error(latest.error_message || "采集失败");
+    ElMessage.success(
+      latest.status === "partial"
+        ? `部分完成，入库 ${latest.final_count || 0} 篇`
+        : `采集完成，入库 ${latest.final_count || 0} 篇`,
+    );
+    return;
+  }
+  throw new Error("等待采集结果超时，请稍后刷新查看");
+};
 const searchNow = async (k) => {
-  await testKeywordWithAgent(k.id);
+  if (!userStore.isSuperAdmin) return ElMessage.warning("仅最高管理员可用");
+  try {
+    await ElMessageBox.confirm(
+      `将对「${k.keyword}」通过 TikHub 付费接口实时采集，会产生费用。`,
+      "确认立即搜索？",
+      { confirmButtonText: "立即搜索", cancelButtonText: "取消", type: "warning", lockScroll: false },
+    );
+  } catch {
+    return;
+  }
+  searchBusy.value = `kw-${k.id}`;
+  try {
+    await api.post(`/admin/xhs-monitoring/keywords/${k.id}/retry-paid`);
+    ElMessage.success("已提交 TikHub 付费采集，正在等待结果…");
+    await waitForKeywordRun(k.id);
+  } catch (error) {
+    if (error?.response?.status === 409) {
+      ElMessage.warning(error?.response?.data?.detail || "该词今天已成功采集");
+      await load();
+    } else {
+      ElMessage.error(error?.response?.data?.detail || error?.message || "立即搜索失败");
+    }
+  } finally {
+    searchBusy.value = "";
+  }
 };
 const removeKeyword = async (k) => {
   await ElMessageBox.confirm(
@@ -2202,6 +2365,39 @@ td em,
     font-size: 29px;
   }
 }
+/* ── TikHub 付费通道面板 ─────────────────────── */
+.tikhub-panel { background: linear-gradient(145deg, #fdfcf9, #f4f6f2); }
+.tikhub-head-side { display: flex; align-items: center; gap: 8px; }
+.tikhub-head-side button.quiet { border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.75); color: var(--ink-2); padding: 7px 12px; cursor: pointer; }
+.tikhub-token-badge { display: inline-flex; align-items: center; border-radius: 99px; padding: 6px 11px; font-size: 11px; font-weight: 700; }
+.tikhub-token-badge.ok { color: var(--pine); background: #e4eee9; }
+.tikhub-token-badge.bad { color: var(--clay-deep); background: var(--clay-tint); }
+.tikhub-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 4px; }
+.tikhub-grid > div { min-width: 0; padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.66); }
+.tikhub-grid small { display: block; color: var(--ink-3); font-size: 11px; }
+.tikhub-grid strong { display: block; margin: 4px 0; font: 700 24px var(--serif); color: var(--ink-2); }
+.tikhub-grid strong em { font: 500 13px var(--serif); color: var(--ink-3); font-style: normal; }
+.tikhub-quota-card i { display: block; height: 7px; margin-top: 8px; background: var(--bone); border-radius: 99px; overflow: hidden; }
+.tikhub-quota-card i b { display: block; height: 100%; background: var(--pine); border-radius: inherit; transition: width .3s ease; }
+.tikhub-quota-card i b.warn { background: var(--clay); }
+.tikhub-quota-sub { display: block; margin-top: 7px; color: var(--ink-3); font-size: 10px; }
+.tikhub-trend-card svg { display: block; width: 100%; height: 36px; margin-top: 6px; }
+.tikhub-op-card p { display: flex; justify-content: space-between; gap: 8px; margin: 5px 0 0; font-size: 11px; color: var(--ink-2); }
+.tikhub-op-card p b { color: var(--ink-3); font-weight: 500; }
+.tikhub-op-empty { color: var(--ink-3); }
+.tikhub-calls { margin-top: 14px; }
+.tikhub-calls-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.tikhub-calls-head strong { font-size: 13px; }
+.tikhub-calls-head span { color: var(--ink-3); font-size: 10px; }
+.tikhub-calls-table { max-height: 300px; }
+.tikhub-calls-table table { min-width: 640px; }
+.tikhub-calls-table td.err { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tikhub-calls-table tr.clickable { cursor: pointer; }
+.tikhub-calls-table tr.clickable:hover { background: var(--ivory); }
+.tikhub-calls-table tr.call-detail td { background: var(--ivory); color: var(--clay-deep); font-size: 11px; white-space: normal; word-break: break-all; }
+@media (max-width: 900px) { .tikhub-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 620px) { .tikhub-grid { grid-template-columns: 1fr; } }
+
 /* ── 今日状态横幅 ─────────────────────────────── */
 .health-banner { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 14px 0 16px; padding: 14px 18px; border-radius: 13px; border: 1px solid var(--line); }
 .health-banner.good { border-color: #cfe0d4; background: linear-gradient(120deg, #eef4ef, #e6efe9); }

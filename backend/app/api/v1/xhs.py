@@ -210,20 +210,31 @@ async def topic_boards(_admin:User=Depends(require_admin_permission("monitoring:
     for interaction in interactions:
         for topic_id in topic_ids_by_note.get(interaction.note_id,[]):interactions_by_topic[topic_id].append(interaction)
     hot=[];fermenting=[]
+    publish_cutoff=now-timedelta(hours=24)
     for topic in topics:
         notes=notes_by_topic[topic.id]
+        # 今日热榜锚定「发布时间」：24h 内发布的笔记才算今日新热；持续发酵的「今天仍在发酵」
+        # 保留「采集时间」口径（老笔记今天互动还在涨、又被采到，也算在发酵）。
         recent=[n for n in notes if n.last_discovered_at>=day_start]
-        authors={n.author_id or n.author_nickname for n in notes if n.author_id or n.author_nickname};recent_authors={n.author_id or n.author_nickname for n in recent if n.author_id or n.author_nickname}
+        recent_published=[n for n in notes if n.published_at and n.published_at>=publish_cutoff]
+        authors={n.author_id or n.author_nickname for n in notes if n.author_id or n.author_nickname};recent_authors={n.author_id or n.author_nickname for n in recent_published if n.author_id or n.author_nickname}
         snapshot=latest_snapshot.get(topic.id)
         daily={}
         for item in interactions_by_topic[topic.id]:
             point=daily.setdefault(item.snapshot_date,{"score":0,"notes":set()})
             point["score"]+=sum(value or 0 for value in (item.like_count,item.collect_count,item.comment_count,item.share_count));point["notes"].add(item.note_id)
         trend_points=[{"at":date.isoformat(),"score":value["score"],"new_notes":len(value["notes"])} for date,value in sorted(daily.items())]
-        payload={"topic_id":topic.public_id,"topic":topic.name,"ai_highlight":topic.summary,"sample_count":len(notes),"author_count":len(authors),"new_notes_24h":len(recent),"new_authors_24h":len(recent_authors),"max_likes":max((n.like_count or 0 for n in notes),default=0),"first_seen_at":topic.first_seen_at.isoformat(),"last_seen_at":topic.last_seen_at.isoformat(),"active_days":topic.active_days,"engagement_growth":snapshot.engagement_growth if snapshot else 0,"fermentation_score":snapshot.fermentation_score if snapshot else 0,"evidence":snapshot.evidence if snapshot else [],"trend_points":trend_points,"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)} for n in notes[:4]]}
-        if len(recent)>=2 and len(recent_authors)>=2:hot.append(payload)
+        payload={"topic_id":topic.public_id,"topic":topic.name,"ai_highlight":topic.summary,"sample_count":len(notes),"author_count":len(authors),"new_notes_24h":len(recent_published),"new_authors_24h":len(recent_authors),"max_likes":max((n.like_count or 0 for n in notes),default=0),"first_seen_at":topic.first_seen_at.isoformat(),"last_seen_at":topic.last_seen_at.isoformat(),"active_days":topic.active_days,"engagement_growth":snapshot.engagement_growth if snapshot else 0,"fermentation_score":snapshot.fermentation_score if snapshot else 0,"evidence":snapshot.evidence if snapshot else [],"trend_points":trend_points,"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)} for n in notes[:4]]}
+        if len(recent_published)>=2 and len(recent_authors)>=2:hot.append(payload)
         if topic.first_seen_at<day_start and topic.active_days>=2 and len(notes)>=2 and len(authors)>=2 and recent:fermenting.append(payload)
-    hot.sort(key=lambda item:(item["new_notes_24h"],item["max_likes"]),reverse=True);fermenting.sort(key=lambda item:(item["new_notes_24h"],item["max_likes"]),reverse=True)
+    hot.sort(key=lambda item:(item["new_notes_24h"],item["max_likes"]),reverse=True)
+    # 持续发酵以"一直在热"为主导：活跃天数与持续增长权重最高，今日突发新话题不会反超多日反复在热的老话题。
+    def _persistence(item):
+        longevity=min(item["active_days"],7)/7
+        growth=max(0.0,min(item["engagement_growth"],100))/100
+        freshness=min(item["new_notes_24h"],5)/5
+        return round(100*(.5*longevity+.3*growth+.2*freshness),1)
+    fermenting.sort(key=lambda item:(_persistence(item),item["fermentation_score"],item["new_notes_24h"],item["max_likes"]),reverse=True)
     generated=max((s.snapshot_at for s in latest_snapshot.values()),default=now)
     result={"generated_at":generated.isoformat(),"edition_date":day_start.date().isoformat(),"hot":hot[:6],"fermenting":fermenting[:20],"fresh":hot[:6]}
     return await _attach_board_monitor(db,result,day_start,topic_count=len(topics),sample_count=len(note_by_id),max_likes=max((n.like_count or 0 for n in note_by_id.values()),default=0))
@@ -333,6 +344,15 @@ async def monitoring(_admin:User=Depends(require_admin_permission("monitoring:re
     day_start=utcnow().replace(hour=0,minute=0,second=0,microsecond=0)
     successful_cost=(await db.scalar(select(func.coalesce(func.sum(XhsProviderCall.estimated_cost),0)).where(XhsProviderCall.provider=="tikhub",XhsProviderCall.status=="success",XhsProviderCall.created_at>=day_start))) or 0
     quota_data["estimated_cost_cny"]=round(float(successful_cost),4)
+    # ── TikHub 成本/配额汇总块(供前端付费通道监控面板)──
+    paid_success=XhsProviderCall.provider=="tikhub",XhsProviderCall.status=="success"
+    total_cost,total_calls=(await db.execute(select(func.coalesce(func.sum(XhsProviderCall.estimated_cost),0),func.count(XhsProviderCall.id)).where(*paid_success))).one()
+    daily_cost_rows=(await db.execute(select(func.date(XhsProviderCall.created_at).label("day"),func.coalesce(func.sum(XhsProviderCall.estimated_cost),0),func.count(XhsProviderCall.id)).where(*paid_success,XhsProviderCall.created_at>=day_start-timedelta(days=6)).group_by(func.date(XhsProviderCall.created_at)))).all()
+    daily_cost_map={str(day):{"cost":round(float(cost),4),"calls":calls} for day,cost,calls in daily_cost_rows}
+    daily_cost_7d=[{"date":(day_start-timedelta(days=6-i)).date().isoformat(),**daily_cost_map.get((day_start-timedelta(days=6-i)).date().isoformat(),{"cost":0.0,"calls":0})} for i in range(7)]
+    by_op_rows=(await db.execute(select(XhsProviderCall.operation,func.count(XhsProviderCall.id),func.coalesce(func.sum(XhsProviderCall.estimated_cost),0)).where(*paid_success,XhsProviderCall.created_at>=day_start).group_by(XhsProviderCall.operation))).all()
+    by_operation=[{"operation":op,"count":cnt,"cost":round(float(cost),4)} for op,cnt,cost in by_op_rows]
+    tikhub_data={"today":{**quota_data},"totals":{"total_cost":round(float(total_cost),4),"total_calls":total_calls},"daily_cost_7d":daily_cost_7d,"by_operation":by_operation,"token_configured":bool(settings.TIKHUB_TOKEN)}
     calls=(await db.scalars(select(XhsProviderCall).where(XhsProviderCall.created_at>=utcnow()-timedelta(days=1)).order_by(desc(XhsProviderCall.id)).limit(100))).all()
     def health(provider):
         rows=[x for x in calls if x.provider==provider and x.status in ("success","failed")];recent=rows[:10];ok=sum(x.status=="success" for x in recent)
@@ -354,8 +374,13 @@ async def monitoring(_admin:User=Depends(require_admin_permission("monitoring:re
     base_total=sum(k.keyword_type=="base" and k.enabled for k in keywords);base_done=len({k.id for r,k in run_rows if k.keyword_type=="base" and r.status=="completed"})
     tikhub_health=health("tikhub");cli_health=health("cli");cookie_configured=Path(settings.XHS_CLI_COOKIE_FILE).is_file();auth_error=await cli_auth_error();cooldown_remaining=await cli_cooldown_remaining()
     alerts=[]
-    if quota_data["used"]>=100:alerts.append({"level":"critical","message":"TikHub 已达到每日硬上限，付费请求已停止"})
-    elif quota_data["used"]>=80:alerts.append({"level":"warning","message":"TikHub 今日调用已达到 80 次"})
+    if not settings.TIKHUB_TOKEN:alerts.append({"level":"critical","key":"tikhub_token","message":"TikHub Token 未配置，付费通道不可用，当前仅靠免费 CLI 采集"})
+    if quota_data["used"]>=quota_data["limit"]:alerts.append({"level":"critical","key":"tikhub_quota","message":f"TikHub 已达每日上限 {quota_data['limit']} 次，付费请求已停止"})
+    elif quota_data["limit"] and quota_data["used"]>=quota_data["limit"]*0.8:alerts.append({"level":"warning","key":"tikhub_quota","message":f"TikHub 今日已用 {quota_data['used']}/{quota_data['limit']} 次，接近每日上限"})
+    tikhub_recent_fail=[x for x in calls if x.provider=="tikhub"][:10]
+    if settings.TIKHUB_TOKEN and len(tikhub_recent_fail)>=3 and all(x.status=="failed" for x in tikhub_recent_fail):alerts.append({"level":"critical","key":"tikhub_failing","message":"TikHub 连续调用失败，可能 Token 失效或账户余额不足，请检查"})
+    yesterday_cost=daily_cost_7d[-2]["cost"] if len(daily_cost_7d)>=2 else 0
+    if yesterday_cost>0 and float(successful_cost)>yesterday_cost*3 and float(successful_cost)>1:alerts.append({"level":"warning","key":"tikhub_cost","message":f"TikHub 今日成本 ¥{float(successful_cost):.2f}，较昨日 ¥{yesterday_cost:.2f} 明显上升"})
     if image_open:alerts.append({"level":"warning" if image_open<20 else "critical","key":"image_failures","message":f"存在 {image_open} 条未处理图片失败报告"})
     for label,item in (("TikHub",tikhub_health),("CLI",cli_health)):
         if item["success_rate"] is not None and item["success_rate"]<70:alerts.append({"level":"critical" if item["success_rate"]<40 else "warning","message":f"{label} 最近 10 次成功率仅 {item['success_rate']}%"})
@@ -369,7 +394,28 @@ async def monitoring(_admin:User=Depends(require_admin_permission("monitoring:re
     if pending6h>20:alerts.append({"level":"warning","message":f"超过 6 小时仍未补全的帖子有 {pending6h} 条"})
     keyword_data=[{"id":k.id,"keyword":k.keyword,"type":k.keyword_type,"group":k.schedule_group,"enabled":k.enabled,"lifecycle_status":k.lifecycle_status,"pinned":k.pinned,"zero_yield_streak":k.zero_yield_streak,"last_yield_count":k.last_yield_count,"quarantine_reason":k.quarantine_reason,"derived_evidence":k.derived_evidence or {},"cooldown_until":k.cooldown_until.isoformat() if k.cooldown_until else None,"next_run_at":k.next_run_at.isoformat() if k.next_run_at else None} for k in keywords]
     call_data=[{"id":c.id,"provider":c.provider,"operation":c.operation,"status":c.status,"is_paid":c.is_paid,"paid_request":bool(c.is_paid and c.request_count>0 and c.status not in ("blocked","skipped")),"request_count":c.request_count,"latency_ms":c.latency_ms,"estimated_cost":c.estimated_cost if c.status=="success" else 0,"error_code":c.error_code,"error_message":c.error_message,"created_at":c.created_at.isoformat()} for c in calls[:30]]
-    return {"progress":{"base_completed":base_done,"base_total":base_total,"derived_completed":len({k.id for r,k in run_rows if k.keyword_type=="derived" and r.status=="completed"}),"derived_total":sum(k.keyword_type=="derived" and k.enabled for k in keywords)},"quota":quota_data,"providers":{"tikhub":tikhub_health,"cli":{**cli_health,"installed":bool(shutil.which(settings.XHS_CLI_BIN)),"version":cli_version,"version_ok":cli_version==settings.XHS_CLI_VERSION,"cookie_configured":cookie_configured,"auth_status":"expired" if auth_error else "configured" if cookie_configured else "missing","cookie_saved_at":cookie_saved_at(),"cooldown_minutes":settings.XHS_CLI_COOLDOWN_MINUTES,"cooldown_remaining_seconds":cooldown_remaining}},"funnel":funnel,"rejections":rejections,"image_health":{"open_reports":image_open,"missing":await db.scalar(select(func.count(XhsNote.id)).where(XhsNote.cover_url.is_(None))) or 0,"suspected_invalid":await db.scalar(select(func.count(XhsNote.id)).where(XhsNote.media_status=="suspected_invalid")) or 0},"runs":runs,"keywords":keyword_data,"alerts":alerts,"calls":call_data}
+    return {"progress":{"base_completed":base_done,"base_total":base_total,"derived_completed":len({k.id for r,k in run_rows if k.keyword_type=="derived" and r.status=="completed"}),"derived_total":sum(k.keyword_type=="derived" and k.enabled for k in keywords)},"quota":quota_data,"providers":{"tikhub":tikhub_health,"cli":{**cli_health,"installed":bool(shutil.which(settings.XHS_CLI_BIN)),"version":cli_version,"version_ok":cli_version==settings.XHS_CLI_VERSION,"cookie_configured":cookie_configured,"auth_status":"expired" if auth_error else "configured" if cookie_configured else "missing","cookie_saved_at":cookie_saved_at(),"cooldown_minutes":settings.XHS_CLI_COOLDOWN_MINUTES,"cooldown_remaining_seconds":cooldown_remaining}},"funnel":funnel,"rejections":rejections,"image_health":{"open_reports":image_open,"missing":await db.scalar(select(func.count(XhsNote.id)).where(XhsNote.cover_url.is_(None))) or 0,"suspected_invalid":await db.scalar(select(func.count(XhsNote.id)).where(XhsNote.media_status=="suspected_invalid")) or 0},"runs":runs,"keywords":keyword_data,"alerts":alerts,"calls":call_data,"tikhub":tikhub_data}
+
+
+class QuotaUpdateBody(BaseModel):
+    limit_count:int=Field(...,ge=1,le=10000)
+
+
+@admin_router.post("/tikhub-quota")
+async def update_tikhub_quota(body:QuotaUpdateBody,admin:User=Depends(get_current_super_admin_user),db:AsyncSession=Depends(get_db)):
+    """最高管理员调整 TikHub 每日额度上限（当天生效）。"""
+    today=utcnow().date()
+    quota=(await db.execute(select(XhsDailyQuota).where(XhsDailyQuota.quota_date==today).with_for_update())).scalar_one_or_none()
+    if not quota:
+        quota=XhsDailyQuota(quota_date=today,limit_count=settings.TIKHUB_DAILY_LIMIT,used_count=0,reserved_search_count=0);db.add(quota);await db.flush()
+    old_limit=quota.limit_count
+    quota.limit_count=body.limit_count
+    # 预留搜索额度不能超过新上限下的可用额度,避免预留占满导致 detail 永远 blocked。
+    quota.reserved_search_count=min(quota.reserved_search_count,max(body.limit_count-quota.used_count,0))
+    db.add(AdminAuditLog(actor_user_id=admin.id,action="xhs_tikhub_quota_update",target_type="xhs_daily_quota",target_id=str(today),summary=f"最高管理员调整 TikHub 每日额度 {old_limit} → {body.limit_count}",metadata_json={"old_limit":old_limit,"new_limit":body.limit_count}))
+    used_count,reserved_count=quota.used_count,quota.reserved_search_count
+    await db.commit()
+    return {"quota":{"used":used_count,"limit":body.limit_count,"reserved_searches":reserved_count,"remaining":max(0,body.limit_count-used_count)}}
 
 
 @admin_router.post("/cli-auth/sessions")
@@ -551,7 +597,8 @@ async def retry_free(keyword_id:int,force:bool=False,admin:User=Depends(require_
 async def retry_paid(keyword_id:int,admin:User=Depends(get_current_super_admin_user),db:AsyncSession=Depends(get_db)):
     run=(await db.execute(select(XhsKeywordRun).where(XhsKeywordRun.keyword_id==keyword_id,XhsKeywordRun.run_date==utcnow().date()))).scalar_one_or_none()
     if run and run.status=="completed":raise HTTPException(409,"成功完成的关键词当天不允许再次搜索")
-    task=collect_keyword_task.apply_async(args=[keyword_id,True,True]);db.add(AdminAuditLog(actor_user_id=admin.id,action="xhs_retry_paid",target_type="xhs_keyword",target_id=str(keyword_id),summary="最高管理员确认 TikHub 付费重试",metadata_json={"task_id":task.id}));await db.commit();return {"task_id":task.id,"paid":True}
+    # CLI 已 100% 被风控，付费重试只走 TikHub 第三方 API，不再并发本地 CLI。
+    task=collect_keyword_task.apply_async(args=[keyword_id,True,True,False]);db.add(AdminAuditLog(actor_user_id=admin.id,action="xhs_retry_paid",target_type="xhs_keyword",target_id=str(keyword_id),summary="最高管理员确认 TikHub 付费重试",metadata_json={"task_id":task.id}));await db.commit();return {"task_id":task.id,"paid":True}
 
 
 @admin_router.post("/notes/{note_id}/refresh-image-free",status_code=202)

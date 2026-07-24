@@ -218,6 +218,8 @@ class Settings(BaseSettings):
     XHS_COLLECTION_ENABLED: bool = False
     # 本地 Agent 接管搜索后保持 false；不影响素材入库、分析和监测。
     XHS_SERVER_COLLECTION_ENABLED: bool = False
+    # 本地 CLI 已 100% 被风控，服务器集中采集只走 TikHub；置 True 才会并发跑 CLI 免费链路。
+    XHS_CLI_ENABLED: bool = False
     TIKHUB_TOKEN: Optional[str] = None
     TIKHUB_API_BASE: str = "https://api.tikhub.io"
     TIKHUB_XHS_SEARCH_PATH: str = "/api/v1/xiaohongshu/app_v2/search_notes"

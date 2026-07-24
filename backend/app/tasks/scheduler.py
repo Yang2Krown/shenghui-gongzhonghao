@@ -16,6 +16,35 @@ from celery.schedules import crontab
 
 
 CELERY_BEAT_SCHEDULE = {
+    # ── 小红书集中采集：每天上午一波（TikHub 付费通道，本地 CLI 已弃用）──
+    # 基础词按 schedule_group 分波，前端默认 1；为不依赖具体分组，覆盖 1-6 全组。
+    # 每个词错峰 90s 派发，detail 兜底≈0，单波 ≈ 关键词数 次 TikHub search。
+    "xhs-collect-morning": {
+        "task": "xhs.dispatch_group",
+        "schedule": crontab(minute=0, hour=8),
+        "kwargs": {"group": 1},
+    },
+    "xhs-collect-morning-g2": {
+        "task": "xhs.dispatch_group",
+        "schedule": crontab(minute=2, hour=8),
+        "kwargs": {"group": 2},
+    },
+    "xhs-collect-morning-g3": {
+        "task": "xhs.dispatch_group",
+        "schedule": crontab(minute=4, hour=8),
+        "kwargs": {"group": 3},
+    },
+    # 动态衍生词：补充采集（每日最多 5 个，过冷却期的才跑）。
+    "xhs-collect-derived": {
+        "task": "xhs.dispatch_derived",
+        "schedule": crontab(minute=6, hour=8),
+    },
+    # 采集后生成「每日热点 + 持续发酵」总结：上午采集错峰 ~30min 内完成，10:00 重建成型。
+    "xhs-topic-after-morning-collect": {
+        "task": "xhs.rebuild_semantic_topics",
+        "schedule": crontab(minute=0, hour=10),
+        "kwargs": {"wave": "morning"},
+    },
     # 搜索采集已由本地 Mac Agent 接管；服务器只保留关键词生成和素材分析。
     "xhs-note-analysis": {"task": "xhs.analyze_notes", "schedule": crontab(minute=0, hour="13,18")},
     "xhs-topic-after-morning": {"task":"xhs.rebuild_semantic_topics","schedule":crontab(minute=15,hour=13),"kwargs":{"wave":"morning"}},

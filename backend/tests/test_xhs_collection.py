@@ -12,7 +12,8 @@ from app.db.seeds.seed_accounts_from_table2 import X_KEYWORDS
 from app.services.xhs_collection import (
     Candidate, CliProvider, TikHubBudgetExhausted, _xsec_token, consume_tikhub_quota, count_value,
     hydrate, merge_provider_candidates, normalize_candidate, pre_hydration_rejection, rank,
-    rejection_reason, reserve_tikhub_searches, upsert_engagement_snapshot, upsert_note, xsec_note_url,
+    rejection_reason, reserve_tikhub_searches, unwrap_detail, unwrap_items, upsert_engagement_snapshot,
+    upsert_note, xsec_note_url,
 )
 from app.services.xhs_cli_entrypoint import XHS_SEARCH_FILTERS, main as xhs_cli_main
 
@@ -123,6 +124,48 @@ def test_cli_search_card_schema_preserves_token_date_shares_and_https_images(mon
     assert c.cover_url.startswith("https://") and c.avatar_url.startswith("https://")
     assert "xsec_token=token-with-equals%3D" in c.xsec_url and "xsec_source=pc_search" in c.xsec_url
     assert _xsec_token(c.xsec_url)=="token-with-equals="
+
+
+def test_tikhub_search_card_uses_note_timestamp_and_flat_metrics():
+    """TikHub app_v2/search_notes:data.data.items[].note,发布时间取 note.timestamp(秒),互动数平铺。"""
+    raw={
+        "model_type":"note",
+        "note":{
+            "id":"6a5a54df00000000110069bb","type":"normal","title":"副业","desc":"#下班做副业#",
+            "timestamp":1784304863,"update_time":1784522569000,"last_update_time":0,
+            "liked_count":32131,"collected_count":18182,"comments_count":7161,"shared_count":1024,
+            "images_list":[{"url":"https://sns-na-i27.xhscdn.com/a.webp"}],
+            "user":{"nickname":"如果你冷","userid":"68ea28980000000037008a8a","images":"https://sns-avatar-qc.xhscdn.com/a.jpg"},
+            "xsec_token":"tok123",
+        },
+    }
+    c=normalize_candidate(raw,"tikhub",1)
+    assert c.note_id=="6a5a54df00000000110069bb" and c.published_at==datetime.fromtimestamp(1784304863)
+    assert c.like_count==32131 and c.collect_count==18182 and c.comment_count==7161 and c.share_count==1024
+    assert c.cover_url=="https://sns-na-i27.xhscdn.com/a.webp" and c.author_id=="68ea28980000000037008a8a"
+    assert c.author_nickname=="如果你冷" and _xsec_token(c.xsec_url)=="tok123"
+
+
+def test_tikhub_detail_note_card_ms_time_and_wan_metrics():
+    """TikHub web_v3 详情 note_card.time 是毫秒整数,interact_info.liked_count 是“万”字符串。"""
+    payload={"data":{"data":{"items":[{"note_card":{
+        "note_id":"6a5a54df00000000110069bb","title":"副业","type":"normal",
+        "time":1784304863000,"last_update_time":1784449539000,
+        "user":{"user_id":"u1","nickname":"如果你冷","avatar":"https://sns-avatar-qc.xhscdn.com/a.jpg"},
+        "interact_info":{"liked_count":"3.2万","collected_count":"1.8万","comment_count":"7161","share_count":"1024"},
+        "image_list":[{"url_default":"https://sns-webpic-qc.xhscdn.com/a.webp"}],
+    }}]}}}
+    flat=unwrap_detail(payload,"6a5a54df00000000110069bb")
+    c=normalize_candidate(flat,"tikhub",99)
+    assert c.published_at==datetime.fromtimestamp(1784304863) and c.like_count==32000 and c.collect_count==18000
+    assert c.comment_count==7161 and c.share_count==1024 and c.cover_url=="https://sns-webpic-qc.xhscdn.com/a.webp"
+
+
+def test_unwrap_items_drills_through_tikhub_double_data():
+    """unwrap_items 能穿过 TikHub 的双层 data 包裹拿到 items 列表。"""
+    payload={"code":200,"data":{"success":True,"data":{"items":[{"model_type":"note","note":{"id":"a"}},{"model_type":"note","note":{"id":"b"}}]}}}
+    items=unwrap_items(payload)
+    assert len(items)==2 and items[0]["note"]["id"]=="a"
 
 
 def test_bare_search_url_is_rebuilt_with_separate_xsec_token():

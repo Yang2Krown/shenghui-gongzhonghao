@@ -14,6 +14,7 @@ from app.core.timezone import utcnow
 from app.db.session import AsyncSessionLocal, SessionLocal, engine as async_engine
 from app.models.xhs import XhsKeyword, XhsNote, XhsNoteDiscovery, XhsProviderCall
 from app.services.llm.llm_client import ChatMessage, get_llm_client
+from app.services.xhs_ai_filter import is_ai_related
 from app.services.xhs_collection import collect_keyword, eligibility_clause, normalize_keyword, refresh_note_image, reserve_tikhub_searches
 from app.services.xhs_topics import evaluate_keyword_lifecycle, rebuild_semantic_topics
 
@@ -22,9 +23,11 @@ PUBLIC_XHS_STATUSES = ("ready", "ready_degraded", "synced")
 
 
 @shared_task(name="xhs.collect_keyword")
-def collect_keyword_task(keyword_id: int, allow_paid: bool = True, retry_existing: bool = False):
+def collect_keyword_task(keyword_id: int, allow_paid: bool = True, retry_existing: bool = False, allow_cli: bool | None = None):
     if not settings.XHS_SERVER_COLLECTION_ENABLED: return {"skipped": True, "reason": "server_collection_disabled"}
-    with SessionLocal() as db: return asyncio.run(collect_keyword(db, keyword_id, allow_paid=allow_paid, retry_existing=retry_existing))
+    # CLI 已 100% 被风控时 allow_cli 取配置默认 False，集中采集只走 TikHub。
+    if allow_cli is None: allow_cli = settings.XHS_CLI_ENABLED
+    with SessionLocal() as db: return asyncio.run(collect_keyword(db, keyword_id, allow_paid=allow_paid, retry_existing=retry_existing, allow_cli=allow_cli))
 
 
 @shared_task(name="xhs.refresh_note_image")
@@ -131,6 +134,10 @@ def dispatch_group_task(group: int):
     if not settings.XHS_SERVER_COLLECTION_ENABLED: return {"skipped": True, "reason": "server_collection_disabled"}
     with SessionLocal() as db:
         rows=db.scalars(select(XhsKeyword).where(XhsKeyword.enabled.is_(True),XhsKeyword.keyword_type=="base",XhsKeyword.schedule_group==group).order_by(XhsKeyword.id)).all()
+        # 兜底：group=1 时把未分组（schedule_group 为空）的 base 词一并采，避免漏采新加的词。
+        if group==1:
+            unassigned=db.scalars(select(XhsKeyword).where(XhsKeyword.enabled.is_(True),XhsKeyword.keyword_type=="base",XhsKeyword.schedule_group.is_(None)).order_by(XhsKeyword.id)).all()
+            seen={row.id for row in rows}; rows=rows+[row for row in unassigned if row.id not in seen]
         reserve_tikhub_searches(db,len(rows))
         for index,row in enumerate(rows): collect_keyword_task.apply_async(args=[row.id],countdown=index*90+random.randint(10,30))
         return {"group":group,"dispatched":len(rows)}
@@ -151,7 +158,7 @@ async def _normalize_dynamic(candidates: list[str]) -> list[str]:
     if not candidates: return []
     try:
         client=get_llm_client()
-        prompt="将这些小红书 AI 趋势词去重归一化，保留具体可搜索短语，排除 AI、工具等泛词，最多返回 5 个。仅返回 JSON：{\"keywords\":[...]}.\n"+"\n".join(candidates[:20])
+        prompt="将这些小红书 AI 趋势词去重归一化，保留具体可搜索短语，只保留与 AI 相关的词，排除 AI、工具等泛词和二次元、穿搭、美食、好视频扶持计划等非 AI 词，最多返回 5 个。仅返回 JSON：{\"keywords\":[...]}.\n"+"\n".join(candidates[:20])
         result=await client.chat([ChatMessage(role="user",content=prompt)],temperature=.1,max_tokens=400,json_mode=True)
         return [str(x).strip() for x in (result.parsed or {}).get("keywords",[]) if str(x).strip()][:5]
     except Exception as exc:
@@ -170,7 +177,7 @@ def generate_dynamic_keywords_task():
         for note,_keyword in rows:
             for tag in list(note.native_tags or [])+list(note.ai_topics or []):
                 key=normalize_keyword(str(tag).lstrip("#"));
-                if len(key)<2 or key in generic: continue
+                if len(key)<2 or key in generic or not is_ai_related(key): continue
                 posts[key].add(note.id);authors[key].add(note.author_id or note.author_nickname)
         existing={x for x in db.scalars(select(XhsKeyword.normalized_keyword)).all()}
         ranked=[k for k in sorted(posts,key=lambda x:(len(posts[x]),len(authors[x])),reverse=True) if len(posts[k])>=3 and len(authors[k])>=2 and k not in existing][:20]
@@ -178,7 +185,7 @@ def generate_dynamic_keywords_task():
         created=[];tomorrow=utcnow().date()+timedelta(days=1)
         for value in normalized[:5]:
             key=normalize_keyword(value)
-            if key in existing or key in generic: continue
+            if key in existing or key in generic or not is_ai_related(key): continue
             db.add(XhsKeyword(keyword=value,normalized_keyword=key,keyword_type="derived",enabled=False,lifecycle_status="candidate",derived_evidence={"post_count":len(posts.get(key,set())),"author_count":len(authors.get(key,set())),"generated_at":utcnow().isoformat()},next_run_at=None))
             existing.add(key);created.append(value)
         db.commit();return {"candidates":len(ranked),"created":created,"run_date":tomorrow.isoformat()}

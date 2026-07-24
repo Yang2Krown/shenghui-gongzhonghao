@@ -213,7 +213,7 @@ def normalize_candidate(raw: dict, provider: str, rank: int) -> Candidate | None
     if not note_id: return None
     user = first(envelope, "user", "author", "note_card.user") or {}
     interact = first(envelope, "interact_info", "interactInfo", "note_card.interact_info") or {}
-    cover = remote_image_url(first(envelope, "cover.url_default", "cover.url", "cover_url", "image_list.0.url_default", "note_card.cover.url_default"))
+    cover = remote_image_url(first(envelope, "cover.url_default", "cover.url", "cover_url", "image_list.0.url_default", "image_list.0.url", "images_list.0.url", "images_list.0.url_default", "note_card.cover.url_default"))
     note_type = str(first(envelope, "type", "note_type", "note_card.type") or "").lower()
     note_type = "video" if "video" in note_type else "image" if note_type else None
     raw_url = first(envelope, "url", "share_url", "note_url") or first(raw, "url", "share_url", "note_url")
@@ -227,13 +227,13 @@ def normalize_candidate(raw: dict, provider: str, rank: int) -> Candidate | None
     return Candidate(
         note_id=str(note_id), title=str(first(envelope,"title","display_title","note_card.display_title") or ""),
         content=str(first(envelope,"desc","content","note_card.desc") or ""),
-        published_at=dt_value(first(envelope,"published_at","time","publish_time","note_card.time")) or search_publish_time(raw), note_type=note_type,
+        published_at=dt_value(first(envelope,"published_at","time","publish_time","timestamp","update_time","note_card.time","note_card.timestamp")) or search_publish_time(raw), note_type=note_type,
         author_id=str(first(user,"user_id","id","userid") or "") or None,
         author_nickname=str(first(user,"nickname","nick_name","name") or ""), author_bio=str(first(user,"desc","bio") or ""),
-        avatar_url=remote_image_url(first(user,"avatar","image")), cover_url=cover,
-        like_count=metric("liked_count","like_count","likedCount",fallback=("like_count","likes")),
-        collect_count=metric("collected_count","collect_count","collectedCount",fallback=("collect_count","collects")),
-        comment_count=metric("comment_count","commentCount",fallback=("comment_count","comments")),
+        avatar_url=remote_image_url(first(user,"avatar","image","images")), cover_url=cover,
+        like_count=metric("liked_count","like_count","likedCount",fallback=("like_count","likes","liked_count")),
+        collect_count=metric("collected_count","collect_count","collectedCount",fallback=("collect_count","collects","collected_count")),
+        comment_count=metric("comment_count","commentCount","comments_count",fallback=("comment_count","comments","comments_count")),
         share_count=metric("share_count","shared_count","shareCount",fallback=("share_count","shared_count","shares")),
         view_count=metric("view_count","viewCount",fallback=("view_count","views")),
         tags=[str(x.get("name") if isinstance(x,dict) else x) for x in (first(envelope,"tag_list","tags") or []) if x],
@@ -252,6 +252,28 @@ def unwrap_items(payload: Any) -> list[dict]:
     nested=data.get("data") if isinstance(data,dict) else None
     if isinstance(nested,(dict,list)):return unwrap_items(nested)
     return []
+
+
+def unwrap_detail(payload: Any, note_id: str) -> dict:
+    """把 TikHub/CLI 详情响应解包成可喂 normalize_candidate 的扁平映射。
+
+    TikHub web_v3 详情真实结构是 data.data.items[].note_card;CLI 详情则常是
+    单层 data 或直接给 note_card。统一穿过双层 data → items[0] → note_card,
+    并回写 note_id,保证下游能取到精确发布时间/点赞数。
+    """
+    if not isinstance(payload, dict): return {"note_id": note_id}
+    node: Any = payload
+    for _ in range(6):
+        if not isinstance(node, dict): break
+        inner = node.get("data")
+        if isinstance(inner, (dict, list)): node = inner; continue
+        break
+    if isinstance(node, dict):
+        items = node.get("items")
+        if isinstance(items, list) and items and isinstance(items[0], dict): node = items[0]
+    if isinstance(node, dict) and isinstance(node.get("note_card"), dict): node = node["note_card"]
+    result = node if isinstance(node, dict) else {}
+    return {**result, "note_id": note_id}
 
 
 def _find_note_mapping(payload: Any, depth: int = 0) -> dict | None:
@@ -459,14 +481,14 @@ async def hydrate(
     if needs_hydration(c):
         started=time.monotonic()
         try:
-            payload=await cli.detail(c); extra=normalize_candidate({**(payload.get("data",payload) if isinstance(payload,dict) else {}),"note_id":c.note_id}, FREE_PROVIDER, 99)
+            payload=await cli.detail(c); extra=normalize_candidate(unwrap_detail(payload, c.note_id), FREE_PROVIDER, 99)
             if extra: c.merge(extra)
             log_call(db,FREE_PROVIDER,"detail","success",run_id=run_id,note_id=c.note_id,started=started)
         except Exception as e: log_call(db,FREE_PROVIDER,"detail","failed",run_id=run_id,note_id=c.note_id,started=started,error=e)
     if needs_hydration(c) and allow_paid:
         started=time.monotonic()
         try:
-            consume_tikhub_quota(db,operation="detail"); payload=await tikhub.detail(c); extra=normalize_candidate({**(payload.get("data",payload) if isinstance(payload,dict) else {}),"note_id":c.note_id}, PAID_PROVIDER, 99)
+            consume_tikhub_quota(db,operation="detail"); payload=await tikhub.detail(c); extra=normalize_candidate(unwrap_detail(payload, c.note_id), PAID_PROVIDER, 99)
             if extra: c.merge(extra)
             log_call(db,PAID_PROVIDER,"detail","success",run_id=run_id,note_id=c.note_id,started=started)
         except Exception as e: log_call(db,PAID_PROVIDER,"detail","blocked" if isinstance(e,TikHubBudgetExhausted) else "failed",run_id=run_id,note_id=c.note_id,started=started,error=e)
@@ -571,7 +593,7 @@ def record_discoveries(db: Session, run_id: int, keyword_id: int, note: XhsNote,
         if not exists: db.add(XhsNoteDiscovery(note_id=note.id,keyword_id=keyword_id,run_id=run_id,provider=provider,provider_rank=provider_rank,discovered_at=now))
 
 
-async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = True, retry_existing: bool = False) -> dict:
+async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = True, retry_existing: bool = False, allow_cli: bool = True) -> dict:
     now=utcnow(); keyword=db.get(XhsKeyword,keyword_id)
     if not keyword or not keyword.enabled: raise ValueError("关键词不存在或已停用")
     run=db.execute(select(XhsKeywordRun).where(XhsKeywordRun.keyword_id==keyword.id,XhsKeywordRun.run_date==now.date(),XhsKeywordRun.wave=="manual")).scalar_one_or_none()
@@ -586,6 +608,9 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
     db.refresh(run); cli=CliProvider(); tikhub=TikHubProvider(); batches={FREE_PROVIDER:[],PAID_PROVIDER:[]}
     async def one(provider_name, provider):
         started=time.monotonic()
+        if provider_name==FREE_PROVIDER and not allow_cli:
+            log_call(db,provider_name,"search","skipped",run_id=run.id,started=started,request_count=0)
+            return [],None
         if provider_name==PAID_PROVIDER and not allow_paid:
             error=TikHubBudgetExhausted("本次运行仅执行免费链路")
             log_call(db,provider_name,"search","skipped",run_id=run.id,started=started,error=error,request_count=0)
@@ -599,7 +624,7 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
     # 两个同级来源每次都执行；任一失败不阻断另一来源。
     cli_result, tikhub_result = await asyncio.gather(one(FREE_PROVIDER,cli),one(PAID_PROVIDER,tikhub))
     batches[FREE_PROVIDER],cli_error=cli_result;batches[PAID_PROVIDER],tikhub_error=tikhub_result
-    run.cli_status="success" if not cli_error else "cooldown" if isinstance(cli_error,CliCoolingDown) else "failed";run.tikhub_status="skipped_free" if not allow_paid else "success" if not tikhub_error else "blocked_budget" if isinstance(tikhub_error,TikHubBudgetExhausted) else "failed";run.cli_raw_count=len(batches[FREE_PROVIDER]);run.tikhub_raw_count=len(batches[PAID_PROVIDER]);db.commit()
+    run.cli_status="skipped" if not allow_cli else "success" if not cli_error else "cooldown" if isinstance(cli_error,CliCoolingDown) else "failed";run.tikhub_status="skipped_free" if not allow_paid else "success" if not tikhub_error else "blocked_budget" if isinstance(tikhub_error,TikHubBudgetExhausted) else "failed";run.cli_raw_count=len(batches[FREE_PROVIDER]);run.tikhub_raw_count=len(batches[PAID_PROVIDER]);db.commit()
     merged=merge_provider_candidates(batches)
     run.merged_count=len(merged);rejections={"old":0,"low_like":0,"unknown_metric":0,"unknown_type":0,"core_incomplete":0,"rank_overflow":0};eligible=[]
     for c in merged.values():
@@ -622,7 +647,7 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
         for nid in selected_ids: cache_note_media_task.apply_async(args=[nid])
     except Exception:
         logger.warning("小红书媒体预缓存入队失败 keyword=%s notes=%d", keyword.keyword, len(selected_ids), exc_info=True)
-    effective_errors=[x for x in (cli_error,tikhub_error if allow_paid else None) if x]
+    effective_errors=[x for x in ((cli_error if allow_cli else None),tikhub_error if allow_paid else None) if x]
     daily=[c for c in merged.values() if collection_level(c.published_at,now)=="daily"]
     weekly=[c for c in merged.values() if collection_level(c.published_at,now)=="weekly"]
     rejections["_levels"]={
@@ -641,14 +666,14 @@ async def refresh_note_image(db: Session, note_identity: str, *, allow_paid: boo
     candidate=Candidate(note_id=note.note_id,title=note.title or "",content=note.content or "",published_at=note.published_at,note_type=note.note_type,author_id=note.author_id,author_nickname=note.author_nickname or "",avatar_url=note.avatar_url,cover_url=None,like_count=note.like_count,xsec_url=note.latest_xsec_url or note.stable_url)
     cli=CliProvider();provider_used="cli";started=time.monotonic()
     try:
-        payload=await cli.detail(candidate);extra=normalize_candidate({**(payload.get("data",payload) if isinstance(payload,dict) else {}),"note_id":note.note_id},FREE_PROVIDER,1)
+        payload=await cli.detail(candidate);extra=normalize_candidate(unwrap_detail(payload, note.note_id),FREE_PROVIDER,1)
         if extra:candidate.merge(extra)
         log_call(db,FREE_PROVIDER,"image_refresh","success",note_id=note.note_id,started=started)
     except Exception as free_error:
         log_call(db,FREE_PROVIDER,"image_refresh","failed",note_id=note.note_id,started=started,error=free_error)
         if not allow_paid:return {"refreshed":False,"paid_request":False,"reason":str(free_error)[:300]}
         provider_used="tikhub";started=time.monotonic();consume_tikhub_quota(db,operation="detail")
-        payload=await TikHubProvider().detail(candidate);extra=normalize_candidate({**(payload.get("data",payload) if isinstance(payload,dict) else {}),"note_id":note.note_id},PAID_PROVIDER,1)
+        payload=await TikHubProvider().detail(candidate);extra=normalize_candidate(unwrap_detail(payload, note.note_id),PAID_PROVIDER,1)
         if extra:candidate.merge(extra)
         log_call(db,PAID_PROVIDER,"image_refresh","success",note_id=note.note_id,started=started)
     if not candidate.cover_url:return {"refreshed":False,"paid_request":provider_used=="tikhub","reason":"来源未返回新封面 URL"}
