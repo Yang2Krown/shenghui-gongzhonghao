@@ -297,6 +297,12 @@
           /><button v-if="userStore.isSuperAdmin" @click="showAdd = true">
             新增基础词
           </button>
+          <button
+            v-if="userStore.isSuperAdmin"
+            :disabled="analyzeBusy"
+            title="对全部素材重建今日热榜 + 持续发酵话题"
+            @click="analyzeNow"
+          >{{ analyzeBusy ? "分析中…" : "立即分析" }}</button>
         </div>
       </div>
       <div class="kw-grid">
@@ -650,6 +656,7 @@ const userStore = useUserStore(),
   recoveryBusy = ref(""),
   recoveryResult = reactive({}),
   searchBusy = ref(""),
+  analyzeBusy = ref(false),
   imageRefreshFeedback = reactive({}),
   recoveryCenter = ref(null),
   tikhubPanel = ref(null),
@@ -1286,19 +1293,30 @@ const waitForKeywordRun = async (keywordId) => {
 };
 const searchNow = async (k) => {
   if (!userStore.isSuperAdmin) return ElMessage.warning("仅最高管理员可用");
+  let timeFilter;
   try {
-    await ElMessageBox.confirm(
-      `将对「${k.keyword}」通过 TikHub 付费接口实时采集，会产生费用。`,
+    // confirm=一周内(7天)；cancel(非关闭)=一天内(24h)；点 X 关闭=放弃
+    const action = await ElMessageBox.confirm(
+      `将对「${k.keyword}」通过 TikHub 付费接口实时采集，会产生费用。请选择采集时间范围。`,
       "确认立即搜索？",
-      { confirmButtonText: "立即搜索", cancelButtonText: "取消", type: "warning", lockScroll: false },
+      {
+        confirmButtonText: "近一周",
+        cancelButtonText: "近 24 小时",
+        distinguishCancelAndClose: true,
+        showCancelButton: true,
+        type: "warning",
+        lockScroll: false,
+      },
     );
-  } catch {
-    return;
+    timeFilter = action === "confirm" ? "一周内" : "一天内";
+  } catch (action) {
+    if (action === "cancel") timeFilter = "一天内";
+    else return; // close = 放弃
   }
   searchBusy.value = `kw-${k.id}`;
   try {
-    await api.post(`/admin/xhs-monitoring/keywords/${k.id}/retry-paid`);
-    ElMessage.success("已提交 TikHub 付费采集，正在等待结果…");
+    await api.post(`/admin/xhs-monitoring/keywords/${k.id}/retry-paid`, null, { params: { time_filter: timeFilter } });
+    ElMessage.success(`已提交 TikHub 付费采集（${timeFilter === "一天内" ? "近 24 小时" : "近一周"}），正在等待结果…`);
     await waitForKeywordRun(k.id);
   } catch (error) {
     if (error?.response?.status === 409) {
@@ -1309,6 +1327,27 @@ const searchNow = async (k) => {
     }
   } finally {
     searchBusy.value = "";
+  }
+};
+const analyzeNow = async () => {
+  if (!userStore.isSuperAdmin) return ElMessage.warning("仅最高管理员可用");
+  try {
+    await ElMessageBox.confirm(
+      "将对全部素材重建「今日热榜 + 持续发酵」话题分析。",
+      "确认立即分析？",
+      { confirmButtonText: "立即分析", cancelButtonText: "取消", type: "warning", lockScroll: false },
+    );
+  } catch {
+    return;
+  }
+  analyzeBusy.value = true;
+  try {
+    await api.post("/admin/xhs-monitoring/analyze-topics");
+    ElMessage.success("已提交全局话题分析，稍候刷新看板查看结果");
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || error?.message || "立即分析失败");
+  } finally {
+    analyzeBusy.value = false;
   }
 };
 const removeKeyword = async (k) => {

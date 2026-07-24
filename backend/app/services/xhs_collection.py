@@ -356,9 +356,10 @@ class TikHubProvider:
                 if acquired and await acquired.owned():await acquired.release()
             finally:await redis.aclose()
 
-    async def search(self, keyword: str) -> list[dict]:
-        # 按点赞最多排序，与 DAILY>200/WEEKLY>2000 的高赞素材门槛对齐；time_filter 一周内。
-        payload = await self._call(settings.TIKHUB_XHS_SEARCH_PATH, {"keyword": keyword, "sort_type": "popularity_descending", "note_type": "不限", "time_filter": "一周内", "page": 1, "source": "explore_feed", "ai_mode": 0})
+    async def search(self, keyword: str, time_filter: str = "一周内") -> list[dict]:
+        # 按点赞最多排序，与 DAILY>200/WEEKLY>2000 的高赞素材门槛对齐；time_filter 默认一周内，
+        # 手动立即搜索可指定「一天内」(24h)。
+        payload = await self._call(settings.TIKHUB_XHS_SEARCH_PATH, {"keyword": keyword, "sort_type": "popularity_descending", "note_type": "不限", "time_filter": time_filter, "page": 1, "source": "explore_feed", "ai_mode": 0})
         return unwrap_items(payload)[:settings.XHS_PROVIDER_CANDIDATE_LIMIT]
 
     async def detail(self, candidate: Candidate) -> dict:
@@ -594,7 +595,7 @@ def record_discoveries(db: Session, run_id: int, keyword_id: int, note: XhsNote,
         if not exists: db.add(XhsNoteDiscovery(note_id=note.id,keyword_id=keyword_id,run_id=run_id,provider=provider,provider_rank=provider_rank,discovered_at=now))
 
 
-async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = True, retry_existing: bool = False, allow_cli: bool = True) -> dict:
+async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = True, retry_existing: bool = False, allow_cli: bool = True, time_filter: str = "一周内") -> dict:
     now=utcnow(); keyword=db.get(XhsKeyword,keyword_id)
     if not keyword or not keyword.enabled: raise ValueError("关键词不存在或已停用")
     run=db.execute(select(XhsKeywordRun).where(XhsKeywordRun.keyword_id==keyword.id,XhsKeywordRun.run_date==now.date(),XhsKeywordRun.wave=="manual")).scalar_one_or_none()
@@ -619,7 +620,7 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
         try:
             if provider_name==PAID_PROVIDER:
                 consume_tikhub_quota(db,operation="search")
-            items=await provider.search(keyword.keyword);log_call(db,provider_name,"search","success",run_id=run.id,started=started);return items,None
+            items=await provider.search(keyword.keyword,time_filter=time_filter) if provider_name==PAID_PROVIDER else await provider.search(keyword.keyword);log_call(db,provider_name,"search","success",run_id=run.id,started=started);return items,None
         except Exception as e:
             log_call(db,provider_name,"search","blocked" if isinstance(e,TikHubBudgetExhausted) else "failed",run_id=run.id,started=started,error=e,request_count=0 if isinstance(e,TikHubBudgetExhausted) else 1);return [],e
     # 两个同级来源每次都执行；任一失败不阻断另一来源。

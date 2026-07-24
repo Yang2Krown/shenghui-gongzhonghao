@@ -594,11 +594,18 @@ async def retry_free(keyword_id:int,force:bool=False,admin:User=Depends(require_
 
 
 @admin_router.post("/keywords/{keyword_id}/retry-paid",status_code=202)
-async def retry_paid(keyword_id:int,admin:User=Depends(get_current_super_admin_user),db:AsyncSession=Depends(get_db)):
+async def retry_paid(keyword_id:int,time_filter:str=Query("一周内",pattern="^(一天内|一周内)$"),admin:User=Depends(get_current_super_admin_user),db:AsyncSession=Depends(get_db)):
     run=(await db.execute(select(XhsKeywordRun).where(XhsKeywordRun.keyword_id==keyword_id,XhsKeywordRun.run_date==utcnow().date()))).scalar_one_or_none()
     if run and run.status=="completed":raise HTTPException(409,"成功完成的关键词当天不允许再次搜索")
     # CLI 已 100% 被风控，付费重试只走 TikHub 第三方 API，不再并发本地 CLI。
-    task=collect_keyword_task.apply_async(args=[keyword_id,True,True,False]);db.add(AdminAuditLog(actor_user_id=admin.id,action="xhs_retry_paid",target_type="xhs_keyword",target_id=str(keyword_id),summary="最高管理员确认 TikHub 付费重试",metadata_json={"task_id":task.id}));await db.commit();return {"task_id":task.id,"paid":True}
+    task=collect_keyword_task.apply_async(args=[keyword_id,True,True,False,time_filter]);db.add(AdminAuditLog(actor_user_id=admin.id,action="xhs_retry_paid",target_type="xhs_keyword",target_id=str(keyword_id),summary=f"最高管理员确认 TikHub 付费重试({time_filter})",metadata_json={"task_id":task.id,"time_filter":time_filter}));await db.commit();return {"task_id":task.id,"paid":True,"time_filter":time_filter}
+
+
+@admin_router.post("/analyze-topics",status_code=202)
+async def analyze_topics(admin:User=Depends(get_current_super_admin_user),db:AsyncSession=Depends(get_db)):
+    """立即重建一次全局话题：今日热榜 + 持续发酵。仅最高管理员。"""
+    from app.tasks.xhs_tasks import rebuild_semantic_topics_task
+    task=rebuild_semantic_topics_task.apply_async(kwargs={"wave":"manual"});db.add(AdminAuditLog(actor_user_id=admin.id,action="xhs_analyze_topics",target_type="xhs_semantic_topic",target_id="all",summary="最高管理员手动触发全局话题分析",metadata_json={"task_id":task.id}));await db.commit();return {"task_id":task.id}
 
 
 @admin_router.post("/notes/{note_id}/refresh-image-free",status_code=202)
