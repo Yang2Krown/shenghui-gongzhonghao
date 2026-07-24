@@ -1319,12 +1319,7 @@ const searchNow = async (k) => {
     ElMessage.success(`已提交 TikHub 付费采集（${timeFilter === "一天内" ? "近 24 小时" : "近一周"}），正在等待结果…`);
     await waitForKeywordRun(k.id);
   } catch (error) {
-    if (error?.response?.status === 409) {
-      ElMessage.warning(error?.response?.data?.detail || "该词今天已成功采集");
-      await load();
-    } else {
-      ElMessage.error(error?.response?.data?.detail || error?.message || "立即搜索失败");
-    }
+    ElMessage.error(error?.response?.data?.detail || error?.message || "立即搜索失败");
   } finally {
     searchBusy.value = "";
   }
