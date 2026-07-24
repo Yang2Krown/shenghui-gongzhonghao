@@ -1,4 +1,4 @@
-"""小红书素材 demo（管理员可见）与后台监测接口。"""
+"""小红书素材库（xhs_topic 产品权益用户可读）与后台采集监测（admin）接口。"""
 import asyncio
 from datetime import datetime, timedelta
 import hashlib
@@ -19,6 +19,7 @@ from sqlalchemy.exc import OperationalError
 from app.api.deps import get_current_super_admin_user
 from app.core.admin_permissions import require_admin_permission
 from app.core.config import settings
+from app.core.product_access import PRODUCT_XHS_TOPIC, require_product_access
 from app.core.timezone import utcnow
 from app.db.session import get_db
 from app.models.admin_audit import AdminAuditLog
@@ -135,7 +136,7 @@ async def note_context(db:AsyncSession,note_ids:list[int])->dict[int,dict]:
 
 
 @router.get("/notes")
-async def list_notes(q:str|None=None,keyword:str|None=None,topic:str|None=None,semantic_topic_id:str|None=None,note_type:str="all",range:str=Query("7d",pattern="^(1d|3d|7d)$"),sort:str=Query("comprehensive",pattern="^(comprehensive|latest|likes|collects|comments)$"),page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),_admin:User=Depends(require_admin_permission("monitoring:read")),db:AsyncSession=Depends(get_db)):
+async def list_notes(q:str|None=None,keyword:str|None=None,topic:str|None=None,semantic_topic_id:str|None=None,note_type:str="all",range:str=Query("7d",pattern="^(1d|3d|7d)$"),sort:str=Query("comprehensive",pattern="^(comprehensive|latest|likes|collects|comments)$"),page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),_user:User=Depends(require_product_access(PRODUCT_XHS_TOPIC)),db:AsyncSession=Depends(get_db)):
     days={"1d":1,"3d":3,"7d":7}[range];now=utcnow();cutoff=now-timedelta(days=days)
     day_cutoff=now-timedelta(hours=24)
     range_eligibility=and_(
@@ -162,14 +163,14 @@ async def list_notes(q:str|None=None,keyword:str|None=None,topic:str|None=None,s
 
 
 @router.get("/notes/{note_id}")
-async def get_note(note_id:str,_admin:User=Depends(require_admin_permission("monitoring:read")),db:AsyncSession=Depends(get_db)):
+async def get_note(note_id:str,_user:User=Depends(require_product_access(PRODUCT_XHS_TOPIC)),db:AsyncSession=Depends(get_db)):
     now=utcnow();note=(await db.execute(select(XhsNote).where(XhsNote.note_id==note_id,eligibility_clause(now),XhsNote.quality_status.in_(PUBLIC_STATUSES)))).scalar_one_or_none()
     if not note:raise HTTPException(404,"素材不存在或不符合展示资格")
     ctx=await note_context(db,[note.id]);return note_payload(note,**ctx.get(note.id,{}))
 
 
 @router.get("/topic-boards")
-async def topic_boards(_admin:User=Depends(require_admin_permission("monitoring:read")),db:AsyncSession=Depends(get_db)):
+async def topic_boards(_user:User=Depends(require_product_access(PRODUCT_XHS_TOPIC)),db:AsyncSession=Depends(get_db)):
     now=utcnow()
     try: topics=(await db.scalars(select(XhsSemanticTopic).where(XhsSemanticTopic.status=="active").order_by(desc(XhsSemanticTopic.last_seen_at)))).all()
     except OperationalError:
@@ -310,7 +311,7 @@ class ImageFailureBody(BaseModel):
 
 
 @router.post("/notes/{note_id}/image-failures",status_code=202)
-async def report_image_failure(note_id:str,body:ImageFailureBody,admin:User=Depends(require_admin_permission("monitoring:read")),db:AsyncSession=Depends(get_db)):
+async def report_image_failure(note_id:str,body:ImageFailureBody,admin:User=Depends(require_product_access(PRODUCT_XHS_TOPIC)),db:AsyncSession=Depends(get_db)):
     note=(await db.execute(select(XhsNote).where(XhsNote.note_id==note_id))).scalar_one_or_none()
     if not note:raise HTTPException(404,"素材不存在")
     row=(await db.execute(select(XhsImageFailureReport).where(XhsImageFailureReport.note_id==note.id,XhsImageFailureReport.image_kind==body.image_kind,XhsImageFailureReport.failed_url==body.failed_url))).scalar_one_or_none()
