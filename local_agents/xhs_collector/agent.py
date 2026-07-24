@@ -20,16 +20,16 @@ import httpx
 import websockets
 
 from client import ServerClient
-from collector import RiskBlocked, XhsCollector
+from collector import AuthenticationExpired, RiskBlocked, XhsCollector
 from normalizer import normalize, unwrap
 from qr_login import LocalBrowserLogin, LocalQrLogin
+from risk import RiskBackoff
 from scheduling import build_daily_plan, build_two_wave_plan, recover_interrupted_slots, select_daily_keywords, slot_due, slot_expired
 from storage import LocalStore
 
-VERSION = "0.6.1"
+VERSION = "0.7.0"
 PLAN_STRATEGY = "all_day_base30_plus_summary_v7"
 LEGACY_PLAN_STRATEGY = PLAN_STRATEGY
-RISK_COOLDOWN_MINUTES = (8, 12)
 SERVICE = "com.midonghub.gzh.xhs-collector"
 APP_DIR = Path.home() / "Library/Application Support/GzhXhsCollector"
 CONFIG_PATH = APP_DIR / "config.json"
@@ -63,9 +63,13 @@ class CollectorAgent:
         self.token = keychain_get()
         self.server = ServerClient(self.config["server_url"], self.token)
         self.store = LocalStore(DB_PATH)
+        self.backoff = RiskBackoff(self.store)
         self.collector = XhsCollector(Path(__file__).resolve().parent)
         self.commands: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.pending_command_ids: set[str] = set()
         self.auth_cancel = threading.Event()
+        # 账号操作锁：采集与登录/验证/浏览器同步等一切触碰 XHS 会话或 Cookie 的
+        # 操作都在其下串行，避免并发读写 Cookie、并发打同一账号触发风控。
         self.collection_lock = asyncio.Lock()
         self.paused = asyncio.Event()
         saved_plan = self.today_plan()
@@ -88,6 +92,7 @@ class CollectorAgent:
         default_status = (
             "running" if self.running_keyword else
             "risk_blocked" if self.cookie_status == "verification_required" else
+            "needs_login" if self.cookie_status in {"expired", "missing"} else
             "paused" if plan and plan.get("paused") else "idle"
         )
         payload = {
@@ -125,6 +130,18 @@ class CollectorAgent:
         except Exception as exc:
             print(f"[progress] {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 
+    def send_command_status(self, command_id: str, payload: dict[str, Any], *, persist_on_failure: bool = False) -> bool:
+        """Authentication must keep running even when one status callback hits a transient 502/timeout."""
+        endpoint = f"/api/v1/xhs-agent/commands/{command_id}/status"
+        try:
+            self.server.command_status(command_id, payload)
+            return True
+        except Exception as exc:
+            print(f"[command-status] {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            if persist_on_failure:
+                self.store.enqueue(endpoint, payload)
+            return False
+
     async def interruptible_gap(self, seconds: float) -> None:
         deadline = asyncio.get_running_loop().time() + seconds
         while asyncio.get_running_loop().time() < deadline:
@@ -132,11 +149,25 @@ class CollectorAgent:
             await self.paused.wait()
             await asyncio.sleep(min(5, deadline - asyncio.get_running_loop().time()))
 
-    async def run_batch(self, keywords: list[dict[str, Any]], mode: str, command_id: str | None = None) -> dict[str, Any]:
+    async def run_batch(
+        self,
+        keywords: list[dict[str, Any]],
+        mode: str,
+        command_id: str | None = None,
+        *,
+        ignore_pause: bool = False,
+    ) -> dict[str, Any]:
         async with self.collection_lock:
-            return await self._run_batch(keywords, mode, command_id)
+            return await self._run_batch(keywords, mode, command_id, ignore_pause=ignore_pause)
 
-    async def _run_batch(self, keywords: list[dict[str, Any]], mode: str, command_id: str | None = None) -> dict[str, Any]:
+    async def _run_batch(
+        self,
+        keywords: list[dict[str, Any]],
+        mode: str,
+        command_id: str | None = None,
+        *,
+        ignore_pause: bool = False,
+    ) -> dict[str, Any]:
         if not keywords: return {"completed": 0, "failed": 0}
         self.stop_requested.clear()
         wave = str(keywords[0].get("wave") or "manual")
@@ -154,7 +185,8 @@ class CollectorAgent:
         try:
             for index, keyword in enumerate(keywords):
                 if self.stop_requested.is_set(): break
-                await self.paused.wait()
+                if not ignore_pause:
+                    await self.paused.wait()
                 self.running_keyword = keyword["keyword"]
                 await self.safe_progress(batch_id, {"status": "running", "current_keyword_id": keyword["id"], "completed_keywords": completed, "failed_keywords": failed})
                 try:
@@ -166,14 +198,23 @@ class CollectorAgent:
                     completed += 1
                     self.cookie_status = "valid"
                     self.store.set("cookie_status", self.cookie_status)
+                    self.backoff.on_success()
+                except AuthenticationExpired as exc:
+                    failed += 1
+                    last_error = f"{type(exc).__name__}: {str(exc)[:500]}"
+                    self.cookie_status = "expired"
+                    self.store.set("cookie_status", self.cookie_status)
+                    self.store.set("verification_url", None)
+                    self.paused.clear()
+                    await self.safe_upload(batch_id, {"keyword_id": keyword["id"], "idempotency_key": f"{local_key}:{keyword['id']}", "status": "failed", "error": str(exc), "notes": []})
+                    await self.safe_progress(batch_id, {"status": "failed", "current_keyword_id": keyword["id"], "completed_keywords": completed, "failed_keywords": failed, "error": str(exc)})
+                    await self.report_status("needs_login", str(exc))
+                    return {"completed": completed, "failed": failed, "auth_expired": True, "error": last_error}
                 except RiskBlocked as exc:
                     failed += 1
                     self.cookie_status = "verification_required"
                     self.store.set("cookie_status", self.cookie_status)
-                    self.store.set(
-                        "risk_cooldown_until",
-                        (datetime.now() + timedelta(minutes=random.randint(*RISK_COOLDOWN_MINUTES))).isoformat(timespec="minutes"),
-                    )
+                    self.backoff.on_block()
                     self.store.set("verification_url", exc.verification_url)
                     self.paused.clear()
                     await self.safe_upload(batch_id, {"keyword_id": keyword["id"], "idempotency_key": f"{local_key}:{keyword['id']}", "status": "risk_blocked", "error": str(exc), "notes": []})
@@ -198,9 +239,22 @@ class CollectorAgent:
         except OSError:
             pass
 
+    def persist_verification_in_plan(self, verification_url: str | None) -> dict | None:
+        """Keep the captcha URL in the plan consumed by the monitoring page."""
+        plan = self.today_plan()
+        if not plan:
+            return None
+        plan["risk_blocked"] = True
+        plan["paused"] = True
+        plan["pause_reason"] = "human_verification"
+        plan["risk_blocked_at"] = datetime.now().isoformat(timespec="seconds")
+        plan["verification_url"] = verification_url or self.store.get("verification_url")
+        self.save_plan(plan)
+        return plan
+
     def requeue_risk_slots(self, plan: dict[str, Any]) -> int:
         stored_resume = self.store.get("risk_cooldown_until")
-        resume_at = datetime.fromisoformat(stored_resume) if stored_resume else datetime.now() + timedelta(minutes=random.randint(*RISK_COOLDOWN_MINUTES))
+        resume_at = datetime.fromisoformat(stored_resume) if stored_resume else datetime.now() + timedelta(minutes=self.backoff.current_cooldown_minutes())
         count = 0
         for slot in plan.get("slots", []):
             if slot.get("status") != "risk_blocked": continue
@@ -218,9 +272,9 @@ class CollectorAgent:
         command_id = command["id"]
         command_type = command["command_type"]
         if command_type in {"test_keyword", "refresh_image"} and self.collection_lock.locked():
-            await asyncio.to_thread(self.server.command_status, command_id, {"status": "failed", "error": "本地采集节点正在执行其他批次，请等待或先停止"})
+            await asyncio.to_thread(self.send_command_status, command_id, {"status": "failed", "error": "本地采集节点正在执行其他批次，请等待或先停止"}, persist_on_failure=True)
             return
-        await asyncio.to_thread(self.server.command_status, command_id, {"status": "running"})
+        await asyncio.to_thread(self.send_command_status, command_id, {"status": "running"})
         try:
             if command_type == "pause":
                 self.paused.clear()
@@ -267,8 +321,16 @@ class CollectorAgent:
                 result = {"stopping": True, "cancelled_commands": cancelled}
             elif command_type == "test_keyword":
                 payload = command.get("payload") or {}
-                result = await self.run_batch([{"id": payload["keyword_id"], "keyword": payload["keyword"], "group": None}], "test", command_id)
+                result = await self.run_batch(
+                    [{"id": payload["keyword_id"], "keyword": payload["keyword"], "group": None}],
+                    "test",
+                    command_id,
+                    ignore_pause=bool(payload.get("force_cooldown_override")),
+                )
                 plan = self.today_plan()
+                if result.get("risk_blocked"):
+                    plan = self.persist_verification_in_plan(result.get("verification_url"))
+                    await self.report_status("risk_blocked", "小红书要求完成人机验证")
                 if plan:
                     slot = next((item for item in plan.get("slots", []) if int(item.get("keyword_id") or 0) == int(payload["keyword_id"]) and item.get("status") == "failed"), None)
                     if slot and result.get("completed") and not result.get("failed"):
@@ -288,7 +350,8 @@ class CollectorAgent:
                 url = str(payload.get("url") or "")
                 if not note_id or not url:
                     raise RuntimeError("封面刷新参数不完整")
-                response = await asyncio.to_thread(self.collector._run_cli, "read", url)
+                async with self.collection_lock:
+                    response = await asyncio.to_thread(self.collector._read, url)
                 rows = unwrap(response)
                 raw = rows[0] if rows else response
                 item = normalize(raw, 1) if isinstance(raw, dict) else None
@@ -301,45 +364,59 @@ class CollectorAgent:
                 }
             elif command_type in {"login", "browser_login", "verify_session"}:
                 def update_login(value):
-                    self.server.command_status(command_id, {"status": "running", "result": value})
+                    self.send_command_status(command_id, {"status": "running", "result": value})
                 self.auth_cancel.clear()
-                if command_type == "verify_session":
-                    try:
-                        await asyncio.to_thread(self.collector._run_cli, "status", timeout_seconds=30)
-                        result = {"status": "authenticated", "source": "captcha", "message": "人机验证已通过，当前 Cookie 继续使用"}
-                    except RiskBlocked as exc:
-                        result = {
-                            "status": "verification_required",
-                            "message": "小红书仍要求完成人机验证",
-                            "verification_url": exc.verification_url,
-                        }
-                        if not self.store.get("risk_cooldown_until"):
-                            self.store.set(
-                                "risk_cooldown_until",
-                                (datetime.now() + timedelta(minutes=random.randint(*RISK_COOLDOWN_MINUTES))).isoformat(timespec="minutes"),
-                            )
-                        self.store.set("verification_url", exc.verification_url)
-                        plan = self.today_plan()
-                        if plan:
-                            plan["verification_url"] = exc.verification_url
-                            plan["risk_blocked"] = True
-                            plan["paused"] = True
-                            plan["pause_reason"] = "human_verification"
-                            self.save_plan(plan)
-                        await self.report_status("risk_blocked", str(exc))
-                elif command_type == "browser_login":
-                    result = await asyncio.to_thread(LocalBrowserLogin().run, update_login)
-                else:
-                    result = await asyncio.to_thread(LocalQrLogin().run, update_login, 240, self.auth_cancel)
-                if result.get("status") == "verification_required":
+                # 登录/验证/浏览器同步与采集在同一把账号操作锁下串行：
+                # 采集期间登录会等锁，登录期间采集不会并发打同一账号或并发写 Cookie。
+                async with self.collection_lock:
+                    if command_type == "verify_session":
+                        try:
+                            await asyncio.to_thread(self.collector.check_status)
+                            result = {"status": "authenticated", "source": "captcha", "message": "人机验证已通过，当前 Cookie 继续使用"}
+                        except AuthenticationExpired:
+                            self.cookie_status = "expired"
+                            self.store.set("cookie_status", self.cookie_status)
+                            result = {
+                                "status": "expired",
+                                "message": "当前 Cookie 已失效，请选择扫码登录或浏览器同步",
+                            }
+                        except RiskBlocked as exc:
+                            result = {
+                                "status": "verification_required",
+                                "message": "小红书仍要求完成人机验证",
+                                "verification_url": exc.verification_url,
+                            }
+                            self.backoff.on_block()
+                            self.store.set("verification_url", exc.verification_url)
+                            plan = self.today_plan()
+                            if plan:
+                                plan["verification_url"] = exc.verification_url
+                                plan["risk_blocked"] = True
+                                plan["paused"] = True
+                                plan["pause_reason"] = "human_verification"
+                                self.save_plan(plan)
+                            await self.report_status("risk_blocked", str(exc))
+                    elif command_type == "browser_login":
+                        result = await asyncio.to_thread(LocalBrowserLogin().run, update_login)
+                    else:
+                        result = await asyncio.to_thread(LocalQrLogin().run, update_login, 240, self.auth_cancel)
+                if result.get("status") == "cancelled":
+                    await asyncio.to_thread(self.send_command_status, command_id, {"status": "cancelled", "result": result}, persist_on_failure=True)
+                    return
+                if result.get("status") in {"verification_required", "expired"}:
                     pass
                 elif result.get("status") != "authenticated":
                     raise RuntimeError(result.get("message") or "本地扫码登录失败")
                 else:
                     self.cookie_status = "valid"
                     self.store.set("cookie_status", self.cookie_status)
+                    self.collector.reset_session()
+                    self.backoff.on_manual_verify()
                     plan = self.today_plan()
                     if plan:
+                        if plan.get("pause_reason") == "account_login":
+                            plan["paused"] = False
+                            plan["pause_reason"] = None
                         self.requeue_risk_slots(plan)
                         stored_resume = self.store.get("risk_cooldown_until")
                         resume_after = datetime.fromisoformat(stored_resume) if stored_resume else None
@@ -357,13 +434,17 @@ class CollectorAgent:
                         self.paused.set()
                     await self.report_status("paused" if plan and plan.get("paused") else "idle")
             else: raise RuntimeError("未知命令")
-            await asyncio.to_thread(self.server.command_status, command_id, {"status": "succeeded", "result": result})
+            await asyncio.to_thread(self.send_command_status, command_id, {"status": "succeeded", "result": result}, persist_on_failure=True)
         except Exception as exc:
-            await asyncio.to_thread(self.server.command_status, command_id, {"status": "failed", "error": str(exc)})
+            await asyncio.to_thread(self.send_command_status, command_id, {"status": "failed", "error": str(exc)}, persist_on_failure=True)
 
     async def command_worker(self) -> None:
         while True:
-            await self.handle_command(await self.commands.get())
+            command = await self.commands.get()
+            try:
+                await self.handle_command(command)
+            finally:
+                self.pending_command_ids.discard(str(command.get("id") or ""))
 
     async def scheduler(self) -> None:
         manifest = None
@@ -412,10 +493,13 @@ class CollectorAgent:
                     self.save_plan(plan)
                     await self.report_status(last_error="检测到未正常收尾的采集任务，已自动标记失败")
 
-                if self.cookie_status == "verification_required" and not plan.get("paused"):
+                if self.cookie_status == "verification_required" and (
+                    not plan.get("paused") or not plan.get("verification_url")
+                ):
                     plan["risk_blocked"] = True
                     plan["paused"] = True
                     plan["pause_reason"] = "human_verification"
+                    plan["verification_url"] = self.store.get("verification_url")
                     self.paused.clear()
                     self.save_plan(plan)
                     await self.report_status("risk_blocked")
@@ -464,6 +548,13 @@ class CollectorAgent:
                             plan["pause_reason"] = "human_verification"
                             plan["risk_blocked_at"] = datetime.now().isoformat(timespec="seconds")
                             plan["verification_url"] = result.get("verification_url")
+                        elif result and result.get("auth_expired"):
+                            due["status"] = "failed"
+                            due["error"] = result.get("error") or "小红书登录已失效"
+                            plan["paused"] = True
+                            plan["pause_reason"] = "account_login"
+                            plan["risk_blocked"] = False
+                            plan["verification_url"] = None
                         elif result and result.get("failed"):
                             due["status"] = "failed"
                         elif result:
@@ -495,6 +586,11 @@ class CollectorAgent:
                             if command.get("command_type") in {"pause", "resume", "stop"}:
                                 asyncio.create_task(self.handle_command(command))
                             else:
+                                command_id = str(command.get("id") or "")
+                                if command_id and command_id in self.pending_command_ids:
+                                    continue
+                                if command_id:
+                                    self.pending_command_ids.add(command_id)
                                 if command.get("command_type") in {"login", "browser_login", "verify_session"}:
                                     self.auth_cancel.set()
                                 await self.commands.put(command)

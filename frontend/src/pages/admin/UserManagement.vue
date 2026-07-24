@@ -334,7 +334,8 @@ const savingProducts = ref(false)
 const productLabels = {
   creation_tool: '创作工具',
   potential_commercial: '潜在商单',
-  practical_camp: '实战营'
+  practical_camp: '实战营',
+  xhs_topic: '小红书选题'
 }
 const productOptions = Object.entries(productLabels).map(([value, label]) => ({ value, label }))
 

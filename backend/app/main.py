@@ -17,6 +17,7 @@ from app.core.product_access import (
     PRODUCT_LABELS,
     PRODUCT_POTENTIAL_COMMERCIAL,
     PRODUCT_PRACTICAL_CAMP,
+    PRODUCT_XHS_TOPIC,
     has_product_access,
     is_admin_user,
 )
@@ -177,6 +178,18 @@ def _required_product_for_request(request: Request) -> Optional[str]:
     if relative.startswith("/courses"):
         return PRODUCT_PRACTICAL_CAMP
     if relative.startswith((
+        "/xhs-publish",
+        "/xhs-debug",
+        "/xhs-agent",
+        "/wechat-to-xhs",
+    )):
+        # 创作类接口（公众号转小红书、小红书发布/调试/本地采集节点）仍归创作工具。
+        return PRODUCT_CREATION_TOOL
+    if relative.startswith("/xhs"):
+        # 小红书素材库只读选题接口（/xhs/notes、/xhs/topic-boards、/xhs/topics、/xhs/media 等），
+        # 灰测期由管理员单独开通「小红书选题」权益。
+        return PRODUCT_XHS_TOPIC
+    if relative.startswith((
         "/creations",
         "/ai",
         "/styles",
@@ -188,12 +201,8 @@ def _required_product_for_request(request: Request) -> Optional[str]:
         "/title-generation",
         "/title-munger",
         "/standalone-title",
-        "/wechat-to-xhs",
-        "/xhs",
         "/generation-records",
         "/image-proxy",
-        "/xhs-publish",
-        "/xhs-debug",
         "/creation-tools",
         "/content-transform",
         "/content-imitate",

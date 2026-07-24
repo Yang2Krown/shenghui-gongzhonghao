@@ -89,7 +89,7 @@ class UserMembershipUpdateRequest(BaseModel):
 
 
 class UserProductAccessUpdateRequest(BaseModel):
-    product_access: list[str] = Field(default_factory=list, description="已开通产品：creation_tool/potential_commercial/practical_camp")
+    product_access: list[str] = Field(default_factory=list, description="已开通产品：creation_tool/potential_commercial/practical_camp/xhs_topic")
     reason: Optional[str] = Field(None, max_length=1000, description="操作原因")
 
 

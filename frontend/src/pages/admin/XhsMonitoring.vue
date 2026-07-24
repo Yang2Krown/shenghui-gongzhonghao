@@ -32,39 +32,6 @@
         >
       </article>
       <article>
-        <span>TikHub 今日共享额度</span
-        ><strong>{{ data.quota.used }} / {{ data.quota.limit }}</strong
-        ><i
-          ><b
-            class="clay"
-            :style="{ width: percent(data.quota.used, data.quota.limit) + '%' }"
-          ></b></i
-        ><small
-          >剩余 {{ data.quota.remaining }} · 预留搜索
-          {{ data.quota.reserved_searches }} · 预计 ¥{{
-            data.quota.estimated_cost_cny
-          }}</small
-        >
-      </article>
-      <article>
-        <span>CLI 最近成功率</span
-        ><strong>{{ rate(data.providers.cli.success_rate) }}</strong
-        ><i
-          ><b
-            :style="{ width: (data.providers.cli.success_rate || 0) + '%' }"
-          ></b></i
-        ><small
-          >v{{ data.providers.cli.version || "未安装" }} · Cookie
-          {{
-            data.providers.cli.cookie_configured ? "已挂载" : "未配置"
-          }}<template v-if="data.providers.cli.cooldown_remaining_seconds">
-            · 剩余冷却
-            {{ cooldownMinutes(data.providers.cli.cooldown_remaining_seconds) }}
-            分钟</template
-          ></small
-        >
-      </article>
-      <article>
         <span>远程图片异常</span
         ><strong>{{ data.image_health.open_reports }}</strong
         ><i
@@ -92,18 +59,31 @@
         >
           去处理</button
         ><button
-          v-if="a.key === 'cli_auth' && userStore.isSuperAdmin"
+          v-else-if="a.key === 'tikhub_quota' && userStore.isSuperAdmin"
           class="alert-action"
-          @click="startCliAuth"
+          @click="scrollToTikhub"
         >
-          重新扫码
-        </button>
+          去提额</button
+        >
       </div>
       <div v-if="!data.alerts.length" class="ok">
         正常 · 当前没有小红书采集告警
       </div>
     </div>
-    <article v-if="primaryAgent" class="panel recovery-center">
+    <section v-if="data" :class="['health-banner', healthTone]">
+      <div class="health-banner-main">
+        <span class="health-dot"></span>
+        <div>
+          <strong>{{ healthTitle }}</strong>
+          <p>{{ healthSubtitle }}</p>
+        </div>
+      </div>
+      <div class="health-banner-side">
+        <span v-if="primaryAgent">采集窗口 {{ planWindow }} · 今日 {{ planCompleted }}/{{ planTotal }}</span>
+        <button v-if="healthTone === 'bad'" class="banner-action" @click="scrollToRecovery">去处理</button>
+      </div>
+    </section>
+    <article v-if="data" ref="recoveryCenter" class="panel recovery-center">
       <div class="recovery-head">
         <div>
           <div class="kicker">INCIDENT RECOVERY</div>
@@ -125,11 +105,80 @@
             :disabled="recoveryBusy === item.key || !canAgentCollect || !!activeBatch || (manualRetryWaitMinutes > 0 && !userStore.isSuperAdmin)"
             @click="retryFailedSlot(item.slot)"
           >{{ recoveryBusy === item.key ? "正在重试…" : manualRetryWaitMinutes > 0 ? userStore.isSuperAdmin ? `跳过冷却并重试` : `安全冷却 ${manualRetryWaitMinutes} 分钟` : "重新执行这个词" }}</button>
-          <button v-else-if="item.action === 'login'" :disabled="!primaryAgent.connected" @click="openAgentVerification">打开人工验证</button>
-          <button v-else @click="refresh">重新检测状态</button>
+          <button v-else-if="item.action === 'pair'" @click="createAgentPairing">生成绑定码</button>
+          <button v-else-if="item.action === 'login' && primaryAgent" :disabled="!primaryAgent.connected" @click="openAgentVerification">打开人工验证</button>
+          <button v-else-if="item.action !== 'login'" @click="refresh">重新检测状态</button>
         </section>
       </div>
       <div v-else class="recovery-ok"><strong>采集链路正常</strong><span>本地节点在线、Cookie 正常，今天没有待处理失败。</span></div>
+    </article>
+    <article v-if="data && data.tikhub" ref="tikhubPanel" class="panel tikhub-panel">
+      <div class="panel-head">
+        <div>
+          <div class="kicker">PAID CHANNEL · TIKHUB</div>
+          <h2>TikHub 付费通道</h2>
+          <p>配额、成本与调用健康；CLI 被风控时这是付费兜底来源</p>
+        </div>
+        <div class="tikhub-head-side">
+          <span :class="['tikhub-token-badge', data.tikhub.token_configured ? 'ok' : 'bad']">
+            {{ data.tikhub.token_configured ? "Token 已配置" : "Token 未配置" }}
+          </span>
+          <button v-if="userStore.isSuperAdmin" class="quiet" @click="openQuotaEditor">调整每日额度</button>
+        </div>
+      </div>
+      <div class="tikhub-grid">
+        <div class="tikhub-quota-card">
+          <small>今日额度</small>
+          <strong>{{ data.tikhub.today.used }}<em>/ {{ data.tikhub.today.limit }}</em></strong>
+          <i><b :class="{ warn: quotaPercent(data.tikhub.today) >= 80 }" :style="{ width: quotaPercent(data.tikhub.today) + '%' }"></b></i>
+          <span class="tikhub-quota-sub">剩余 {{ data.tikhub.today.remaining }} · 预留搜索 {{ data.tikhub.today.reserved_searches }}</span>
+        </div>
+        <div class="tikhub-cost-card">
+          <small>今日成本</small>
+          <strong>¥{{ (data.tikhub.today.estimated_cost_cny || 0).toFixed(2) }}</strong>
+          <span class="tikhub-quota-sub">累计 ¥{{ (data.tikhub.totals.total_cost || 0).toFixed(2) }} · {{ data.tikhub.totals.total_calls }} 次</span>
+        </div>
+        <div class="tikhub-trend-card">
+          <small>近 7 天成本</small>
+          <svg viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true">
+            <polyline v-if="tikhubCostSparkline" :points="tikhubCostSparkline" fill="none" stroke="var(--pine,#35695a)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" />
+          </svg>
+          <span class="tikhub-quota-sub">{{ tikhubCostSummary }}</span>
+        </div>
+        <div class="tikhub-op-card">
+          <small>今日按操作</small>
+          <p v-for="op in data.tikhub.by_operation" :key="op.operation">
+            <span>{{ opLabel(op.operation) }}</span><b>{{ op.count }} 次 · ¥{{ op.cost.toFixed(2) }}</b>
+          </p>
+          <p v-if="!data.tikhub.by_operation.length" class="tikhub-op-empty">今日暂无付费调用</p>
+        </div>
+      </div>
+      <div class="tikhub-calls">
+        <div class="tikhub-calls-head"><strong>付费调用明细</strong><span>仅 TikHub 通道,含每笔成本</span></div>
+        <div class="table table-scroll tikhub-calls-table">
+          <table>
+            <thead>
+              <tr><th>时间</th><th>操作</th><th>状态</th><th>成本</th><th>延迟</th><th>错误</th></tr>
+            </thead>
+            <tbody>
+              <template v-for="c in tikhubCalls" :key="c.id">
+                <tr :class="{ clickable: c.error_message }" @click="toggleCallExpand(c.id)">
+                  <td>{{ time(c.created_at) }}</td>
+                  <td>{{ opLabel(c.operation) }}</td>
+                  <td><em :class="{ bad: c.status !== 'success' }">{{ status(c.status) }}</em></td>
+                  <td>{{ c.status === 'success' && c.estimated_cost ? '¥' + c.estimated_cost.toFixed(3) : '—' }}</td>
+                  <td>{{ c.latency_ms == null ? '—' : c.latency_ms + 'ms' }}</td>
+                  <td class="err">{{ callError(c) }}</td>
+                </tr>
+                <tr v-if="expandedCall === c.id && c.error_message" class="call-detail">
+                  <td colspan="6">{{ c.error_message }}</td>
+                </tr>
+              </template>
+              <tr v-if="!tikhubCalls.length"><td colspan="6">近 24 小时暂无 TikHub 调用</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </article>
     <article v-if="data" class="panel agent-panel">
       <div class="panel-head">
@@ -180,7 +229,7 @@
 
         <div class="agent-facts">
           <div><small>本地账号</small><strong>{{ agentCookieLabel(primaryAgent.cookie_status) }}</strong><span>Cookie 仅保存在 Mac</span></div>
-          <div><small>今日关键词</small><strong>{{ todayPlan ? `${todayPlan.base_count} + ${todayPlan.derived_count}` : "正在生成" }}</strong><span>基础 30 词 + 总结词 · 全天分散执行</span></div>
+          <div><small>今日关键词</small><strong>{{ todayPlan ? `${todayPlan.base_count} + ${todayPlan.derived_count}` : "正在生成" }}</strong><span>窗口 {{ planWindow }} · 全天分散执行</span></div>
           <div><small>{{ runningPlanSlot ? "当前任务" : "下一次" }}</small><strong>{{ runningPlanSlot ? "执行中" : nextPendingSlot ? slotTime(nextPendingSlot) : "今日已结束" }}</strong><span>{{ runningPlanSlot?.keyword || nextPendingSlot?.keyword || "没有待执行关键词" }}</span></div>
           <div><small>今日进度</small><strong>{{ planCompleted }} / {{ planTotal }}</strong><span>跳过 {{ planSkipped }} · 剩余 {{ planPending }}</span></div>
         </div>
@@ -210,6 +259,8 @@
       <div v-if="primaryAgent" class="agent-command-bar">
         <div class="command-copy"><strong>全天自动计划</strong><span>Mac 保持开机即可，无需手动执行整组</span></div>
         <div class="agent-utilities">
+          <button class="utility" @click="openSchedule">采集策略</button>
+          <span class="utility-divider"></span>
           <button class="utility" :disabled="!primaryAgent.connected || !!activeBatch" @click="startLocalLogin">更换本地账号</button>
           <span class="utility-divider"></span>
           <button v-if="!todayPlan?.paused" class="utility" :disabled="!primaryAgent.connected || todayPlan?.stopped" @click="sendAgentCommand('pause')">暂停今日计划</button>
@@ -248,6 +299,39 @@
         </div>
       </div>
     </section>
+    <section v-if="data" class="panel trends-panel">
+      <div class="panel-head">
+        <div>
+          <div class="kicker">TRENDS</div>
+          <h2>近 {{ trendDays }} 天采集趋势</h2>
+          <p>成功率、入库量与风控(验证码)事件，按天聚合</p>
+        </div>
+        <div class="trend-tools">
+          <button v-for="d in [7, 14, 30]" :key="d" :class="['trend-range', { active: trendDays === d }]" @click="setTrendDays(d)">{{ d }} 天</button>
+        </div>
+      </div>
+      <div v-if="trendSeries.length" class="trends-grid">
+        <figure class="trend-card">
+          <figcaption>采集成功率<small>{{ trendSummary.success }}</small></figcaption>
+          <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+            <polyline v-if="trendPaths.success" :points="trendPaths.success" fill="none" stroke="var(--pine,#35695a)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />
+          </svg>
+        </figure>
+        <figure class="trend-card">
+          <figcaption>每日入库素材<small>{{ trendSummary.notes }}</small></figcaption>
+          <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+            <polyline v-if="trendPaths.notes" :points="trendPaths.notes" fill="none" stroke="var(--pine,#35695a)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />
+          </svg>
+        </figure>
+        <figure class="trend-card">
+          <figcaption>风控(验证码)事件<small>{{ trendSummary.captcha }}</small></figcaption>
+          <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+            <polyline v-if="trendPaths.captcha" :points="trendPaths.captcha" fill="none" stroke="var(--clay,#c0735a)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />
+          </svg>
+        </figure>
+      </div>
+      <p v-else class="trend-empty">暂无历史趋势数据，采集运行几天后自动生成。</p>
+    </section>
     <div v-if="data" class="grid">
       <article class="panel runs">
         <div class="panel-head">
@@ -262,8 +346,6 @@
               <tr>
                 <th>关键词</th>
                 <th>计划类型</th>
-                <th>TikHub</th>
-                <th>CLI</th>
                 <th>搜索 / 解析</th>
                 <th>今日合格 / 一周合格 / 入库</th>
                 <th>状态</th>
@@ -280,14 +362,6 @@
                 </td>
                 <td>{{ row.keyword_type === "base" ? "每日基础" : "随机总结" }}</td>
                 <td>
-                  {{ status(row.tikhub_status)
-                  }}<small>{{ row.tikhub_raw_count }} 条</small>
-                </td>
-                <td>
-                  {{ status(row.cli_status)
-                  }}<small>{{ cliResultLabel(row) }}</small>
-                </td>
-                <td>
                   {{ searchParseLabel(row) }}
                 </td>
                 <td>{{ filterResultLabel(row) }}</td>
@@ -301,12 +375,11 @@
                   <div class="row-actions">
                     <button class="link" @click="openRunNotes(row)">明细</button>
                     <button v-if="row.status !== 'completed'" class="link" :disabled="!canAgentCollect || !!activeBatch" @click="testKeywordWithAgent(row.keyword_id)">本地测试</button>
-                    <button v-if="userStore.isSuperAdmin && row.status !== 'completed'" class="link paid" @click="retry(row, true)">付费刷新</button>
                   </div>
                 </td>
               </tr>
               <tr v-if="!runRows.length">
-                <td colspan="8">今日尚无执行记录</td>
+                <td colspan="6">今日尚无执行记录</td>
               </tr>
             </tbody>
           </table>
@@ -314,45 +387,13 @@
       </article>
       <aside>
         <article class="panel health">
-          <h2>来源健康</h2>
+          <h2>今日淘汰原因</h2>
+          <p class="health-intro">搜索、解析、时间与点赞规则过滤掉的笔记，按原因归类。</p>
           <div>
-            <b>TikHub</b
-            ><em :class="data.providers.tikhub.status">{{
-              rate(data.providers.tikhub.success_rate)
-            }}</em>
-            <p>搜索与详情共用 100 次硬上限；达到上限后 CLI 免费链路继续。</p>
-          </div>
-          <div>
-            <b>xiaohongshu-cli</b
-            ><em
-              :class="
-                data.providers.cli.auth_status === 'expired'
-                  ? 'critical'
-                  : data.providers.cli.status
-              "
-              >{{ cliAuthLabel(data.providers.cli) }}</em
-            >
-            <p>
-              锁定 0.6.4 · 一周内搜索 · 今日 &gt; 200 / 一周 &gt; 2000 · 最多点赞 · 全局并发
-              1。验证码冷却最长 10 分钟，重新扫码可立即解除。
-            </p>
-            <button
-              v-if="userStore.isSuperAdmin"
-              class="auth-entry"
-              @click="startCliAuth"
-            >
-              {{
-                data.providers.cli.auth_status === "expired"
-                  ? "重新扫码登录"
-                  : "更新扫码登录"
-              }}
-            </button>
-          </div>
-          <div>
-            <b>淘汰原因</b>
             <p v-for="(count, key) in data.rejections" :key="key">
               {{ reason(key) }} <strong>{{ count }}</strong>
             </p>
+            <p v-if="!Object.keys(data.rejections || {}).length" class="health-empty">今日暂无淘汰记录</p>
           </div>
         </article>
       </aside>
@@ -388,7 +429,12 @@
           </div>
           <small>近次产出 {{ k.last_yield_count || 0 }} 篇 · 连续零产出 {{ k.zero_yield_streak || 0 }} 天<span v-if="k.quarantine_reason"> · {{ k.quarantine_reason }}</span></small>
           <div class="kw-actions">
-            <button @click="searchNow(k)">立即搜索</button
+            <button
+              :disabled="searchBusy === `kw-${k.id}` || !userStore.isSuperAdmin"
+              :title="userStore.isSuperAdmin ? '通过 TikHub 付费接口实时采集' : '仅最高管理员可用'"
+              @click="searchNow(k)"
+              >{{ searchBusy === `kw-${k.id}` ? "搜索中…" : "立即搜索" }}</button
+            ><button @click="openKeywordHistory(k)">历史</button
             ><template v-if="userStore.isSuperAdmin"
               ><button @click="openEdit(k)">修改</button
               ><button @click="toggle(k)">
@@ -412,7 +458,7 @@
       <div class="panel-head">
         <div>
           <h2>最近请求审计</h2>
-          <p>不记录 Token 或 Cookie；费用按配置单价估算</p>
+          <p>本地采集节点的请求记录；不记录 Token 或 Cookie</p>
         </div>
       </div>
       <div class="table table-scroll table-audit">
@@ -424,8 +470,6 @@
               <th>操作</th>
               <th>状态</th>
               <th>延迟</th>
-              <th>付费请求</th>
-              <th>预计费用</th>
               <th>错误</th>
             </tr>
           </thead>
@@ -436,8 +480,6 @@
               <td>{{ c.operation }}</td>
               <td>{{ status(c.status) }}</td>
               <td>{{ c.latency_ms == null ? "—" : c.latency_ms + "ms" }}</td>
-              <td>{{ c.paid_request ? "是" : "否" }}</td>
-              <td>¥{{ c.estimated_cost }}</td>
               <td :title="c.error_message || ''">{{ callError(c) }}</td>
             </tr>
           </tbody>
@@ -584,42 +626,6 @@
         </table>
       </div></el-dialog
     >
-    <el-dialog
-      v-model="showCliAuth"
-      title="重新授权小红书采集"
-      width="430px"
-      append-to-body
-      :lock-scroll="false"
-      :close-on-click-modal="false"
-      @closed="cancelCliAuth"
-      ><div class="qr-auth">
-        <div v-if="authCreating" class="qr-placeholder">正在获取二维码…</div>
-        <canvas
-          v-show="!authCreating && authState !== 'authenticated'"
-          ref="authQrCanvas"
-        ></canvas>
-        <div v-if="authState === 'authenticated'" class="auth-success">
-          <strong>授权成功</strong
-          ><span>新 Cookie 已保存到服务器，CLI 采集已恢复</span>
-        </div>
-        <p :class="['auth-state', authState]">{{ authMessage }}</p>
-        <div v-if="authState === 'verification_required'" class="auth-verify">
-          <a :href="authVerificationUrl" target="_blank" rel="noopener noreferrer"
-            >打开小红书人机验证</a
-          ><button class="retry-auth" @click="resumeCliAuth">我已完成，继续检查</button>
-          <small>验证页会在新窗口打开；完成后回到这里继续，不需要重新扫码。</small>
-        </div>
-        <small v-if="authState === 'waiting' || authState === 'scanned'"
-          >请使用小红书 App 扫码并在手机上确认；二维码 4 分钟内有效。</small
-        ><button
-          v-if="authState === 'failed' || authState === 'expired'"
-          class="retry-auth"
-          @click="startCliAuth"
-        >
-          重新获取二维码
-        </button>
-      </div></el-dialog
-    >
     <el-dialog v-model="showAgentPairing" title="绑定本地采集节点" width="460px" append-to-body :lock-scroll="false">
       <div class="pairing-box">
         <p>绑定码 10 分钟内有效。安装程序只需运行一次。</p>
@@ -632,14 +638,27 @@
       </div>
       <template #footer><el-button @click="showAgentPairing = false">关闭</el-button></template>
     </el-dialog>
-    <el-dialog v-model="showLocalLogin" title="本地节点账号验证" width="430px" append-to-body :lock-scroll="false" @closed="stopLocalLoginPoll">
+    <el-dialog v-model="showLocalLogin" title="本地 Mac 小红书登录" width="460px" append-to-body :lock-scroll="false" :close-on-click-modal="false" @closed="stopLocalLoginPoll">
       <div class="qr-auth">
-        <div v-if="!localLoginQr && localLoginMode !== 'verify_session'" class="qr-placeholder">{{ localLoginMode === 'browser_login' ? '正在从本机浏览器同步 Cookie…' : '正在让本地 Mac 生成二维码…' }}</div>
-        <canvas v-show="localLoginQr" ref="localLoginCanvas"></canvas>
+        <div class="local-auth-methods">
+          <button :class="{ active: localLoginMode === 'login' }" @click="startLocalLogin">扫码登录</button>
+          <button :class="{ active: localLoginMode === 'browser_login' }" @click="startLocalBrowserLogin">浏览器同步</button>
+        </div>
+        <p class="local-auth-help">
+          {{ localLoginMode === 'browser_login'
+            ? '从这台 Mac 的 Chrome/Safari 读取已登录 Cookie，适合浏览器已能正常打开小红书的情况。'
+            : localLoginMode === 'verify_session'
+              ? '正在检查人机验证后的旧 Cookie，这一步不会生成二维码。'
+              : '使用小红书 App 扫码并在手机上确认，新 Cookie 只保存在这台 Mac。' }}
+        </p>
+        <div v-if="localLoginMode === 'login' && !localLoginQr" class="qr-placeholder">正在让本地 Mac 生成二维码…
+        </div>
+        <div v-else-if="localLoginMode === 'browser_login'" class="qr-placeholder browser-sync">正在读取本机浏览器登录态…</div>
+        <canvas v-show="localLoginMode === 'login' && localLoginQr" ref="localLoginCanvas"></canvas>
         <p :class="['auth-state', localLoginState]">{{ localLoginMessage }}</p>
-        <div v-if="localLoginState === 'failed'" class="local-auth-actions">
-          <button class="retry-auth" @click="startLocalBrowserLogin">从浏览器同步</button>
+        <div v-if="localLoginState === 'failed' || localLoginState === 'expired'" class="local-auth-actions">
           <button class="retry-auth" @click="startLocalLogin">重新获取二维码</button>
+          <button class="retry-auth" @click="startLocalBrowserLogin">改用浏览器同步</button>
         </div>
         <div v-if="localLoginVerificationUrl" class="auth-verify">
           <a :href="localLoginVerificationUrl" target="_blank" rel="noopener noreferrer">打开小红书人机验证</a>
@@ -650,8 +669,57 @@
             <button class="retry-auth" @click="startLocalLogin">放弃此链接，重新扫码</button>
           </div>
         </div>
-        <button v-if="localLoginMode !== 'browser_login' && localLoginMode !== 'verify_session' && !localLoginQr" class="retry-auth" @click="startLocalBrowserLogin">我已在浏览器登录，直接同步 Cookie</button>
         <small>Cookie 只写入本地 Mac，不会上传服务器。</small>
+      </div>
+    </el-dialog>
+    <el-dialog v-model="showSchedule" title="采集策略" width="440px" append-to-body :lock-scroll="false">
+      <el-form label-position="top">
+        <el-form-item label="每日采集窗口（开始 ~ 结束）">
+          <div class="schedule-window">
+            <el-time-select v-model="scheduleForm.window_start" start="00:00" step="00:30" end="23:30" placeholder="开始" />
+            <span>~</span>
+            <el-time-select v-model="scheduleForm.window_end" start="00:00" step="00:30" end="23:30" placeholder="结束" />
+          </div>
+        </el-form-item>
+        <el-form-item label="每日动态总结词上限">
+          <el-input-number v-model="scheduleForm.daily_derived_limit" :min="0" :max="50" />
+        </el-form-item>
+        <p class="schedule-note">
+          只开放采集窗口与总结词上限；请求间隔、详情间隔、风控冷却等参数由服务器固定，避免误调加剧小红书风控。保存后下发到这台 Mac，下一个采集周期生效。
+        </p>
+      </el-form>
+      <template #footer>
+        <el-button @click="showSchedule = false">取消</el-button>
+        <el-button type="primary" :loading="scheduleSaving" @click="saveSchedule">保存并下发</el-button>
+      </template>
+    </el-dialog>
+    <el-dialog v-model="showKeywordHistory" :title="`关键词历史 · ${keywordHistoryName}`" width="720px" append-to-body :lock-scroll="false">
+      <div class="table table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>波次</th>
+              <th>搜索返回</th>
+              <th>今日合格</th>
+              <th>入库</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in keywordHistoryRuns" :key="r.id">
+              <td>{{ r.run_date }}</td>
+              <td>{{ ({ morning: "上午", afternoon: "下午", manual: "手动" })[r.wave] || r.wave }}</td>
+              <td>{{ r.cli_raw_count }}</td>
+              <td>{{ r.eligible_like_count }}</td>
+              <td>{{ r.final_count }}</td>
+              <td><em :class="r.status">{{ status(r.status) }}</em><small v-if="r.error_message" :title="r.error_message">{{ r.error_message }}</small></td>
+            </tr>
+            <tr v-if="!keywordHistoryRuns.length">
+              <td colspan="6">近 {{ keywordHistoryDays }} 天没有执行记录</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </el-dialog>
   </section>
@@ -683,13 +751,6 @@ const userStore = useUserStore(),
   runNotes = ref([]),
   runNotesRun = ref(null),
   runNotesTitle = ref(""),
-  showCliAuth = ref(false),
-  authCreating = ref(false),
-  authState = ref("idle"),
-  authMessage = ref(""),
-  authQrCanvas = ref(null),
-  authSessionId = ref(""),
-  authVerificationUrl = ref(""),
   agentData = ref({ devices: [], batches: [] }),
   showAgentPairing = ref(false),
   pairingCode = ref(""),
@@ -704,33 +765,75 @@ const userStore = useUserStore(),
   imageRefreshBusy = ref(""),
   recoveryBusy = ref(""),
   recoveryResult = reactive({}),
-  imageRefreshFeedback = reactive({});
-let authTimer = null;
+  searchBusy = ref(""),
+  imageRefreshFeedback = reactive({}),
+  recoveryCenter = ref(null),
+  tikhubPanel = ref(null),
+  expandedCall = ref(null),
+  trendDays = ref(14),
+  trendSeries = ref([]),
+  showSchedule = ref(false),
+  scheduleSaving = ref(false),
+  scheduleForm = reactive({ window_start: "00:30", window_end: "23:30", daily_derived_limit: 5 }),
+  showKeywordHistory = ref(false),
+  keywordHistoryName = ref(""),
+  keywordHistoryDays = ref(30),
+  keywordHistoryRuns = ref([]);
 let monitorTimer = null;
 let localLoginTimer = null;
+let localLoginPollFailures = 0;
+let monitorDisposed = false;
+let monitorRequestController = null;
+let agentRequestController = null;
+const requestCancelled = (error) =>
+  error?.code === "ERR_CANCELED" || error?.name === "CanceledError";
 const loadAgent = async () => {
+  agentRequestController?.abort();
+  const controller = new AbortController();
+  agentRequestController = controller;
   try {
-    agentData.value = (
+    const nextData = (
       await api.get("/admin/xhs-monitoring/agent/devices", {
         skipErrorToast: true,
+        signal: controller.signal,
       })
     ).data;
-  } catch {
-    agentData.value = { devices: [], batches: [] };
+    if (!monitorDisposed && agentRequestController === controller) {
+      agentData.value = nextData;
+    }
+  } catch (error) {
+    if (!monitorDisposed && !requestCancelled(error) && agentRequestController === controller) {
+      agentData.value = { devices: [], batches: [] };
+    }
+  } finally {
+    if (agentRequestController === controller) agentRequestController = null;
   }
 };
 const load = async () => {
+  monitorRequestController?.abort();
+  const controller = new AbortController();
+  monitorRequestController = controller;
   loading.value = true;
   try {
     const [monitor] = await Promise.all([
-      api.get("/admin/xhs-monitoring", { skipErrorToast: true }),
+      api.get("/admin/xhs-monitoring", {
+        skipErrorToast: true,
+        signal: controller.signal,
+      }),
       loadAgent(),
     ]);
-    data.value = monitor.data;
-  } catch {
-    data.value = null;
+    if (!monitorDisposed && monitorRequestController === controller) {
+      data.value = monitor.data;
+    }
+  } catch (error) {
+    if (!monitorDisposed && !requestCancelled(error) && monitorRequestController === controller) {
+      data.value = null;
+    }
   } finally {
-    loading.value = false;
+    if (monitorRequestController === controller) {
+      monitorRequestController = null;
+      loading.value = false;
+    }
   }
 };
 const primaryAgent = computed(() => agentData.value.devices?.[0] || null);
@@ -823,7 +926,12 @@ const failureGuide = (slot) => {
 };
 const recoveryItems = computed(() => {
   const items = [];
-  if (!primaryAgent.value?.connected) items.push({
+  if (!primaryAgent.value) items.push({
+    key: "agent-unbound", level: "critical", label: "本地节点", title: "尚未绑定本地采集节点",
+    cause: "所有小红书采集都由你的一台 Mac 在本地执行；未绑定前没有任何采集会发生。",
+    solution: "生成绑定码后，在 Mac 上运行一次安装程序即可接入。", action: "pair",
+  });
+  else if (!primaryAgent.value.connected) items.push({
     key: "agent-offline", level: "critical", label: "本地节点", title: "Mac 采集节点离线",
     cause: "服务器无法向你的 Mac 下发任务，定时采集不会执行。",
     solution: "确认 Mac 已开机且联网，然后重新检测；Agent 会自动重连。", action: "refresh",
@@ -839,6 +947,146 @@ const recoveryItems = computed(() => {
   }
   return items;
 });
+// 顶部「现在正常吗」横幅：把散落的连接/计划/冷却状态收敛成一个结论。
+const healthTone = computed(() => {
+  if (!primaryAgent.value || !primaryAgent.value.connected) return "bad";
+  if (primaryAgent.value.cookie_status === "verification_required") return "warn";
+  if (failedPlanSlots.value.length) return "warn";
+  return "good";
+});
+const healthTitle = computed(() => {
+  if (!primaryAgent.value) return "尚未绑定本地采集节点";
+  if (!primaryAgent.value.connected) return "本地采集节点离线";
+  if (primaryAgent.value.cookie_status === "verification_required") return "账号需要人机验证";
+  if (riskCooldownMinutes.value) return `风控冷却中，约 ${riskCooldownMinutes.value} 分钟后自动续跑`;
+  if (activeBatch.value) return `正在采集「${activeBatch.value.current_keyword || primaryAgent.value.current_keyword || "…"}」`;
+  if (failedPlanSlots.value.length) return `今日有 ${failedPlanSlots.value.length} 个关键词待处理`;
+  if (planPending.value) return "运行正常，等待下一个关键词";
+  return "今日采集已完成";
+});
+const healthSubtitle = computed(() => {
+  if (!primaryAgent.value) return "绑定一台 Mac 后，这里会显示实时采集状态。";
+  if (!primaryAgent.value.connected) return "服务器无法下发任务，请确认 Mac 开机联网。";
+  if (primaryAgent.value.cookie_status === "verification_required") return "完成人机验证或重新登录后即可恢复。";
+  if (todayPlan.value?.stopped) return "今日计划已停止，明天会自动生成新计划。";
+  if (activeBatch.value) return `已处理 ${batchProcessed(activeBatch.value)} / ${activeBatch.value.total_keywords} 个关键词`;
+  return `今日进度 ${planCompleted.value}/${planTotal.value} · 跳过 ${planSkipped.value} · 剩余 ${planPending.value}`;
+});
+const scrollToRecovery = () => recoveryCenter.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+const scrollToTikhub = () => tikhubPanel.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+// 采集策略（只放开窗口与总结词上限；风控参数服务器固定）
+const openSchedule = () => {
+  const s = primaryAgent.value?.schedule || {};
+  scheduleForm.window_start = s.window_start || "00:30";
+  scheduleForm.window_end = s.window_end || "23:30";
+  scheduleForm.daily_derived_limit = s.daily_derived_limit ?? 5;
+  showSchedule.value = true;
+};
+const saveSchedule = async () => {
+  if (!primaryAgent.value) return;
+  if (scheduleForm.window_start >= scheduleForm.window_end) return ElMessage.warning("采集开始时间必须早于结束时间");
+  scheduleSaving.value = true;
+  try {
+    await api.put(`/admin/xhs-monitoring/agent/devices/${primaryAgent.value.id}/schedule`, {
+      window_start: scheduleForm.window_start,
+      window_end: scheduleForm.window_end,
+      daily_derived_limit: scheduleForm.daily_derived_limit,
+    });
+    showSchedule.value = false;
+    ElMessage.success("采集策略已下发到这台 Mac，下一个采集周期生效");
+    await loadAgent();
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || "保存采集策略失败");
+  } finally {
+    scheduleSaving.value = false;
+  }
+};
+// 历史趋势（按天聚合，数据来自已落库的 runs / provider calls）
+const loadTrends = async () => {
+  try {
+    trendSeries.value = (
+      await api.get("/admin/xhs-monitoring/stats/daily", { params: { days: trendDays.value }, skipErrorToast: true })
+    ).data.series || [];
+  } catch { trendSeries.value = []; }
+};
+const setTrendDays = (d) => { trendDays.value = d; loadTrends(); };
+// 把 [0..1] 归一化后的序列映射成 100x40 的 SVG polyline 点。
+const sparkline = (values) => {
+  const nums = values.filter((v) => v != null);
+  if (!nums.length) return "";
+  const max = Math.max(...nums, 1), n = values.length;
+  return values.map((v, i) => {
+    const x = n > 1 ? (i / (n - 1)) * 100 : 50;
+    const y = 38 - ((v || 0) / max) * 34;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+};
+const trendPaths = computed(() => ({
+  success: sparkline(trendSeries.value.map((d) => (d.success_rate == null ? null : Math.round(d.success_rate * 100)))),
+  notes: sparkline(trendSeries.value.map((d) => d.notes_collected || 0)),
+  captcha: sparkline(trendSeries.value.map((d) => d.captcha_events || 0)),
+}));
+// ── TikHub 付费通道 ──
+const tikhub = computed(() => data.value?.tikhub || null);
+const quotaPercent = (today) => (today?.limit ? Math.min(100, Math.round((today.used / today.limit) * 100)) : 0);
+const tikhubCostSparkline = computed(() => sparkline((tikhub.value?.daily_cost_7d || []).map((d) => d.cost || 0)));
+const tikhubCostSummary = computed(() => {
+  const days = tikhub.value?.daily_cost_7d || [];
+  const total = days.reduce((a, d) => a + (d.cost || 0), 0);
+  const calls = days.reduce((a, d) => a + (d.calls || 0), 0);
+  return `7 天 ¥${total.toFixed(2)} · ${calls} 次`;
+});
+const tikhubCalls = computed(() => (data.value?.calls || []).filter((c) => c.provider === "tikhub"));
+const opLabel = (op) => ({ search: "搜索", detail: "详情补全", image_refresh: "图片刷新", agent_upload: "本地上报" })[op] || op || "—";
+const toggleCallExpand = (id) => { expandedCall.value = expandedCall.value === id ? null : id; };
+const openQuotaEditor = async () => {
+  const current = tikhub.value?.today?.limit ?? 100;
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `当前每日上限 ${current} 次。提高额度会增加今日 TikHub 付费上限,立即生效(仅当天)。`,
+      "调整 TikHub 每日额度",
+      {
+        confirmButtonText: "确认调整",
+        cancelButtonText: "取消",
+        inputValue: String(current),
+        inputPattern: /^([1-9]\d{0,3}|10000)$/,
+        inputErrorMessage: "请输入 1–10000 的整数",
+        lockScroll: false,
+      },
+    );
+    const limit = parseInt(value, 10);
+    await api.post("/admin/xhs-monitoring/tikhub-quota", { limit_count: limit });
+    ElMessage.success(`每日额度已调整为 ${limit} 次`);
+    await load();
+  } catch (error) {
+    if (error !== "cancel" && error?.action !== "cancel") {
+      ElMessage.error(error?.response?.data?.detail || "调整额度失败");
+    }
+  }
+};
+const trendSummary = computed(() => {
+  const s = trendSeries.value;
+  const runs = s.reduce((a, d) => a + (d.runs || 0), 0);
+  const ok = s.reduce((a, d) => a + (d.succeeded || 0), 0);
+  return {
+    success: runs ? `平均 ${Math.round((ok / runs) * 100)}%` : "暂无数据",
+    notes: `共 ${s.reduce((a, d) => a + (d.notes_collected || 0), 0)} 篇`,
+    captcha: `共 ${s.reduce((a, d) => a + (d.captcha_events || 0), 0)} 次`,
+  };
+});
+// 单关键词历史下钻
+const openKeywordHistory = async (k) => {
+  showKeywordHistory.value = true;
+  keywordHistoryName.value = k.keyword;
+  keywordHistoryRuns.value = [];
+  try {
+    keywordHistoryRuns.value = (
+      await api.get(`/admin/xhs-monitoring/keywords/${k.id}/runs`, { params: { days: keywordHistoryDays.value } })
+    ).data.runs || [];
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || "读取关键词历史失败");
+  }
+};
 const createAgentPairing = async () => {
   showAgentPairing.value = true;
   pairingCode.value = "";
@@ -938,33 +1186,58 @@ const stopLocalLoginPoll = () => {
   localLoginTimer = null;
 };
 const pollLocalLogin = async () => {
-  if (!localLoginCommandId.value) return;
+  if (monitorDisposed) return;
+  const commandId = localLoginCommandId.value;
+  if (!commandId) return;
   try {
     const command = (
       await api.get(
-        `/admin/xhs-monitoring/agent/commands/${localLoginCommandId.value}`,
+        `/admin/xhs-monitoring/agent/commands/${commandId}`,
         { skipErrorToast: true },
       )
     ).data;
+    if (commandId !== localLoginCommandId.value) return;
+    localLoginPollFailures = 0;
     const result = command.result || {};
     localLoginState.value = result.status || command.status;
-    localLoginMessage.value = result.message ||
-      (result.status === "authenticated" ? "本地授权成功" : result.status === "scanned" ? "已扫码，请在手机上确认" : "等待扫码…");
+    localLoginMessage.value = result.message || (
+      result.status === "authenticated"
+        ? "本地授权成功"
+        : result.status === "scanned"
+          ? "已扫码，请在手机上确认"
+          : result.status === "waiting" && result.qr_url
+            ? "等待扫码…"
+            : localLoginMode.value === "verify_session"
+              ? "正在检查当前 Cookie…"
+              : localLoginMode.value === "browser_login"
+                ? "正在读取本机浏览器 Cookie…"
+                : "正在让本地 Mac 生成二维码…"
+    );
     localLoginVerificationUrl.value = result.verification_url || "";
     if (result.qr_url && result.qr_url !== localLoginQr.value) {
       localLoginQr.value = result.qr_url;
       await nextTick();
       await QRCode.toCanvas(localLoginCanvas.value, result.qr_url, { width: 240, margin: 1 });
     }
-    if (command.status === "succeeded" || command.status === "failed") {
+    if (["succeeded", "failed", "cancelled"].includes(command.status)) {
       if (command.status === "succeeded" && result.status === "verification_required") {
         localLoginState.value = "verification_required";
         localLoginMessage.value = result.message || "请完成小红书人机验证";
+      } else if (command.status === "succeeded" && result.status === "expired") {
+        localLoginState.value = "expired";
+        localLoginMessage.value = result.message || "当前 Cookie 已失效，请重新登录";
       } else if (command.status === "succeeded") {
-        ElMessage.success(result.message || "本地 Cookie 已恢复");
-        showLocalLogin.value = false;
-      }
-      else {
+        if (result.status === "authenticated") {
+          ElMessage.success(result.message || "本地 Cookie 已恢复");
+          showLocalLogin.value = false;
+        } else {
+          localLoginState.value = "failed";
+          localLoginMessage.value = result.message || "本地登录没有完成";
+        }
+      } else if (command.status === "cancelled") {
+        localLoginState.value = "cancelled";
+        localLoginMessage.value = result.message || "已切换登录方式";
+      } else {
         localLoginState.value = "failed";
         localLoginMessage.value = command.error || "本地扫码登录失败";
       }
@@ -972,19 +1245,29 @@ const pollLocalLogin = async () => {
       await loadAgent();
       return;
     }
-    localLoginTimer = window.setTimeout(pollLocalLogin, 2000);
+    if (!monitorDisposed) localLoginTimer = window.setTimeout(pollLocalLogin, 2000);
   } catch {
-    localLoginMessage.value = "登录状态读取失败";
-    stopLocalLoginPoll();
+    if (commandId !== localLoginCommandId.value) return;
+    localLoginPollFailures += 1;
+    if (localLoginPollFailures <= 5 && showLocalLogin.value) {
+      localLoginMessage.value = `与服务器通信短暂中断，正在自动重试（${localLoginPollFailures}/5）…`;
+      if (!monitorDisposed) localLoginTimer = window.setTimeout(pollLocalLogin, Math.min(5000, 1000 * localLoginPollFailures));
+    } else {
+      localLoginState.value = "failed";
+      localLoginMessage.value = "连续无法读取登录状态，请检查网络后重试";
+      stopLocalLoginPoll();
+    }
   }
 };
 const startLocalAuth = async (commandType) => {
   if (!primaryAgent.value?.connected) return ElMessage.warning("本地采集节点当前离线");
   stopLocalLoginPoll();
+  localLoginPollFailures = 0;
   showLocalLogin.value = true;
   localLoginMode.value = commandType;
   localLoginQr.value = "";
   localLoginState.value = "waiting";
+  localLoginCommandId.value = "";
   localLoginMessage.value = commandType === "verify_session"
     ? "正在检查当前 Cookie 的人机验证结果…"
     : commandType === "browser_login"
@@ -1007,7 +1290,7 @@ const startLocalLogin = () => startLocalAuth("login");
 const startLocalBrowserLogin = () => startLocalAuth("browser_login");
 const openAgentVerification = () => {
   const verificationUrl = todayPlan.value?.verification_url;
-  if (!verificationUrl) return startLocalAuth("verify_session");
+  if (!verificationUrl) return startLocalLogin();
   stopLocalLoginPoll();
   showLocalLogin.value = true;
   localLoginMode.value = "verify_session";
@@ -1026,18 +1309,8 @@ const filteredKeywords = computed(() => {
 const enabledBaseCount = computed(() => (data.value?.keywords || []).filter((item) => item.enabled && item.type === "base").length);
 const enabledDerivedCount = computed(() => (data.value?.keywords || []).filter((item) => item.enabled && item.type === "derived").length);
 const percent = (a, b) => (b ? Math.round((a / b) * 100) : 0);
-const rate = (n) => (n == null ? "暂无样本" : `${n}%`);
-const cooldownMinutes = (seconds) => Math.max(1, Math.ceil(seconds / 60));
 const time = (v) =>
   v ? new Date(v).toLocaleString("zh-CN", { hour12: false }) : "—";
-const cliAuthLabel = (cli) =>
-  cli.auth_status === "expired"
-    ? "登录已失效"
-    : cli.auth_status === "missing"
-      ? "未授权"
-      : cli.installed
-        ? "已配置"
-        : "未安装";
 const labels = {
   pending: "待执行",
   running: "执行中",
@@ -1070,16 +1343,10 @@ const reasons = {
   rank: "历史版本数量截断",
 };
 const reason = (k) => reasons[k] || k;
-const cliResultLabel = (row) => {
-  if (row.run_source === "local_agent" && !row.has_search_diagnostics)
-    return "历史未记录原始搜索数";
-  if (row.search_state === "unrecognized") return "搜索响应无法解析";
-  return `搜索返回 ${row.cli_raw_count} 条`;
-};
 const searchParseLabel = (row) =>
   row.run_source === "local_agent" && !row.has_search_diagnostics
     ? `未知 / 已上传 ${row.merged_count}`
-    : `${row.tikhub_raw_count + row.cli_raw_count} / ${row.merged_count}`;
+    : `${row.cli_raw_count} / ${row.merged_count}`;
 const levelStat = (row, level, field) => row?.level_stats?.[level]?.[field] ?? "—";
 const searchRouteLabel = (row) => {
   const sorts = (row?.searches || []).map((item) => item.sort).filter(Boolean);
@@ -1115,20 +1382,6 @@ const emptyRunNotesMessage = computed(() => {
   if (run.cli_raw_count === 0) return "小红书搜索页本次真实返回 0 条。";
   return `搜索页返回 ${run.cli_raw_count} 条，但没有笔记通过完整入库规则；请查看上方淘汰原因。`;
 });
-const retry = async (row, paid) => {
-  await ElMessageBox.confirm(
-    paid
-      ? "本操作可能产生 TikHub 费用，确认由最高管理员执行？"
-      : "本次只执行免费链路，不消耗 TikHub 额度。",
-    "确认重试",
-    { lockScroll: false },
-  );
-  await api.post(
-    `/admin/xhs-monitoring/keywords/${row.keyword_id}/retry-${paid ? "paid" : "free"}`,
-  );
-  ElMessage.success("已提交任务");
-  load();
-};
 const toggle = async (k) => {
   await api.patch(`/admin/xhs-monitoring/keywords/${k.id}/enabled`, null, {
     params: { enabled: !k.enabled },
@@ -1143,8 +1396,51 @@ const promote = async (k) => {
   ElMessage.success("已提升为基础词");
   load();
 };
+const waitForKeywordRun = async (keywordId) => {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 3000));
+    const runs = (
+      await api.get(`/admin/xhs-monitoring/keywords/${keywordId}/runs`, { params: { days: 1 }, skipErrorToast: true })
+    ).data.runs || [];
+    const latest = runs[0];
+    if (!latest || latest.status === "running") continue;
+    await load();
+    if (latest.status === "failed") throw new Error(latest.error_message || "采集失败");
+    ElMessage.success(
+      latest.status === "partial"
+        ? `部分完成，入库 ${latest.final_count || 0} 篇`
+        : `采集完成，入库 ${latest.final_count || 0} 篇`,
+    );
+    return;
+  }
+  throw new Error("等待采集结果超时，请稍后刷新查看");
+};
 const searchNow = async (k) => {
-  await testKeywordWithAgent(k.id);
+  if (!userStore.isSuperAdmin) return ElMessage.warning("仅最高管理员可用");
+  try {
+    await ElMessageBox.confirm(
+      `将对「${k.keyword}」通过 TikHub 付费接口实时采集，会产生费用。`,
+      "确认立即搜索？",
+      { confirmButtonText: "立即搜索", cancelButtonText: "取消", type: "warning", lockScroll: false },
+    );
+  } catch {
+    return;
+  }
+  searchBusy.value = `kw-${k.id}`;
+  try {
+    await api.post(`/admin/xhs-monitoring/keywords/${k.id}/retry-paid`);
+    ElMessage.success("已提交 TikHub 付费采集，正在等待结果…");
+    await waitForKeywordRun(k.id);
+  } catch (error) {
+    if (error?.response?.status === 409) {
+      ElMessage.warning(error?.response?.data?.detail || "该词今天已成功采集");
+      await load();
+    } else {
+      ElMessage.error(error?.response?.data?.detail || error?.message || "立即搜索失败");
+    }
+  } finally {
+    searchBusy.value = "";
+  }
 };
 const removeKeyword = async (k) => {
   await ElMessageBox.confirm(
@@ -1163,7 +1459,7 @@ const refresh = async () => {
 const funnelStages = computed(() => {
   const f = data.value?.funnel || {},
     pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : null),
-    raw = (f.tikhub_raw_count || 0) + (f.cli_raw_count || 0),
+    raw = (f.cli_raw_count || 0),
     cliIncomplete = (f.cli_missing_diagnostics_count || 0) > 0,
     parsedOut = Math.max(0, raw - (f.merged_count || 0));
   return [
@@ -1172,9 +1468,7 @@ const funnelStages = computed(() => {
       value: cliIncomplete ? "未完整记录" : raw,
       note: cliIncomplete
         ? `${f.cli_missing_diagnostics_count} 个历史批次未知`
-        : f.tikhub_raw_count
-          ? `CLI ${f.cli_raw_count || 0} · TikHub ${f.tikhub_raw_count}`
-          : "本地 CLI",
+        : "本地采集",
     },
     {
       label: "解析并去重",
@@ -1284,127 +1578,44 @@ const saveEdit = async () => {
   ElMessage.success("关键词已修改");
   load();
 };
-const stopAuthPoll = () => {
-  if (authTimer) {
-    clearTimeout(authTimer);
-    authTimer = null;
-  }
-};
-const pollCliAuth = async () => {
-  if (!authSessionId.value) return;
-  try {
-    const result = (
-      await api.get(
-        `/admin/xhs-monitoring/cli-auth/sessions/${authSessionId.value}`,
-        { skipErrorToast: true },
-      )
-    ).data;
-    authState.value = result.status;
-    if (result.status === "scanned") {
-      authMessage.value = "已扫码，请在手机上确认登录";
-    } else if (result.status === "waiting") {
-      authMessage.value = "等待扫码…";
-    } else if (result.status === "authenticated") {
-      authMessage.value = "授权成功，采集已恢复";
-      authSessionId.value = "";
-      stopAuthPoll();
-      ElMessage.success("小红书 CLI 授权已更新");
-      await load();
-      return;
-    } else if (result.status === "verification_required") {
-      authMessage.value = result.message || "请先完成人机验证";
-      authVerificationUrl.value = result.verification_url || "";
-      stopAuthPoll();
-      return;
-    } else if (result.status === "failed" || result.status === "expired") {
-      authMessage.value = result.message || "授权失败";
-      authSessionId.value = "";
-      stopAuthPoll();
-      return;
-    }
-    authTimer = setTimeout(pollCliAuth, 2000);
-  } catch (error) {
-    authState.value = "failed";
-    authMessage.value =
-      error?.response?.data?.detail || "授权状态查询失败";
-    authSessionId.value = "";
-    stopAuthPoll();
-  }
-};
-const resumeCliAuth = () => {
-  if (!authSessionId.value) return;
-  authState.value = "waiting";
-  authMessage.value = "正在检查验证结果…";
-  authVerificationUrl.value = "";
-  pollCliAuth();
-};
-const startCliAuth = async () => {
-  stopAuthPoll();
-  if (authSessionId.value) {
-    await api
-      .delete(
-        `/admin/xhs-monitoring/cli-auth/sessions/${authSessionId.value}`,
-        { skipErrorToast: true },
-      )
-      .catch(() => {});
-  }
-  showCliAuth.value = true;
-  authCreating.value = true;
-  authState.value = "waiting";
-  authMessage.value = "正在获取二维码…";
-  authSessionId.value = "";
-  authVerificationUrl.value = "";
-  try {
-    const result = (
-      await api.post("/admin/xhs-monitoring/cli-auth/sessions")
-    ).data;
-    authSessionId.value = result.session_id;
-    await nextTick();
-    await QRCode.toCanvas(authQrCanvas.value, result.qr_url, {
-      width: 240,
-      margin: 1,
-      color: { dark: "#24211d", light: "#fffdf8" },
-    });
-    authMessage.value = "等待扫码…";
-    authTimer = setTimeout(pollCliAuth, 1200);
-  } catch (error) {
-    authState.value = "failed";
-    authMessage.value =
-      error?.response?.data?.detail || "获取二维码失败";
-  } finally {
-    authCreating.value = false;
-  }
-};
-const cancelCliAuth = async () => {
-  stopAuthPoll();
-  const sessionId = authSessionId.value;
-  authSessionId.value = "";
-  if (sessionId) {
-    await api
-      .delete(`/admin/xhs-monitoring/cli-auth/sessions/${sessionId}`, {
-        skipErrorToast: true,
-      })
-      .catch(() => {});
-  }
+const stopMonitorRefresh = () => {
+  if (monitorTimer) window.clearTimeout(monitorTimer);
+  monitorTimer = null;
 };
 const scheduleMonitorRefresh = () => {
-  if (monitorTimer) window.clearTimeout(monitorTimer);
+  stopMonitorRefresh();
+  if (monitorDisposed || document.visibilityState !== "visible") return;
   monitorTimer = window.setTimeout(async () => {
-    if (document.visibilityState === "visible") {
-      if (activeBatch.value) await load();
-      else await loadAgent();
-    }
+    monitorTimer = null;
+    if (monitorDisposed || document.visibilityState !== "visible") return;
+    if (activeBatch.value) await load();
+    else await loadAgent();
+    if (monitorDisposed) return;
     scheduleMonitorRefresh();
-  }, activeBatch.value ? 5000 : 30000);
+  }, activeBatch.value ? 15000 : 60000);
+};
+const handleVisibilityChange = () => {
+  if (document.visibilityState !== "visible") {
+    stopMonitorRefresh();
+    return;
+  }
+  loadAgent();
+  scheduleMonitorRefresh();
 };
 onMounted(() => {
+  monitorDisposed = false;
   load();
+  loadTrends();
   scheduleMonitorRefresh();
+  document.addEventListener("visibilitychange", handleVisibilityChange);
 });
 onBeforeUnmount(() => {
-  cancelCliAuth();
+  monitorDisposed = true;
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
+  stopMonitorRefresh();
+  monitorRequestController?.abort();
+  agentRequestController?.abort();
   stopLocalLoginPoll();
-  if (monitorTimer) window.clearTimeout(monitorTimer);
 });
 </script>
 <style scoped>
@@ -2004,6 +2215,37 @@ td em,
   text-align: center;
   padding: 4px 12px 12px;
 }
+.local-auth-methods {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--ivory);
+}
+.local-auth-methods button {
+  border: 0;
+  border-radius: 7px;
+  padding: 9px 10px;
+  color: var(--ink-3);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.local-auth-methods button.active {
+  color: #fff;
+  background: var(--pine);
+}
+.local-auth-help {
+  min-height: 42px;
+  margin: 0 4px 10px;
+  color: var(--ink-3);
+  font-size: 10px;
+  line-height: 1.55;
+  text-align: left;
+}
 .qr-auth canvas {
   width: 240px !important;
   height: 240px !important;
@@ -2017,6 +2259,9 @@ td em,
   color: var(--ink-3);
   background: var(--ivory);
   border-radius: 12px;
+}
+.qr-placeholder.browser-sync {
+  height: 150px;
 }
 .auth-state {
   font-weight: 700;
@@ -2119,5 +2364,76 @@ td em,
   .monitor h1 {
     font-size: 29px;
   }
+}
+/* ── TikHub 付费通道面板 ─────────────────────── */
+.tikhub-panel { background: linear-gradient(145deg, #fdfcf9, #f4f6f2); }
+.tikhub-head-side { display: flex; align-items: center; gap: 8px; }
+.tikhub-head-side button.quiet { border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.75); color: var(--ink-2); padding: 7px 12px; cursor: pointer; }
+.tikhub-token-badge { display: inline-flex; align-items: center; border-radius: 99px; padding: 6px 11px; font-size: 11px; font-weight: 700; }
+.tikhub-token-badge.ok { color: var(--pine); background: #e4eee9; }
+.tikhub-token-badge.bad { color: var(--clay-deep); background: var(--clay-tint); }
+.tikhub-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 4px; }
+.tikhub-grid > div { min-width: 0; padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.66); }
+.tikhub-grid small { display: block; color: var(--ink-3); font-size: 11px; }
+.tikhub-grid strong { display: block; margin: 4px 0; font: 700 24px var(--serif); color: var(--ink-2); }
+.tikhub-grid strong em { font: 500 13px var(--serif); color: var(--ink-3); font-style: normal; }
+.tikhub-quota-card i { display: block; height: 7px; margin-top: 8px; background: var(--bone); border-radius: 99px; overflow: hidden; }
+.tikhub-quota-card i b { display: block; height: 100%; background: var(--pine); border-radius: inherit; transition: width .3s ease; }
+.tikhub-quota-card i b.warn { background: var(--clay); }
+.tikhub-quota-sub { display: block; margin-top: 7px; color: var(--ink-3); font-size: 10px; }
+.tikhub-trend-card svg { display: block; width: 100%; height: 36px; margin-top: 6px; }
+.tikhub-op-card p { display: flex; justify-content: space-between; gap: 8px; margin: 5px 0 0; font-size: 11px; color: var(--ink-2); }
+.tikhub-op-card p b { color: var(--ink-3); font-weight: 500; }
+.tikhub-op-empty { color: var(--ink-3); }
+.tikhub-calls { margin-top: 14px; }
+.tikhub-calls-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.tikhub-calls-head strong { font-size: 13px; }
+.tikhub-calls-head span { color: var(--ink-3); font-size: 10px; }
+.tikhub-calls-table { max-height: 300px; }
+.tikhub-calls-table table { min-width: 640px; }
+.tikhub-calls-table td.err { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tikhub-calls-table tr.clickable { cursor: pointer; }
+.tikhub-calls-table tr.clickable:hover { background: var(--ivory); }
+.tikhub-calls-table tr.call-detail td { background: var(--ivory); color: var(--clay-deep); font-size: 11px; white-space: normal; word-break: break-all; }
+@media (max-width: 900px) { .tikhub-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 620px) { .tikhub-grid { grid-template-columns: 1fr; } }
+
+/* ── 今日状态横幅 ─────────────────────────────── */
+.health-banner { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 14px 0 16px; padding: 14px 18px; border-radius: 13px; border: 1px solid var(--line); }
+.health-banner.good { border-color: #cfe0d4; background: linear-gradient(120deg, #eef4ef, #e6efe9); }
+.health-banner.warn { border-color: #ecd6b4; background: linear-gradient(120deg, #fbf3e4, #f8ecd8); }
+.health-banner.bad { border-color: #e3c0ae; background: linear-gradient(120deg, #fbe9df, #f7e0d2); }
+.health-banner-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.health-dot { flex: none; width: 11px; height: 11px; border-radius: 50%; }
+.health-banner.good .health-dot { background: var(--pine); box-shadow: 0 0 0 4px rgba(63, 92, 82, .16); }
+.health-banner.warn .health-dot { background: #b9832f; box-shadow: 0 0 0 4px rgba(185, 131, 47, .16); }
+.health-banner.bad .health-dot { background: var(--clay-deep); box-shadow: 0 0 0 4px rgba(168, 90, 64, .18); }
+.health-banner-main strong { display: block; font-size: 15px; color: var(--ink-2); }
+.health-banner-main p { margin: 2px 0 0; color: var(--ink-3); font-size: 12px; }
+.health-banner-side { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; flex: none; }
+.health-banner-side span { color: var(--ink-3); font-size: 11px; }
+.banner-action { border: 0; border-radius: 8px; padding: 7px 13px; color: #fff; background: var(--clay-deep); font-size: 12px; cursor: pointer; }
+/* ── 趋势面板 ─────────────────────────────────── */
+.trends-panel { margin-bottom: 16px; }
+.trend-tools { display: flex; gap: 6px; }
+.trend-range { border: 1px solid var(--line); border-radius: 8px; padding: 5px 11px; background: transparent; color: var(--ink-3); font-size: 11px; cursor: pointer; }
+.trend-range.active { border-color: var(--pine); color: var(--pine); background: #e9f0eb; font-weight: 700; }
+.trends-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 4px; }
+.trend-card { margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255, 255, 255, .6); }
+.trend-card figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.trend-card figcaption small { color: var(--ink-3); font-size: 10px; font-weight: 500; }
+.trend-card svg { display: block; width: 100%; height: 40px; margin-top: 8px; }
+.trend-empty { margin: 6px 0 0; color: var(--ink-3); font-size: 12px; }
+/* ── 采集策略表单 ─────────────────────────────── */
+.schedule-window { display: flex; align-items: center; gap: 10px; width: 100%; }
+.schedule-window .el-select { flex: 1; }
+.schedule-note { margin: 4px 0 0; padding: 10px 12px; border-radius: 9px; background: var(--ivory); color: var(--ink-3); font-size: 11px; line-height: 1.6; }
+/* ── 关键词历史 / 侧栏健康 ────────────────────── */
+.health-intro { margin: 2px 0 10px; color: var(--ink-3); font-size: 11px; }
+.health-empty { color: var(--ink-3); font-size: 11px; }
+@media (max-width: 900px) {
+  .trends-grid { grid-template-columns: 1fr; }
+  .health-banner { flex-direction: column; align-items: flex-start; }
+  .health-banner-side { align-items: flex-start; }
 }
 </style>

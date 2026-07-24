@@ -193,10 +193,11 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const productForPath = (path) => {
+  if (path.startsWith('/xhs-materials')) return 'xhs_topic'
   if (path.startsWith('/potential-commercial') || path.startsWith('/content-info/commercial')) return 'potential_commercial'
   if (path.startsWith('/courses')) return 'practical_camp'
   if (
-    path === '/' || path.startsWith('/content-info') || path.startsWith('/xhs-materials') || path.startsWith('/topic-clusters') ||
+    path === '/' || path.startsWith('/content-info') || path.startsWith('/topic-clusters') ||
     path.startsWith('/legacy') || path.startsWith('/creation') || path.startsWith('/content-transform') ||
     path.startsWith('/content-imitate') || path.startsWith('/creation-history') || path.startsWith('/history') ||
     path.startsWith('/standalone-title') || path.startsWith('/munger-generation') || path.startsWith('/wechat-to-xhs') ||
@@ -279,7 +280,7 @@ const navItems = [
     id: 'xhs-materials',
     label: '小红书选题',
     icon: 'TrendCharts',
-    adminOnly: true,
+    product: 'xhs_topic',
   },
   {
     id: 'potential-commercial',
@@ -354,7 +355,11 @@ const canSeeAdminChild = (child) => {
 }
 
 const visibleNavItems = computed(() => navItems
-  .filter(item => !item.adminOnly || userStore.isAdmin)
+  .filter(item => {
+    if (item.adminOnly && !userStore.isAdmin) return false
+    if (item.product && !userStore.hasProduct(item.product)) return false
+    return true
+  })
   .map(item => {
     if (!item.children) return item
     return {

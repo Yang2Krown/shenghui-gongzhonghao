@@ -1,11 +1,13 @@
 from app.api.v1 import api_router
+from app.api.deps import get_current_super_admin_user
 from app.api.v1.xhs import note_payload, topic_boards
-from app.models.xhs import XhsEngagementSnapshot, XhsKeyword, XhsKeywordRun, XhsNote, XhsNoteDiscovery, XhsSemanticTopic, XhsTopicMember, XhsTopicSnapshot
+from app.models.xhs import XhsDailyQuota, XhsEngagementSnapshot, XhsKeyword, XhsKeywordRun, XhsNote, XhsNoteDiscovery, XhsProviderCall, XhsSemanticTopic, XhsTopicMember, XhsTopicSnapshot
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.api.v1 import xhs as xhs_module
@@ -100,6 +102,7 @@ def test_xhs_public_and_admin_routes_are_registered():
     assert ("/admin/xhs-monitoring/cli-auth/sessions","POST") in routes
     assert ("/admin/xhs-monitoring/cli-auth/sessions/{session_id}","GET") in routes
     assert ("/admin/xhs-monitoring/cli-auth/sessions/{session_id}","DELETE") in routes
+    assert ("/admin/xhs-monitoring/tikhub-quota","POST") in routes
 
 
 def test_public_payload_contains_remote_urls_and_no_oss_fields():
@@ -172,6 +175,59 @@ async def test_topic_boards_requires_xhs_topic_access():
     assert exc.value.status_code==403
     entitled=User(id=3,username="buyer",role="user",is_superuser=False,is_active=True,product_access=[PRODUCT_XHS_TOPIC])
     assert (await dependency(entitled)) is entitled
+
+
+_XHS_MONITOR_TABLES=("xhs_keywords","xhs_keyword_runs","xhs_notes","xhs_note_discoveries","xhs_daily_quotas","xhs_provider_calls","xhs_image_failure_reports")
+
+
+async def _async_none():return None
+async def _async_zero():return 0
+
+
+async def test_tikhub_quota_update_super_admin_only_and_persists(monkeypatch):
+    from app.core.config import settings as _settings
+    engine=create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.tables["xhs_daily_quotas"].create)
+        await conn.run_sync(Base.metadata.tables["admin_audit_logs"].create)
+    root=User(id=1,username="root",phone=_settings.SUPER_ADMIN_PHONE,role="admin",is_superuser=True,is_active=True)
+    async with AsyncSession(engine) as db:
+        result=await xhs_module.update_tikhub_quota(xhs_module.QuotaUpdateBody(limit_count=200),admin=root,db=db)
+        assert result["quota"]["limit"]==200 and result["quota"]["remaining"]==200
+        quota=(await db.execute(select(XhsDailyQuota))).scalar_one()
+        assert quota.limit_count==200
+    # 非最高管理员被 deps 闸拦截
+    not_root=User(id=2,username="admin2",phone="13900000000",role="admin",is_superuser=True,is_active=True)
+    with pytest.raises(HTTPException) as exc:await get_current_super_admin_user(not_root)
+    assert exc.value.status_code==403
+
+
+async def test_monitoring_returns_tikhub_cost_block(monkeypatch):
+    from importlib.metadata import PackageNotFoundError
+    now=datetime(2026,7,24,10,0,0)
+    monkeypatch.setattr(xhs_module,"utcnow",lambda:now)
+    monkeypatch.setattr(xhs_module,"cli_auth_error",lambda:_async_none())
+    monkeypatch.setattr(xhs_module,"cli_cooldown_remaining",lambda:_async_zero())
+    monkeypatch.setattr(xhs_module,"version",lambda _name:(_ for _ in ()).throw(PackageNotFoundError()))
+    engine=create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        for table in _XHS_MONITOR_TABLES:await conn.run_sync(Base.metadata.tables[table].create)
+    async with AsyncSession(engine) as db:
+        db.add(XhsDailyQuota(quota_date=now.date(),limit_count=100,used_count=30,reserved_search_count=5))
+        db.add_all([
+            XhsProviderCall(provider="tikhub",operation="search",status="success",is_paid=True,request_count=1,estimated_cost=0.07,created_at=now),
+            XhsProviderCall(provider="tikhub",operation="detail",status="success",is_paid=True,request_count=1,estimated_cost=0.07,created_at=now),
+            XhsProviderCall(provider="tikhub",operation="detail",status="success",is_paid=True,request_count=1,estimated_cost=0.07,created_at=now-timedelta(days=1)),
+            XhsProviderCall(provider="cli",operation="search",status="success",is_paid=False,request_count=0,estimated_cost=0,created_at=now),
+        ])
+        await db.commit()
+        result=await xhs_module.monitoring(_admin=None,db=db)
+    tikhub=result["tikhub"]
+    assert tikhub["today"]["used"]==30 and tikhub["today"]["limit"]==100 and tikhub["today"]["remaining"]==70
+    assert tikhub["totals"]["total_calls"]==3 and abs(tikhub["totals"]["total_cost"]-0.21)<1e-6
+    by_op={x["operation"]:x for x in tikhub["by_operation"]}
+    assert by_op["search"]["count"]==1 and by_op["detail"]["count"]==1  # 今日仅 2 次 success
+    assert len(tikhub["daily_cost_7d"])==7 and tikhub["token_configured"] is True
 
 
 class _FakeRedis:
@@ -291,7 +347,7 @@ async def test_topic_boards_semantic_payload_has_monitor_and_snapshot_score(monk
         db.add(topic);await db.flush()
         notes=[]
         for index,likes in enumerate((3200,2800),1):
-            note=XhsNote(note_id=f"s{index}",title=f"语义笔记{index}",note_type="image",author_nickname=f"作者{index}",stable_url=f"https://www.xiaohongshu.com/explore/s{index}",like_count=likes,published_at=edition-timedelta(hours=2),first_discovered_at=edition,last_discovered_at=edition,quality_status="ready")
+            note=XhsNote(note_id=f"s{index}",title=f"语义笔记{index}",note_type="image",author_nickname=f"作者{index}",stable_url=f"https://www.xiaohongshu.com/explore/s{index}",like_count=likes,published_at=edition+timedelta(hours=22),first_discovered_at=edition,last_discovered_at=edition,quality_status="ready")
             db.add(note);await db.flush();notes.append(note)
             db.add(XhsTopicMember(topic_id=topic.id,note_id=note.id,similarity=.9,assigned_at=edition))
             db.add(XhsEngagementSnapshot(note_id=note.id,snapshot_date=edition.date(),like_count=likes,collect_count=10,comment_count=5,share_count=1))
@@ -302,3 +358,32 @@ async def test_topic_boards_semantic_payload_has_monitor_and_snapshot_score(monk
     assert result["hot"][0]["fermentation_score"]==76.0
     assert result["hot"][0]["trend_points"][0]["score"]==6032
     assert result["monitor"]=={"topic_count":1,"sample_count":2,"fresh_count":1,"max_likes":3200,"today_new_notes":2}
+
+
+async def test_topic_boards_fermenting_prefers_sustained_over_sudden_spike(monkeypatch):
+    """持续发酵应以"一直在热"为主导：多日反复在热的老话题排在今日突发新话题前面。"""
+    now=datetime(2026,7,22,9,0,0);edition=datetime(2026,7,21,8,0,0)
+    monkeypatch.setattr(xhs_module,"utcnow",lambda:now)
+    engine=create_async_engine("sqlite+aiosqlite:///:memory:")
+    tables=("xhs_notes","xhs_engagement_snapshots","xhs_semantic_topics","xhs_topic_members","xhs_topic_snapshots")
+    async with engine.begin() as conn:
+        for table in tables:await conn.run_sync(Base.metadata.tables[table].create)
+    async with AsyncSession(engine) as db:
+        # sustained：连续 6 个采集日在热、互动持续上涨，但今日仅 2 篇新笔记
+        sustained=XhsSemanticTopic(public_id="topic-sustained",name="持续发酵老话题",summary="s",centroid=[1.0,0.0],first_seen_at=edition-timedelta(days=6),last_seen_at=edition,active_days=6)
+        # spike：昨日才出现、今日突然 9 篇新笔记但仅 2 个采集日
+        spike=XhsSemanticTopic(public_id="topic-spike",name="今日突发新话题",summary="s",centroid=[0.0,1.0],first_seen_at=edition-timedelta(days=1),last_seen_at=edition,active_days=2)
+        db.add_all([sustained,spike]);await db.flush()
+        async def _seed(topic,count,likes):
+            for index in range(count):
+                note=XhsNote(note_id=f"{topic.public_id}-{index}",title=f"笔记{topic.public_id}{index}",note_type="image",author_nickname=f"作者{topic.public_id}{index}",stable_url=f"https://www.xiaohongshu.com/explore/{topic.public_id}{index}",like_count=likes,published_at=edition-timedelta(hours=2),first_discovered_at=edition,last_discovered_at=edition,quality_status="ready")
+                db.add(note);await db.flush()
+                db.add(XhsTopicMember(topic_id=topic.id,note_id=note.id,similarity=.9,assigned_at=edition))
+        await _seed(sustained,2,3200);await _seed(spike,9,8000)
+        db.add(XhsTopicSnapshot(topic_id=sustained.id,snapshot_date=edition.date(),wave="morning",snapshot_at=edition,note_count=2,author_count=2,new_notes_24h=2,new_authors_24h=2,engagement_total=9000,engagement_growth=40.0,fermentation_score=70.0,evidence=[]))
+        db.add(XhsTopicSnapshot(topic_id=spike.id,snapshot_date=edition.date(),wave="morning",snapshot_at=edition,note_count=9,author_count=9,new_notes_24h=9,new_authors_24h=9,engagement_total=72000,engagement_growth=0.0,fermentation_score=55.0,evidence=[]))
+        await db.commit()
+        result=await topic_boards(db=db)
+    fermenting=[b["topic"] for b in result["fermenting"]]
+    assert fermenting[0]=="持续发酵老话题" and "今日突发新话题" in fermenting
+

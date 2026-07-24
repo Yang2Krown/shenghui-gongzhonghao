@@ -14,6 +14,7 @@ from app.models.xhs import (
     XhsTopicSnapshot,
 )
 from app.services.llm.embedding_service import embedding_service
+from app.services.xhs_ai_filter import cluster_is_ai_related
 from app.services.xhs_collection import eligibility_clause
 
 PUBLIC_STATUSES = ("ready", "ready_degraded", "synced")
@@ -87,17 +88,23 @@ async def _synthesize_topic_labels(groups: list[list[XhsNote]]) -> dict[int,dict
         from app.services.llm.llm_client import ChatMessage, get_llm_client
         samples=[]
         for index,notes in enumerate(groups):
+            top=sorted(notes,key=lambda item:item.like_count or 0,reverse=True)[:5]
             samples.append({
                 "cluster":index,
-                "articles":[{"title":n.title,"summary":n.ai_summary or (n.content or "")[:220]} for n in sorted(notes,key=lambda item:item.like_count or 0,reverse=True)[:5]],
+                "articles":[{"title":n.title,"content":(n.content or n.ai_summary or "")[:600]} for n in top],
             })
         prompt=(
-            "根据每组文章共同讨论的具体事件、产品变化或创作现象，提炼中文小话题。"
-            "禁止把搜索关键词、宽泛标签（如AI、AIGC、大模型、agent、codex）直接当话题名；"
-            "名称需具体到发生了什么，8到22字；摘要不超过45字。"
-            "返回JSON：{\"items\":[{\"cluster\":0,\"name\":\"\",\"summary\":\"\"}]}\n"+str(samples)
+            "你是内容编辑助手。给你若干组小红书笔记，每组围绕同一主题。对每组重新概括共同话题，"
+            "不要照抄任何单篇标题，不要把搜索关键词、宽泛标签（如AI、AIGC、大模型、agent、codex）直接当话题名。\n"
+            "只为与 AI 相关的内容簇起话题名；若该簇明显与 AI 无关（如二次元、穿搭、美食、好视频扶持计划等），name 返回空字符串。\n"
+            "要求：\n"
+            "1. name：具体的事件性话题名，写清是谁/什么产品发生了什么（发布/更新/翻车/实测/争议等），8到24字，"
+            "客观陈述，禁止营销腔、书名号/感叹号堆砌和“速看”“干货”“保姆级”这类口水词。\n"
+            "2. summary：一段话事实摘要（不超过80字），说清这组笔记共同在讨论什么、关键细节和值得关注的点；"
+            "产品名/版本号/人名/数字只能严格依据给定正文逐字核对，不得编造、混淆或张冠李戴，不确定就不写。\n"
+            "只返回JSON：{\"items\":[{\"cluster\":0,\"name\":\"\",\"summary\":\"\"}]}\n"+str(samples)
         )
-        result=await get_llm_client().chat([ChatMessage(role="user",content=prompt)],temperature=.2,max_tokens=1800,json_mode=True)
+        result=await get_llm_client().chat([ChatMessage(role="user",content=prompt)],temperature=.2,max_tokens=2600,json_mode=True)
         output={}
         for item in (result.parsed or {}).get("items",[]):
             index=int(item.get("cluster",-1));name=str(item.get("name") or "").strip()[:80];summary=str(item.get("summary") or "").strip()[:300]
@@ -128,6 +135,10 @@ async def rebuild_semantic_topics(db: AsyncSession, wave: str = "nightly") -> di
     for cluster_index,indices in enumerate(clusters):
         members=member_groups[cluster_index]; centroid=_centroid([list(n.topic_embedding) for n in members])
         label=synthesized.get(cluster_index,{})
+        # AI 相关性过滤：LLM 判空（非 AI）且确定性兜底（簇内标题/标签全不沾 AI）也判非 AI 时，
+        # 整簇剔除，不建话题、不进 hot/fermenting 展示集合。
+        if not label.get("name") and not cluster_is_ai_related([t for n in members for t in ([n.title or ""]+[str(x) for x in (n.native_tags or [])])]):
+            continue
         name=label.get("name") or _topic_label(members);summary=label.get("summary") or next((n.ai_summary for n in members if n.ai_summary),None)
         matches=[(cosine_similarity(centroid,list(t.centroid or [])),t) for t in existing if t.id not in used_topics]
         score,topic=max(matches,default=(0,None),key=lambda item:item[0])

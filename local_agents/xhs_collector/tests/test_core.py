@@ -1,13 +1,25 @@
-import json
-import subprocess
+import asyncio
 from datetime import date, datetime
 
 import pytest
+from xhs_cli.exceptions import NeedVerifyError, SessionExpiredError
 
-from collector import RiskBlocked, XhsCollector
+import collector as collector_module
+from agent import CollectorAgent
+from collector import AuthenticationExpired, RiskBlocked, XhsCollector
 from normalizer import has_result_list, merge, normalize
 from scheduling import build_daily_plan, build_two_wave_plan, recover_interrupted_slots, select_daily_keywords, slot_due, slot_expired
 from storage import LocalStore
+
+
+def make_collector(monkeypatch, search=None, read=None):
+    """构造一个常驻 client 已被 mock 的采集器，避免真实加载 cookie / 发请求。"""
+    collector = XhsCollector.__new__(XhsCollector)
+    collector._client = object()  # 占位，绕过 _ensure_client 的 cookie 加载
+    monkeypatch.setattr(collector, "_search", search or (lambda *a, **k: {"ok": True, "data": []}))
+    monkeypatch.setattr(collector, "_read", read or (lambda *a, **k: {"ok": True, "data": []}))
+    monkeypatch.setattr(collector_module.time, "sleep", lambda *_: None)
+    return collector
 
 
 def test_search_card_normalization_keeps_rank_time_and_likes():
@@ -75,13 +87,119 @@ def test_local_store_persists_failed_uploads(tmp_path):
 
 
 def test_collector_stops_immediately_on_captcha(tmp_path, monkeypatch):
-    payload = {"ok": False, "error": {"code": "verification_required", "message": "Captcha required: type=slider, uuid=verify-123"}}
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args=[], returncode=1, stdout=json.dumps(payload), stderr=""))
-    collector = XhsCollector(tmp_path)
+    class FakeClient:
+        _verify_count = 0
+
+        def search_notes(self, *a, **k):
+            raise NeedVerifyError("slider", "verify-123")
+
+    collector = XhsCollector.__new__(XhsCollector)
+    collector._client = FakeClient()
+    monkeypatch.setattr(collector_module.time, "sleep", lambda *_: None)
     with pytest.raises(RiskBlocked) as captured:
         collector.collect_keyword("AI Agent")
     assert "verifyUuid=verify-123" in captured.value.verification_url
     assert "verifyType=slider" in captured.value.verification_url
+
+
+def test_collector_classifies_expired_session_as_authentication_failure(tmp_path, monkeypatch):
+    class FakeClient:
+        def get_self_info(self):
+            raise SessionExpiredError()
+
+    collector = XhsCollector.__new__(XhsCollector)
+    collector._client = FakeClient()
+    with pytest.raises(AuthenticationExpired):
+        collector.check_status()
+
+
+def test_auth_status_callback_never_aborts_login_on_network_failure():
+    class BrokenServer:
+        def command_status(self, *_args, **_kwargs):
+            raise RuntimeError("temporary 502")
+
+    class FakeStore:
+        def __init__(self):
+            self.rows = []
+
+        def enqueue(self, endpoint, payload):
+            self.rows.append((endpoint, payload))
+
+    agent = CollectorAgent.__new__(CollectorAgent)
+    agent.server = BrokenServer()
+    agent.store = FakeStore()
+    assert agent.send_command_status("cmd-1", {"status": "running"}) is False
+    assert agent.store.rows == []
+    assert agent.send_command_status("cmd-1", {"status": "succeeded"}, persist_on_failure=True) is False
+    assert agent.store.rows == [("/api/v1/xhs-agent/commands/cmd-1/status", {"status": "succeeded"})]
+
+
+def test_forced_manual_retry_does_not_wait_for_paused_schedule():
+    class FakeServer:
+        def create_batch(self, _payload):
+            return {"batch_id": "batch-1"}
+
+    class FakeCollector:
+        def collect_keyword(self, _keyword):
+            return {"notes": [], "diagnostics": {"search_state": "empty"}}
+
+    class FakeStore:
+        def set(self, *_args):
+            return None
+
+    class FakeBackoff:
+        def on_success(self):
+            return None
+
+        def on_block(self):
+            return None
+
+        def on_manual_verify(self):
+            return None
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    agent = CollectorAgent.__new__(CollectorAgent)
+    agent.collection_lock = asyncio.Lock()
+    agent.stop_requested = asyncio.Event()
+    agent.paused = asyncio.Event()  # Intentionally unset: normal work would wait here.
+    agent.server = FakeServer()
+    agent.collector = FakeCollector()
+    agent.store = FakeStore()
+    agent.backoff = FakeBackoff()
+    agent.cookie_status = "valid"
+    agent.running_keyword = None
+    agent.safe_progress = noop
+    agent.safe_upload = noop
+
+    result = asyncio.run(asyncio.wait_for(
+        agent.run_batch([{"id": 5, "keyword": "ChatGPT"}], "test", "cmd-1", ignore_pause=True),
+        timeout=1,
+    ))
+    assert result == {"completed": 1, "failed": 0, "error": None}
+
+
+def test_manual_risk_block_persists_verification_url_in_today_plan():
+    verification_url = "https://www.xiaohongshu.com/website-login/captcha?verifyUuid=test"
+
+    class FakeStore:
+        def get(self, _key):
+            return verification_url
+
+    agent = CollectorAgent.__new__(CollectorAgent)
+    agent.store = FakeStore()
+    agent.today_plan = lambda: {"date": date.today().isoformat(), "paused": False}
+    saved = []
+    agent.save_plan = saved.append
+
+    plan = agent.persist_verification_in_plan(verification_url)
+
+    assert plan["risk_blocked"] is True
+    assert plan["paused"] is True
+    assert plan["pause_reason"] == "human_verification"
+    assert plan["verification_url"] == verification_url
+    assert saved == [plan]
 
 
 def test_empty_result_list_is_distinguished_from_unrecognized_response():
@@ -91,8 +209,7 @@ def test_empty_result_list_is_distinguished_from_unrecognized_response():
 
 
 def test_collector_reports_true_search_zero(tmp_path, monkeypatch):
-    collector = XhsCollector(tmp_path)
-    monkeypatch.setattr(collector, "_run_cli", lambda *args, **kwargs: {"ok": True, "data": []})
+    collector = make_collector(monkeypatch)
     result = collector.collect_keyword("AI startup")
     assert result["notes"] == []
     assert result["diagnostics"]["search_state"] == "empty"
@@ -103,7 +220,6 @@ def test_collector_reports_true_search_zero(tmp_path, monkeypatch):
 
 
 def test_collector_preserves_raw_count_when_every_result_is_filtered(tmp_path, monkeypatch):
-    collector = XhsCollector(tmp_path)
     search_payload = {"ok": True, "data": [{
         "id": "note-low-like", "model_type": "note",
         "note_card": {
@@ -112,7 +228,7 @@ def test_collector_preserves_raw_count_when_every_result_is_filtered(tmp_path, m
             "interact_info": {"liked_count": "120"},
         },
     }]}
-    monkeypatch.setattr(collector, "_run_cli", lambda *args, **kwargs: search_payload)
+    collector = make_collector(monkeypatch, search=lambda *a, **k: search_payload)
     result = collector.collect_keyword("AI startup")
     diagnostics = result["diagnostics"]
     assert result["notes"] == []
@@ -125,13 +241,7 @@ def test_collector_preserves_raw_count_when_every_result_is_filtered(tmp_path, m
 
 
 def test_daily_latest_fetches_third_page_only_when_yield_is_low_and_page_two_is_new(tmp_path, monkeypatch):
-    collector = XhsCollector(tmp_path)
-    calls = []
-
-    def fake_cli(*args, **kwargs):
-        calls.append(args)
-        sort = args[args.index("--sort") + 1]
-        page = int(args[args.index("--page") + 1])
+    def fake_search(keyword, sort, page):
         if sort == "popular":
             return {"ok": True, "data": []}
         return {"ok": True, "data": [{
@@ -142,20 +252,17 @@ def test_daily_latest_fetches_third_page_only_when_yield_is_low_and_page_two_is_
             },
         }]}
 
-    monkeypatch.setattr(collector, "_run_cli", fake_cli)
-    monkeypatch.setattr("collector.time.sleep", lambda *_: None)
+    collector = make_collector(monkeypatch, search=fake_search)
     result = collector.collect_keyword("AI")
     assert result["diagnostics"]["pagination"] == {"daily_pages": [1, 2, 3], "weekly_pages": [1]}
     assert [note["note_id"] for note in result["notes"]] == ["daily-1", "daily-2", "daily-3"]
 
 
 def test_weekly_popular_stops_after_first_page_when_no_item_exceeds_threshold(tmp_path, monkeypatch):
-    collector = XhsCollector(tmp_path)
     calls = []
 
-    def fake_cli(*args, **kwargs):
-        calls.append(args)
-        sort = args[args.index("--sort") + 1]
+    def fake_search(keyword, sort, page):
+        calls.append((sort, page))
         if sort == "latest":
             return {"ok": True, "data": []}
         return {"ok": True, "data": [{
@@ -166,50 +273,37 @@ def test_weekly_popular_stops_after_first_page_when_no_item_exceeds_threshold(tm
             },
         }]}
 
-    monkeypatch.setattr(collector, "_run_cli", fake_cli)
+    collector = make_collector(monkeypatch, search=fake_search)
     result = collector.collect_keyword("AI")
     assert result["diagnostics"]["pagination"]["weekly_pages"] == [1]
-    assert len([call for call in calls if call[call.index("--sort") + 1] == "popular"]) == 1
+    assert len([call for call in calls if call[0] == "popular"]) == 1
 
 
 def test_collector_uses_latest_for_daily_and_popular_for_weekly(tmp_path, monkeypatch):
-    collector = XhsCollector(tmp_path)
     calls = []
 
-    def fake_cli(*args, **kwargs):
-        calls.append(args)
-        if args[:2] == ("search", "AI"):
-            sort = args[args.index("--sort") + 1]
-            if sort == "latest":
-                return {"ok": True, "data": [{
-                    "id": "daily-note", "model_type": "note",
-                    "note_card": {"display_title": "今日", "corner_tag_info": [{"type": "publish_time", "text": "今天"}], "interact_info": {"liked_count": "201"}},
-                }]}
+    def fake_search(keyword, sort, page):
+        calls.append((sort, page))
+        if sort == "latest":
             return {"ok": True, "data": [{
-                "id": "weekly-note", "model_type": "note",
-                "note_card": {"display_title": "一周", "corner_tag_info": [{"type": "publish_time", "text": "2天前"}], "interact_info": {"liked_count": "2001"}},
+                "id": "daily-note", "model_type": "note",
+                "note_card": {"display_title": "今日", "corner_tag_info": [{"type": "publish_time", "text": "今天"}], "interact_info": {"liked_count": "201"}},
             }]}
-        return {"ok": True, "data": []}
+        return {"ok": True, "data": [{
+            "id": "weekly-note", "model_type": "note",
+            "note_card": {"display_title": "一周", "corner_tag_info": [{"type": "publish_time", "text": "2天前"}], "interact_info": {"liked_count": "2001"}},
+        }]}
 
-    monkeypatch.setattr(collector, "_run_cli", fake_cli)
-    monkeypatch.setattr("collector.time.sleep", lambda *_: None)
+    collector = make_collector(monkeypatch, search=fake_search)
     result = collector.collect_keyword("AI")
-    assert [(call[0], call[3], call[5]) for call in calls[:4]] == [
-        ("search", "latest", "1"), ("search", "latest", "2"),
-        ("search", "popular", "1"), ("search", "popular", "2"),
-    ]
+    assert calls[:4] == [("latest", 1), ("latest", 2), ("popular", 1), ("popular", 2)]
     assert {note["note_id"] for note in result["notes"]} == {"daily-note", "weekly-note"}
     assert result["diagnostics"]["levels"]["daily"]["eligible_count"] == 1
     assert result["diagnostics"]["levels"]["weekly"]["eligible_count"] == 1
 
 
 def test_popular_search_can_supplement_daily_candidates(tmp_path, monkeypatch):
-    collector = XhsCollector(tmp_path)
-
-    def fake_cli(*args, **kwargs):
-        if args[0] == "read":
-            return {"ok": True, "data": []}
-        sort = args[args.index("--sort") + 1]
+    def fake_search(keyword, sort, page):
         if sort == "latest":
             return {"ok": True, "data": []}
         return {"ok": True, "data": [{
@@ -217,14 +311,13 @@ def test_popular_search_can_supplement_daily_candidates(tmp_path, monkeypatch):
             "note_card": {"display_title": "今日高赞", "corner_tag_info": [{"type": "publish_time", "text": "今天"}], "interact_info": {"liked_count": "888"}},
         }]}
 
-    monkeypatch.setattr(collector, "_run_cli", fake_cli)
+    collector = make_collector(monkeypatch, search=fake_search)
     result = collector.collect_keyword("AI")
     assert [note["note_id"] for note in result["notes"]] == ["popular-daily"]
     assert result["diagnostics"]["levels"]["daily"]["eligible_count"] == 1
 
 
 def test_collector_keeps_every_qualified_result_without_internal_cap(tmp_path, monkeypatch):
-    collector = XhsCollector(tmp_path)
     rows = [{
         "id": f"note-{index}", "model_type": "note",
         "note_card": {
@@ -234,11 +327,7 @@ def test_collector_keeps_every_qualified_result_without_internal_cap(tmp_path, m
         },
     } for index in range(12)]
 
-    def fake_cli(*args, **kwargs):
-        return {"ok": True, "data": [] if args[0] == "read" else rows}
-
-    monkeypatch.setattr(collector, "_run_cli", fake_cli)
-    monkeypatch.setattr("collector.time.sleep", lambda *_: None)
+    collector = make_collector(monkeypatch, search=lambda *a, **k: {"ok": True, "data": rows})
     result = collector.collect_keyword("AI")
     assert len(result["notes"]) == 12
     assert result["diagnostics"]["levels"]["daily"]["eligible_count"] == 12

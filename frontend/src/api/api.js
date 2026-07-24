@@ -42,7 +42,13 @@ api.interceptors.response.use(
     const originalRequest = error.config
     const userStore = useUserStore()
     const skipErrorToast = originalRequest?.skipErrorToast === true
-    
+
+    // 主动取消的请求（AbortController / 页面切换时打断重复请求）不是错误，
+    // 静默放行，避免弹出 axios 默认的 "canceled" 提示。
+    if (error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError') {
+      return Promise.reject(error)
+    }
+
     // 如果是401错误且没有重试过
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true
