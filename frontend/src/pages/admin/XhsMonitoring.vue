@@ -70,25 +70,12 @@
         正常 · 当前没有小红书采集告警
       </div>
     </div>
-    <section v-if="data" :class="['health-banner', healthTone]">
-      <div class="health-banner-main">
-        <span class="health-dot"></span>
-        <div>
-          <strong>{{ healthTitle }}</strong>
-          <p>{{ healthSubtitle }}</p>
-        </div>
-      </div>
-      <div class="health-banner-side">
-        <span v-if="primaryAgent">采集窗口 {{ planWindow }} · 今日 {{ planCompleted }}/{{ planTotal }}</span>
-        <button v-if="healthTone === 'bad'" class="banner-action" @click="scrollToRecovery">去处理</button>
-      </div>
-    </section>
     <article v-if="data" ref="recoveryCenter" class="panel recovery-center">
       <div class="recovery-head">
         <div>
           <div class="kicker">INCIDENT RECOVERY</div>
           <h2>故障处理中心</h2>
-          <p>不仅提示异常，也给出原因、影响和可以立即执行的恢复动作</p>
+          <p>今日采集失败的关键词会列在这里，可立即重试</p>
         </div>
         <em :class="{ ok: !recoveryItems.length }">{{ recoveryItems.length ? `${recoveryItems.length} 项待处理` : "当前无需处理" }}</em>
       </div>
@@ -102,15 +89,12 @@
           </div>
           <button
             v-if="item.action === 'retry'"
-            :disabled="recoveryBusy === item.key || !canAgentCollect || !!activeBatch || (manualRetryWaitMinutes > 0 && !userStore.isSuperAdmin)"
+            :disabled="recoveryBusy === item.key || (manualRetryWaitMinutes > 0 && !userStore.isSuperAdmin)"
             @click="retryFailedSlot(item.slot)"
           >{{ recoveryBusy === item.key ? "正在重试…" : manualRetryWaitMinutes > 0 ? userStore.isSuperAdmin ? `跳过冷却并重试` : `安全冷却 ${manualRetryWaitMinutes} 分钟` : "重新执行这个词" }}</button>
-          <button v-else-if="item.action === 'pair'" @click="createAgentPairing">生成绑定码</button>
-          <button v-else-if="item.action === 'login' && primaryAgent" :disabled="!primaryAgent.connected" @click="openAgentVerification">打开人工验证</button>
-          <button v-else-if="item.action !== 'login'" @click="refresh">重新检测状态</button>
         </section>
       </div>
-      <div v-else class="recovery-ok"><strong>采集链路正常</strong><span>本地节点在线、Cookie 正常，今天没有待处理失败。</span></div>
+      <div v-else class="recovery-ok"><strong>采集链路正常</strong><span>今天没有待处理的失败。</span></div>
     </article>
     <article v-if="data && data.tikhub" ref="tikhubPanel" class="panel tikhub-panel">
       <div class="panel-head">
@@ -177,106 +161,6 @@
               <tr v-if="!tikhubCalls.length"><td colspan="6">近 24 小时暂无 TikHub 调用</td></tr>
             </tbody>
           </table>
-        </div>
-      </div>
-    </article>
-    <article v-if="data" class="panel agent-panel">
-      <div class="panel-head">
-        <div>
-          <div class="kicker">LOCAL COLLECTOR</div>
-          <h2>本地采集节点</h2>
-          <p>当前任务、批次进度和本地账号状态</p>
-        </div>
-        <div class="agent-head-actions">
-          <span v-if="primaryAgent" :class="['connection-badge', primaryAgent.connected ? 'online' : 'offline']">
-            {{ primaryAgent.connected ? "节点在线" : "节点离线" }}
-          </span>
-          <button class="quiet" @click="refresh">刷新</button>
-          <button v-if="userStore.isSuperAdmin && !primaryAgent" class="quiet" @click="createAgentPairing">绑定 Mac</button>
-        </div>
-      </div>
-      <template v-if="primaryAgent">
-        <section :class="['active-task', { idle: !hasActiveTask, blocked: primaryAgent.cookie_status === 'verification_required' }]">
-          <div class="active-task-copy">
-            <div class="task-label">
-              <span class="status-dot"></span>
-              {{ hasActiveTask ? "正在采集" : primaryAgent.cookie_status === "verification_required" ? "采集已阻断" : "当前空闲" }}
-              <span v-if="activeBatch" class="auto-refresh">每 5 秒更新</span>
-            </div>
-            <h3>{{ hasActiveTask ? (activeBatch?.current_keyword || primaryAgent.current_keyword || runningPlanSlot?.keyword || "正在读取当前关键词…") : agentIdleTitle }}</h3>
-            <p v-if="activeBatch">
-              {{ batchMode(activeBatch.mode) }} · 已处理 {{ batchProcessed(activeBatch) }} / {{ activeBatch.total_keywords }} 个关键词
-              <span class="phase-hint">最近进度 {{ shortTime(activeBatch.last_progress_at) }} · 当前只执行这一个关键词</span>
-            </p>
-            <p v-else-if="runningPlanSlot">定时采集正在本地执行；后续到点任务会按顺序衔接。</p>
-            <p v-else>{{ agentIdleDescription }}</p>
-          </div>
-          <div v-if="activeBatch" class="task-progress-card">
-            <strong>{{ batchProcessed(activeBatch) ? batchPercent(activeBatch) + "%" : "执行中" }}</strong>
-            <span>当前单词任务 · 完成 {{ activeBatch.completed_keywords }} · 异常 {{ activeBatch.failed_keywords }}</span>
-            <i><b :style="{ width: batchPercent(activeBatch) + '%' }"></b></i>
-          </div>
-          <div v-else-if="runningPlanSlot" class="task-progress-card">
-            <strong>执行中</strong>
-            <span>{{ slotTime(runningPlanSlot) }} 开始 · 当前只执行这一个关键词</span>
-            <i><b style="width: 18%"></b></i>
-          </div>
-          <div v-else class="task-ready-card">
-            <small>Cookie</small>
-            <strong>{{ agentCookieLabel(primaryAgent.cookie_status) }}</strong>
-          </div>
-        </section>
-
-        <div class="agent-facts">
-          <div><small>本地账号</small><strong>{{ agentCookieLabel(primaryAgent.cookie_status) }}</strong><span>Cookie 仅保存在 Mac</span></div>
-          <div><small>今日关键词</small><strong>{{ todayPlan ? `${todayPlan.base_count} + ${todayPlan.derived_count}` : "正在生成" }}</strong><span>窗口 {{ planWindow }} · 全天分散执行</span></div>
-          <div><small>{{ runningPlanSlot ? "当前任务" : "下一次" }}</small><strong>{{ runningPlanSlot ? "执行中" : nextPendingSlot ? slotTime(nextPendingSlot) : "今日已结束" }}</strong><span>{{ runningPlanSlot?.keyword || nextPendingSlot?.keyword || "没有待执行关键词" }}</span></div>
-          <div><small>今日进度</small><strong>{{ planCompleted }} / {{ planTotal }}</strong><span>跳过 {{ planSkipped }} · 剩余 {{ planPending }}</span></div>
-        </div>
-      </template>
-      <div v-if="primaryAgent?.cookie_status === 'verification_required'" class="agent-risk-alert">
-        <div><strong>小红书要求人机验证</strong><span>如果验证页提示“异常行为”或无法操作，可直接改用浏览器同步或重新扫码，不会卡住今日计划。</span></div>
-        <div class="risk-actions">
-          <button @click="openAgentVerification">打开人机验证</button>
-          <button class="secondary" @click="startLocalBrowserLogin">从浏览器同步</button>
-          <button class="secondary" @click="startLocalLogin">重新扫码</button>
-        </div>
-      </div>
-      <div v-if="!primaryAgent" class="agent-empty"><strong>尚未绑定本地采集节点</strong><p>生成绑定码后，在这台 Mac 上运行一次安装程序；之后自动启动。</p></div>
-      <section v-if="primaryAgent && todayPlan" class="daily-plan">
-        <div class="daily-plan-head">
-          <div><strong>今日采集时间轴</strong><span>每次只采一个词；到点后按队列串行执行</span></div>
-          <em :class="{ paused: todayPlan.paused, stopped: todayPlan.stopped }">{{ planStateLabel }}</em>
-        </div>
-        <div class="plan-track">
-          <div v-for="slot in todayPlan.slots" :key="`${slot.wave || 'manual'}-${slot.keyword_id}-${slot.scheduled_at}`" :class="['plan-slot', slot.status]" :title="slot.error || slot.reason || ''">
-            <time>{{ slotTime(slot) }}</time><span>{{ slot.keyword }}</span><b>{{ slotTypeLabel(slot) }} · {{ slotStatus(slot.status) }}</b>
-            <small v-if="slot.error">{{ slot.error }}</small>
-            <button v-if="slot.status === 'failed'" :disabled="recoveryBusy === `slot-${slot.keyword_id}` || !canAgentCollect || !!activeBatch || (manualRetryWaitMinutes > 0 && !userStore.isSuperAdmin)" @click="retryFailedSlot(slot)">{{ manualRetryWaitMinutes > 0 ? userStore.isSuperAdmin ? "跳过冷却并重试" : `${manualRetryWaitMinutes} 分钟后可重试` : "重试" }}</button>
-          </div>
-        </div>
-      </section>
-      <div v-if="primaryAgent" class="agent-command-bar">
-        <div class="command-copy"><strong>全天自动计划</strong><span>Mac 保持开机即可，无需手动执行整组</span></div>
-        <div class="agent-utilities">
-          <button class="utility" @click="openSchedule">采集策略</button>
-          <span class="utility-divider"></span>
-          <button class="utility" :disabled="!primaryAgent.connected || !!activeBatch" @click="startLocalLogin">更换本地账号</button>
-          <span class="utility-divider"></span>
-          <button v-if="!todayPlan?.paused" class="utility" :disabled="!primaryAgent.connected || todayPlan?.stopped" @click="sendAgentCommand('pause')">暂停今日计划</button>
-          <button v-else class="utility" :disabled="!primaryAgent.connected || todayPlan?.stopped || primaryAgent.cookie_status !== 'valid'" @click="sendAgentCommand('resume')">继续今日计划</button>
-          <button class="utility danger" :disabled="!primaryAgent.connected || todayPlan?.stopped" @click="stopTodayPlan">停止今日计划</button>
-        </div>
-      </div>
-      <div v-if="recentBatches.length" class="recent-batches">
-        <div class="recent-batches-head"><strong>最近批次</strong><span>以下均为历史记录，不代表当前状态</span></div>
-        <div class="recent-batch-list">
-          <div v-for="batch in recentBatches" :key="batch.id" class="recent-batch-item">
-            <span>{{ batchMode(batch.mode) }}</span>
-            <strong :class="batch.status">{{ status(batch.status) }}</strong>
-            <span>{{ batch.completed_keywords }}/{{ batch.total_keywords }} 完成</span>
-            <time>{{ shortTime(batch.last_progress_at) }}</time>
-          </div>
         </div>
       </div>
     </article>
@@ -374,7 +258,6 @@
                 <td>
                   <div class="row-actions">
                     <button class="link" @click="openRunNotes(row)">明细</button>
-                    <button v-if="row.status !== 'completed'" class="link" :disabled="!canAgentCollect || !!activeBatch" @click="testKeywordWithAgent(row.keyword_id)">本地测试</button>
                   </div>
                 </td>
               </tr>
@@ -458,7 +341,7 @@
       <div class="panel-head">
         <div>
           <h2>最近请求审计</h2>
-          <p>本地采集节点的请求记录；不记录 Token 或 Cookie</p>
+          <p>TikHub 付费通道的请求记录；不记录 Token 或 Cookie</p>
         </div>
       </div>
       <div class="table table-scroll table-audit">
@@ -474,7 +357,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="c in data.calls" :key="c.id">
+            <tr v-for="c in tikhubCalls" :key="c.id">
               <td>{{ time(c.created_at) }}</td>
               <td>{{ c.provider }}</td>
               <td>{{ c.operation }}</td>
@@ -482,6 +365,7 @@
               <td>{{ c.latency_ms == null ? "—" : c.latency_ms + "ms" }}</td>
               <td :title="c.error_message || ''">{{ callError(c) }}</td>
             </tr>
+            <tr v-if="!tikhubCalls.length"><td colspan="6">近 24 小时暂无 TikHub 调用</td></tr>
           </tbody>
         </table>
       </div>
@@ -525,7 +409,7 @@
           </p>
           <div class="diagnostic-grid">
             <div><small>搜索线路</small><b>{{ searchRouteLabel(runNotesRun) }}</b></div>
-            <div><small>搜索页返回</small><b>{{ runNotesRun.cli_raw_count }}</b></div>
+            <div><small>搜索页返回</small><b>{{ runNotesRun.tikhub_raw_count }}</b></div>
             <div><small>成功解析</small><b>{{ runNotesRun.merged_count }}</b></div>
             <div><small>今日候选</small><b>{{ levelStat(runNotesRun, "daily", "candidate_count") }}</b></div>
             <div><small>搜索页初筛 · 24h赞 &gt; 200</small><b>{{ levelStat(runNotesRun, "daily", "eligible_count") }}</b></div>
@@ -710,7 +594,7 @@
             <tr v-for="r in keywordHistoryRuns" :key="r.id">
               <td>{{ r.run_date }}</td>
               <td>{{ ({ morning: "上午", afternoon: "下午", manual: "手动" })[r.wave] || r.wave }}</td>
-              <td>{{ r.cli_raw_count }}</td>
+              <td>{{ r.tikhub_raw_count }}</td>
               <td>{{ r.eligible_like_count }}</td>
               <td>{{ r.final_count }}</td>
               <td><em :class="r.status">{{ status(r.status) }}</em><small v-if="r.error_message" :title="r.error_message">{{ r.error_message }}</small></td>
@@ -926,21 +810,6 @@ const failureGuide = (slot) => {
 };
 const recoveryItems = computed(() => {
   const items = [];
-  if (!primaryAgent.value) items.push({
-    key: "agent-unbound", level: "critical", label: "本地节点", title: "尚未绑定本地采集节点",
-    cause: "所有小红书采集都由你的一台 Mac 在本地执行；未绑定前没有任何采集会发生。",
-    solution: "生成绑定码后，在 Mac 上运行一次安装程序即可接入。", action: "pair",
-  });
-  else if (!primaryAgent.value.connected) items.push({
-    key: "agent-offline", level: "critical", label: "本地节点", title: "Mac 采集节点离线",
-    cause: "服务器无法向你的 Mac 下发任务，定时采集不会执行。",
-    solution: "确认 Mac 已开机且联网，然后重新检测；Agent 会自动重连。", action: "refresh",
-  });
-  if (primaryAgent.value?.cookie_status === "verification_required") items.push({
-    key: "verification", level: "critical", label: "账号验证", title: "小红书要求人工验证",
-    cause: "系统已暂停后续请求，避免继续触发风控。",
-    solution: todayPlan.value?.verification_url ? "打开当前 Cookie 的人机验证，完成后直接检查并续跑，无需扫码。" : "本次未取到验证链接，可从已登录的本机浏览器同步 Cookie，扫码仅作兜底。", action: "login",
-  });
   for (const slot of failedPlanSlots.value) {
     const guide = failureGuide(slot);
     items.push({ key: `slot-${slot.keyword_id}`, level: "warning", label: `${slotTime(slot)} · 失败词`, slot, ...guide });
@@ -1459,16 +1328,13 @@ const refresh = async () => {
 const funnelStages = computed(() => {
   const f = data.value?.funnel || {},
     pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : null),
-    raw = (f.cli_raw_count || 0),
-    cliIncomplete = (f.cli_missing_diagnostics_count || 0) > 0,
+    raw = (f.tikhub_raw_count || 0),
     parsedOut = Math.max(0, raw - (f.merged_count || 0));
   return [
     {
       label: "搜索页返回",
-      value: cliIncomplete ? "未完整记录" : raw,
-      note: cliIncomplete
-        ? `${f.cli_missing_diagnostics_count} 个历史批次未知`
-        : "本地采集",
+      value: raw,
+      note: "TikHub 付费采集",
     },
     {
       label: "解析并去重",
