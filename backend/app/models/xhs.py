@@ -289,3 +289,12 @@ class XhsAgentUpload(BaseModel):
     accepted_count = Column(Integer, nullable=False, default=0)
     rejection_counts = Column(JSONField, nullable=False, default=dict)
     error_message = Column(Text, nullable=True)
+
+
+class XhsTopicBoard(BaseModel):
+    """分析任务生成的「今日热榜 + 持续发酵」看板快照；页面读最新一版，不实时计算。"""
+    __tablename__ = "xhs_topic_boards"
+
+    edition_date = Column(Date, nullable=False, index=True)
+    wave = Column(String(20), nullable=False, default="manual")
+    payload = Column(JSONField, nullable=False, default=dict)

@@ -222,7 +222,21 @@ def rebuild_semantic_topics_task(wave: str = "nightly"):
     async def run():
         await async_engine.dispose()
         try:
-            async with AsyncSessionLocal() as db: return await rebuild_semantic_topics(db,wave)
+            async with AsyncSessionLocal() as db:
+                result = await rebuild_semantic_topics(db,wave)
+                # 聚类完成后生成「今日热榜 + 持续发酵」看板快照；页面只读快照，不实时计算。
+                try:
+                    from datetime import date as _date
+                    from app.api.v1.xhs import compute_topic_boards
+                    from app.models.xhs import XhsTopicBoard
+                    payload = await compute_topic_boards(db, analyze_singles=True)
+                    db.add(XhsTopicBoard(edition_date=_date.fromisoformat(payload["edition_date"]), wave=wave, payload=payload))
+                    await db.commit()
+                    result["board_edition"] = payload["edition_date"]
+                except Exception:
+                    logger.warning("话题看板快照生成失败，不影响聚类结果: %s", wave, exc_info=True)
+                    await db.rollback()
+                return result
         finally:
             await async_engine.dispose()
     return asyncio.run(run())

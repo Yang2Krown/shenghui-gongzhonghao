@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import hashlib
 from importlib.metadata import PackageNotFoundError, version
 import json
+import logging
 from pathlib import Path
 import shutil
 
@@ -24,7 +25,7 @@ from app.core.timezone import utcnow
 from app.db.session import get_db
 from app.models.admin_audit import AdminAuditLog
 from app.models.user import User
-from app.models.xhs import XhsAgentBatch, XhsDailyQuota, XhsEngagementSnapshot, XhsImageFailureReport, XhsKeyword, XhsKeywordRun, XhsNote, XhsNoteDiscovery, XhsProviderCall, XhsSemanticTopic, XhsTopicMember, XhsTopicSnapshot
+from app.models.xhs import XhsAgentBatch, XhsDailyQuota, XhsEngagementSnapshot, XhsImageFailureReport, XhsKeyword, XhsKeywordRun, XhsNote, XhsNoteDiscovery, XhsProviderCall, XhsSemanticTopic, XhsTopicBoard, XhsTopicMember, XhsTopicSnapshot
 from app.services.xhs_cli_auth import XhsQrLoginManager
 from app.services.xhs_ai_filter import is_ai_related
 from app.services.xhs_collection import (
@@ -36,6 +37,7 @@ from app.services.xhs_topic_highlights import attach_highlights
 from app.tasks.xhs_tasks import collect_keyword_task, refresh_note_image_task
 
 router=APIRouter();admin_router=APIRouter()
+logger=logging.getLogger(__name__)
 PUBLIC_STATUSES=("ready","ready_degraded","synced")
 # 今日热榜补位：聚类话题不足 4 个时，用 24h 内单篇高热笔记填满（聚类话题永远排前面）。
 HOT_BOARD_MIN_SLOTS=4
@@ -176,6 +178,43 @@ async def get_note(note_id:str,_user:User=Depends(require_product_access(PRODUCT
 
 @router.get("/topic-boards")
 async def topic_boards(_user:User=Depends(require_product_access(PRODUCT_XHS_TOPIC)),db:AsyncSession=Depends(get_db)):
+    """看板只在分析任务（每日定时 / 手动立即分析）后更新；无快照时回退实时计算。"""
+    try: stored=(await db.scalars(select(XhsTopicBoard).order_by(desc(XhsTopicBoard.id)).limit(1))).first()
+    except OperationalError:
+        await db.rollback();stored=None
+    if stored and (stored.payload or {}).get("hot") is not None:return stored.payload
+    return await compute_topic_boards(db)
+
+
+async def _analyze_single_notes(db:AsyncSession,notes:list) -> dict:
+    """分析任务内对补位热帖候选做 LLM 判定：AI 相关性 + 一句话摘要（写回 ai_summary，调用方提交）。
+    返回 {note_id: 是否 AI 相关}；LLM 失败时回退到关键词过滤，保证看板不为空。"""
+    if not notes:return {}
+    fallback={n.note_id:is_ai_related(" ".join([n.title or "",*(str(x) for x in (n.native_tags or []))])) for n in notes}
+    try:
+        from app.services.llm.llm_client import ChatMessage, get_llm_client
+        samples=[{"note_id":n.note_id,"title":n.title,"content":(n.content or "")[:600]} for n in notes]
+        prompt=("你是内容编辑助手。判断每篇小红书笔记是否与 AI（大模型/AI 工具/AI 生成内容/AI 行业动态）相关，"
+                "并为 AI 相关的笔记写一句话事实摘要（不超过60字），说清这篇笔记在讨论什么、关键细节；"
+                "产品名/版本号/人名/数字只能严格依据给定正文，不得编造。\n"
+                "只返回JSON：{\"items\":[{\"note_id\":\"\",\"ai_related\":true,\"summary\":\"\"}]}\n"+str(samples))
+        result=await get_llm_client().chat([ChatMessage(role="user",content=prompt)],temperature=.2,max_tokens=1500,json_mode=True)
+        verdicts={}
+        for item in (result.parsed or {}).get("items",[]):
+            note_id=str(item.get("note_id"));verdicts[note_id]=bool(item.get("ai_related"))
+            summary=str(item.get("summary") or "").strip()[:200]
+            if verdicts[note_id] and summary:
+                for n in notes:
+                    if n.note_id==note_id and not (n.ai_summary or "").strip():n.ai_summary=summary
+        await db.flush()
+        return verdicts or fallback
+    except Exception:
+        logger.warning("补位热帖 LLM 分析失败，回退关键词过滤",exc_info=True)
+        return fallback
+
+
+async def compute_topic_boards(db:AsyncSession,*,analyze_singles:bool=False)->dict:
+    """计算「今日热榜 + 持续发酵」看板。analyze_singles=True（分析任务内）时补位热帖会先过 AI 摘要。"""
     now=utcnow()
     try: topics=(await db.scalars(select(XhsSemanticTopic).where(XhsSemanticTopic.status=="active").order_by(desc(XhsSemanticTopic.last_seen_at)))).all()
     except OperationalError:
@@ -235,14 +274,18 @@ async def topic_boards(_user:User=Depends(require_product_access(PRODUCT_XHS_TOP
         if topic.first_seen_at<day_start and topic.active_days>=2 and len(notes)>=2 and len(authors)>=2 and recent:fermenting.append(payload)
     hot.sort(key=lambda item:(item["new_notes_24h"],item["max_likes"]),reverse=True)
     # 聚类话题不足时用「24h 内单篇高热笔记」补位填满热榜；补位永远排在聚类话题之后。
+    # 分析任务内由 LLM 判定 AI 相关性并生成摘要；实时回退计算用关键词过滤。
     if len(hot)<HOT_BOARD_MIN_SLOTS:
         shown={n["note_id"] for item in hot for n in item["notes"]}
         singles=(await db.scalars(select(XhsNote).where(XhsNote.published_at>=publish_cutoff,XhsNote.like_count>SINGLE_HOT_MIN_LIKES,XhsNote.quality_status.in_(PUBLIC_STATUSES)).order_by(desc(XhsNote.like_count)).limit(HOT_BOARD_MIN_SLOTS*3))).all()
-        for n in singles:
-            if len(hot)>=HOT_BOARD_MIN_SLOTS:break
-            if n.note_id in shown or not is_ai_related(" ".join([n.title or "",*(str(x) for x in (n.native_tags or []))])):continue
+        candidates=[n for n in singles if n.note_id not in shown]
+        if analyze_singles:
+            verdicts=await _analyze_single_notes(db,candidates)
+            picked=[n for n in candidates if verdicts.get(n.note_id)]
+        else:
+            picked=[n for n in candidates if is_ai_related(" ".join([n.title or "",*(str(x) for x in (n.native_tags or []))]))]
+        for n in picked[:HOT_BOARD_MIN_SLOTS-len(hot)]:
             hot.append({"kind":"single","topic_id":f"note-{n.note_id}","topic":(n.title or "").strip()[:36] or "未命名笔记","ai_highlight":n.ai_summary,"sample_count":1,"author_count":1,"new_notes_24h":1,"new_authors_24h":1,"max_likes":n.like_count or 0,"first_seen_at":n.first_discovered_at.isoformat(),"last_seen_at":n.last_discovered_at.isoformat(),"active_days":1,"engagement_growth":0,"fermentation_score":0,"evidence":[f"单篇笔记 24 小时内获 {n.like_count} 赞"],"trend_points":[],"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)}]})
-            shown.add(n.note_id)
     # 持续发酵以"一直在热"为主导：活跃天数与持续增长权重最高，今日突发新话题不会反超多日反复在热的老话题。
     def _persistence(item):
         longevity=min(item["active_days"],7)/7

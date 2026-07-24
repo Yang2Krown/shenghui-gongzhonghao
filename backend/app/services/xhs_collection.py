@@ -203,6 +203,8 @@ class Candidate:
     def merge(self, other: "Candidate") -> None:
         for name in ("title","content","published_at","note_type","author_id","author_nickname","author_bio","avatar_url","cover_url","like_count","collect_count","comment_count","share_count","view_count"):
             if getattr(self, name) in (None, "", []): setattr(self, name, getattr(other, name))
+        # 搜索卡片正文常被截断（~60 字）：详情拿到更长正文时直接替换，不保留残文。
+        if other.content and len(other.content) > len(self.content or ""): self.content = other.content
         # 后续来源/详情补全到 token 时，允许它替换先到的裸链接。
         if not _xsec_token(self.xsec_url) and _xsec_token(other.xsec_url):
             self.xsec_url = other.xsec_url
@@ -468,8 +470,14 @@ class CliProvider:
     async def detail(self, candidate: Candidate) -> dict: return await self._run("read", candidate.xsec_url or candidate.note_id)
 
 
+CONTENT_MAYBE_TRUNCATED_LEN = 55  # 搜索卡片正文常被截断在 ~60 字；达到此长度即视为疑似残缺，需详情补全
+
+
 def needs_hydration(c: Candidate) -> bool:
-    return any(x in (None, "") for x in (c.title,c.content,c.author_nickname,c.cover_url,c.published_at,c.like_count)) or all(x is None for x in (c.like_count,c.collect_count,c.comment_count,c.share_count))
+    # 卡片给的残缺正文（~60 字）不算"字段齐全"：疑似截断时也要拉详情换全量正文。
+    if any(x in (None, "") for x in (c.title,c.content,c.author_nickname,c.cover_url,c.published_at,c.like_count)): return True
+    if all(x is None for x in (c.like_count,c.collect_count,c.comment_count,c.share_count)): return True
+    return len(c.content or "") >= CONTENT_MAYBE_TRUNCATED_LEN
 
 
 async def hydrate(

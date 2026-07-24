@@ -11,7 +11,7 @@ from app.models.xhs import XhsDailyQuota, XhsKeyword, XhsKeywordRun
 from app.db.seeds.seed_accounts_from_table2 import X_KEYWORDS
 from app.services.xhs_collection import (
     Candidate, CliProvider, TikHubBudgetExhausted, _xsec_token, consume_tikhub_quota, count_value,
-    hydrate, merge_provider_candidates, normalize_candidate, pre_hydration_rejection, rank,
+    hydrate, merge_provider_candidates, needs_hydration, normalize_candidate, pre_hydration_rejection, rank,
     rejection_reason, reserve_tikhub_searches, unwrap_detail, unwrap_items, upsert_engagement_snapshot,
     upsert_note, xsec_note_url,
 )
@@ -209,6 +209,20 @@ def test_tokenized_candidate_replaces_bare_url_during_provider_merge():
     tokenized=Candidate(note_id="note-1",xsec_url=xsec_note_url("note-1",token="search-token="))
     bare.merge(tokenized)
     assert _xsec_token(bare.xsec_url)=="search-token="
+
+
+def test_truncated_card_content_triggers_hydration_and_gets_replaced():
+    # 搜索卡片正文被截断在 ~60 字：字段"齐全"也要继续拉详情
+    now=datetime(2026,7,16,12,0,0)
+    card=Candidate(note_id="n",title="标题",content="残" * 60,author_nickname="作者",cover_url="https://sns-webpic.xhscdn.com/a.jpg",note_type="image",published_at=now,like_count=300)
+    assert needs_hydration(card) is True
+    #  genuinely 短正文（<55 字）的笔记不重复拉详情
+    short=Candidate(note_id="n2",title="标题",content="短正文",author_nickname="作者",cover_url="https://sns-webpic.xhscdn.com/a.jpg",note_type="image",published_at=now,like_count=300)
+    assert needs_hydration(short) is False
+    # 详情拿到更长正文时替换残文，而不是保留截断版
+    detail=Candidate(note_id="n",content="完整" * 200)
+    card.merge(detail)
+    assert card.content == "完整" * 200
 
 
 def test_search_card_prefilter_avoids_details_for_definitely_ineligible_notes():
