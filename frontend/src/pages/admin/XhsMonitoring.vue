@@ -47,6 +47,14 @@
         >
       </article>
     </div>
+    <div v-if="data && data.overview" class="overview-strip">
+      <div><small>今日运行</small><b>{{ data.overview.runs }}</b><span>次</span></div>
+      <div><small>搜索返回</small><b>{{ data.overview.searched_raw }}</b><span>条</span></div>
+      <div><small>入库</small><b>{{ data.overview.ingested }}</b><span>篇<template v-if="data.overview.relaxed_ingested">（含补录 {{ data.overview.relaxed_ingested }}）</template></span></div>
+      <div><small>预估成本</small><b>¥{{ (data.overview.estimated_cost_cny || 0).toFixed(2) }}</b><span></span></div>
+      <div><small>活跃话题</small><b>{{ data.overview.active_topics }}</b><span>个</span></div>
+      <div v-if="data.relaxed_stats && data.relaxed_stats.ingested"><small>补录进话题率</small><b>{{ data.relaxed_stats.topic_rate }}%</b><span>{{ data.relaxed_stats.in_topics }}/{{ data.relaxed_stats.ingested }} 篇</span></div>
+    </div>
     <div v-if="data" class="alerts">
       <div v-for="a in data.alerts" :key="a.message" :class="a.level">
         <span
@@ -183,45 +191,12 @@
         </div>
       </div>
     </section>
-    <section v-if="data" class="panel trends-panel">
-      <div class="panel-head">
-        <div>
-          <div class="kicker">TRENDS</div>
-          <h2>近 {{ trendDays }} 天采集趋势</h2>
-          <p>成功率、入库量与风控(验证码)事件，按天聚合</p>
-        </div>
-        <div class="trend-tools">
-          <button v-for="d in [7, 14, 30]" :key="d" :class="['trend-range', { active: trendDays === d }]" @click="setTrendDays(d)">{{ d }} 天</button>
-        </div>
-      </div>
-      <div v-if="trendSeries.length" class="trends-grid">
-        <figure class="trend-card">
-          <figcaption>采集成功率<small>{{ trendSummary.success }}</small></figcaption>
-          <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
-            <polyline v-if="trendPaths.success" :points="trendPaths.success" fill="none" stroke="var(--pine,#35695a)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />
-          </svg>
-        </figure>
-        <figure class="trend-card">
-          <figcaption>每日入库素材<small>{{ trendSummary.notes }}</small></figcaption>
-          <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
-            <polyline v-if="trendPaths.notes" :points="trendPaths.notes" fill="none" stroke="var(--pine,#35695a)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />
-          </svg>
-        </figure>
-        <figure class="trend-card">
-          <figcaption>风控(验证码)事件<small>{{ trendSummary.captcha }}</small></figcaption>
-          <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
-            <polyline v-if="trendPaths.captcha" :points="trendPaths.captcha" fill="none" stroke="var(--clay,#c0735a)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />
-          </svg>
-        </figure>
-      </div>
-      <p v-else class="trend-empty">暂无历史趋势数据，采集运行几天后自动生成。</p>
-    </section>
     <div v-if="data" class="grid">
       <article class="panel runs">
         <div class="panel-head">
           <div>
             <h2>今日关键词执行</h2>
-            <p>成功完成的关键词当天不可再次搜索</p>
+            <p>成功完成的关键词当天不可再次搜索；同日重搜会覆盖统计，素材按 note_id 去重不重复入库</p>
           </div>
         </div>
         <div class="table table-scroll table-runs">
@@ -251,6 +226,9 @@
                 <td>{{ filterResultLabel(row) }}</td>
                 <td>
                   <em :class="row.status">{{ status(row.status) }}</em
+                  ><small
+                    >更新于 {{ shortTime(row.finished_at)
+                    }}<template v-if="row.attempts > 1"> · 第 {{ row.attempts }} 次运行</template></small
                   ><small v-if="row.error_message" :title="row.error_message">{{
                     row.error_message
                   }}</small>
@@ -281,6 +259,54 @@
         </article>
       </aside>
     </div>
+    <article v-if="data && (data.keyword_roi || []).length" class="panel roi-panel">
+      <div class="panel-head">
+        <div>
+          <h2>关键词产出 · 近 7 天</h2>
+          <p>按入库量排序；连续零产出且成本偏高的词可考虑停用或替换</p>
+        </div>
+      </div>
+      <div class="table table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>关键词</th>
+              <th>运行</th>
+              <th>搜索返回</th>
+              <th>入库（补录）</th>
+              <th>付费调用</th>
+              <th>成本 / 单篇</th>
+              <th>零产出</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in data.keyword_roi" :key="row.keyword_id">
+              <td>
+                <b>{{ row.keyword }}</b
+                ><small>{{ row.keyword_type === "base" ? "基础词" : "动态词" }}</small>
+              </td>
+              <td>{{ row.runs }} 次</td>
+              <td>{{ row.searched_raw }}</td>
+              <td>
+                {{ row.ingested
+                }}<small v-if="row.relaxed_ingested">（+{{ row.relaxed_ingested }} 补录）</small>
+              </td>
+              <td>{{ row.paid_calls }}</td>
+              <td>
+                ¥{{ row.cost.toFixed(2)
+                }}<small v-if="row.cost_per_note != null"> / ¥{{ row.cost_per_note.toFixed(3) }}</small
+                ><small v-else> / —</small>
+              </td>
+              <td>
+                <em v-if="row.zero_yield_streak >= 3" class="failed">连续 {{ row.zero_yield_streak }} 天</em>
+                <span v-else-if="row.zero_yield_days">{{ row.zero_yield_days }} 天</span>
+                <span v-else>—</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </article>
     <article v-if="data" class="panel keyword-panel">
       <div class="panel-head">
         <div>
@@ -503,6 +529,8 @@
               <td>
                 <button class="link" :disabled="imageRefreshBusy === r.note_id" @click="refreshImage(r)">
                   {{ imageRefreshBusy === r.note_id ? "正在刷新…" : "免费刷新图片" }}</button
+                ><button v-if="userStore.isSuperAdmin" class="link paid" :disabled="imageRefreshBusy === r.note_id" @click="refreshImage(r, true)">
+                  {{ imageRefreshBusy === r.note_id ? "正在刷新…" : "付费刷新(TikHub)" }}</button
                 ><button class="link paid" @click="resolveFailure(r)">
                   标记已处理
                 </button>
@@ -661,8 +689,6 @@ const userStore = useUserStore(),
   recoveryCenter = ref(null),
   tikhubPanel = ref(null),
   expandedCall = ref(null),
-  trendDays = ref(14),
-  trendSeries = ref([]),
   showSchedule = ref(false),
   scheduleSaving = ref(false),
   scheduleForm = reactive({ window_start: "00:30", window_end: "23:30", daily_derived_limit: 5 }),
@@ -877,15 +903,6 @@ const saveSchedule = async () => {
     scheduleSaving.value = false;
   }
 };
-// 历史趋势（按天聚合，数据来自已落库的 runs / provider calls）
-const loadTrends = async () => {
-  try {
-    trendSeries.value = (
-      await api.get("/admin/xhs-monitoring/stats/daily", { params: { days: trendDays.value }, skipErrorToast: true })
-    ).data.series || [];
-  } catch { trendSeries.value = []; }
-};
-const setTrendDays = (d) => { trendDays.value = d; loadTrends(); };
 // 把 [0..1] 归一化后的序列映射成 100x40 的 SVG polyline 点。
 const sparkline = (values) => {
   const nums = values.filter((v) => v != null);
@@ -897,11 +914,6 @@ const sparkline = (values) => {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
 };
-const trendPaths = computed(() => ({
-  success: sparkline(trendSeries.value.map((d) => (d.success_rate == null ? null : Math.round(d.success_rate * 100)))),
-  notes: sparkline(trendSeries.value.map((d) => d.notes_collected || 0)),
-  captcha: sparkline(trendSeries.value.map((d) => d.captcha_events || 0)),
-}));
 // ── TikHub 付费通道 ──
 const tikhub = computed(() => data.value?.tikhub || null);
 const quotaPercent = (today) => (today?.limit ? Math.min(100, Math.round((today.used / today.limit) * 100)) : 0);
@@ -940,16 +952,6 @@ const openQuotaEditor = async () => {
     }
   }
 };
-const trendSummary = computed(() => {
-  const s = trendSeries.value;
-  const runs = s.reduce((a, d) => a + (d.runs || 0), 0);
-  const ok = s.reduce((a, d) => a + (d.succeeded || 0), 0);
-  return {
-    success: runs ? `平均 ${Math.round((ok / runs) * 100)}%` : "暂无数据",
-    notes: `共 ${s.reduce((a, d) => a + (d.notes_collected || 0), 0)} 篇`,
-    captcha: `共 ${s.reduce((a, d) => a + (d.captcha_events || 0), 0)} 次`,
-  };
-});
 // 单关键词历史下钻
 const openKeywordHistory = async (k) => {
   showKeywordHistory.value = true;
@@ -1212,6 +1214,7 @@ const reasons = {
   old: "超过 7 天",
   unknown_date: "发布时间未知",
   low_like: "未达到所在层级点赞门槛",
+  low_like_soft: "放宽档待补录（标准档已满，未补录）",
   unknown_metric: "指标未知",
   unknown_type: "类型未知",
   core_incomplete: "核心详情缺失",
@@ -1219,10 +1222,15 @@ const reasons = {
   rank: "历史版本数量截断",
 };
 const reason = (k) => reasons[k] || k;
-const searchParseLabel = (row) =>
-  row.run_source === "local_agent" && !row.has_search_diagnostics
-    ? `未知 / 已上传 ${row.merged_count}`
-    : `${row.cli_raw_count} / ${row.merged_count}`;
+const searchParseLabel = (row) => {
+  if (row.run_source === "local_agent" && !row.has_search_diagnostics)
+    return `未知 / 已上传 ${row.merged_count}`;
+  // CLI 已停用，付费 TikHub 是主通道；搜索列要展示真实出数的那一路，避免全是 0/N。
+  const parts = [];
+  if (row.cli_raw_count) parts.push(`CLI ${row.cli_raw_count}`);
+  if (row.tikhub_raw_count) parts.push(`TikHub ${row.tikhub_raw_count}`);
+  return `${parts.length ? parts.join(" + ") : 0} / ${row.merged_count}`;
+};
 const levelStat = (row, level, field) => row?.level_stats?.[level]?.[field] ?? "—";
 const searchRouteLabel = (row) => {
   const sorts = (row?.searches || []).map((item) => item.sort).filter(Boolean);
@@ -1237,12 +1245,13 @@ const diagnosticRejections = computed(() =>
     .filter(([key, count]) => !key.startsWith("_") && Number(count) > 0)
     .map(([key, count]) => ({ key, count })),
 );
+const rawCount = (run) => (run.cli_raw_count || 0) + (run.tikhub_raw_count || 0);
 const runDiagnosticSummary = (run) => {
   if (run.search_state === "unrecognized")
     return "小红书返回了无法识别的响应，本次不能判定为 0 条，请检查 CLI 或重新登录。";
-  if (run.cli_raw_count === 0) return "小红书搜索页本次真实返回 0 条。";
+  if (rawCount(run) === 0) return "小红书搜索页本次真实返回 0 条。";
   if (run.displayable_count === 0)
-    return `搜索页返回 ${run.cli_raw_count} 条，但结果均在解析、时间、点赞或详情规则中被过滤。`;
+    return `搜索页返回 ${rawCount(run)} 条，但结果均在解析、时间、点赞或详情规则中被过滤。`;
   const initialEligible =
     Number(levelStat(run, "daily", "eligible_count") || 0) +
     Number(levelStat(run, "weekly", "eligible_count") || 0);
@@ -1255,8 +1264,8 @@ const emptyRunNotesMessage = computed(() => {
     return "这次历史运行没有记录原始搜索漏斗，不能判定为搜索结果 0 条。";
   if (run.search_state === "unrecognized")
     return "搜索响应无法解析，不能判定为搜索结果 0 条。";
-  if (run.cli_raw_count === 0) return "小红书搜索页本次真实返回 0 条。";
-  return `搜索页返回 ${run.cli_raw_count} 条，但没有笔记通过完整入库规则；请查看上方淘汰原因。`;
+  if (rawCount(run) === 0) return "小红书搜索页本次真实返回 0 条。";
+  return `搜索页返回 ${rawCount(run)} 条，但没有笔记通过完整入库规则；请查看上方淘汰原因。`;
 });
 const toggle = async (k) => {
   await api.patch(`/admin/xhs-monitoring/keywords/${k.id}/enabled`, null, {
@@ -1324,11 +1333,26 @@ const searchNow = async (k) => {
     searchBusy.value = "";
   }
 };
+const waitForAnalyzeTask = async (taskId) => {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 3000));
+    const { data: task } = await api.get(`/admin/xhs-monitoring/analyze-topics/${taskId}`, { skipErrorToast: true });
+    if (task.status === "running") continue;
+    await load();
+    if (task.status === "failed") throw new Error(task.error_message || "话题分析失败");
+    const r = task.result || {};
+    ElMessage.success(
+      `话题分析完成：${r.selected ?? 0} 篇素材参与，生成 ${r.topics ?? 0} 个话题；热榜请刷新小红书素材页查看`,
+    );
+    return;
+  }
+  throw new Error("等待分析结果超时，请稍后刷新查看");
+};
 const analyzeNow = async () => {
   if (!userStore.isSuperAdmin) return ElMessage.warning("仅最高管理员可用");
   try {
     await ElMessageBox.confirm(
-      "将对全部素材重建「今日热榜 + 持续发酵」话题分析。",
+      "将对全部已入库素材重建「今日热榜 + 持续发酵」话题分析（仅重新聚类已有素材，不包含新采集）。",
       "确认立即分析？",
       { confirmButtonText: "立即分析", cancelButtonText: "取消", type: "warning", lockScroll: false },
     );
@@ -1337,8 +1361,9 @@ const analyzeNow = async () => {
   }
   analyzeBusy.value = true;
   try {
-    await api.post("/admin/xhs-monitoring/analyze-topics");
-    ElMessage.success("已提交全局话题分析，稍候刷新看板查看结果");
+    const { data } = await api.post("/admin/xhs-monitoring/analyze-topics");
+    ElMessage.success("已提交全局话题分析，正在等待结果…");
+    await waitForAnalyzeTask(data.task_id);
   } catch (error) {
     ElMessage.error(error?.response?.data?.detail || error?.message || "立即分析失败");
   } finally {
@@ -1380,7 +1405,7 @@ const funnelStages = computed(() => {
       label: "点赞门槛合格",
       value: f.eligible_like_count || 0,
       conv: pct(f.eligible_like_count, f.merged_count),
-      note: "近 24h >200 · 1–7 天 >2000",
+      note: "标准档 24h >200 · 1–7 天 >2000；不足自动补录放宽档（>100 / >1500）",
     },
     {
       label: "完整入库",
@@ -1407,37 +1432,48 @@ const resolveFailure = async (r) => {
   openFailures();
   load();
 };
-const refreshImage = async (r) => {
-  if (!primaryAgent.value?.connected) return ElMessage.warning("本地采集节点当前离线");
-  if (primaryAgent.value.cookie_status !== "valid") return ElMessage.warning("请先完成本地节点扫码登录");
-  imageRefreshBusy.value = r.note_id;
-  imageRefreshFeedback[r.note_id] = "正在发送到本地 Mac，通常 10–30 秒…";
-  try {
-    const response = await api.post("/admin/xhs-monitoring/agent/commands", {
-      device_id: primaryAgent.value.id,
-      command_type: "refresh_image",
-      note_id: r.note_id,
-    });
-    const commandId = response.data.command_id;
-    imageRefreshFeedback[r.note_id] = "本地 Mac 正在读取小红书笔记…";
-    for (let attempt = 0; attempt < 75; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 2000));
-      const command = (await api.get(`/admin/xhs-monitoring/agent/commands/${commandId}`, { skipErrorToast: true })).data;
-      if (command.status === "succeeded") {
-        imageRefreshFeedback[r.note_id] = "刷新成功，封面已缓存";
-        ElMessage.success("封面已刷新并开始本地缓存");
-        await Promise.all([openFailures(), load()]);
-        return;
-      }
-      if (["failed", "cancelled"].includes(command.status)) throw new Error(command.error || "图片刷新失败");
+const refreshImage = async (r, paid = false) => {
+  // 走服务端 TikHub/免费刷新接口(不再依赖本地采集节点):成功即换新封面 URL、
+  // 把该笔记的 open 报告标记为 resolved 并立刻预缓存封面。报告从列表消失即视为成功。
+  if (paid && !userStore.isSuperAdmin) return ElMessage.warning("仅最高管理员可用付费刷新");
+  if (paid) {
+    try {
+      await ElMessageBox.confirm(
+        "将通过 TikHub 付费接口重新拉取该笔记封面,会产生一次付费调用。确认继续?",
+        "付费刷新封面",
+        { confirmButtonText: "确认付费刷新", cancelButtonText: "取消", type: "warning" },
+      );
+    } catch {
+      return;
     }
-    throw new Error("图片刷新超时，请稍后查看失败报告");
+  }
+  imageRefreshBusy.value = r.note_id;
+  imageRefreshFeedback[r.note_id] = paid ? "TikHub 付费刷新中…" : "刷新中…";
+  const stillOpen = async () => {
+    const reports = (await api.get("/admin/xhs-monitoring/image-failures", { skipErrorToast: true })).data.reports || [];
+    return reports.some((x) => x.note_id === r.note_id && x.image_kind === r.image_kind);
+  };
+  try {
+    await api.post(`/admin/xhs-monitoring/notes/${r.note_id}/refresh-image-${paid ? "paid" : "free"}`);
+    let resolved = false;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      if (!(await stillOpen())) { resolved = true; break; }
+    }
+    if (resolved) {
+      imageRefreshFeedback[r.note_id] = "刷新成功,封面已更新";
+      ElMessage.success(paid ? "付费刷新成功,封面已缓存" : "封面已刷新并开始本地缓存");
+    } else {
+      imageRefreshFeedback[r.note_id] = "未能取到新封面(来源可能已失效),可尝试付费刷新或稍后重试";
+      ElMessage.warning("刷新未成功,封面未更新");
+    }
   } catch (error) {
     const message = error?.response?.data?.detail || error?.message || "图片刷新失败";
-    imageRefreshFeedback[r.note_id] = `刷新失败：${message}`;
+    imageRefreshFeedback[r.note_id] = `刷新失败:${message}`;
     ElMessage.error(message);
   } finally {
     imageRefreshBusy.value = "";
+    await Promise.all([openFailures(), load()]);
   }
 };
 const noteStatus = (s) =>
@@ -1505,7 +1541,6 @@ const handleVisibilityChange = () => {
 onMounted(() => {
   monitorDisposed = false;
   load();
-  loadTrends();
   scheduleMonitorRefresh();
   document.addEventListener("visibilitychange", handleVisibilityChange);
 });
@@ -1649,6 +1684,44 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(4, 1fr);
   gap: 11px;
   margin-top: 20px;
+}
+.overview-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 11px;
+  margin-top: 11px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 16px;
+}
+.overview-strip > div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-right: 14px;
+  border-right: 1px solid var(--line);
+}
+.overview-strip > div:last-child {
+  border-right: none;
+}
+.overview-strip small {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.overview-strip b {
+  font: 700 20px var(--serif);
+}
+.overview-strip span {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.roi-panel {
+  margin-top: 11px;
+}
+.roi-panel td em.failed {
+  color: var(--clay);
+  font-style: normal;
 }
 .metric-grid article,
 .panel {
@@ -2313,17 +2386,6 @@ td em,
 .health-banner-side { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; flex: none; }
 .health-banner-side span { color: var(--ink-3); font-size: 11px; }
 .banner-action { border: 0; border-radius: 8px; padding: 7px 13px; color: #fff; background: var(--clay-deep); font-size: 12px; cursor: pointer; }
-/* ── 趋势面板 ─────────────────────────────────── */
-.trends-panel { margin-bottom: 16px; }
-.trend-tools { display: flex; gap: 6px; }
-.trend-range { border: 1px solid var(--line); border-radius: 8px; padding: 5px 11px; background: transparent; color: var(--ink-3); font-size: 11px; cursor: pointer; }
-.trend-range.active { border-color: var(--pine); color: var(--pine); background: #e9f0eb; font-weight: 700; }
-.trends-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 4px; }
-.trend-card { margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255, 255, 255, .6); }
-.trend-card figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--ink-2); font-size: 12px; font-weight: 600; }
-.trend-card figcaption small { color: var(--ink-3); font-size: 10px; font-weight: 500; }
-.trend-card svg { display: block; width: 100%; height: 40px; margin-top: 8px; }
-.trend-empty { margin: 6px 0 0; color: var(--ink-3); font-size: 12px; }
 /* ── 采集策略表单 ─────────────────────────────── */
 .schedule-window { display: flex; align-items: center; gap: 10px; width: 100%; }
 .schedule-window .el-select { flex: 1; }
@@ -2332,7 +2394,6 @@ td em,
 .health-intro { margin: 2px 0 10px; color: var(--ink-3); font-size: 11px; }
 .health-empty { color: var(--ink-3); font-size: 11px; }
 @media (max-width: 900px) {
-  .trends-grid { grid-template-columns: 1fr; }
   .health-banner { flex-direction: column; align-items: flex-start; }
   .health-banner-side { align-items: flex-start; }
 }

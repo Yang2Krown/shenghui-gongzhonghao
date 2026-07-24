@@ -225,7 +225,7 @@ def test_collector_preserves_raw_count_when_every_result_is_filtered(tmp_path, m
         "note_card": {
             "display_title": "低赞笔记",
             "corner_tag_info": [{"type": "publish_time", "text": "今天"}],
-            "interact_info": {"liked_count": "120"},
+            "interact_info": {"liked_count": "80"},
         },
     }]}
     collector = make_collector(monkeypatch, search=lambda *a, **k: search_payload)
@@ -238,6 +238,24 @@ def test_collector_preserves_raw_count_when_every_result_is_filtered(tmp_path, m
     assert diagnostics["eligible_like_count"] == 0
     assert diagnostics["rejection_counts"]["low_like"] == 1
     assert diagnostics["rejection_counts"]["duplicate"] == 2
+
+
+def test_relaxed_band_notes_are_submitted_but_not_counted_as_eligible(tmp_path, monkeypatch):
+    search_payload = {"ok": True, "data": [{
+        "id": "note-relaxed", "model_type": "note",
+        "note_card": {
+            "display_title": "放宽档笔记",
+            "corner_tag_info": [{"type": "publish_time", "text": "今天"}],
+            "interact_info": {"liked_count": "150"},
+        },
+    }]}
+    collector = make_collector(monkeypatch, search=lambda *a, **k: search_payload)
+    result = collector.collect_keyword("AI startup")
+    diagnostics = result["diagnostics"]
+    # 放宽档（>100 但 ≤200）照常提交服务器，由服务端决定补录；不计入标准档合格数
+    assert [note["note_id"] for note in result["notes"]] == ["note-relaxed"]
+    assert diagnostics["eligible_like_count"] == 0
+    assert diagnostics["rejection_counts"]["low_like"] == 0
 
 
 def test_daily_latest_fetches_third_page_only_when_yield_is_low_and_page_two_is_new(tmp_path, monkeypatch):

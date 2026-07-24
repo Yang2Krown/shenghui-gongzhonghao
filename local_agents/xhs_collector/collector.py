@@ -33,6 +33,9 @@ class AuthenticationExpired(RuntimeError):
 
 DAILY_MIN_LIKES_EXCLUSIVE = 200
 WEEKLY_MIN_LIKES_EXCLUSIVE = 2000
+# 放宽档地板：高于地板的候选一律提交服务器，由服务端决定标准档直入或补录。
+DAILY_RELAXED_MIN_LIKES_EXCLUSIVE = 100
+WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE = 1500
 DAILY_EXPANSION_TARGET = 10
 MAX_PAGE_DUPLICATE_RATIO = 0.8
 
@@ -228,8 +231,8 @@ class XhsCollector:
             "within_week_count": 0,
             "eligible_like_count": 0,
             "levels": {
-                "daily": {"candidate_count": 0, "eligible_count": 0, "likes_gt": DAILY_MIN_LIKES_EXCLUSIVE},
-                "weekly": {"candidate_count": 0, "eligible_count": 0, "likes_gt": WEEKLY_MIN_LIKES_EXCLUSIVE},
+                "daily": {"candidate_count": 0, "eligible_count": 0, "likes_gt": DAILY_MIN_LIKES_EXCLUSIVE, "relaxed_likes_gt": DAILY_RELAXED_MIN_LIKES_EXCLUSIVE},
+                "weekly": {"candidate_count": 0, "eligible_count": 0, "likes_gt": WEEKLY_MIN_LIKES_EXCLUSIVE, "relaxed_likes_gt": WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE},
             },
             "detail_attempted_count": 0,
             "detail_success_count": 0,
@@ -266,12 +269,15 @@ class XhsCollector:
                 if likes is None:
                     diagnostics["rejection_counts"]["unknown_metric"] += 1
                     continue
-                threshold = diagnostics["levels"][level]["likes_gt"]
-                if likes <= threshold:
+                strict_threshold = diagnostics["levels"][level]["likes_gt"]
+                floor_threshold = diagnostics["levels"][level]["relaxed_likes_gt"]
+                # 地板以下本地直接拒；放宽档（地板~标准档）照常提交，由服务端按补录策略决定。
+                if likes <= floor_threshold:
                     diagnostics["rejection_counts"]["low_like"] += 1
                     continue
-                diagnostics["eligible_like_count"] += 1
-                diagnostics["levels"][level]["eligible_count"] += 1
+                if likes > strict_threshold:
+                    diagnostics["eligible_like_count"] += 1
+                    diagnostics["levels"][level]["eligible_count"] += 1
                 item["collection_level"] = level
                 item["collection_sort"] = search["sort"]
                 candidates_by_level[level].append(item)

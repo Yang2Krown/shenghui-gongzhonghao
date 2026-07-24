@@ -24,7 +24,10 @@ from app.models.xhs import (
     XhsImageFailureReport, XhsKeyword, XhsKeywordRun, XhsNote,
 )
 from app.services.xhs_agent_ingestion import AgentIngestionConflict, ingest_agent_result
-from app.services.xhs_collection import DAILY_MIN_LIKES_EXCLUSIVE, WEEKLY_MIN_LIKES_EXCLUSIVE, remote_image_url
+from app.services.xhs_collection import (
+    DAILY_MIN_LIKES_EXCLUSIVE, DAILY_RELAXED_MIN_LIKES_EXCLUSIVE,
+    WEEKLY_MIN_LIKES_EXCLUSIVE, WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE, remote_image_url,
+)
 
 router = APIRouter()
 admin_router = APIRouter()
@@ -383,8 +386,8 @@ async def manifest(agent: XhsCollectorDevice = Depends(get_agent), db: AsyncSess
         "rules": {
             "max_age_days": 7, "max_per_keyword": None, "sort": "popular",
             "levels": {
-                "daily": {"max_age_hours": 24, "likes_gt": DAILY_MIN_LIKES_EXCLUSIVE},
-                "weekly": {"min_age_hours": 24, "max_age_days": 7, "likes_gt": WEEKLY_MIN_LIKES_EXCLUSIVE},
+                "daily": {"max_age_hours": 24, "likes_gt": DAILY_RELAXED_MIN_LIKES_EXCLUSIVE, "strict_likes_gt": DAILY_MIN_LIKES_EXCLUSIVE},
+                "weekly": {"min_age_hours": 24, "max_age_days": 7, "likes_gt": WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE, "strict_likes_gt": WEEKLY_MIN_LIKES_EXCLUSIVE},
             },
         },
         "schedule": _schedule_payload(agent),

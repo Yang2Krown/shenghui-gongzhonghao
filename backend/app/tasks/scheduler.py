@@ -47,8 +47,6 @@ CELERY_BEAT_SCHEDULE = {
     },
     # 搜索采集已由本地 Mac Agent 接管；服务器只保留关键词生成和素材分析。
     "xhs-note-analysis": {"task": "xhs.analyze_notes", "schedule": crontab(minute=0, hour="13,18")},
-    "xhs-topic-after-morning": {"task":"xhs.rebuild_semantic_topics","schedule":crontab(minute=15,hour=13),"kwargs":{"wave":"morning"}},
-    "xhs-topic-after-afternoon": {"task":"xhs.rebuild_semantic_topics","schedule":crontab(minute=15,hour=18),"kwargs":{"wave":"afternoon"}},
     "xhs-dynamic-generate": {"task": "xhs.generate_dynamic_keywords", "schedule": crontab(minute=20, hour=18)},
     "xhs-keyword-lifecycle": {"task":"xhs.evaluate_keyword_lifecycle","schedule":crontab(minute=25,hour=18)},
     # ── 采集：每天 5 波，错峰派发每个源 ──

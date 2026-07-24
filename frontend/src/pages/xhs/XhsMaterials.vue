@@ -6,13 +6,13 @@
     <section v-if="topics.length" class="topic-board">
       <div class="board" :class="{solo:!railTopics.length}">
         <article class="tb-topic tb-hero" :class="{selected:filters.semantic_topic_id===headline.topic_id,'no-cover':!topNote}" role="button" tabindex="0" :aria-pressed="filters.semantic_topic_id===headline.topic_id" @click="openTopic(headline)" @keydown.enter.prevent="openTopic(headline)" @keydown.space.prevent="openTopic(headline)">
-          <span class="sel-chip">✓ 筛选中</span><div class="hero-main"><div class="hero-top"><span class="rank">01</span><span class="badge badge-new">今日新切口</span><span class="page-tag">A1 · 头条</span></div><h3 class="hero-title">{{ headline.topic }}</h3><p class="hero-deck">{{ headline.ai_highlight || evidence(headline) }}</p>
+          <span class="sel-chip">✓ 筛选中</span><div class="hero-main"><div class="hero-top"><span class="rank">01</span><span class="badge" :class="headline.kind==='single'?'badge-single':'badge-new'">{{ headline.kind==='single'?'单篇高热':'今日新切口' }}</span><span class="page-tag">A1 · 头条</span></div><h3 class="hero-title">{{ headline.topic }}</h3><p class="hero-deck">{{ headline.ai_highlight || evidence(headline) }}</p>
           <ul class="hero-meta"><li><b>论据</b>今天形成内容热度</li><li><b>{{ headline.sample_count }}</b> 篇样本</li><li>最高 <b>{{ compact(headline.max_likes) }}</b> 赞</li></ul>
           <div v-if="heroMoreNotes.length" class="hero-notes"><div class="notes-label">其余代表笔记 · MORE NOTES</div><button v-for="(n,ni) in heroMoreNotes" :key="n.note_id" type="button" class="note" @click.stop="openDetail({note_id:n.note_id})"><span class="no">NO.{{ ni+2 }}</span><span class="t">「{{ n.title }}」</span><span class="leader"></span><span class="lk"><b>{{ compact(n.likes) }}</b> 赞</span></button></div></div>
           <figure v-if="topNote" class="hero-cover"><img :src="imageUrl(topNote)" :alt="topNote.title" loading="lazy" referrerpolicy="no-referrer" @error="imageFailed($event,topNote,'cover')"><span class="cover-wm">{{ headline.topic.slice(0,1) }}</span><span class="cover-tag">置顶代表笔记</span><figcaption @click.stop="openDetail({note_id:topNote.note_id})"><span class="cover-title">「{{ topNote.title }}」</span><span class="like-chip"><i>♥</i> {{ compact(topNote.likes) }} 赞 · 话题内最热</span></figcaption></figure>
         </article>
         <aside v-if="railTopics.length" class="rail"><div class="rail-head"><b>其余要闻</b><span>A2 · 02—{{ String(railTopics.length+1).padStart(2,'0') }}</span></div>
-          <article v-for="(t,i) in railTopics" :key="t.topic_id" class="tb-topic rail-item" :class="{selected:filters.semantic_topic_id===t.topic_id}" role="button" tabindex="0" @click="openTopic(t)" @keydown.enter.prevent="openTopic(t)" @keydown.space.prevent="openTopic(t)"><span class="sel-chip">✓ 筛选中</span><div class="ri-top"><span class="rank">{{ String(i+2).padStart(2,'0') }}</span><h3 class="ri-name">{{ t.topic }}</h3><span class="badge badge-new sm">今日新切口</span></div><p v-if="t.ai_highlight" class="ri-deck">{{ t.ai_highlight }}</p><p class="ri-meta">{{ evidence(t) }}</p><ul v-if="t.notes.length" class="ri-notes"><li v-for="n in t.notes.slice(0,3)" :key="n.note_id" @click.stop="openDetail({note_id:n.note_id})"><span class="t">「{{ n.title }}」</span><span class="l">{{ compact(n.likes) }}<em>赞</em></span></li></ul></article>
+          <article v-for="(t,i) in railTopics" :key="t.topic_id" class="tb-topic rail-item" :class="{selected:filters.semantic_topic_id===t.topic_id}" role="button" tabindex="0" @click="openTopic(t)" @keydown.enter.prevent="openTopic(t)" @keydown.space.prevent="openTopic(t)"><span class="sel-chip">✓ 筛选中</span><div class="ri-top"><span class="rank">{{ String(i+2).padStart(2,'0') }}</span><h3 class="ri-name">{{ t.topic }}</h3><span class="badge sm" :class="t.kind==='single'?'badge-single':'badge-new'">{{ t.kind==='single'?'单篇高热':'今日新切口' }}</span></div><p v-if="t.ai_highlight" class="ri-deck">{{ t.ai_highlight }}</p><p class="ri-meta">{{ evidence(t) }}</p><ul v-if="t.notes.length" class="ri-notes"><li v-for="n in t.notes.slice(0,3)" :key="n.note_id" @click.stop="openDetail({note_id:n.note_id})"><span class="t">「{{ n.title }}」</span><span class="l">{{ compact(n.likes) }}<em>赞</em></span></li></ul></article>
         </aside>
       </div>
     </section><el-empty v-else description="今日暂无形成规模的内容话题"/></div>
@@ -65,7 +65,7 @@ const todayEdition=computed(()=>{if(boards.value.edition_date){const[,m,d]=board
 // 监测状态条：由看板数据汇总，接口不可用时全为 0
 const monitor=computed(()=>{const all=[...boards.value.hot,...boards.value.fermenting],server=boards.value.monitor||{};return{topicCount:server.topic_count??all.length,sampleCount:server.sample_count??all.reduce((s,t)=>s+(t.sample_count||0),0),freshCount:server.fresh_count??boards.value.hot.length,maxLikes:server.max_likes??Math.max(0,...all.map(t=>t.max_likes||0)),todayNewNotes:server.today_new_notes??boards.value.today_new_notes??0}});
 // 卡片只按内容语义话题筛选，采集关键词不参与话题展示或跳转。
-const openTopic=t=>{filters.semantic_topic_id=t.topic_id;filters.keyword='';activeTopicName.value=t.topic;activeTab.value='all';load().then(()=>setTimeout(()=>document.querySelector('.body-grid')?.scrollIntoView({behavior:'smooth',block:'start'})))};const clearSemanticFilter=()=>{filters.semantic_topic_id='';activeTopicName.value='';load()};onMounted(loadBoards)
+const openTopic=t=>{if(t.kind==='single'&&t.notes?.[0])return openDetail({note_id:t.notes[0].note_id});filters.semantic_topic_id=t.topic_id;filters.keyword='';activeTopicName.value=t.topic;activeTab.value='all';load().then(()=>setTimeout(()=>document.querySelector('.body-grid')?.scrollIntoView({behavior:'smooth',block:'start'})))};const clearSemanticFilter=()=>{filters.semantic_topic_id='';activeTopicName.value='';load()};onMounted(loadBoards)
 // 弹窗打开时锁定背景滚动：补偿滚动条宽度防止布局晃动，不改 scrollTop（不回顶），Esc 关闭
 watch(drawer,v=>{const de=document.documentElement;if(v){const sw=window.innerWidth-de.clientWidth;de.style.paddingRight=sw>0?sw+'px':'';de.style.overflow='hidden'}else{de.style.overflow='';de.style.paddingRight=''}});const onKey=e=>{if(e.key==='Escape')drawer.value=false};
 // #app 默认的 overflow-x:hidden 会让 sticky 工作带失效；clip 不会制造额外滚动容器。
@@ -297,6 +297,12 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   background: var(--clay-deep);
   color: var(--ivory);
   box-shadow: 2px 2px 0 var(--clay-soft);
+}
+/* 单篇高热 = 黏土描边空心章，与聚类话题的实心章区分 */
+.badge-single {
+  color: var(--clay-deep);
+  border: 1.5px solid var(--clay-deep);
+  padding: 5px 11px;
 }
 .badge-ferment {
   color: var(--pine);

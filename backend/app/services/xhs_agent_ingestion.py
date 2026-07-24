@@ -16,7 +16,9 @@ from app.models.xhs import (
     XhsKeywordRun, XhsProviderCall,
 )
 from app.services.xhs_collection import (
-    Candidate, DAILY_MIN_LIKES_EXCLUSIVE, WEEKLY_MIN_LIKES_EXCLUSIVE, collection_level,
+    Candidate, DAILY_MIN_LIKES_EXCLUSIVE, DAILY_RELAXED_MIN_LIKES_EXCLUSIVE,
+    RELAXED_TARGET_MIN, RELAXED_TOPUP_MAX, WEEKLY_MIN_LIKES_EXCLUSIVE,
+    WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE, collection_level,
     count_value, dt_value, qualifies_by_time_and_likes, rank, record_discoveries,
     rejection_reason, remote_image_url, sync_raw_info, upsert_engagement_snapshot, upsert_note,
 )
@@ -120,19 +122,42 @@ def ingest_agent_result(
 
         diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
         diagnostic_rejections = diagnostics.get("rejection_counts") if isinstance(diagnostics.get("rejection_counts"), dict) else {}
-        rejections = {"old": 0, "low_like": 0, "unknown_metric": 0, "unknown_date": 0, "unknown_type": 0, "core_incomplete": 0, "rank_overflow": 0, "invalid_payload": invalid_payload}
+        rejections = {"old": 0, "low_like": 0, "low_like_soft": 0, "unknown_metric": 0, "unknown_date": 0, "unknown_type": 0, "core_incomplete": 0, "rank_overflow": 0, "invalid_payload": invalid_payload}
         for key in ("old", "low_like", "unknown_metric", "unknown_date", "invalid_payload"):
             rejections[key] += max(0, int(diagnostic_rejections.get(key) or 0))
         eligible: list[Candidate] = []
+        relaxed_pool: list[Candidate] = []
         for candidate in candidates:
             candidate.score = rank(candidate, now)
             reason = rejection_reason(candidate, now)
+            if reason == "low_like_soft":
+                relaxed_pool.append(candidate)
+                continue
             if reason:
                 rejections[reason] += 1
                 note = upsert_note(db, candidate, "rejected_" + reason, now)
                 record_discoveries(db, run.id, keyword.id, note, candidate, now)
             else:
                 eligible.append(candidate)
+
+        # 与服务器采集同一策略：标准档不足保底量时，从放宽档按点赞从高到低补录。
+        topup_left = min(max(0, RELAXED_TARGET_MIN - len(eligible)), RELAXED_TOPUP_MAX)
+        if topup_left:
+            relaxed_pool.sort(key=lambda item: item.like_count or 0, reverse=True)
+            for candidate in relaxed_pool:
+                if not topup_left:
+                    break
+                if rejection_reason(candidate, now, relaxed=True):
+                    continue
+                candidate.like_tier = "relaxed"
+                candidate.score = rank(candidate, now)
+                eligible.append(candidate)
+                topup_left -= 1
+        for candidate in relaxed_pool:
+            if candidate.like_tier != "relaxed":
+                rejections["low_like_soft"] += 1
+                note = upsert_note(db, candidate, "rejected_low_like_soft", now)
+                record_discoveries(db, run.id, keyword.id, note, candidate, now)
 
         eligible.sort(key=lambda item: item.score, reverse=True)
         selected = eligible
@@ -161,8 +186,8 @@ def ingest_agent_result(
             daily=[item for item in candidates if collection_level(item.published_at,now)=="daily"]
             weekly=[item for item in candidates if collection_level(item.published_at,now)=="weekly"]
             level_diagnostics={
-                "daily":{"candidate_count":len(daily),"eligible_count":sum(qualifies_by_time_and_likes(item.published_at,item.like_count,now) for item in daily),"likes_gt":DAILY_MIN_LIKES_EXCLUSIVE},
-                "weekly":{"candidate_count":len(weekly),"eligible_count":sum(qualifies_by_time_and_likes(item.published_at,item.like_count,now) for item in weekly),"likes_gt":WEEKLY_MIN_LIKES_EXCLUSIVE},
+                "daily":{"candidate_count":len(daily),"eligible_count":sum(qualifies_by_time_and_likes(item.published_at,item.like_count,now) for item in daily),"likes_gt":DAILY_MIN_LIKES_EXCLUSIVE,"relaxed_likes_gt":DAILY_RELAXED_MIN_LIKES_EXCLUSIVE},
+                "weekly":{"candidate_count":len(weekly),"eligible_count":sum(qualifies_by_time_and_likes(item.published_at,item.like_count,now) for item in weekly),"likes_gt":WEEKLY_MIN_LIKES_EXCLUSIVE,"relaxed_likes_gt":WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE},
             }
         run.rejection_counts = {
             **rejections,

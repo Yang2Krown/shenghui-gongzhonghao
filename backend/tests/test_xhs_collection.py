@@ -58,10 +58,19 @@ def test_cli_entrypoint_calls_installed_click_cli(monkeypatch):
 def test_strict_eligibility_uses_daily_200_and_weekly_2000_levels():
     now=datetime(2026,7,16,12,0,0)
     base=dict(note_id="n",title="完整标题",content="完整正文",author_nickname="作者",cover_url="https://sns-webpic.xhscdn.com/a.jpg",note_type="image")
-    assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=1),like_count=200),now)=="low_like"
+    # 标准档未过但高于地板 → 放宽档待补录（low_like_soft）
+    assert rejection_reason(Candidate(**base,published_at=now-timedelta(hours=23),like_count=200),now)=="low_like_soft"
+    assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=2),like_count=2000),now)=="low_like_soft"
+    # 地板及以下 → 永久拒绝（low_like）
+    assert rejection_reason(Candidate(**base,published_at=now-timedelta(hours=23),like_count=100),now)=="low_like"
+    assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=2),like_count=1500),now)=="low_like"
+    # 标准档通过
     assert rejection_reason(Candidate(**base,published_at=now-timedelta(hours=23),like_count=201),now) is None
-    assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=2),like_count=2000),now)=="low_like"
     assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=2),like_count=2001),now) is None
+    # 补录判定（relaxed=True）：放宽档通过，地板以下仍拒绝
+    assert rejection_reason(Candidate(**base,published_at=now-timedelta(hours=23),like_count=101),now,relaxed=True) is None
+    assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=2),like_count=1501),now,relaxed=True) is None
+    assert rejection_reason(Candidate(**base,published_at=now-timedelta(hours=23),like_count=100),now,relaxed=True)=="low_like"
     assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=8),like_count=9000),now)=="old"
     assert rejection_reason(Candidate(**base,published_at=None,like_count=9000),now)=="unknown_metric"
     assert rejection_reason(Candidate(**base,published_at=now-timedelta(days=1),like_count=None),now)=="unknown_metric"
@@ -205,10 +214,13 @@ def test_tokenized_candidate_replaces_bare_url_during_provider_merge():
 def test_search_card_prefilter_avoids_details_for_definitely_ineligible_notes():
     now=datetime(2026,7,16,12,0,0)
     old=Candidate(note_id="old",published_at=datetime(2026,6,23),like_count=22916,note_type="video")
-    low=Candidate(note_id="low",published_at=datetime(2026,7,14),like_count=2000,note_type="video")
+    hard_low=Candidate(note_id="hard-low",published_at=datetime(2026,7,14),like_count=1500,note_type="video")
+    soft=Candidate(note_id="soft",published_at=datetime(2026,7,14),like_count=2000,note_type="video")
     possible=Candidate(note_id="possible",published_at=datetime(2026,7,15),like_count=3000,note_type="image")
     assert pre_hydration_rejection(old,now)=="old"
-    assert pre_hydration_rejection(low,now)=="low_like"
+    assert pre_hydration_rejection(hard_low,now)=="low_like"
+    # 放宽档候选不提前淘汰也不立即水化，标记为待补录
+    assert pre_hydration_rejection(soft,now)=="low_like_soft"
     assert pre_hydration_rejection(possible,now) is None
 
 

@@ -177,7 +177,7 @@ async def test_topic_boards_requires_xhs_topic_access():
     assert (await dependency(entitled)) is entitled
 
 
-_XHS_MONITOR_TABLES=("xhs_keywords","xhs_keyword_runs","xhs_notes","xhs_note_discoveries","xhs_daily_quotas","xhs_provider_calls","xhs_image_failure_reports")
+_XHS_MONITOR_TABLES=("xhs_keywords","xhs_keyword_runs","xhs_notes","xhs_note_discoveries","xhs_daily_quotas","xhs_provider_calls","xhs_image_failure_reports","xhs_semantic_topics","xhs_topic_members")
 
 
 async def _async_none():return None

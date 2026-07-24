@@ -26,15 +26,20 @@ from app.models.admin_audit import AdminAuditLog
 from app.models.user import User
 from app.models.xhs import XhsAgentBatch, XhsDailyQuota, XhsEngagementSnapshot, XhsImageFailureReport, XhsKeyword, XhsKeywordRun, XhsNote, XhsNoteDiscovery, XhsProviderCall, XhsSemanticTopic, XhsTopicMember, XhsTopicSnapshot
 from app.services.xhs_cli_auth import XhsQrLoginManager
+from app.services.xhs_ai_filter import is_ai_related
 from app.services.xhs_collection import (
     CLI_AUTH_INVALID_KEY, CLI_COOLDOWN_KEY, DAILY_MIN_LIKES_EXCLUSIVE,
-    WEEKLY_MIN_LIKES_EXCLUSIVE, _xsec_token, eligibility_clause,
+    DAILY_RELAXED_MIN_LIKES_EXCLUSIVE, WEEKLY_MIN_LIKES_EXCLUSIVE,
+    WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE, _xsec_token, eligibility_clause,
 )
 from app.services.xhs_topic_highlights import attach_highlights
 from app.tasks.xhs_tasks import collect_keyword_task, refresh_note_image_task
 
 router=APIRouter();admin_router=APIRouter()
 PUBLIC_STATUSES=("ready","ready_degraded","synced")
+# 今日热榜补位：聚类话题不足 4 个时，用 24h 内单篇高热笔记填满（聚类话题永远排前面）。
+HOT_BOARD_MIN_SLOTS=4
+SINGLE_HOT_MIN_LIKES=500
 
 # 封面/头像代理：小红书 CDN 对外站 Referer 一律 403，且 URL 有时效，
 # 前端直连不可靠；统一由后端代取并落盘缓存（URL 变化 → 缓存键变化）。
@@ -142,8 +147,8 @@ async def list_notes(q:str|None=None,keyword:str|None=None,topic:str|None=None,s
     range_eligibility=and_(
         XhsNote.published_at>=cutoff,
         or_(
-            and_(XhsNote.published_at>=day_cutoff,XhsNote.like_count>DAILY_MIN_LIKES_EXCLUSIVE),
-            and_(XhsNote.published_at<day_cutoff,XhsNote.like_count>WEEKLY_MIN_LIKES_EXCLUSIVE),
+            and_(XhsNote.published_at>=day_cutoff,XhsNote.like_count>DAILY_RELAXED_MIN_LIKES_EXCLUSIVE),
+            and_(XhsNote.published_at<day_cutoff,XhsNote.like_count>WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE),
         ),
     )
     stmt=select(XhsNote).where(range_eligibility,XhsNote.quality_status.in_(PUBLIC_STATUSES))
@@ -159,7 +164,7 @@ async def list_notes(q:str|None=None,keyword:str|None=None,topic:str|None=None,s
     order={"comprehensive":XhsNote.comprehensive_score,"latest":XhsNote.published_at,"likes":XhsNote.like_count,"collects":XhsNote.collect_count,"comments":XhsNote.comment_count}[sort]
     count_stmt=select(func.count()).select_from(stmt.order_by(None).subquery());total=(await db.scalar(count_stmt)) or 0
     notes=(await db.scalars(stmt.order_by(desc(order).nullslast()).offset((page-1)*page_size).limit(page_size))).all();ctx=await note_context(db,[n.id for n in notes])
-    return {"items":[note_payload(n,**ctx.get(n.id,{})) for n in notes],"page":page,"page_size":page_size,"total":total,"hard_filters":{"range":range,"max_age_days":days,"likes_gt":DAILY_MIN_LIKES_EXCLUSIVE if range=="1d" else None,"levels":{"daily":{"max_age_hours":24,"likes_gt":DAILY_MIN_LIKES_EXCLUSIVE},"weekly":{"max_age_days":days,"likes_gt":WEEKLY_MIN_LIKES_EXCLUSIVE}},"types":["image","video"]}}
+    return {"items":[note_payload(n,**ctx.get(n.id,{})) for n in notes],"page":page,"page_size":page_size,"total":total,"hard_filters":{"range":range,"max_age_days":days,"likes_gt":DAILY_RELAXED_MIN_LIKES_EXCLUSIVE if range=="1d" else None,"levels":{"daily":{"max_age_hours":24,"likes_gt":DAILY_MIN_LIKES_EXCLUSIVE,"relaxed_likes_gt":DAILY_RELAXED_MIN_LIKES_EXCLUSIVE},"weekly":{"max_age_days":days,"likes_gt":WEEKLY_MIN_LIKES_EXCLUSIVE,"relaxed_likes_gt":WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE}},"types":["image","video"]}}
 
 
 @router.get("/notes/{note_id}")
@@ -225,10 +230,19 @@ async def topic_boards(_user:User=Depends(require_product_access(PRODUCT_XHS_TOP
             point=daily.setdefault(item.snapshot_date,{"score":0,"notes":set()})
             point["score"]+=sum(value or 0 for value in (item.like_count,item.collect_count,item.comment_count,item.share_count));point["notes"].add(item.note_id)
         trend_points=[{"at":date.isoformat(),"score":value["score"],"new_notes":len(value["notes"])} for date,value in sorted(daily.items())]
-        payload={"topic_id":topic.public_id,"topic":topic.name,"ai_highlight":topic.summary,"sample_count":len(notes),"author_count":len(authors),"new_notes_24h":len(recent_published),"new_authors_24h":len(recent_authors),"max_likes":max((n.like_count or 0 for n in notes),default=0),"first_seen_at":topic.first_seen_at.isoformat(),"last_seen_at":topic.last_seen_at.isoformat(),"active_days":topic.active_days,"engagement_growth":snapshot.engagement_growth if snapshot else 0,"fermentation_score":snapshot.fermentation_score if snapshot else 0,"evidence":snapshot.evidence if snapshot else [],"trend_points":trend_points,"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)} for n in notes[:4]]}
+        payload={"kind":"cluster","topic_id":topic.public_id,"topic":topic.name,"ai_highlight":topic.summary,"sample_count":len(notes),"author_count":len(authors),"new_notes_24h":len(recent_published),"new_authors_24h":len(recent_authors),"max_likes":max((n.like_count or 0 for n in notes),default=0),"first_seen_at":topic.first_seen_at.isoformat(),"last_seen_at":topic.last_seen_at.isoformat(),"active_days":topic.active_days,"engagement_growth":snapshot.engagement_growth if snapshot else 0,"fermentation_score":snapshot.fermentation_score if snapshot else 0,"evidence":snapshot.evidence if snapshot else [],"trend_points":trend_points,"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)} for n in notes[:4]]}
         if len(recent_published)>=2 and len(recent_authors)>=2:hot.append(payload)
         if topic.first_seen_at<day_start and topic.active_days>=2 and len(notes)>=2 and len(authors)>=2 and recent:fermenting.append(payload)
     hot.sort(key=lambda item:(item["new_notes_24h"],item["max_likes"]),reverse=True)
+    # 聚类话题不足时用「24h 内单篇高热笔记」补位填满热榜；补位永远排在聚类话题之后。
+    if len(hot)<HOT_BOARD_MIN_SLOTS:
+        shown={n["note_id"] for item in hot for n in item["notes"]}
+        singles=(await db.scalars(select(XhsNote).where(XhsNote.published_at>=publish_cutoff,XhsNote.like_count>SINGLE_HOT_MIN_LIKES,XhsNote.quality_status.in_(PUBLIC_STATUSES)).order_by(desc(XhsNote.like_count)).limit(HOT_BOARD_MIN_SLOTS*3))).all()
+        for n in singles:
+            if len(hot)>=HOT_BOARD_MIN_SLOTS:break
+            if n.note_id in shown or not is_ai_related(" ".join([n.title or "",*(str(x) for x in (n.native_tags or []))])):continue
+            hot.append({"kind":"single","topic_id":f"note-{n.note_id}","topic":(n.title or "").strip()[:36] or "未命名笔记","ai_highlight":n.ai_summary,"sample_count":1,"author_count":1,"new_notes_24h":1,"new_authors_24h":1,"max_likes":n.like_count or 0,"first_seen_at":n.first_discovered_at.isoformat(),"last_seen_at":n.last_discovered_at.isoformat(),"active_days":1,"engagement_growth":0,"fermentation_score":0,"evidence":[f"单篇笔记 24 小时内获 {n.like_count} 赞"],"trend_points":[],"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)}]})
+            shown.add(n.note_id)
     # 持续发酵以"一直在热"为主导：活跃天数与持续增长权重最高，今日突发新话题不会反超多日反复在热的老话题。
     def _persistence(item):
         longevity=min(item["active_days"],7)/7
@@ -335,7 +349,7 @@ async def report_image_failure(note_id:str,body:ImageFailureBody,admin:User=Depe
 def run_payload(r:XhsKeywordRun,k:XhsKeyword)->dict:
     rejections=r.rejection_counts or {}
     levels=rejections.get("_levels") if isinstance(rejections.get("_levels"),dict) else {}
-    return {"id":r.id,"keyword_id":k.id,"keyword":k.keyword,"keyword_type":k.keyword_type,"group":k.schedule_group,"status":r.status,"tikhub_status":r.tikhub_status,"cli_status":r.cli_status,"tikhub_raw_count":r.tikhub_raw_count,"cli_raw_count":r.cli_raw_count,"merged_count":r.merged_count,"within_week_count":r.within_week_count,"eligible_like_count":r.eligible_like_count,"level_stats":{"daily":levels.get("daily",{}),"weekly":levels.get("weekly",{})},"searches":rejections.get("_searches",[]),"filtered_count":r.filtered_count,"final_count":r.final_count,"displayable_count":r.displayable_count,"paid_call_count":r.paid_call_count,"rejection_counts":rejections,"has_search_diagnostics":bool(rejections.get("_search_diagnostics")) or r.run_source!="local_agent","search_state":"unrecognized" if rejections.get("_search_state_unrecognized") else "empty" if rejections.get("_search_state_empty") else "ok","detail_attempted_count":rejections.get("_detail_attempted",0),"detail_success_count":rejections.get("_detail_success",0),"run_source":r.run_source,"error_message":r.error_message,"finished_at":r.finished_at.isoformat() if r.finished_at else None}
+    return {"id":r.id,"keyword_id":k.id,"keyword":k.keyword,"keyword_type":k.keyword_type,"group":k.schedule_group,"status":r.status,"tikhub_status":r.tikhub_status,"cli_status":r.cli_status,"tikhub_raw_count":r.tikhub_raw_count,"cli_raw_count":r.cli_raw_count,"merged_count":r.merged_count,"within_week_count":r.within_week_count,"eligible_like_count":r.eligible_like_count,"level_stats":{"daily":levels.get("daily",{}),"weekly":levels.get("weekly",{})},"searches":rejections.get("_searches",[]),"filtered_count":r.filtered_count,"final_count":r.final_count,"displayable_count":r.displayable_count,"paid_call_count":r.paid_call_count,"attempts":int(rejections.get("_attempts") or 1),"rejection_counts":rejections,"has_search_diagnostics":bool(rejections.get("_search_diagnostics")) or r.run_source!="local_agent","search_state":"unrecognized" if rejections.get("_search_state_unrecognized") else "empty" if rejections.get("_search_state_empty") else "ok","detail_attempted_count":rejections.get("_detail_attempted",0),"detail_success_count":rejections.get("_detail_success",0),"run_source":r.run_source,"error_message":r.error_message,"finished_at":r.finished_at.isoformat() if r.finished_at else None}
 
 
 @admin_router.get("")
@@ -362,7 +376,7 @@ async def monitoring(_admin:User=Depends(require_admin_permission("monitoring:re
     funnel={key:sum(getattr(r,key) or 0 for r,_ in run_rows) for key in ("tikhub_raw_count","cli_raw_count","merged_count","within_week_count","eligible_like_count","filtered_count","final_count","displayable_count")};rejections={}
     current_eligibility=eligibility_clause(utcnow())
     funnel["unique_ingested_today_count"]=(await db.scalar(select(func.count(func.distinct(XhsNoteDiscovery.note_id))).join(XhsNote,XhsNote.id==XhsNoteDiscovery.note_id).where(XhsNoteDiscovery.discovered_at>=day_start,current_eligibility,XhsNote.quality_status.in_(PUBLIC_STATUSES)))) or 0
-    funnel["current_daily_displayable_count"]=(await db.scalar(select(func.count(XhsNote.id)).where(XhsNote.published_at>=utcnow()-timedelta(hours=24),XhsNote.like_count>DAILY_MIN_LIKES_EXCLUSIVE,XhsNote.quality_status.in_(PUBLIC_STATUSES)))) or 0
+    funnel["current_daily_displayable_count"]=(await db.scalar(select(func.count(XhsNote.id)).where(XhsNote.published_at>=utcnow()-timedelta(hours=24),XhsNote.like_count>DAILY_RELAXED_MIN_LIKES_EXCLUSIVE,XhsNote.quality_status.in_(PUBLIC_STATUSES)))) or 0
     funnel["current_displayable_count"]=(await db.scalar(select(func.count(XhsNote.id)).where(current_eligibility,XhsNote.quality_status.in_(PUBLIC_STATUSES)))) or 0
     funnel["cli_missing_diagnostics_count"]=sum(r.run_source=="local_agent" and not (r.rejection_counts or {}).get("_search_diagnostics") for r,_ in run_rows)
     funnel["cli_diagnostics_count"]=sum(bool((r.rejection_counts or {}).get("_search_diagnostics")) for r,_ in run_rows)
@@ -395,7 +409,30 @@ async def monitoring(_admin:User=Depends(require_admin_permission("monitoring:re
     if pending6h>20:alerts.append({"level":"warning","message":f"超过 6 小时仍未补全的帖子有 {pending6h} 条"})
     keyword_data=[{"id":k.id,"keyword":k.keyword,"type":k.keyword_type,"group":k.schedule_group,"enabled":k.enabled,"lifecycle_status":k.lifecycle_status,"pinned":k.pinned,"zero_yield_streak":k.zero_yield_streak,"last_yield_count":k.last_yield_count,"quarantine_reason":k.quarantine_reason,"derived_evidence":k.derived_evidence or {},"cooldown_until":k.cooldown_until.isoformat() if k.cooldown_until else None,"next_run_at":k.next_run_at.isoformat() if k.next_run_at else None} for k in keywords]
     call_data=[{"id":c.id,"provider":c.provider,"operation":c.operation,"status":c.status,"is_paid":c.is_paid,"paid_request":bool(c.is_paid and c.request_count>0 and c.status not in ("blocked","skipped")),"request_count":c.request_count,"latency_ms":c.latency_ms,"estimated_cost":c.estimated_cost if c.status=="success" else 0,"error_code":c.error_code,"error_message":c.error_message,"created_at":c.created_at.isoformat()} for c in calls[:30]]
-    return {"progress":{"base_completed":base_done,"base_total":base_total,"derived_completed":len({k.id for r,k in run_rows if k.keyword_type=="derived" and r.status=="completed"}),"derived_total":sum(k.keyword_type=="derived" and k.enabled for k in keywords)},"quota":quota_data,"providers":{"tikhub":tikhub_health,"cli":{**cli_health,"installed":bool(shutil.which(settings.XHS_CLI_BIN)),"version":cli_version,"version_ok":cli_version==settings.XHS_CLI_VERSION,"cookie_configured":cookie_configured,"auth_status":"expired" if auth_error else "configured" if cookie_configured else "missing","cookie_saved_at":cookie_saved_at(),"cooldown_minutes":settings.XHS_CLI_COOLDOWN_MINUTES,"cooldown_remaining_seconds":cooldown_remaining}},"funnel":funnel,"rejections":rejections,"image_health":{"open_reports":image_open,"missing":await db.scalar(select(func.count(XhsNote.id)).where(XhsNote.cover_url.is_(None))) or 0,"suspected_invalid":await db.scalar(select(func.count(XhsNote.id)).where(XhsNote.media_status=="suspected_invalid")) or 0},"runs":runs,"keywords":keyword_data,"alerts":alerts,"calls":call_data,"tikhub":tikhub_data}
+    # ── 业务决策聚合：关键词 ROI（近 7 天）、今日总览、补录效果 ──
+    week_start=today-timedelta(days=6)
+    relaxed_clause=XhsNote.source_payload["like_tier"].as_string()=="relaxed"
+    roi_rows=(await db.execute(select(XhsKeyword,XhsKeywordRun).join(XhsKeywordRun,XhsKeywordRun.keyword_id==XhsKeyword.id).where(XhsKeywordRun.run_date>=week_start))).all()
+    run_ids=[r.id for _,r in roi_rows]
+    cost_by_run=dict((await db.execute(select(XhsProviderCall.run_id,func.sum(XhsProviderCall.estimated_cost)).where(XhsProviderCall.run_id.in_(run_ids),XhsProviderCall.is_paid.is_(True),XhsProviderCall.status=="success").group_by(XhsProviderCall.run_id))).all()) if run_ids else {}
+    relaxed_by_keyword=dict((await db.execute(select(XhsNoteDiscovery.keyword_id,func.count(func.distinct(XhsNoteDiscovery.note_id))).join(XhsNote,XhsNote.id==XhsNoteDiscovery.note_id).where(XhsNoteDiscovery.discovered_at>=day_start-timedelta(days=6),XhsNote.quality_status.in_(PUBLIC_STATUSES),relaxed_clause).group_by(XhsNoteDiscovery.keyword_id))).all())
+    roi={}
+    for k,r in roi_rows:
+        item=roi.setdefault(k.id,{"keyword_id":k.id,"keyword":k.keyword,"keyword_type":k.keyword_type,"runs":0,"searched_raw":0,"ingested":0,"relaxed_ingested":0,"paid_calls":0,"cost":0.0,"zero_yield_days":0,"zero_yield_streak":k.zero_yield_streak or 0})
+        item["runs"]+=1;item["searched_raw"]+=(r.tikhub_raw_count or 0)+(r.cli_raw_count or 0);item["ingested"]+=r.final_count or 0;item["paid_calls"]+=r.paid_call_count or 0;item["cost"]+=float(cost_by_run.get(r.id) or 0)
+        if not (r.final_count or 0):item["zero_yield_days"]+=1
+    keyword_roi=[]
+    for item in roi.values():
+        item["relaxed_ingested"]=relaxed_by_keyword.get(item["keyword_id"],0)
+        item["cost"]=round(item["cost"],4);item["cost_per_note"]=round(item["cost"]/item["ingested"],4) if item["ingested"] else None
+        keyword_roi.append(item)
+    keyword_roi.sort(key=lambda x:(-x["ingested"],-x["cost"]))
+    # 补录效果：relaxed 笔记最终有多少进入了话题聚类，验证放宽档是否供给了有效素材
+    relaxed_note_ids=(await db.scalars(select(XhsNote.id).where(XhsNote.quality_status.in_(PUBLIC_STATUSES),relaxed_clause))).all()
+    relaxed_in_topics=(await db.scalar(select(func.count(func.distinct(XhsTopicMember.note_id))).where(XhsTopicMember.note_id.in_(relaxed_note_ids)))) if relaxed_note_ids else 0
+    relaxed_stats={"ingested":len(relaxed_note_ids),"in_topics":relaxed_in_topics or 0,"topic_rate":round((relaxed_in_topics or 0)/len(relaxed_note_ids)*100,1) if relaxed_note_ids else None}
+    overview={"runs":len(run_rows),"searched_raw":funnel["tikhub_raw_count"]+funnel["cli_raw_count"],"ingested":funnel["final_count"],"relaxed_ingested":(await db.scalar(select(func.count(func.distinct(XhsNoteDiscovery.note_id))).join(XhsNote,XhsNote.id==XhsNoteDiscovery.note_id).where(XhsNoteDiscovery.discovered_at>=day_start,XhsNote.quality_status.in_(PUBLIC_STATUSES),relaxed_clause))) or 0,"estimated_cost_cny":quota_data["estimated_cost_cny"],"active_topics":(await db.scalar(select(func.count(XhsSemanticTopic.id)).where(XhsSemanticTopic.status=="active"))) or 0}
+    return {"progress":{"base_completed":base_done,"base_total":base_total,"derived_completed":len({k.id for r,k in run_rows if k.keyword_type=="derived" and r.status=="completed"}),"derived_total":sum(k.keyword_type=="derived" and k.enabled for k in keywords)},"quota":quota_data,"providers":{"tikhub":tikhub_health,"cli":{**cli_health,"installed":bool(shutil.which(settings.XHS_CLI_BIN)),"version":cli_version,"version_ok":cli_version==settings.XHS_CLI_VERSION,"cookie_configured":cookie_configured,"auth_status":"expired" if auth_error else "configured" if cookie_configured else "missing","cookie_saved_at":cookie_saved_at(),"cooldown_minutes":settings.XHS_CLI_COOLDOWN_MINUTES,"cooldown_remaining_seconds":cooldown_remaining}},"funnel":funnel,"rejections":rejections,"image_health":{"open_reports":image_open,"missing":await db.scalar(select(func.count(XhsNote.id)).where(XhsNote.cover_url.is_(None))) or 0,"suspected_invalid":await db.scalar(select(func.count(XhsNote.id)).where(XhsNote.media_status=="suspected_invalid")) or 0},"runs":runs,"keywords":keyword_data,"alerts":alerts,"calls":call_data,"tikhub":tikhub_data,"overview":overview,"keyword_roi":keyword_roi,"relaxed_stats":relaxed_stats}
 
 
 class QuotaUpdateBody(BaseModel):
@@ -606,6 +643,17 @@ async def analyze_topics(admin:User=Depends(get_current_super_admin_user),db:Asy
     """立即重建一次全局话题：今日热榜 + 持续发酵。仅最高管理员。"""
     from app.tasks.xhs_tasks import rebuild_semantic_topics_task
     task=rebuild_semantic_topics_task.apply_async(kwargs={"wave":"manual"});db.add(AdminAuditLog(actor_user_id=admin.id,action="xhs_analyze_topics",target_type="xhs_semantic_topic",target_id="all",summary="最高管理员手动触发全局话题分析",metadata_json={"task_id":task.id}));await db.commit();return {"task_id":task.id}
+
+
+@admin_router.get("/analyze-topics/{task_id}")
+async def analyze_topics_status(task_id:str,admin:User=Depends(get_current_super_admin_user),db:AsyncSession=Depends(get_db)):
+    """查询手动话题分析任务状态。依赖 celery_monitor 信号落库的 CeleryTaskRun。"""
+    from app.models.celery_task_run import CeleryTaskRun
+    row=(await db.scalars(select(CeleryTaskRun).where(CeleryTaskRun.task_id==task_id))).first()
+    if row is None:return {"task_id":task_id,"status":"running"}
+    if row.status=="success":return {"task_id":task_id,"status":"success","result":row.result_json or {}}
+    if row.status in ("failed","dead_letter") or row.is_dead_letter:return {"task_id":task_id,"status":"failed","error_message":row.error_message or "话题分析任务失败"}
+    return {"task_id":task_id,"status":"running"}
 
 
 @admin_router.post("/notes/{note_id}/refresh-image-free",status_code=202)

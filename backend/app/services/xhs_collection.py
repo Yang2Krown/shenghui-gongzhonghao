@@ -40,6 +40,11 @@ PAID_PROVIDER = "tikhub"
 FREE_PROVIDER = "cli"
 DAILY_MIN_LIKES_EXCLUSIVE = 200
 WEEKLY_MIN_LIKES_EXCLUSIVE = 2000
+# 放宽档地板：标准档入选不足时按点赞从高到低补录；地板以下永久拒绝。
+DAILY_RELAXED_MIN_LIKES_EXCLUSIVE = 100
+WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE = 1500
+RELAXED_TARGET_MIN = 3   # 单次采集中标准档不足此数时触发补录
+RELAXED_TOPUP_MAX = 5    # 单次采集最多补录篇数（防冷门词灌入过多低热度内容）
 
 
 def collection_level(published_at: datetime | None, now: datetime) -> str | None:
@@ -48,22 +53,24 @@ def collection_level(published_at: datetime | None, now: datetime) -> str | None
     return "daily" if published_at >= now - timedelta(hours=24) else "weekly"
 
 
-def minimum_likes_exclusive(published_at: datetime | None, now: datetime) -> int:
-    return DAILY_MIN_LIKES_EXCLUSIVE if collection_level(published_at, now) == "daily" else WEEKLY_MIN_LIKES_EXCLUSIVE
+def minimum_likes_exclusive(published_at: datetime | None, now: datetime, *, relaxed: bool = False) -> int:
+    if collection_level(published_at, now) == "daily":
+        return DAILY_RELAXED_MIN_LIKES_EXCLUSIVE if relaxed else DAILY_MIN_LIKES_EXCLUSIVE
+    return WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE if relaxed else WEEKLY_MIN_LIKES_EXCLUSIVE
 
 
-def qualifies_by_time_and_likes(published_at: datetime | None, like_count: int | None, now: datetime) -> bool:
+def qualifies_by_time_and_likes(published_at: datetime | None, like_count: int | None, now: datetime, *, relaxed: bool = False) -> bool:
     level = collection_level(published_at, now)
-    return level is not None and like_count is not None and like_count > minimum_likes_exclusive(published_at, now)
+    return level is not None and like_count is not None and like_count > minimum_likes_exclusive(published_at, now, relaxed=relaxed)
 
 
 def eligibility_clause(now: datetime):
-    """SQL equivalent of the two mutually exclusive collection levels."""
+    """展示/聚类口径用放宽档地板。低于地板的笔记采集时被永久拒绝（rejected_* 状态），不会混进来。"""
     day_cutoff = now - timedelta(hours=24)
     week_cutoff = now - timedelta(days=7)
     return or_(
-        and_(XhsNote.published_at >= day_cutoff, XhsNote.like_count > DAILY_MIN_LIKES_EXCLUSIVE),
-        and_(XhsNote.published_at >= week_cutoff, XhsNote.published_at < day_cutoff, XhsNote.like_count > WEEKLY_MIN_LIKES_EXCLUSIVE),
+        and_(XhsNote.published_at >= day_cutoff, XhsNote.like_count > DAILY_RELAXED_MIN_LIKES_EXCLUSIVE),
+        and_(XhsNote.published_at >= week_cutoff, XhsNote.published_at < day_cutoff, XhsNote.like_count > WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE),
     )
 CLI_AUTH_INVALID_KEY = "xhs:cli:auth_invalid"
 CLI_COOLDOWN_KEY = "xhs:cli:cooldown"
@@ -191,6 +198,7 @@ class Candidate:
     payloads: dict[str, Any] = field(default_factory=dict)
     score: float = 0
     title_generated: bool = False
+    like_tier: str = "strict"  # strict=标准档直接入选；relaxed=放宽档补录入选
 
     def merge(self, other: "Candidate") -> None:
         for name in ("title","content","published_at","note_type","author_id","author_nickname","author_bio","avatar_url","cover_url","like_count","collect_count","comment_count","share_count","view_count"):
@@ -524,10 +532,12 @@ def fill_title_from_content(c: Candidate, limit: int = 80) -> bool:
     return True
 
 
-def rejection_reason(c: Candidate, now: datetime) -> str | None:
+def rejection_reason(c: Candidate, now: datetime, *, relaxed: bool = False) -> str | None:
     if c.published_at is None or c.like_count is None: return "unknown_metric"
     if c.published_at < now - timedelta(days=7): return "old"
-    if c.like_count <= minimum_likes_exclusive(c.published_at, now): return "low_like"
+    # low_like = 地板以下（永久拒绝）；low_like_soft = 放宽档（标准档不足时可补录）。
+    if c.like_count <= minimum_likes_exclusive(c.published_at, now, relaxed=True): return "low_like"
+    if not relaxed and c.like_count <= minimum_likes_exclusive(c.published_at, now): return "low_like_soft"
     if c.note_type not in {"image","video"}: return "unknown_type"
     fill_title_from_content(c)
     if not all((c.title,c.content,c.author_nickname,c.cover_url)): return "core_incomplete"
@@ -535,9 +545,11 @@ def rejection_reason(c: Candidate, now: datetime) -> str | None:
 
 
 def pre_hydration_rejection(c: Candidate, now: datetime) -> str | None:
-    """只用搜索卡片已有硬指标提前淘汰，避免为明确不合格候选请求详情。"""
+    """只用搜索卡片已有硬指标提前分流，避免为明确不合格候选请求详情；放宽档候选暂缓，留给补录。"""
     if c.published_at is not None and c.published_at < now-timedelta(days=7):return "old"
-    if c.like_count is not None and c.published_at is not None and c.like_count <= minimum_likes_exclusive(c.published_at,now):return "low_like"
+    if c.like_count is not None and c.published_at is not None:
+        if c.like_count <= minimum_likes_exclusive(c.published_at,now,relaxed=True):return "low_like"
+        if c.like_count <= minimum_likes_exclusive(c.published_at,now):return "low_like_soft"
     if c.note_type is not None and c.note_type not in {"image","video"}:return "unknown_type"
     return None
 
@@ -562,7 +574,7 @@ def upsert_note(db: Session, c: Candidate, quality_status: str, now: datetime) -
     # 新一轮偶尔只拿到裸 URL 时，不要覆盖库里仍可用的最新 token 链接。
     if _xsec_token(c.xsec_url) or not row.latest_xsec_url:
         row.latest_xsec_url=c.xsec_url
-    row.last_discovered_at=now;row.detail_status="hydrated";row.media_status="remote_ok" if c.cover_url else "missing";row.quality_status=quality_status;row.comprehensive_score=c.score;row.source_payload={"providers":list(c.ranks),"ranks":c.ranks,"generated_title":c.title_generated}
+    row.last_discovered_at=now;row.detail_status="hydrated";row.media_status="remote_ok" if c.cover_url else "missing";row.quality_status=quality_status;row.comprehensive_score=c.score;row.source_payload={"providers":list(c.ranks),"ranks":c.ranks,"generated_title":c.title_generated,"like_tier":c.like_tier}
     db.flush();return row
 
 
@@ -603,8 +615,10 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
         # 已完成拦截在 API 层（retry 接口 409，force=true 放行）；到这里说明允许重跑
         if not retry_existing: return {"skipped":True,"reason":"same_keyword_same_day"}
         run.status="running";run.started_at=now;run.finished_at=None;run.error_message=None
+        previous_attempts=int((run.rejection_counts or {}).get("_attempts") or 1)
     else:
         run=XhsKeywordRun(keyword_id=keyword.id,run_date=now.date(),wave="manual",status="running",started_at=now);db.add(run)
+        previous_attempts=0
     try: db.commit()
     except IntegrityError: db.rollback(); return {"skipped":True,"reason":"same_keyword_same_day"}
     db.refresh(run); cli=CliProvider(); tikhub=TikHubProvider(); batches={FREE_PROVIDER:[],PAID_PROVIDER:[]}
@@ -628,14 +642,27 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
     batches[FREE_PROVIDER],cli_error=cli_result;batches[PAID_PROVIDER],tikhub_error=tikhub_result
     run.cli_status="skipped" if not allow_cli else "success" if not cli_error else "cooldown" if isinstance(cli_error,CliCoolingDown) else "failed";run.tikhub_status="skipped_free" if not allow_paid else "success" if not tikhub_error else "blocked_budget" if isinstance(tikhub_error,TikHubBudgetExhausted) else "failed";run.cli_raw_count=len(batches[FREE_PROVIDER]);run.tikhub_raw_count=len(batches[PAID_PROVIDER]);db.commit()
     merged=merge_provider_candidates(batches)
-    run.merged_count=len(merged);rejections={"old":0,"low_like":0,"unknown_metric":0,"unknown_type":0,"core_incomplete":0,"rank_overflow":0};eligible=[]
+    run.merged_count=len(merged);rejections={"old":0,"low_like":0,"low_like_soft":0,"unknown_metric":0,"unknown_type":0,"core_incomplete":0,"rank_overflow":0};eligible=[];relaxed_pool=[]
     for c in merged.values():
         reason=pre_hydration_rejection(c,now)
+        if reason=="low_like_soft": relaxed_pool.append(c);continue
         if reason:
             rejections[reason]+=1;record_discoveries(db,run.id,keyword.id,upsert_note(db,c,"rejected_"+reason,now),c,now);continue
         await hydrate(c,cli,tikhub,db,run.id,allow_paid=allow_paid);reason=rejection_reason(c,now);c.score=rank(c,now)
+        if reason=="low_like_soft": relaxed_pool.append(c);continue
         if reason: rejections[reason]+=1;record_discoveries(db,run.id,keyword.id,upsert_note(db,c,"rejected_"+reason,now),c,now)
         else: eligible.append(c)
+    # 标准档不足保底量时，从放宽档按点赞从高到低补录（有单次上限，防冷门词灌入过多低热度内容）。
+    topup_left=min(max(0,RELAXED_TARGET_MIN-len(eligible)),RELAXED_TOPUP_MAX)
+    if topup_left:
+        relaxed_pool.sort(key=lambda x:x.like_count or 0,reverse=True)
+        for c in relaxed_pool:
+            if not topup_left: break
+            await hydrate(c,cli,tikhub,db,run.id,allow_paid=allow_paid)
+            if rejection_reason(c,now,relaxed=True): continue
+            c.like_tier="relaxed";c.score=rank(c,now);eligible.append(c);topup_left-=1
+    for c in relaxed_pool:
+        if c.like_tier!="relaxed": rejections["low_like_soft"]+=1;record_discoveries(db,run.id,keyword.id,upsert_note(db,c,"rejected_low_like_soft",now),c,now)
     eligible.sort(key=lambda x:x.score,reverse=True);selected=eligible
     selected_ids=[]
     for c in selected:
@@ -653,9 +680,10 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
     daily=[c for c in merged.values() if collection_level(c.published_at,now)=="daily"]
     weekly=[c for c in merged.values() if collection_level(c.published_at,now)=="weekly"]
     rejections["_levels"]={
-        "daily":{"candidate_count":len(daily),"eligible_count":sum(qualifies_by_time_and_likes(c.published_at,c.like_count,now) for c in daily),"likes_gt":DAILY_MIN_LIKES_EXCLUSIVE},
-        "weekly":{"candidate_count":len(weekly),"eligible_count":sum(qualifies_by_time_and_likes(c.published_at,c.like_count,now) for c in weekly),"likes_gt":WEEKLY_MIN_LIKES_EXCLUSIVE},
+        "daily":{"candidate_count":len(daily),"eligible_count":sum(qualifies_by_time_and_likes(c.published_at,c.like_count,now) for c in daily),"likes_gt":DAILY_MIN_LIKES_EXCLUSIVE,"relaxed_likes_gt":DAILY_RELAXED_MIN_LIKES_EXCLUSIVE},
+        "weekly":{"candidate_count":len(weekly),"eligible_count":sum(qualifies_by_time_and_likes(c.published_at,c.like_count,now) for c in weekly),"likes_gt":WEEKLY_MIN_LIKES_EXCLUSIVE,"relaxed_likes_gt":WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE},
     }
+    rejections["_attempts"]=previous_attempts+1  # 同日重搜覆盖统计，此处记录是第几次运行
     run.within_week_count=len(daily)+len(weekly);run.eligible_like_count=sum(qualifies_by_time_and_likes(c.published_at,c.like_count,now) for c in merged.values());run.filtered_count=len(eligible);run.final_count=len(selected);run.displayable_count=len(selected);run.paid_call_count=db.scalar(select(func.coalesce(func.sum(XhsProviderCall.request_count),0)).where(XhsProviderCall.run_id==run.id,XhsProviderCall.is_paid.is_(True))) or 0;run.rejection_counts=rejections;run.status="completed" if not effective_errors else "partial";run.error_message="; ".join(str(x)[:300] for x in effective_errors) or None;run.finished_at=utcnow();keyword.last_run_at=run.finished_at
     if keyword.keyword_type=="derived": keyword.cooldown_until=now.date()+timedelta(days=3)
     db.commit();return {"run_id":run.id,"keyword":keyword.keyword,"status":run.status,"merged":run.merged_count,"eligible":run.filtered_count,"final":run.final_count,"rejections":rejections}
