@@ -357,7 +357,8 @@ class TikHubProvider:
             finally:await redis.aclose()
 
     async def search(self, keyword: str) -> list[dict]:
-        payload = await self._call(settings.TIKHUB_XHS_SEARCH_PATH, {"keyword": keyword, "sort_type": "general", "note_type": "不限", "time_filter": "一周内", "page": 1, "source": "explore_feed", "ai_mode": 0})
+        # 按点赞最多排序，与 DAILY>200/WEEKLY>2000 的高赞素材门槛对齐；time_filter 一周内。
+        payload = await self._call(settings.TIKHUB_XHS_SEARCH_PATH, {"keyword": keyword, "sort_type": "popularity_descending", "note_type": "不限", "time_filter": "一周内", "page": 1, "source": "explore_feed", "ai_mode": 0})
         return unwrap_items(payload)[:settings.XHS_PROVIDER_CANDIDATE_LIMIT]
 
     async def detail(self, candidate: Candidate) -> dict:

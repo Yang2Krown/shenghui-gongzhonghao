@@ -126,6 +126,17 @@ def test_cli_search_card_schema_preserves_token_date_shares_and_https_images(mon
     assert _xsec_token(c.xsec_url)=="token-with-equals="
 
 
+def test_tikhub_search_sorts_by_popularity_within_one_week(monkeypatch):
+    """TikHub search 按点赞最多排序 + 一周内,与高赞素材门槛对齐(防被改回综合排序)。"""
+    from app.services.xhs_collection import TikHubProvider
+    captured={}
+    async def fake_call(self,path,params): captured.update({"path":path,**params}); return {"data":{"data":{"items":[]}}}
+    monkeypatch.setattr(TikHubProvider,"_call",fake_call)
+    asyncio.run(TikHubProvider().search("AI"))
+    assert captured["sort_type"]=="popularity_descending"
+    assert captured["time_filter"]=="一周内"
+
+
 def test_tikhub_search_card_uses_note_timestamp_and_flat_metrics():
     """TikHub app_v2/search_notes:data.data.items[].note,发布时间取 note.timestamp(秒),互动数平铺。"""
     raw={
