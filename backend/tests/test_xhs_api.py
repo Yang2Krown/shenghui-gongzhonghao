@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.api.v1 import xhs as xhs_module
 from app.core.admin_permissions import require_admin_permission
+from app.core.product_access import PRODUCT_XHS_TOPIC, require_product_access
 from app.db.base import Base
 from app.models.user import User
 from app.services import xhs_topic_highlights as hl_module
@@ -167,11 +168,13 @@ async def test_topic_boards_split_filter_and_shape(monkeypatch):
     assert result["today_new_notes"]==11
 
 
-async def test_topic_boards_requires_monitoring_read():
-    dependency=require_admin_permission("monitoring:read")
-    support=User(id=2,username="support",role="support",is_superuser=False,is_active=True)
+async def test_topic_boards_requires_xhs_topic_access():
+    dependency=require_product_access(PRODUCT_XHS_TOPIC)
+    support=User(id=2,username="support",role="support",is_superuser=False,is_active=True,product_access=[])
     with pytest.raises(HTTPException) as exc:await dependency(support)
     assert exc.value.status_code==403
+    entitled=User(id=3,username="buyer",role="user",is_superuser=False,is_active=True,product_access=[PRODUCT_XHS_TOPIC])
+    assert (await dependency(entitled)) is entitled
 
 
 _XHS_MONITOR_TABLES=("xhs_keywords","xhs_keyword_runs","xhs_notes","xhs_note_discoveries","xhs_daily_quotas","xhs_provider_calls","xhs_image_failure_reports")
