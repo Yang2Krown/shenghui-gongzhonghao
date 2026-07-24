@@ -229,6 +229,9 @@ services:
       ROLE: worker
     volumes:
       - ./backend/secrets:/app/secrets:ro
+      # 小红书封面/头像预取缓存(cache_note_media / warm_media_cache)写本地盘,
+      # 必须与 web 容器共享 uploads_data,否则 web 的 /media 代取读不到 → 前端破图。
+      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -257,6 +260,7 @@ services:
       ROLE: worker
     volumes:
       - ./backend/secrets:/app/secrets:ro
+      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -285,6 +289,7 @@ services:
       ROLE: worker
     volumes:
       - ./backend/secrets:/app/secrets:ro
+      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
