@@ -39,9 +39,15 @@ from app.tasks.xhs_tasks import collect_keyword_task, refresh_note_image_task
 router=APIRouter();admin_router=APIRouter()
 logger=logging.getLogger(__name__)
 PUBLIC_STATUSES=("ready","ready_degraded","synced")
-# 今日热榜补位：聚类话题不足 4 个时，用 24h 内单篇高热笔记填满（聚类话题永远排前面）。
+# 今日热榜补位：聚类话题不足 4 个时，用窗口内单篇高热笔记填满（聚类话题永远排前面）。
 HOT_BOARD_MIN_SLOTS=4
 SINGLE_HOT_MIN_LIKES=500
+# 今日热榜聚集窗口放宽到 48h：48h 内发布的热点可聚成话题；24h 内为"今日新切口"，24–48h 为"两日热点"。
+HOT_TOPIC_WINDOW_HOURS=48
+HOT_TOPIC_FRESH_HOURS=24
+# 版面更丰满：热榜展示话题数与每话题代表笔记数（前端头条/要闻/更多要闻都从这里取）。
+HOT_BOARD_MAX_TOPICS=8
+HOT_TOPIC_NOTE_LIMIT=8
 
 # 封面/头像代理：小红书 CDN 对外站 Referer 一律 403，且 URL 有时效，
 # 前端直连不可靠；统一由后端代取并落盘缓存（URL 变化 → 缓存键变化）。
@@ -255,13 +261,15 @@ async def compute_topic_boards(db:AsyncSession,*,analyze_singles:bool=False)->di
     for interaction in interactions:
         for topic_id in topic_ids_by_note.get(interaction.note_id,[]):interactions_by_topic[topic_id].append(interaction)
     hot=[];fermenting=[]
-    publish_cutoff=now-timedelta(hours=24)
+    publish_cutoff=now-timedelta(hours=HOT_TOPIC_WINDOW_HOURS)
+    fresh_cutoff=now-timedelta(hours=HOT_TOPIC_FRESH_HOURS)
     for topic in topics:
         notes=notes_by_topic[topic.id]
-        # 今日热榜锚定「发布时间」：24h 内发布的笔记才算今日新热；持续发酵的「今天仍在发酵」
+        # 今日热榜锚定「发布时间」：放宽到 48h 内发布的笔记都可聚成今日热点；持续发酵的「今天仍在发酵」
         # 保留「采集时间」口径（老笔记今天互动还在涨、又被采到，也算在发酵）。
         recent=[n for n in notes if n.last_discovered_at>=day_start]
         recent_published=[n for n in notes if n.published_at and n.published_at>=publish_cutoff]
+        fresh_published=[n for n in notes if n.published_at and n.published_at>=fresh_cutoff]
         authors={n.author_id or n.author_nickname for n in notes if n.author_id or n.author_nickname};recent_authors={n.author_id or n.author_nickname for n in recent_published if n.author_id or n.author_nickname}
         snapshot=latest_snapshot.get(topic.id)
         daily={}
@@ -269,11 +277,11 @@ async def compute_topic_boards(db:AsyncSession,*,analyze_singles:bool=False)->di
             point=daily.setdefault(item.snapshot_date,{"score":0,"notes":set()})
             point["score"]+=sum(value or 0 for value in (item.like_count,item.collect_count,item.comment_count,item.share_count));point["notes"].add(item.note_id)
         trend_points=[{"at":date.isoformat(),"score":value["score"],"new_notes":len(value["notes"])} for date,value in sorted(daily.items())]
-        payload={"kind":"cluster","topic_id":topic.public_id,"topic":topic.name,"ai_highlight":topic.summary,"sample_count":len(notes),"author_count":len(authors),"new_notes_24h":len(recent_published),"new_authors_24h":len(recent_authors),"max_likes":max((n.like_count or 0 for n in notes),default=0),"first_seen_at":topic.first_seen_at.isoformat(),"last_seen_at":topic.last_seen_at.isoformat(),"active_days":topic.active_days,"engagement_growth":snapshot.engagement_growth if snapshot else 0,"fermentation_score":snapshot.fermentation_score if snapshot else 0,"evidence":snapshot.evidence if snapshot else [],"trend_points":trend_points,"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)} for n in notes[:4]]}
+        payload={"kind":"cluster","topic_id":topic.public_id,"topic":topic.name,"ai_highlight":topic.summary,"sample_count":len(notes),"author_count":len(authors),"new_notes_24h":len(recent_published),"new_authors_24h":len(recent_authors),"max_likes":max((n.like_count or 0 for n in notes),default=0),"first_seen_at":topic.first_seen_at.isoformat(),"last_seen_at":topic.last_seen_at.isoformat(),"active_days":topic.active_days,"engagement_growth":snapshot.engagement_growth if snapshot else 0,"fermentation_score":snapshot.fermentation_score if snapshot else 0,"evidence":snapshot.evidence if snapshot else [],"hot_window":"24h" if fresh_published else "48h","trend_points":trend_points,"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)} for n in notes[:HOT_TOPIC_NOTE_LIMIT]]}
         if len(recent_published)>=2 and len(recent_authors)>=2:hot.append(payload)
         if topic.first_seen_at<day_start and topic.active_days>=2 and len(notes)>=2 and len(authors)>=2 and recent:fermenting.append(payload)
     hot.sort(key=lambda item:(item["new_notes_24h"],item["max_likes"]),reverse=True)
-    # 聚类话题不足时用「24h 内单篇高热笔记」补位填满热榜；补位永远排在聚类话题之后。
+    # 聚类话题不足时用「窗口内单篇高热笔记」补位填满热榜；补位永远排在聚类话题之后。
     # 分析任务内由 LLM 判定 AI 相关性并生成摘要；实时回退计算用关键词过滤。
     if len(hot)<HOT_BOARD_MIN_SLOTS:
         shown={n["note_id"] for item in hot for n in item["notes"]}
@@ -285,7 +293,7 @@ async def compute_topic_boards(db:AsyncSession,*,analyze_singles:bool=False)->di
         else:
             picked=[n for n in candidates if is_ai_related(" ".join([n.title or "",*(str(x) for x in (n.native_tags or []))]))]
         for n in picked[:HOT_BOARD_MIN_SLOTS-len(hot)]:
-            hot.append({"kind":"single","topic_id":f"note-{n.note_id}","topic":(n.title or "").strip()[:36] or "未命名笔记","ai_highlight":n.ai_summary,"sample_count":1,"author_count":1,"new_notes_24h":1,"new_authors_24h":1,"max_likes":n.like_count or 0,"first_seen_at":n.first_discovered_at.isoformat(),"last_seen_at":n.last_discovered_at.isoformat(),"active_days":1,"engagement_growth":0,"fermentation_score":0,"evidence":[f"单篇笔记 24 小时内获 {n.like_count} 赞"],"trend_points":[],"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)}]})
+            hot.append({"kind":"single","topic_id":f"note-{n.note_id}","topic":(n.title or "").strip()[:36] or "未命名笔记","ai_highlight":n.ai_summary,"sample_count":1,"author_count":1,"new_notes_24h":1,"new_authors_24h":1,"max_likes":n.like_count or 0,"first_seen_at":n.first_discovered_at.isoformat(),"last_seen_at":n.last_discovered_at.isoformat(),"active_days":1,"engagement_growth":0,"fermentation_score":0,"evidence":[f"单篇笔记 48 小时内获 {n.like_count} 赞"],"hot_window":"48h","trend_points":[],"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)}]})
     # 持续发酵以"一直在热"为主导：活跃天数与持续增长权重最高，今日突发新话题不会反超多日反复在热的老话题。
     def _persistence(item):
         longevity=min(item["active_days"],7)/7
@@ -294,7 +302,7 @@ async def compute_topic_boards(db:AsyncSession,*,analyze_singles:bool=False)->di
         return round(100*(.5*longevity+.3*growth+.2*freshness),1)
     fermenting.sort(key=lambda item:(_persistence(item),item["fermentation_score"],item["new_notes_24h"],item["max_likes"]),reverse=True)
     generated=max((s.snapshot_at for s in latest_snapshot.values()),default=now)
-    result={"generated_at":generated.isoformat(),"edition_date":day_start.date().isoformat(),"hot":hot[:6],"fermenting":fermenting[:20],"fresh":hot[:6]}
+    result={"generated_at":generated.isoformat(),"edition_date":day_start.date().isoformat(),"hot":hot[:HOT_BOARD_MAX_TOPICS],"fermenting":fermenting[:20],"fresh":hot[:HOT_BOARD_MAX_TOPICS]}
     return await _attach_board_monitor(db,result,day_start,topic_count=len(topics),sample_count=len(note_by_id),max_likes=max((n.like_count or 0 for n in note_by_id.values()),default=0))
 
 
@@ -335,7 +343,7 @@ async def _legacy_topic_boards(db:AsyncSession,now:datetime,attach_ai:bool=True)
         recent_authors={n.author_id or n.author_nickname for n in recent if n.author_id or n.author_nickname}
         active_days=max(1,min(7,(last.date()-first.date()).days+1))
         score=min(100,round(25+len(items)*6+len(authors)*4+len(recent)*5,1))
-        board={"topic_id":None,"keyword":keyword,"topic":keyword,"fallback_source":"keyword","sample_count":len(items),"author_count":len(authors),"new_notes_24h":len(recent),"new_authors_24h":len(recent_authors),"recent_3d_count":sum(n.published_at>=recent_3d for n in items),"max_likes":max(n.like_count for n in items),"first_seen_at":first.isoformat(),"last_seen_at":last.isoformat(),"active_days":active_days,"engagement_growth":0,"fermentation_score":score,"evidence":[f"今日采集再次命中 {len(recent)} 篇",f"共 {len(authors)} 位作者",f"近 7 日共 {len(items)} 篇合格素材"],"trend_points":[{"at":last.isoformat(),"score":score,"new_notes":len(recent)}],"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)} for n in sorted(items,key=lambda n:n.like_count,reverse=True)[:4]]}
+        board={"topic_id":None,"keyword":keyword,"topic":keyword,"fallback_source":"keyword","sample_count":len(items),"author_count":len(authors),"new_notes_24h":len(recent),"new_authors_24h":len(recent_authors),"recent_3d_count":sum(n.published_at>=recent_3d for n in items),"max_likes":max(n.like_count for n in items),"first_seen_at":first.isoformat(),"last_seen_at":last.isoformat(),"active_days":active_days,"engagement_growth":0,"fermentation_score":score,"evidence":[f"今日采集再次命中 {len(recent)} 篇",f"共 {len(authors)} 位作者",f"近 7 日共 {len(items)} 篇合格素材"],"trend_points":[{"at":last.isoformat(),"score":score,"new_notes":len(recent)}],"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)} for n in sorted(items,key=lambda n:n.like_count,reverse=True)[:HOT_TOPIC_NOTE_LIMIT]]}
         if len(recent)>=2 and len(recent_authors)>=2:fresh.append(dict(board))
         if first<ref and recent and len(authors)>=2:fermenting.append(dict(board))
     fresh.sort(key=lambda b:b["max_likes"],reverse=True);fermenting.sort(key=lambda b:b["max_likes"],reverse=True)

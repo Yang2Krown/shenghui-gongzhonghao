@@ -223,7 +223,9 @@ def normalize_candidate(raw: dict, provider: str, rank: int) -> Candidate | None
     if not note_id: return None
     user = first(envelope, "user", "author", "note_card.user") or {}
     interact = first(envelope, "interact_info", "interactInfo", "note_card.interact_info") or {}
-    cover = remote_image_url(first(envelope, "cover.url_default", "cover.url", "cover_url", "image_list.0.url_default", "image_list.0.url", "images_list.0.url", "images_list.0.url_default", "note_card.cover.url_default"))
+    # 视频笔记没有 image_list，封面帧在 video 对象下（cover / first_frame / origin_cover），
+    # 之前只读图文字段导致视频 cover_url 恒为空 → media_status=missing / 详情被判 core_incomplete。
+    cover = remote_image_url(first(envelope, "cover.url_default", "cover.url", "cover_url", "image_list.0.url_default", "image_list.0.url", "images_list.0.url", "images_list.0.url_default", "note_card.cover.url_default", "video.cover.url_default", "video.cover.url", "video_cover.url_default", "video_cover.url", "video.origin_cover.url_default", "video.first_frame.url_default", "first_frame.url_default", "image_info.url_default", "note_card.video.cover.url_default", "note_card.video.cover.url", "note_card.video_cover.url_default", "note_card.video.origin_cover.url_default", "note_card.video.first_frame.url_default"))
     note_type = str(first(envelope, "type", "note_type", "note_card.type") or "").lower()
     note_type = "video" if "video" in note_type else "image" if note_type else None
     raw_url = first(envelope, "url", "share_url", "note_url") or first(raw, "url", "share_url", "note_url")
