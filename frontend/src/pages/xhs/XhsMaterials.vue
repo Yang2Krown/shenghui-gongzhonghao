@@ -6,7 +6,7 @@
     <section v-if="topics.length" class="topic-board">
       <div class="board" :class="{solo:!railTopics.length}">
         <article class="tb-topic tb-hero" :class="{selected:filters.semantic_topic_id===headline.topic_id,'no-cover':!topNote,'is-single':!heroMoreNotes.length}" role="button" tabindex="0" :aria-pressed="filters.semantic_topic_id===headline.topic_id" @click="openTopic(headline)" @keydown.enter.prevent="openTopic(headline)" @keydown.space.prevent="openTopic(headline)">
-          <span class="sel-chip">✓ 筛选中</span><div class="hero-main"><div class="hero-top"><span class="rank">01</span><span class="badge" :class="badgeClass(headline)">{{ badgeLabel(headline) }}</span><span class="page-tag">A1 · 头条</span></div><h3 class="hero-title">{{ headline.topic }}</h3><p class="hero-deck">{{ headline.ai_highlight || evidence(headline) }}</p>
+          <span class="sel-chip">✓ 筛选中</span><div class="hero-main"><div class="hero-top"><span class="rank">01</span><span class="badge" :class="badgeClass(headline)">{{ badgeLabel(headline) }}</span><span class="page-tag">A1 · 头条</span></div><h3 class="hero-title" :class="{'hero-title-lg':isShortTopic(headline)}">{{ headline.topic }}</h3><p class="hero-deck">{{ headline.ai_highlight || evidence(headline) }}</p>
           <ul class="hero-meta"><li><b>论据</b>{{ headline.hot_window==='48h'?'两日':'今天' }}形成内容热度</li><li><b>{{ headline.sample_count }}</b> 篇样本</li><li>最高 <b>{{ compact(headline.max_likes) }}</b> 赞</li></ul>
           <div v-if="heroMoreNotes.length" class="hero-notes"><div class="notes-label">其余代表笔记 · MORE NOTES</div><button v-for="(n,ni) in heroMoreNotes" :key="n.note_id" type="button" class="note" @click.stop="openDetail({note_id:n.note_id})"><span class="no">NO.{{ ni+2 }}</span><span class="t">「{{ n.title }}」</span><span class="leader"></span><span class="lk"><b>{{ compact(n.likes) }}</b> 赞</span></button></div></div>
           <figure v-if="topNote" class="hero-cover"><img :src="imageUrl(topNote)" :alt="topNote.title" loading="lazy" referrerpolicy="no-referrer" @error="imageFailed($event,topNote,'cover')"><span class="cover-wm">{{ headline.topic.slice(0,1) }}</span><span class="cover-tag">置顶代表笔记</span><figcaption @click.stop="openDetail({note_id:topNote.note_id})"><span class="cover-title">「{{ topNote.title }}」</span><span class="like-chip"><i>♥</i> {{ compact(topNote.likes) }} 赞 · 话题内最热</span></figcaption></figure>
@@ -58,6 +58,8 @@ const topics=computed(()=>boards.value.hot.map(t=>({...t,status:'fresh'})).slice
 // 热榜徽章：单篇高热 / 今日新切口(24h内) / 两日热点(24–48h)
 const badgeLabel=t=>t.kind==='single'?'单篇高热':(t.hot_window==='48h'?'两日热点':'今日新切口');
 const badgeClass=t=>t.kind==='single'?'badge-single':(t.hot_window==='48h'?'badge-2d':'badge-new');
+// 只有短话题名（聚类话题，如"大模型/AI/vibecoding"）才用超大报头字；长单篇标题用常规大标题
+const isShortTopic=t=>t.kind!=='single'&&(t.topic||'').length>0&&(t.topic||'').length<=10;
 const sparkGeometry=t=>{let values=(t.trend_points||[]).slice(-7).map(p=>Number(p.score||p.new_notes||0));if(!values.length)values=[0,0];if(values.length===1)values=[values[0],values[0]];const min=Math.min(...values),max=Math.max(...values),points=values.map((v,i)=>({x:2+i*96/(values.length-1),y:72-(v-min)/Math.max(1,max-min)*50}));let line=`M ${points[0].x} ${points[0].y}`;for(let i=1;i<points.length;i++){const prev=points[i-1],point=points[i],mid=(prev.x+point.x)/2;line+=` C ${mid} ${prev.y}, ${mid} ${point.y}, ${point.x} ${point.y}`}const last=points[points.length-1];return{line,area:`${line} L ${last.x} 82 L ${points[0].x} 82 Z`,last}};
 const topicEvidence=t=>(t.evidence||[]).slice(0,3).length?(t.evidence||[]).slice(0,3):[`内容样本 ${t.sample_count} 篇`,`涉及 ${t.author_count} 位作者`,`今日监测 ${t.new_notes_24h} 篇`];
 // 发酵天数的参考日：所有上榜话题 last_seen_at 的最大值
@@ -351,11 +353,11 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
 .tb-hero.no-cover {
   grid-template-columns: 1fr;
 }
-/* 头条为单篇（无其余代表笔记）时：封面压缩为方形，行高随内容收缩，
-   不再被 360px 封面撑出大片空白；左列靠 .hero-meta margin-top:auto 顶到底 */
+/* 头条为单篇（无其余代表笔记）时：封面略收为 4:3，行高随内容略收，
+   不被 360px 高封面撑出大片空白；左列靠 .hero-meta margin-top:auto 顶到底 */
 .tb-hero.is-single .hero-cover {
-  min-height: 0;
-  aspect-ratio: 1 / 1;
+  min-height: 300px;
+  aspect-ratio: 4 / 3;
   align-self: center;
 }
 .hero-main {
@@ -383,17 +385,24 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
 .hero-title {
   font-family: var(--serif);
   font-weight: 700;
-  font-size: clamp(50px, 4.5vw, 74px);
-  line-height: 1.08;
-  letter-spacing: 0.02em;
+  /* 默认常规大标题：适配真实长单篇标题，最多 3 行 */
+  font-size: clamp(24px, 1.9vw, 34px);
+  line-height: 1.25;
+  letter-spacing: 0.01em;
   margin: 18px 0 12px;
-  /* 长标题最多 3 行截断，防止头条卡被撑爆 */
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
   transition: color 0.25s ease;
+}
+/* 短话题名（聚类话题）才用 mockup 的超大报头字 */
+.hero-title.hero-title-lg {
+  font-size: clamp(50px, 4.5vw, 74px);
+  line-height: 1.08;
+  letter-spacing: 0.02em;
+  -webkit-line-clamp: 2;
 }
 .tb-hero:hover .hero-title {
   color: var(--clay-deep);
@@ -809,10 +818,10 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   .hero-cover {
     min-height: 320px;
   }
-  /* 单篇头条即便在窄屏也保持压缩，不被响应式 min-height 重新撑高 */
+  /* 单篇头条在窄屏保持 4:3 收缩，不被响应式 min-height 重新撑高 */
   .tb-hero.is-single .hero-cover {
-    min-height: 0;
-    aspect-ratio: 16 / 10;
+    min-height: 240px;
+    aspect-ratio: 4 / 3;
   }
 }
 @media (max-width: 800px) {
@@ -824,8 +833,8 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
     min-height: 240px;
   }
   .tb-hero.is-single .hero-cover {
-    min-height: 0;
-    aspect-ratio: 16 / 10;
+    min-height: 200px;
+    aspect-ratio: 4 / 3;
   }
   .cover-wm {
     font-size: 130px;

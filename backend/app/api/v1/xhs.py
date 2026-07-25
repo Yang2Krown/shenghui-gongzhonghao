@@ -293,7 +293,8 @@ async def compute_topic_boards(db:AsyncSession,*,analyze_singles:bool=False)->di
         else:
             picked=[n for n in candidates if is_ai_related(" ".join([n.title or "",*(str(x) for x in (n.native_tags or []))]))]
         for n in picked[:HOT_BOARD_MIN_SLOTS-len(hot)]:
-            hot.append({"kind":"single","topic_id":f"note-{n.note_id}","topic":(n.title or "").strip()[:36] or "未命名笔记","ai_highlight":n.ai_summary,"sample_count":1,"author_count":1,"new_notes_24h":1,"new_authors_24h":1,"max_likes":n.like_count or 0,"first_seen_at":n.first_discovered_at.isoformat(),"last_seen_at":n.last_discovered_at.isoformat(),"active_days":1,"engagement_growth":0,"fermentation_score":0,"evidence":[f"单篇笔记 48 小时内获 {n.like_count} 赞"],"hot_window":"48h","trend_points":[],"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)}]})
+            single_window="24h" if (n.published_at and n.published_at>=fresh_cutoff) else "48h"
+            hot.append({"kind":"single","topic_id":f"note-{n.note_id}","topic":(n.title or "").strip()[:36] or "未命名笔记","ai_highlight":n.ai_summary,"sample_count":1,"author_count":1,"new_notes_24h":1,"new_authors_24h":1,"max_likes":n.like_count or 0,"first_seen_at":n.first_discovered_at.isoformat(),"last_seen_at":n.last_discovered_at.isoformat(),"active_days":1,"engagement_growth":0,"fermentation_score":0,"evidence":[f"单篇笔记 48 小时内获 {n.like_count} 赞"],"hot_window":single_window,"trend_points":[],"notes":[{"note_id":n.note_id,"title":n.title,"likes":n.like_count,"note_type":n.note_type,"author":n.author_nickname,"cover_url":n.cover_url,"original_url":original_note_url(n)}]})
     # 持续发酵以"一直在热"为主导：活跃天数与持续增长权重最高，今日突发新话题不会反超多日反复在热的老话题。
     def _persistence(item):
         longevity=min(item["active_days"],7)/7
