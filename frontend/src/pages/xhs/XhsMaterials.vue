@@ -6,15 +6,18 @@
     <section v-if="topics.length" class="topic-board">
       <div class="board" :class="{solo:!railTopics.length}">
         <article class="tb-topic tb-hero" :class="{selected:filters.semantic_topic_id===headline.topic_id,'no-cover':!topNote}" role="button" tabindex="0" :aria-pressed="filters.semantic_topic_id===headline.topic_id" @click="openTopic(headline)" @keydown.enter.prevent="openTopic(headline)" @keydown.space.prevent="openTopic(headline)">
-          <span class="sel-chip">✓ 筛选中</span><div class="hero-main"><div class="hero-top"><span class="rank">01</span><span class="badge" :class="headline.kind==='single'?'badge-single':'badge-new'">{{ headline.kind==='single'?'单篇高热':'今日新切口' }}</span><span class="page-tag">A1 · 头条</span></div><h3 class="hero-title">{{ headline.topic }}</h3><p class="hero-deck">{{ headline.ai_highlight || evidence(headline) }}</p>
-          <ul class="hero-meta"><li><b>论据</b>今天形成内容热度</li><li><b>{{ headline.sample_count }}</b> 篇样本</li><li>最高 <b>{{ compact(headline.max_likes) }}</b> 赞</li></ul>
+          <span class="sel-chip">✓ 筛选中</span><div class="hero-main"><div class="hero-top"><span class="rank">01</span><span class="badge" :class="badgeClass(headline)">{{ badgeLabel(headline) }}</span><span class="page-tag">A1 · 头条</span></div><h3 class="hero-title">{{ headline.topic }}</h3><p class="hero-deck">{{ headline.ai_highlight || evidence(headline) }}</p>
+          <ul class="hero-meta"><li><b>论据</b>{{ headline.hot_window==='48h'?'两日':'今天' }}形成内容热度</li><li><b>{{ headline.sample_count }}</b> 篇样本</li><li>最高 <b>{{ compact(headline.max_likes) }}</b> 赞</li></ul>
           <div v-if="heroMoreNotes.length" class="hero-notes"><div class="notes-label">其余代表笔记 · MORE NOTES</div><button v-for="(n,ni) in heroMoreNotes" :key="n.note_id" type="button" class="note" @click.stop="openDetail({note_id:n.note_id})"><span class="no">NO.{{ ni+2 }}</span><span class="t">「{{ n.title }}」</span><span class="leader"></span><span class="lk"><b>{{ compact(n.likes) }}</b> 赞</span></button></div></div>
           <figure v-if="topNote" class="hero-cover"><img :src="imageUrl(topNote)" :alt="topNote.title" loading="lazy" referrerpolicy="no-referrer" @error="imageFailed($event,topNote,'cover')"><span class="cover-wm">{{ headline.topic.slice(0,1) }}</span><span class="cover-tag">置顶代表笔记</span><figcaption @click.stop="openDetail({note_id:topNote.note_id})"><span class="cover-title">「{{ topNote.title }}」</span><span class="like-chip"><i>♥</i> {{ compact(topNote.likes) }} 赞 · 话题内最热</span></figcaption></figure>
         </article>
         <aside v-if="railTopics.length" class="rail"><div class="rail-head"><b>其余要闻</b><span>A2 · 02—{{ String(railTopics.length+1).padStart(2,'0') }}</span></div>
-          <article v-for="(t,i) in railTopics" :key="t.topic_id" class="tb-topic rail-item" :class="{selected:filters.semantic_topic_id===t.topic_id}" role="button" tabindex="0" @click="openTopic(t)" @keydown.enter.prevent="openTopic(t)" @keydown.space.prevent="openTopic(t)"><span class="sel-chip">✓ 筛选中</span><div class="ri-top"><span class="rank">{{ String(i+2).padStart(2,'0') }}</span><h3 class="ri-name">{{ t.topic }}</h3><span class="badge sm" :class="t.kind==='single'?'badge-single':'badge-new'">{{ t.kind==='single'?'单篇高热':'今日新切口' }}</span></div><p v-if="t.ai_highlight" class="ri-deck">{{ t.ai_highlight }}</p><p class="ri-meta">{{ evidence(t) }}</p><ul v-if="t.kind!=='single' && t.notes.length" class="ri-notes"><li v-for="n in t.notes.slice(0,3)" :key="n.note_id" @click.stop="openDetail({note_id:n.note_id})"><span class="t">「{{ n.title }}」</span><span class="l">{{ compact(n.likes) }}<em>赞</em></span></li></ul></article>
+          <article v-for="(t,i) in railTopics" :key="t.topic_id" class="tb-topic rail-item" :class="{selected:filters.semantic_topic_id===t.topic_id}" role="button" tabindex="0" @click="openTopic(t)" @keydown.enter.prevent="openTopic(t)" @keydown.space.prevent="openTopic(t)"><span class="sel-chip">✓ 筛选中</span><img v-if="t.notes&&t.notes[0]&&t.notes[0].cover_url" class="ri-thumb" :src="imageUrl(t.notes[0])" :alt="t.topic" loading="lazy" referrerpolicy="no-referrer" @error="imageFailed($event,t.notes[0],'cover')"><div class="ri-body"><div class="ri-top"><span class="rank">{{ String(i+2).padStart(2,'0') }}</span><h3 class="ri-name">{{ t.topic }}</h3><span class="badge sm" :class="badgeClass(t)">{{ badgeLabel(t) }}</span></div><p v-if="t.ai_highlight" class="ri-deck">{{ t.ai_highlight }}</p><p class="ri-meta">{{ evidence(t) }}</p><ul v-if="t.kind!=='single' && t.notes.length" class="ri-notes"><li v-for="n in t.notes.slice(0,3)" :key="n.note_id" @click.stop="openDetail({note_id:n.note_id})"><span class="t">「{{ n.title }}」</span><span class="l">{{ compact(n.likes) }}<em>赞</em></span></li></ul></div></article>
         </aside>
       </div>
+      <div v-if="moreTopics.length" class="more-board"><div class="more-head"><b>更多要闻</b><span>MORE · {{ String(railTopics.length+2).padStart(2,'0') }}—{{ String(railTopics.length+1+moreTopics.length).padStart(2,'0') }}</span></div><div class="more-grid">
+        <article v-for="(t,i) in moreTopics" :key="t.topic_id" class="more-card" :class="{selected:filters.semantic_topic_id===t.topic_id}" role="button" tabindex="0" @click="openTopic(t)" @keydown.enter.prevent="openTopic(t)" @keydown.space.prevent="openTopic(t)"><div class="mc-media"><img v-if="t.notes&&t.notes[0]&&t.notes[0].cover_url" :src="imageUrl(t.notes[0])" :alt="t.topic" loading="lazy" referrerpolicy="no-referrer" @error="imageFailed($event,t.notes[0],'cover')"><span class="mc-rank">{{ String(railTopics.length+2+i).padStart(2,'0') }}</span><span class="badge sm" :class="badgeClass(t)">{{ badgeLabel(t) }}</span></div><div class="mc-body"><h4 class="mc-name">{{ t.topic }}</h4><p class="mc-meta">{{ t.sample_count }} 篇 · {{ t.author_count }} 位作者 · 最高 {{ compact(t.max_likes) }} 赞</p></div></article>
+      </div></div>
     </section><el-empty v-else description="今日暂无形成规模的内容话题"/></div>
     <section v-if="activeTab==='fermenting'" class="signals-section">
       <div class="page-marker"><span class="pm-no">A2</span><span class="pm-name">趋势版</span><span class="pm-note">近 7 日趋势 · {{ fermentTopics.length }} 组信号追踪<template v-if="boards.generated_at"> · 更新于 {{ dateTime(boards.generated_at) }}</template></span></div>
@@ -51,7 +54,10 @@ const loading=ref(false),boardsLoading=ref(false),items=ref([]),total=ref(0),dra
 const load=async(page=1)=>{const targetPage=Number.isInteger(page)?page:1;notesController?.abort();const controller=new AbortController();notesController=controller;loading.value=true;try{const {data}=await api.get('/xhs/notes',{params:{...filters,page:targetPage},signal:controller.signal});if(notesController!==controller)return;items.value=data.items;total.value=data.total;filters.page=targetPage}catch(e){if(!cancelled(e)&&notesController===controller&&!items.value.length){total.value=0}}finally{if(notesController===controller){notesController=null;loading.value=false}}};const reset=()=>{Object.assign(filters,{range:'7d',keyword:'',topic:'',semantic_topic_id:'',note_type:'all',sort:'comprehensive',q:'',page:1});activeTopicName.value='';load()};const openDetail=async n=>{detailController?.abort();const controller=new AbortController();detailController=controller;const hasFullData=Boolean(n&&n.author&&n.content!==undefined);if(hasFullData){selected.value=n;drawer.value=true}try{const latest=(await api.get(`/xhs/notes/${n.note_id}`,{signal:controller.signal})).data;if(detailController===controller){selected.value=latest;if(!hasFullData)drawer.value=true}}catch(e){if(cancelled(e))return;if(!hasFullData){selected.value=n;drawer.value=true}}finally{if(detailController===controller)detailController=null}};const mediaHash=s=>{let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))|0;return(h>>>0).toString(36)};const mediaUrl=(u,n,kind)=>u?`/api/v1/xhs/media/${n.note_id}/${kind}?v=${mediaHash(u)}`:placeholder;const imageUrl=n=>mediaUrl(n.cover_url,n,'cover');const avatarUrl=n=>mediaUrl(n.author.avatar_url,n,'avatar');const imageFailed=(event,note,kind)=>{const original=event.target.src;if(original.endsWith('xhs-placeholder.svg'))return;event.target.src=placeholder;const key=`${note.note_id}:${kind}:${original}`;if(failed.has(key))return;failed.add(key);api.post(`/xhs/notes/${note.note_id}/image-failures`,{image_kind:kind,failed_url:kind==='cover'?note.cover_url:note.author.avatar_url},{skipErrorToast:true}).catch(()=>{})};const metric=n=>n===null||n===undefined?'—':compact(n);const compact=n=>n>=10000?`${(n/10000).toFixed(n>=100000?0:1)}万`:String(n||0);const dateTime=v=>v?new Date(v).toLocaleString('zh-CN',{hour12:false}):'—';const relative=v=>{if(!v)return '时间未知';const d=Math.floor((Date.now()-new Date(v))/86400000);return d<=0?'今天':`${d} 天前`};const keywordHeat=computed(()=>{const map={};items.value.forEach(n=>n.keywords.forEach(k=>map[k]=(map[k]||0)+1));return Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,10)});const keywordCount=computed(()=>keywordHeat.value.length);const videoCount=computed(()=>items.value.filter(n=>n.note_type==='video').length);const imageCount=computed(()=>items.value.length-videoCount.value);const cleanTag=t=>(t||'').replace(/\[话题\]/g,'').replace(/^#+|#+$/g,'').trim();const cleanContent=c=>(c||'').replace(/#[^#\[\]\s]{1,40}\[话题\]#/g,'').replace(/[^\S\n]+/g,' ').replace(/ *\n */g,'\n').replace(/\n{3,}/g,'\n\n').trim();const maxLikes=computed(()=>Math.max(0,...items.value.map(n=>n.engagement.likes||0)));const rangeLabel=computed(()=>({'1d':'近 1 天','3d':'近 3 天','7d':'近 7 天'})[filters.range]);const typeLabel=computed(()=>filters.note_type==='video'?'视频':filters.note_type==='image'?'图文':'全部类型');
 // 热榜看板：独立于筛选器拉取，失败静默降级为空，不阻塞页面
 const boards=ref({generated_at:null,edition_date:null,hot:[],fermenting:[],monitor:null,today_new_notes:0});const loadBoards=async()=>{boardsController?.abort();const controller=new AbortController();boardsController=controller;boardsLoading.value=true;try{const {data}=await api.get('/xhs/topic-boards',{skipErrorToast:true,signal:controller.signal});if(boardsController!==controller)return;boards.value={generated_at:data.generated_at||null,edition_date:data.edition_date||null,hot:data.hot||data.fresh||[],fermenting:data.fermenting||[],monitor:data.monitor||null,today_new_notes:data.today_new_notes||0}}catch(e){if(!cancelled(e)&&boardsController===controller)boards.value={generated_at:null,edition_date:null,hot:[],fermenting:[],monitor:null,today_new_notes:0}}finally{if(boardsController===controller){boardsController=null;boardsLoading.value=false}}};
-const topics=computed(()=>boards.value.hot.map(t=>({...t,status:'fresh'})).slice(0,6));const fermentTopics=computed(()=>boards.value.fermenting);const visibleFermentTopics=computed(()=>fermentTopics.value.slice(0,visibleFerment.value));
+const topics=computed(()=>boards.value.hot.map(t=>({...t,status:'fresh'})).slice(0,8));const fermentTopics=computed(()=>boards.value.fermenting);const visibleFermentTopics=computed(()=>fermentTopics.value.slice(0,visibleFerment.value));
+// 热榜徽章：单篇高热 / 今日新切口(24h内) / 两日热点(24–48h)
+const badgeLabel=t=>t.kind==='single'?'单篇高热':(t.hot_window==='48h'?'两日热点':'今日新切口');
+const badgeClass=t=>t.kind==='single'?'badge-single':(t.hot_window==='48h'?'badge-2d':'badge-new');
 const sparkGeometry=t=>{let values=(t.trend_points||[]).slice(-7).map(p=>Number(p.score||p.new_notes||0));if(!values.length)values=[0,0];if(values.length===1)values=[values[0],values[0]];const min=Math.min(...values),max=Math.max(...values),points=values.map((v,i)=>({x:2+i*96/(values.length-1),y:72-(v-min)/Math.max(1,max-min)*50}));let line=`M ${points[0].x} ${points[0].y}`;for(let i=1;i<points.length;i++){const prev=points[i-1],point=points[i],mid=(prev.x+point.x)/2;line+=` C ${mid} ${prev.y}, ${mid} ${point.y}, ${point.x} ${point.y}`}const last=points[points.length-1];return{line,area:`${line} L ${last.x} 82 L ${points[0].x} 82 Z`,last}};
 const topicEvidence=t=>(t.evidence||[]).slice(0,3).length?(t.evidence||[]).slice(0,3):[`内容样本 ${t.sample_count} 篇`,`涉及 ${t.author_count} 位作者`,`今日监测 ${t.new_notes_24h} 篇`];
 // 发酵天数的参考日：所有上榜话题 last_seen_at 的最大值
@@ -59,7 +65,7 @@ const referenceTime=computed(()=>Math.max(0,...topics.value.map(t=>+new Date(t.l
 const fermentDays=t=>Math.max(1,Math.round((referenceTime.value-+new Date(t.first_seen_at))/86400000));
 const evidence=t=>{if(t.status==='fresh')return `${t.fallback_source==='keyword'?'今日采集再次命中':'今天首次形成热度'} · ${t.sample_count} 篇样本 · 最高 ${compact(t.max_likes)} 赞`;return `${fermentDays(t)} 天前出现 · 今天仍在发酵 · 最高 ${compact(t.max_likes)} 赞`};
 // v3 报纸风版面：第 1 名进头条位，02–04 进右侧要闻榜；亮点句优先 ai_highlight，为 null 时回退 evidence 数据句
-const headline=computed(()=>topics.value[0]||null);const railTopics=computed(()=>topics.value.slice(1,4));const topNote=computed(()=>headline.value?.notes?.[0]||null);const heroMoreNotes=computed(()=>(headline.value?.notes||[]).slice(1,3));const filtersEl=ref(null);
+const headline=computed(()=>topics.value[0]||null);const railTopics=computed(()=>topics.value.slice(1,4));const moreTopics=computed(()=>topics.value.slice(4));const topNote=computed(()=>headline.value?.notes?.[0]||null);const heroMoreNotes=computed(()=>(headline.value?.notes||[]).slice(1,4));const filtersEl=ref(null);
 // 刊头版期：优先用看板实际锚定的采集日（后端 edition_date），无数据时回退当天 →「选题号外 · 07月17日版」
 const todayEdition=computed(()=>{if(boards.value.edition_date){const[,m,d]=boards.value.edition_date.split('-');return `${m}月${d}日`}const d=new Date();return `${String(d.getMonth()+1).padStart(2,'0')}月${String(d.getDate()).padStart(2,'0')}日`});
 // 监测状态条：由看板数据汇总，接口不可用时全为 0
@@ -308,6 +314,12 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   color: var(--pine);
   border: 1.5px dashed var(--pine);
   padding: 5px 11px;
+}
+/* 两日热点 = 48h 窗口聚成的话题，松绿实心章，与今日新切口的黏土章区分 */
+.badge-2d {
+  background: var(--pine);
+  color: var(--ivory);
+  box-shadow: 2px 2px 0 rgba(63, 92, 82, 0.35);
 }
 .badge.sm {
   font-size: 10.5px;
@@ -606,11 +618,27 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
      空隙统一留在 meta 与钉底笔记之间（与素材卡同理），不再出现卡底大留白 */
   flex: 1 1 auto;
   display: flex;
-  flex-direction: column;
-  padding: 15px 18px 13px;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
   background: transparent;
   /* 内容多时裁剪在本卡内，绝不溢出到相邻卡 */
   overflow: hidden;
+}
+/* 要闻卡封面缩略图：左侧窄条，给纯文字榜单补一层视觉 */
+.ri-thumb {
+  flex: none;
+  width: 108px;
+  align-self: stretch;
+  object-fit: cover;
+  background: var(--bone);
+}
+.ri-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 15px 18px 13px;
 }
 .rail-item + .rail-item {
   border-top: 1px solid var(--line);
@@ -724,6 +752,108 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   color: var(--ink-4);
   margin-left: 2px;
 }
+/* ---------- 更多要闻 MORE RAIL：榜单下方的封面卡片条带，把版面铺满 ---------- */
+.more-board {
+  margin-top: 18px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+.more-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 12px 18px 10px;
+  border-bottom: 3px solid var(--ink);
+}
+.more-head b {
+  font-family: var(--serif);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+.more-head span {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--ink-4);
+}
+.more-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.more-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  user-select: none;
+  border-left: 1px solid var(--line);
+  transition: background 0.22s ease;
+}
+.more-card:first-child {
+  border-left: 0;
+}
+.more-card:hover {
+  background: var(--ivory);
+}
+.more-card.selected {
+  background: var(--clay-tint);
+  box-shadow: inset 0 3px 0 var(--clay-deep);
+}
+.mc-media {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  background: var(--bone);
+  overflow: hidden;
+}
+.mc-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.mc-rank {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--ivory);
+  background: rgba(31, 31, 30, 0.5);
+  padding: 3px 8px;
+  border-radius: 2px;
+}
+.mc-media .badge {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+}
+.mc-body {
+  padding: 12px 14px 13px;
+}
+.mc-name {
+  margin: 0;
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 15.5px;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  transition: color 0.22s ease;
+}
+.more-card:hover .mc-name {
+  color: var(--clay-deep);
+}
+.mc-meta {
+  margin: 7px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
 /* 响应式：≤1024px 榜单收头条下方，≤800px 头条自身收单列 */
 @media (max-width: 1024px) {
   .board {
@@ -731,6 +861,15 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   }
   .hero-cover {
     min-height: 320px;
+  }
+  .more-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .more-card:nth-child(odd) {
+    border-left: 0;
+  }
+  .more-card:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
   }
 }
 @media (max-width: 800px) {
@@ -743,6 +882,19 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   }
   .cover-wm {
     font-size: 130px;
+  }
+  .ri-thumb {
+    width: 84px;
+  }
+  .more-grid {
+    grid-template-columns: 1fr;
+  }
+  .more-card {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .more-card:first-child {
+    border-top: 0;
   }
 }
 

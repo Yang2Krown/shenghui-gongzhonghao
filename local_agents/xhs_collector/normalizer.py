@@ -126,7 +126,8 @@ def normalize(raw: dict[str, Any], provider_rank: int = 1) -> dict[str, Any] | N
     interact = first(note, "interact_info", "interactInfo", "note_card.interact_info") or {}
     note_type = str(first(note, "type", "note_type", "note_card.type") or "").lower()
     note_type = "video" if "video" in note_type else "image" if note_type else None
-    cover = remote_image_url(first(note, "cover.url_default", "cover.url", "cover_url", "image_list.0.url_default", "note_card.cover.url_default"))
+    # 视频笔记没有 image_list，封面帧在 video 对象下；只读图文字段会让视频 cover_url 为空。
+    cover = remote_image_url(first(note, "cover.url_default", "cover.url", "cover_url", "image_list.0.url_default", "image_list.0.url", "images_list.0.url", "images_list.0.url_default", "note_card.cover.url_default", "video.cover.url_default", "video.cover.url", "video_cover.url_default", "video_cover.url", "video.origin_cover.url_default", "video.first_frame.url_default", "first_frame.url_default", "image_info.url_default", "note_card.video.cover.url_default", "note_card.video.cover.url", "note_card.video_cover.url_default", "note_card.video.origin_cover.url_default", "note_card.video.first_frame.url_default"))
     raw_url = first(note, "url", "share_url", "note_url") or first(raw, "url", "share_url", "note_url")
     token = first(note, "xsec_token", "xsecToken") or first(raw, "xsec_token", "xsecToken", "note_card.xsec_token", "note_card.xsecToken")
     source = first(note, "xsec_source", "xsecSource") or first(raw, "xsec_source", "xsecSource", "note_card.xsec_source", "note_card.xsecSource")

@@ -114,6 +114,25 @@ def test_cli_non_note_search_items_are_ignored():
     assert normalize_candidate(raw,"cli",1) is None
 
 
+def test_video_note_cover_extracted_from_video_object():
+    """视频笔记没有 image_list，封面帧在 video.cover 下：必须能取到，否则封面恒空。"""
+    raw={"id":"v1","title":"视频标题","type":"video","time":1720000000,
+         "user":{"id":"u1","nickname":"作者"},
+         "interact_info":{"liked_count":"100"},
+         "video":{"cover":{"url_default":"https://sns-webpic.xhscdn.com/video-cover.webp"}}}
+    c=normalize_candidate(raw,"cli",1)
+    assert c.note_type=="video" and c.cover_url=="https://sns-webpic.xhscdn.com/video-cover.webp"
+
+
+def test_video_note_cover_falls_back_to_first_frame():
+    raw={"note_card":{"type":"video","display_title":"视频","time":1720000000,
+         "user":{"user_id":"u1","nick_name":"作者"},"interact_info":{"liked_count":"50"},
+         "video":{"first_frame":{"url_default":"http://sns-webpic-qc.xhscdn.com/frame.webp"}}},
+         "id":"v2"}
+    c=normalize_candidate(raw,"cli",1)
+    assert c.note_type=="video" and c.cover_url=="https://sns-webpic-qc.xhscdn.com/frame.webp"
+
+
 def test_cli_search_card_schema_preserves_token_date_shares_and_https_images(monkeypatch):
     monkeypatch.setattr("app.services.xhs_collection.utcnow",lambda:datetime(2026,7,16,12,0,0))
     raw={
