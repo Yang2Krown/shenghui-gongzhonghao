@@ -12,7 +12,7 @@
           <figure v-if="topNote" class="hero-cover"><img :src="imageUrl(topNote)" :alt="topNote.title" loading="lazy" referrerpolicy="no-referrer" @error="imageFailed($event,topNote,'cover')"><span class="cover-wm">{{ headline.topic.slice(0,1) }}</span><span class="cover-tag">置顶代表笔记</span><figcaption @click.stop="openDetail({note_id:topNote.note_id})"><span class="cover-title">「{{ topNote.title }}」</span><span class="like-chip"><i>♥</i> {{ compact(topNote.likes) }} 赞 · 话题内最热</span></figcaption></figure>
         </article>
         <aside v-if="railTopics.length" class="rail"><div class="rail-head"><b>其余要闻</b><span>A2 · 02—{{ String(railTopics.length+1).padStart(2,'0') }}</span></div>
-          <article v-for="(t,i) in railTopics" :key="t.topic_id" class="tb-topic rail-item" :class="{selected:filters.semantic_topic_id===t.topic_id}" role="button" tabindex="0" @click="openTopic(t)" @keydown.enter.prevent="openTopic(t)" @keydown.space.prevent="openTopic(t)"><span class="sel-chip">✓ 筛选中</span><img v-if="t.notes&&t.notes[0]&&t.notes[0].cover_url" class="ri-thumb" :src="imageUrl(t.notes[0])" :alt="t.topic" loading="lazy" referrerpolicy="no-referrer" @error="imageFailed($event,t.notes[0],'cover')"><div class="ri-body"><div class="ri-top"><span class="rank">{{ String(i+2).padStart(2,'0') }}</span><h3 class="ri-name">{{ t.topic }}</h3><span class="badge sm" :class="badgeClass(t)">{{ badgeLabel(t) }}</span></div><p v-if="t.ai_highlight" class="ri-deck">{{ t.ai_highlight }}</p><p class="ri-meta">{{ evidence(t) }}</p><ul v-if="t.kind!=='single' && t.notes.length" class="ri-notes"><li v-for="n in t.notes.slice(0,3)" :key="n.note_id" @click.stop="openDetail({note_id:n.note_id})"><span class="t">「{{ n.title }}」</span><span class="l">{{ compact(n.likes) }}<em>赞</em></span></li></ul></div></article>
+          <article v-for="(t,i) in railTopics" :key="t.topic_id" class="tb-topic rail-item" :class="{selected:filters.semantic_topic_id===t.topic_id}" role="button" tabindex="0" @click="openTopic(t)" @keydown.enter.prevent="openTopic(t)" @keydown.space.prevent="openTopic(t)"><span class="sel-chip">✓ 筛选中</span><div class="ri-top"><span class="rank">{{ String(i+2).padStart(2,'0') }}</span><h3 class="ri-name">{{ t.topic }}</h3><span class="badge sm" :class="badgeClass(t)">{{ badgeLabel(t) }}</span></div><p v-if="t.ai_highlight" class="ri-deck">{{ t.ai_highlight }}</p><p class="ri-meta">{{ evidence(t) }}</p><ul v-if="t.kind!=='single' && t.notes.length" class="ri-notes"><li v-for="n in t.notes.slice(0,3)" :key="n.note_id" @click.stop="openDetail({note_id:n.note_id})"><span class="t">「{{ n.title }}」</span><span class="l">{{ compact(n.likes) }}<em>赞</em></span></li></ul></article>
         </aside>
       </div>
       <div v-if="moreTopics.length" class="more-board"><div class="more-head"><b>更多要闻</b><span>MORE · {{ String(railTopics.length+2).padStart(2,'0') }}—{{ String(railTopics.length+1+moreTopics.length).padStart(2,'0') }}</span></div><div class="more-grid">
@@ -618,27 +618,14 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
      空隙统一留在 meta 与钉底笔记之间（与素材卡同理），不再出现卡底大留白 */
   flex: 1 1 auto;
   display: flex;
-  align-items: stretch;
-  gap: 0;
-  padding: 0;
+  flex-direction: column;
+  padding: 15px 18px 13px;
   background: transparent;
   /* 内容多时裁剪在本卡内，绝不溢出到相邻卡 */
   overflow: hidden;
 }
-/* 要闻卡封面缩略图：左侧窄条，给纯文字榜单补一层视觉 */
-.ri-thumb {
-  flex: none;
-  width: 108px;
-  align-self: stretch;
-  object-fit: cover;
-  background: var(--bone);
-}
 .ri-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 15px 18px 13px;
+  display: contents;
 }
 .rail-item + .rail-item {
   border-top: 1px solid var(--line);
@@ -882,9 +869,6 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   }
   .cover-wm {
     font-size: 130px;
-  }
-  .ri-thumb {
-    width: 84px;
   }
   .more-grid {
     grid-template-columns: 1fr;
