@@ -5,7 +5,7 @@
     <div v-if="activeTab==='hot'" class="screen-one">
     <section v-if="topics.length" class="topic-board">
       <div class="board" :class="{solo:!railTopics.length}">
-        <article class="tb-topic tb-hero" :class="{selected:filters.semantic_topic_id===headline.topic_id,'no-cover':!topNote}" role="button" tabindex="0" :aria-pressed="filters.semantic_topic_id===headline.topic_id" @click="openTopic(headline)" @keydown.enter.prevent="openTopic(headline)" @keydown.space.prevent="openTopic(headline)">
+        <article class="tb-topic tb-hero" :class="{selected:filters.semantic_topic_id===headline.topic_id,'no-cover':!topNote,'is-single':!heroMoreNotes.length}" role="button" tabindex="0" :aria-pressed="filters.semantic_topic_id===headline.topic_id" @click="openTopic(headline)" @keydown.enter.prevent="openTopic(headline)" @keydown.space.prevent="openTopic(headline)">
           <span class="sel-chip">✓ 筛选中</span><div class="hero-main"><div class="hero-top"><span class="rank">01</span><span class="badge" :class="badgeClass(headline)">{{ badgeLabel(headline) }}</span><span class="page-tag">A1 · 头条</span></div><h3 class="hero-title">{{ headline.topic }}</h3><p class="hero-deck">{{ headline.ai_highlight || evidence(headline) }}</p>
           <ul class="hero-meta"><li><b>论据</b>{{ headline.hot_window==='48h'?'两日':'今天' }}形成内容热度</li><li><b>{{ headline.sample_count }}</b> 篇样本</li><li>最高 <b>{{ compact(headline.max_likes) }}</b> 赞</li></ul>
           <div v-if="heroMoreNotes.length" class="hero-notes"><div class="notes-label">其余代表笔记 · MORE NOTES</div><button v-for="(n,ni) in heroMoreNotes" :key="n.note_id" type="button" class="note" @click.stop="openDetail({note_id:n.note_id})"><span class="no">NO.{{ ni+2 }}</span><span class="t">「{{ n.title }}」</span><span class="leader"></span><span class="lk"><b>{{ compact(n.likes) }}</b> 赞</span></button></div></div>
@@ -350,6 +350,16 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
 }
 .tb-hero.no-cover {
   grid-template-columns: 1fr;
+}
+/* 头条为单篇（无其余代表笔记）时：左列文字垂直居中、封面压缩为方形，
+   行高随内容收缩，不再被 360px 封面撑出大片空白 */
+.tb-hero.is-single .hero-main {
+  justify-content: center;
+}
+.tb-hero.is-single .hero-cover {
+  min-height: 0;
+  aspect-ratio: 1 / 1;
+  align-self: center;
 }
 .hero-main {
   display: flex;
@@ -849,6 +859,11 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   .hero-cover {
     min-height: 320px;
   }
+  /* 单篇头条即便在窄屏也保持压缩，不被响应式 min-height 重新撑高 */
+  .tb-hero.is-single .hero-cover {
+    min-height: 0;
+    aspect-ratio: 16 / 10;
+  }
   .more-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -866,6 +881,10 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   }
   .hero-cover {
     min-height: 240px;
+  }
+  .tb-hero.is-single .hero-cover {
+    min-height: 0;
+    aspect-ratio: 16 / 10;
   }
   .cover-wm {
     font-size: 130px;
