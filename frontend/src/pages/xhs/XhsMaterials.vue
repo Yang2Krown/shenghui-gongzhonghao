@@ -201,6 +201,9 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
 .screen-one {
   display: flex;
   flex-direction: column;
+  /* 今日热榜一屏撑满：100dvh 减去全局顶栏(60px)+页头(76+39px)+状态条(约60px)+底部缓冲，
+     board 用 flex:1 吃满剩余，整版刚好卡满一页、下方不留白 */
+  min-height: calc(100dvh - 60px - 76px - 39px - 60px - 32px);
 }
 .screen-two,
 .filters,
@@ -219,6 +222,7 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   --sans: "PingFang SC", "Helvetica Neue", "Microsoft YaHei", Arial, sans-serif;
   display: flex;
   flex-direction: column;
+  flex: 1;
   margin-top: 0;
 }
 @keyframes tb-pulse {
@@ -353,13 +357,8 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
 .tb-hero.no-cover {
   grid-template-columns: 1fr;
 }
-/* 头条为单篇（无其余代表笔记）时：封面略收为 4:3，行高随内容略收，
-   不被 360px 高封面撑出大片空白；左列靠 .hero-meta margin-top:auto 顶到底 */
-.tb-hero.is-single .hero-cover {
-  min-height: 300px;
-  aspect-ratio: 4 / 3;
-  align-self: center;
-}
+/* 头条为单篇（无其余代表笔记）时：左列论据行 margin-top:auto 顶到底，
+   封面保持正常高度、随整版一起拉伸填满，不再压塌 */
 .hero-main {
   display: flex;
   flex-direction: column;
@@ -818,11 +817,6 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   .hero-cover {
     min-height: 320px;
   }
-  /* 单篇头条在窄屏保持 4:3 收缩，不被响应式 min-height 重新撑高 */
-  .tb-hero.is-single .hero-cover {
-    min-height: 240px;
-    aspect-ratio: 4 / 3;
-  }
 }
 @media (max-width: 800px) {
   .tb-hero {
@@ -831,10 +825,6 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   }
   .hero-cover {
     min-height: 240px;
-  }
-  .tb-hero.is-single .hero-cover {
-    min-height: 200px;
-    aspect-ratio: 4 / 3;
   }
   .cover-wm {
     font-size: 130px;
