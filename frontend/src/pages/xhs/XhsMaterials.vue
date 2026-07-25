@@ -16,7 +16,7 @@
         </aside>
       </div>
       <div v-if="moreTopics.length" class="more-board"><div class="more-head"><b>更多要闻</b><span>MORE · {{ String(railTopics.length+2).padStart(2,'0') }}—{{ String(railTopics.length+1+moreTopics.length).padStart(2,'0') }}</span></div><div class="more-grid">
-        <article v-for="(t,i) in moreTopics" :key="t.topic_id" class="more-card" :class="{selected:filters.semantic_topic_id===t.topic_id}" role="button" tabindex="0" @click="openTopic(t)" @keydown.enter.prevent="openTopic(t)" @keydown.space.prevent="openTopic(t)"><div class="mc-media"><img v-if="t.notes&&t.notes[0]&&t.notes[0].cover_url" :src="imageUrl(t.notes[0])" :alt="t.topic" loading="lazy" referrerpolicy="no-referrer" @error="imageFailed($event,t.notes[0],'cover')"><span class="mc-rank">{{ String(railTopics.length+2+i).padStart(2,'0') }}</span><span class="badge sm" :class="badgeClass(t)">{{ badgeLabel(t) }}</span></div><div class="mc-body"><h4 class="mc-name">{{ t.topic }}</h4><p class="mc-meta">{{ t.sample_count }} 篇 · {{ t.author_count }} 位作者 · 最高 {{ compact(t.max_likes) }} 赞</p></div></article>
+        <article v-for="(t,i) in moreTopics" :key="t.topic_id" class="more-card" :class="{selected:filters.semantic_topic_id===t.topic_id}" role="button" tabindex="0" @click="openTopic(t)" @keydown.enter.prevent="openTopic(t)" @keydown.space.prevent="openTopic(t)"><div class="ri-top"><span class="rank">{{ String(railTopics.length+2+i).padStart(2,'0') }}</span><h4 class="ri-name">{{ t.topic }}</h4><span class="badge sm" :class="badgeClass(t)">{{ badgeLabel(t) }}</span></div><p class="ri-meta">{{ evidence(t) }}</p><ul v-if="t.kind!=='single' && t.notes.length" class="ri-notes"><li v-for="n in t.notes.slice(0,3)" :key="n.note_id" @click.stop="openDetail({note_id:n.note_id})"><span class="t">「{{ n.title }}」</span><span class="l">{{ compact(n.likes) }}<em>赞</em></span></li></ul></article>
       </div></div>
     </section><el-empty v-else description="今日暂无形成规模的内容话题"/></div>
     <section v-if="activeTab==='fermenting'" class="signals-section">
@@ -351,11 +351,8 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
 .tb-hero.no-cover {
   grid-template-columns: 1fr;
 }
-/* 头条为单篇（无其余代表笔记）时：左列文字垂直居中、封面压缩为方形，
-   行高随内容收缩，不再被 360px 封面撑出大片空白 */
-.tb-hero.is-single .hero-main {
-  justify-content: center;
-}
+/* 头条为单篇（无其余代表笔记）时：封面压缩为方形，行高随内容收缩，
+   不再被 360px 封面撑出大片空白；左列靠 .hero-meta margin-top:auto 顶到底 */
 .tb-hero.is-single .hero-cover {
   min-height: 0;
   aspect-ratio: 1 / 1;
@@ -386,13 +383,13 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
 .hero-title {
   font-family: var(--serif);
   font-weight: 700;
-  font-size: clamp(30px, 3.1vw, 58px);
-  line-height: 1.1;
+  font-size: clamp(50px, 4.5vw, 74px);
+  line-height: 1.08;
   letter-spacing: 0.02em;
   margin: 18px 0 12px;
-  /* 小屏长标题最多 4 行，超出截断，防止头条卡被撑爆 */
+  /* 长标题最多 3 行截断，防止头条卡被撑爆 */
   display: -webkit-box;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
@@ -409,11 +406,6 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   line-height: 1.8;
   color: var(--ink-2);
   max-width: 34em;
-  /* 导语最多 3 行，避免超长文本压缩右侧要闻栏 */
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 .hero-meta {
   display: flex;
@@ -426,6 +418,11 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   font-size: 12.5px;
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
+}
+/* 单篇（无其余代表笔记）时，把论据行顶到底部，封住左列空白 */
+.tb-hero.is-single .hero-meta {
+  margin-top: auto;
+  padding-top: 16px;
 }
 .hero-meta li {
   display: flex;
@@ -749,7 +746,7 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   color: var(--ink-4);
   margin-left: 2px;
 }
-/* ---------- 更多要闻 MORE RAIL：榜单下方的封面卡片条带，把版面铺满 ---------- */
+/* ---------- 更多要闻 MORE RAIL：与侧边要闻同款（rank+话题名+徽+meta+3条笔记），铺满版面 ---------- */
 .more-board {
   margin-top: 18px;
   background: var(--paper);
@@ -759,7 +756,7 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  padding: 12px 18px 10px;
+  padding: 13px 18px 11px;
   border-bottom: 3px solid var(--ink);
 }
 .more-head b {
@@ -775,7 +772,7 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
 }
 .more-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .more-card {
   position: relative;
@@ -783,73 +780,26 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   flex-direction: column;
   cursor: pointer;
   user-select: none;
+  padding: 15px 18px 13px;
   border-left: 1px solid var(--line);
+  border-top: 1px solid var(--line);
   transition: background 0.22s ease;
 }
-.more-card:first-child {
+.more-card:nth-child(odd) {
   border-left: 0;
+}
+.more-card:nth-child(-n + 2) {
+  border-top: 0;
 }
 .more-card:hover {
   background: var(--ivory);
 }
 .more-card.selected {
   background: var(--clay-tint);
-  box-shadow: inset 0 3px 0 var(--clay-deep);
+  box-shadow: inset 3px 0 0 var(--clay-deep);
 }
-.mc-media {
-  position: relative;
-  aspect-ratio: 16 / 10;
-  background: var(--bone);
-  overflow: hidden;
-}
-.mc-media img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.mc-rank {
-  position: absolute;
-  left: 10px;
-  top: 10px;
-  font-family: var(--serif);
-  font-weight: 700;
-  font-size: 15px;
-  color: var(--ivory);
-  background: rgba(31, 31, 30, 0.5);
-  padding: 3px 8px;
-  border-radius: 2px;
-}
-.mc-media .badge {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-}
-.mc-body {
-  padding: 12px 14px 13px;
-}
-.mc-name {
-  margin: 0;
-  font-family: var(--serif);
-  font-weight: 700;
-  font-size: 15.5px;
-  line-height: 1.4;
-  letter-spacing: 0.01em;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  transition: color 0.22s ease;
-}
-.more-card:hover .mc-name {
+.more-card:hover .ri-name {
   color: var(--clay-deep);
-}
-.mc-meta {
-  margin: 7px 0 0;
-  font-size: 11.5px;
-  line-height: 1.6;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
 }
 /* 响应式：≤1024px 榜单收头条下方，≤800px 头条自身收单列 */
 @media (max-width: 1024px) {
@@ -863,15 +813,6 @@ const appEl=document.getElementById('app');onMounted(()=>{window.addEventListene
   .tb-hero.is-single .hero-cover {
     min-height: 0;
     aspect-ratio: 16 / 10;
-  }
-  .more-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .more-card:nth-child(odd) {
-    border-left: 0;
-  }
-  .more-card:nth-child(n + 3) {
-    border-top: 1px solid var(--line);
   }
 }
 @media (max-width: 800px) {
