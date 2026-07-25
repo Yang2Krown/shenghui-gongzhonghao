@@ -1,6 +1,4 @@
 import asyncio
-import sys
-import types
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import create_engine
@@ -10,49 +8,11 @@ from app.db.base import Base
 from app.models.xhs import XhsDailyQuota, XhsKeyword, XhsKeywordRun
 from app.db.seeds.seed_accounts_from_table2 import X_KEYWORDS
 from app.services.xhs_collection import (
-    Candidate, CliProvider, TikHubBudgetExhausted, _xsec_token, consume_tikhub_quota, count_value,
+    Candidate, TikHubBudgetExhausted, _xsec_token, consume_tikhub_quota, count_value,
     hydrate, merge_provider_candidates, needs_hydration, normalize_candidate, pre_hydration_rejection, rank,
     rejection_reason, reserve_tikhub_searches, unwrap_detail, unwrap_items, upsert_engagement_snapshot,
     upsert_note, xsec_note_url,
 )
-from app.services.xhs_cli_entrypoint import XHS_SEARCH_FILTERS, main as xhs_cli_main
-
-
-def test_cli_error_message_prefers_structured_stdout():
-    payload = b'{"ok":false,"error":{"code":"not_authenticated","message":"Session expired"}}'
-    message = CliProvider._error_message(payload, b"")
-    assert message == "not_authenticated: Session expired"
-    assert CliProvider._is_auth_expired(message)
-    assert not CliProvider._is_risk_error(message)
-
-
-def test_cli_error_message_falls_back_to_stderr():
-    assert CliProvider._error_message(b"", b"network failed\n") == "network failed"
-
-
-def test_cli_search_filters_are_one_week_and_most_liked():
-    filters={item["type"]:item["tags"] for item in XHS_SEARCH_FILTERS}
-    assert filters["sort_type"] == ["popularity_descending"]
-    assert filters["filter_note_time"] == ["一周内"]
-
-
-def test_cli_entrypoint_calls_installed_click_cli(monkeypatch):
-    called = []
-    package = types.ModuleType("xhs_cli")
-    package.__path__ = []
-    client_mixins = types.ModuleType("xhs_cli.client_mixins")
-    client_mixins._SEARCH_DEFAULT_FILTERS = []
-    cli_module = types.ModuleType("xhs_cli.cli")
-    cli_module.cli = lambda: called.append(True)
-    package.client_mixins = client_mixins
-    monkeypatch.setitem(sys.modules, "xhs_cli", package)
-    monkeypatch.setitem(sys.modules, "xhs_cli.client_mixins", client_mixins)
-    monkeypatch.setitem(sys.modules, "xhs_cli.cli", cli_module)
-
-    xhs_cli_main()
-
-    assert called == [True]
-    assert client_mixins._SEARCH_DEFAULT_FILTERS == XHS_SEARCH_FILTERS
 
 
 def test_strict_eligibility_uses_daily_200_and_weekly_2000_levels():
@@ -104,14 +64,14 @@ def test_image_and_video_are_both_eligible():
 
 def test_candidate_normalization_uses_note_id_and_preserves_explicit_zero():
     raw={"id":"abc123","title":"标题","type":"video","time":1720000000,"user":{"id":"u1","nickname":"作者"},"interact_info":{"liked_count":"2.1万","comment_count":0},"cover":{"url_default":"https://sns-webpic.xhscdn.com/a.jpg"}}
-    c=normalize_candidate(raw,"cli",1)
+    c=normalize_candidate(raw,"html",1)
     assert c.note_id=="abc123" and c.like_count==21000 and c.comment_count==0 and c.note_type=="video"
     assert count_value(None) is None and count_value("0")==0
 
 
-def test_cli_non_note_search_items_are_ignored():
+def test_non_note_search_items_are_ignored():
     raw={"id":"suggestion#123","model_type":"query_suggestion","title":"不是笔记"}
-    assert normalize_candidate(raw,"cli",1) is None
+    assert normalize_candidate(raw,"html",1) is None
 
 
 def test_video_note_cover_extracted_from_video_object():
@@ -120,7 +80,7 @@ def test_video_note_cover_extracted_from_video_object():
          "user":{"id":"u1","nickname":"作者"},
          "interact_info":{"liked_count":"100"},
          "video":{"cover":{"url_default":"https://sns-webpic.xhscdn.com/video-cover.webp"}}}
-    c=normalize_candidate(raw,"cli",1)
+    c=normalize_candidate(raw,"html",1)
     assert c.note_type=="video" and c.cover_url=="https://sns-webpic.xhscdn.com/video-cover.webp"
 
 
@@ -129,11 +89,11 @@ def test_video_note_cover_falls_back_to_first_frame():
          "user":{"user_id":"u1","nick_name":"作者"},"interact_info":{"liked_count":"50"},
          "video":{"first_frame":{"url_default":"http://sns-webpic-qc.xhscdn.com/frame.webp"}}},
          "id":"v2"}
-    c=normalize_candidate(raw,"cli",1)
+    c=normalize_candidate(raw,"html",1)
     assert c.note_type=="video" and c.cover_url=="https://sns-webpic-qc.xhscdn.com/frame.webp"
 
 
-def test_cli_search_card_schema_preserves_token_date_shares_and_https_images(monkeypatch):
+def test_search_card_schema_preserves_token_date_shares_and_https_images(monkeypatch):
     monkeypatch.setattr("app.services.xhs_collection.utcnow",lambda:datetime(2026,7,16,12,0,0))
     raw={
         "id":"69e72965000000001e00f40c",
@@ -146,7 +106,7 @@ def test_cli_search_card_schema_preserves_token_date_shares_and_https_images(mon
             "cover":{"url_default":"http://sns-webpic-qc.xhscdn.com/a.webp"},
         },
     }
-    c=normalize_candidate(raw,"cli",1)
+    c=normalize_candidate(raw,"html",1)
     assert c.note_id==raw["id"] and c.title=="Claude Code 教程" and c.author_nickname=="作者"
     assert c.published_at==datetime(2026,7,15) and c.like_count==22916 and c.share_count==3803
     assert c.cover_url.startswith("https://") and c.avatar_url.startswith("https://")
@@ -215,7 +175,7 @@ def test_bare_search_url_is_rebuilt_with_separate_xsec_token():
         "xsec_source":"pc_search",
         "title":"可直达笔记",
     }
-    candidate=normalize_candidate(raw,"cli",1)
+    candidate=normalize_candidate(raw,"html",1)
     assert candidate.xsec_url == (
         "https://www.xiaohongshu.com/explore/6a57633a0000000021019bc5"
         "?xsec_token=ABZC7Wl4Gb4YIaf4alGHhvcVNDgPRfGIVjx5_DeFoMTfA%3D"
@@ -259,17 +219,17 @@ def test_search_card_prefilter_avoids_details_for_definitely_ineligible_notes():
 
 def test_comprehensive_rank_rewards_better_rank_freshness_and_dual_source():
     now=datetime(2026,7,16,12,0,0)
-    high=Candidate(note_id="a",published_at=now,like_count=10000,ranks={"cli":1,"tikhub":2})
-    low=Candidate(note_id="b",published_at=now-timedelta(days=6),like_count=3000,ranks={"cli":20})
+    high=Candidate(note_id="a",published_at=now,like_count=10000,ranks={"html":1,"tikhub":2})
+    low=Candidate(note_id="b",published_at=now-timedelta(days=6),like_count=3000,ranks={"html":20})
     assert rank(high,now)>rank(low,now)
 
 
 def test_each_equal_provider_is_capped_at_20_before_note_id_merge():
-    cli=[{"id":f"n{i}","title":f"CLI {i}"} for i in range(25)]
+    html=[{"id":f"n{i}","title":f"HTML {i}"} for i in range(25)]
     tikhub=[{"id":f"n{i}","title":f"TikHub {i}"} for i in range(10,35)]
-    merged=merge_provider_candidates({"cli":cli,"tikhub":tikhub})
+    merged=merge_provider_candidates({"html":html,"tikhub":tikhub})
     assert len(merged)==30  # 20 + 20 - 10 duplicate note_ids
-    assert set(merged["n10"].ranks)=={"cli","tikhub"}
+    assert set(merged["n10"].ranks)=={"html","tikhub"}
     assert set(merged["n24"].ranks)=={"tikhub"}
 
 
@@ -315,20 +275,82 @@ def test_repeated_note_refreshes_metrics_and_same_day_snapshot():
         assert (snapshot.like_count,snapshot.collect_count,snapshot.comment_count,snapshot.share_count,snapshot.view_count)==(560,44,9,7,1800)
 
 
-def test_free_hydration_never_calls_tikhub(monkeypatch):
-    paid_calls=[]
+class _PaidTikHub:
+    """记录调用并返回可归一化的 web_v3 详情负载的假 TikHubProvider。"""
+    def __init__(self):
+        self.calls=[]
 
-    class FreeCli:
-        async def detail(self, _candidate):
-            return {"data": {"id": "free-note", "title": "仅免费补全"}}
+    async def detail(self, candidate):
+        self.calls.append(candidate.note_id)
+        return {"data":{"data":{"items":[{"note_card":{
+            "note_id":candidate.note_id,"title":"付费标题","desc":"付费正文","time":1784304863000,
+            "user":{"nickname":"付费作者"},"interact_info":{"liked_count":"800"},
+            "image_list":[{"url_default":"https://sns-webpic.xhscdn.com/p.webp"}],
+        }}]}}}
 
+
+def _stub_log_call(monkeypatch):
+    logs=[]
+    monkeypatch.setattr("app.services.xhs_collection.log_call",lambda *args,**kwargs:logs.append(args))
+    return logs
+
+
+def test_hydrate_html_complete_skips_tikhub(monkeypatch):
+    """HTML 免费抓取补齐全部字段 → 不消耗 TikHub 额度，log_call 记录 html success。"""
+    long_content="这是一段足够长的正文，用来验证 HTML 详情返回的全量内容不会被疑似截断规则误判为残缺，否则真实笔记几乎都会白调一次付费兜底。"
+    async def fake_extract(url,cookie=None):
+        return {"title":"HTML 标题","content":long_content,"author":"作者","cover_url":"https://sns-webpic.xhscdn.com/a.jpg","published_at":1784304863000,"like_count":500,"tags":["AI"]}
+    monkeypatch.setattr("app.services.xhs_collection.extract_xhs",fake_extract)
+    logs=_stub_log_call(monkeypatch)
+    tikhub=_PaidTikHub()
+    candidate=Candidate(note_id="html-note",xsec_url="https://www.xiaohongshu.com/explore/html-note?xsec_token=t")
+    asyncio.run(hydrate(candidate,tikhub,None,1,allow_paid=True))
+    assert candidate.title=="HTML 标题" and candidate.author_nickname=="作者" and candidate.cover_url=="https://sns-webpic.xhscdn.com/a.jpg"
+    assert candidate.published_at==datetime.fromtimestamp(1784304863) and candidate.like_count==500
+    assert tikhub.calls==[]
+    assert any(call[1]=="html" and call[2]=="detail" and call[3]=="success" for call in logs)
+
+
+def test_hydrate_html_partial_falls_back_to_tikhub_with_quota(monkeypatch):
+    """HTML 字段不全 → 走 TikHub 付费兜底且消耗额度。"""
+    async def fake_extract(url,cookie=None): return {"title":"只有标题"}
+    monkeypatch.setattr("app.services.xhs_collection.extract_xhs",fake_extract)
+    logs=_stub_log_call(monkeypatch)
+    quota=[]
+    monkeypatch.setattr("app.services.xhs_collection.consume_tikhub_quota",lambda db,operation:quota.append(operation))
+    tikhub=_PaidTikHub()
+    candidate=Candidate(note_id="html-note",xsec_url="https://www.xiaohongshu.com/explore/html-note?xsec_token=t")
+    asyncio.run(hydrate(candidate,tikhub,None,1,allow_paid=True))
+    assert tikhub.calls==["html-note"] and quota==["detail"]
+    assert candidate.title=="只有标题" and candidate.author_nickname=="付费作者" and candidate.cover_url=="https://sns-webpic.xhscdn.com/p.webp"
+    assert any(call[1]=="tikhub" and call[3]=="success" for call in logs)
+
+
+def test_hydrate_html_blocked_falls_back_to_tikhub(monkeypatch):
+    """HTML 命中风控/登录墙（blocked=True）→ 记录 html blocked 并走 TikHub。"""
+    async def fake_extract(url,cookie=None): return {"blocked": True}
+    monkeypatch.setattr("app.services.xhs_collection.extract_xhs",fake_extract)
+    logs=_stub_log_call(monkeypatch)
+    monkeypatch.setattr("app.services.xhs_collection.consume_tikhub_quota",lambda db,operation:None)
+    tikhub=_PaidTikHub()
+    candidate=Candidate(note_id="blocked-note",xsec_url="https://www.xiaohongshu.com/explore/blocked-note?xsec_token=t")
+    asyncio.run(hydrate(candidate,tikhub,None,1,allow_paid=True))
+    assert tikhub.calls==["blocked-note"]
+    assert any(call[1]=="html" and call[3]=="blocked" for call in logs)
+
+
+def test_hydrate_free_only_never_calls_tikhub(monkeypatch):
+    """allow_paid=False 且 HTML 字段不全 → 不调 TikHub、不消耗额度。"""
+    paid_calls=[];quota=[]
+    async def fake_extract(url,cookie=None): return {"title":"仅免费补全"}
     class PaidTikHub:
-        async def detail(self, _candidate):
+        async def detail(self,_candidate):
             paid_calls.append(_candidate.note_id)
             return {}
-
-    monkeypatch.setattr("app.services.xhs_collection.log_call", lambda *args, **kwargs: None)
-    candidate=Candidate(note_id="free-note")
-    asyncio.run(hydrate(candidate,FreeCli(),PaidTikHub(),None,1,allow_paid=False))
+    monkeypatch.setattr("app.services.xhs_collection.extract_xhs",fake_extract)
+    monkeypatch.setattr("app.services.xhs_collection.log_call",lambda *args,**kwargs:None)
+    monkeypatch.setattr("app.services.xhs_collection.consume_tikhub_quota",lambda db,operation:quota.append(operation))
+    candidate=Candidate(note_id="free-note",xsec_url="https://www.xiaohongshu.com/explore/free-note")
+    asyncio.run(hydrate(candidate,PaidTikHub(),None,1,allow_paid=False))
     assert candidate.title=="仅免费补全"
-    assert paid_calls==[]
+    assert paid_calls==[] and quota==[]

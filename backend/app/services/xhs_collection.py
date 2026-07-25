@@ -1,20 +1,13 @@
-"""小红书关键词双源采集、硬过滤与素材入库。"""
+"""小红书关键词采集、硬过滤与素材入库。"""
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import math
-import os
-import random
 import re
-import shutil
-import sys
-import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -37,7 +30,7 @@ from app.services.scraping.link_extractor import extract_xhs
 logger = logging.getLogger(__name__)
 PUBLIC_STATUSES = {"ready", "ready_degraded", "synced"}
 PAID_PROVIDER = "tikhub"
-FREE_PROVIDER = "cli"
+HTML_PROVIDER = "html"
 DAILY_MIN_LIKES_EXCLUSIVE = 200
 WEEKLY_MIN_LIKES_EXCLUSIVE = 2000
 # 放宽档地板：标准档入选不足时按点赞从高到低补录；地板以下永久拒绝。
@@ -72,13 +65,12 @@ def eligibility_clause(now: datetime):
         and_(XhsNote.published_at >= day_cutoff, XhsNote.like_count > DAILY_RELAXED_MIN_LIKES_EXCLUSIVE),
         and_(XhsNote.published_at >= week_cutoff, XhsNote.published_at < day_cutoff, XhsNote.like_count > WEEKLY_RELAXED_MIN_LIKES_EXCLUSIVE),
     )
+# CLI 已下线，仅保留 Redis key 常量供 admin 扫码/冷却状态端点（api/v1/xhs.py）读写。
 CLI_AUTH_INVALID_KEY = "xhs:cli:auth_invalid"
 CLI_COOLDOWN_KEY = "xhs:cli:cooldown"
 
 
 class TikHubBudgetExhausted(RuntimeError): pass
-class CliCoolingDown(RuntimeError): pass
-class CliAuthenticationExpired(CliCoolingDown): pass
 
 
 def normalize_keyword(value: str) -> str:
@@ -140,7 +132,7 @@ def xsec_note_url(
 ) -> str:
     """生成可从搜索结果直达的笔记链接。
 
-    xiaohongshu-cli 的搜索卡片可能同时返回裸 URL 和单独的
+    搜索卡片可能同时返回裸 URL 和单独的
     xsec_token。裸 /explore/{note_id} 在未登录浏览器中常会被小红书转到
     300031 验证页，因此不能因为已有 url 字段就丢掉 token。
     """
@@ -155,7 +147,7 @@ def xsec_note_url(
 
 
 def search_publish_time(payload: dict, now: datetime | None = None) -> datetime | None:
-    """解析 CLI 搜索卡片中的相对日期或 MM-DD；详情时间仍优先使用精确时间戳。"""
+    """解析搜索卡片中的相对日期或 MM-DD；详情时间仍优先使用精确时间戳。"""
     now=now or utcnow()
     tags=first(payload,"corner_tag_info","note_card.corner_tag_info") or []
     text=next((str(x.get("text") or "").strip() for x in tags if isinstance(x,dict) and x.get("type")=="publish_time"),"")
@@ -267,11 +259,10 @@ def unwrap_items(payload: Any) -> list[dict]:
 
 
 def unwrap_detail(payload: Any, note_id: str) -> dict:
-    """把 TikHub/CLI 详情响应解包成可喂 normalize_candidate 的扁平映射。
+    """把 TikHub 详情响应解包成可喂 normalize_candidate 的扁平映射。
 
-    TikHub web_v3 详情真实结构是 data.data.items[].note_card;CLI 详情则常是
-    单层 data 或直接给 note_card。统一穿过双层 data → items[0] → note_card,
-    并回写 note_id,保证下游能取到精确发布时间/点赞数。
+    TikHub web_v3 详情真实结构是 data.data.items[].note_card。统一穿过双层
+    data → items[0] → note_card,并回写 note_id,保证下游能取到精确发布时间/点赞数。
     """
     if not isinstance(payload, dict): return {"note_id": note_id}
     node: Any = payload
@@ -383,108 +374,28 @@ def _xsec_token(url: str | None) -> str:
     return (parse_qs(urlparse(url).query).get("xsec_token") or [""])[0]
 
 
-class CliProvider:
-    @staticmethod
-    def _error_message(out: bytes, err: bytes) -> str:
-        """Extract the CLI's structured error, which is usually written to stdout."""
-        stdout = out.decode("utf-8", "replace").strip()
-        stderr = err.decode("utf-8", "replace").strip()
-        if stdout:
-            try:
-                payload = json.loads(stdout)
-                error = payload.get("error") if isinstance(payload, dict) else None
-                if isinstance(error, dict):
-                    code = str(error.get("code") or "").strip()
-                    message = str(error.get("message") or "").strip()
-                    if code and message:
-                        return f"{code}: {message}"[-1000:]
-                    if message or code:
-                        return (message or code)[-1000:]
-                if error:
-                    return str(error)[-1000:]
-            except json.JSONDecodeError:
-                pass
-        return (stderr or stdout or "xiaohongshu-cli 执行失败（未返回错误详情）")[-1000:]
-
-    @staticmethod
-    def _is_auth_expired(message: str) -> bool:
-        lowered = message.lower()
-        return any(x in lowered for x in (
-            "session expired", "cookie expired", "not_authenticated",
-            "not authenticated", "re-login",
-        ))
-
-    @staticmethod
-    def _is_risk_error(message: str) -> bool:
-        lowered = message.lower()
-        return any(x in lowered for x in (
-            "captcha", "verify", "461", "471",
-        ))
-
-    async def _raise_cli_error(self, message: str) -> None:
-        redis = aioredis.from_url(settings.CELERY_BROKER_URL, decode_responses=True)
-        try:
-            if self._is_auth_expired(message):
-                # 登录失效不是短暂冷却：持久阻断到管理员重新扫码。
-                await redis.set(CLI_AUTH_INVALID_KEY, message[:500])
-                raise CliAuthenticationExpired(message)
-            if self._is_risk_error(message):
-                await redis.set(CLI_COOLDOWN_KEY, "1", ex=settings.XHS_CLI_COOLDOWN_MINUTES * 60)
-                raise CliCoolingDown(message)
-        finally:
-            await redis.aclose()
-        raise RuntimeError(message)
-
-    def _env(self, temp_home: str) -> dict:
-        cookie = Path(settings.XHS_CLI_COOKIE_FILE)
-        if not cookie.is_file(): raise RuntimeError("xiaohongshu-cli Cookie 私密文件未配置")
-        config = Path(temp_home) / ".xiaohongshu-cli"; config.mkdir(parents=True)
-        os.symlink(cookie, config / "cookies.json")
-        env = os.environ.copy(); env.update({"HOME": temp_home, "OUTPUT": "json"}); return env
-
-    async def _run(self, *args: str) -> dict:
-        if not shutil.which(settings.XHS_CLI_BIN): raise RuntimeError(f"{settings.XHS_CLI_BIN} 未安装")
-        redis=aioredis.from_url(settings.CELERY_BROKER_URL,decode_responses=True)
-        lock=redis.lock("xhs:cli:global",timeout=settings.XHS_CLI_TIMEOUT_SECONDS+30,blocking_timeout=settings.XHS_CLI_TIMEOUT_SECONDS+30)
-        try:
-            auth_error=await redis.get(CLI_AUTH_INVALID_KEY)
-            if auth_error: raise CliAuthenticationExpired(auth_error)
-            if await redis.exists(CLI_COOLDOWN_KEY): raise CliCoolingDown("xiaohongshu-cli 正在验证码冷却期")
-            if not await lock.acquire(): raise CliCoolingDown("xiaohongshu-cli 全局单并发锁等待超时")
-            await asyncio.sleep(random.uniform(3,8))
-            with tempfile.TemporaryDirectory(prefix="xhs-cli-") as home:
-                proc = await asyncio.create_subprocess_exec(sys.executable, "-m", "app.services.xhs_cli_entrypoint", *args, "--json", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=self._env(home))
-                out, err = await asyncio.wait_for(proc.communicate(), settings.XHS_CLI_TIMEOUT_SECONDS)
-        finally:
-            try:
-                if await lock.owned(): await lock.release()
-            finally: await redis.aclose()
-        if proc.returncode:
-            message = self._error_message(out, err)
-            await self._raise_cli_error(message)
-        payload = json.loads(out.decode("utf-8"));
-        if isinstance(payload, dict) and payload.get("ok") is False:
-            message = self._error_message(out, err)
-            await self._raise_cli_error(message)
-        return payload
-
-    async def search(self, keyword: str) -> list[dict]: return unwrap_items(await self._run("search", keyword, "--sort", "popular"))[:settings.XHS_PROVIDER_CANDIDATE_LIMIT]
-    async def detail(self, candidate: Candidate) -> dict: return await self._run("read", candidate.xsec_url or candidate.note_id)
-
-
 CONTENT_MAYBE_TRUNCATED_LEN = 55  # 搜索卡片正文常被截断在 ~60 字；达到此长度即视为疑似残缺，需详情补全
 
 
-def needs_hydration(c: Candidate) -> bool:
+def needs_hydration(c: Candidate, *, content_may_be_truncated: bool = True) -> bool:
     # 卡片给的残缺正文（~60 字）不算"字段齐全"：疑似截断时也要拉详情换全量正文。
     if any(x in (None, "") for x in (c.title,c.content,c.author_nickname,c.cover_url,c.published_at,c.like_count)): return True
     if all(x is None for x in (c.like_count,c.collect_count,c.comment_count,c.share_count)): return True
-    return len(c.content or "") >= CONTENT_MAYBE_TRUNCATED_LEN
+    # 详情源（HTML/付费）已给出全量正文后，长度不再作为残缺证据——真实正文几乎都超 55 字，否则每篇都会白调一次付费兜底。
+    return content_may_be_truncated and len(c.content or "") >= CONTENT_MAYBE_TRUNCATED_LEN
+
+
+def _html_detail_payload(parsed: dict, note_id: str, url: str) -> dict:
+    """extract_xhs 返回的扁平 dict 中 author 是字符串；reshape 成 normalize_candidate 可读的用户映射。"""
+    payload = {**parsed, "note_id": note_id, "url": url}
+    author = parsed.get("author")
+    if isinstance(author, str) and author:
+        payload["author"] = {"nickname": author, "user_id": parsed.get("author_id"), "desc": parsed.get("author_bio"), "avatar": parsed.get("avatar_url")}
+    return payload
 
 
 async def hydrate(
     c: Candidate,
-    cli: CliProvider,
     tikhub: TikHubProvider,
     db: Session,
     run_id: int,
@@ -492,20 +403,22 @@ async def hydrate(
     allow_paid: bool = True,
 ) -> None:
     if not needs_hydration(c): return
+    html_full_content=False
     if c.xsec_url:
-        try:
-            parsed = await extract_xhs(c.xsec_url)
-            extra = normalize_candidate({**parsed, "note_id": c.note_id, "url": c.xsec_url}, "html", 99)
-            if extra: c.merge(extra)
-        except Exception: logger.exception("xhs HTML 补全失败 note_id=%s", c.note_id)
-    if needs_hydration(c):
         started=time.monotonic()
         try:
-            payload=await cli.detail(c); extra=normalize_candidate(unwrap_detail(payload, c.note_id), FREE_PROVIDER, 99)
-            if extra: c.merge(extra)
-            log_call(db,FREE_PROVIDER,"detail","success",run_id=run_id,note_id=c.note_id,started=started)
-        except Exception as e: log_call(db,FREE_PROVIDER,"detail","failed",run_id=run_id,note_id=c.note_id,started=started,error=e)
-    if needs_hydration(c) and allow_paid:
+            parsed = await extract_xhs(c.xsec_url, cookie=settings.XHS_WEB_COOKIE or None)
+            blocked = bool(parsed.get("blocked"))
+            if not blocked:
+                # HTML 详情给的是全量正文：拿到后不再按"疑似截断"升级付费兜底。
+                html_full_content=bool((parsed.get("content") or "").strip())
+                extra = normalize_candidate(_html_detail_payload(parsed, c.note_id, c.xsec_url), HTML_PROVIDER, 99)
+                if extra: c.merge(extra)
+            log_call(db,HTML_PROVIDER,"detail","blocked" if blocked else "success",run_id=run_id,note_id=c.note_id,started=started)
+        except Exception as e:
+            logger.exception("xhs HTML 补全失败 note_id=%s", c.note_id)
+            log_call(db,HTML_PROVIDER,"detail","failed",run_id=run_id,note_id=c.note_id,started=started,error=e)
+    if needs_hydration(c,content_may_be_truncated=not html_full_content) and allow_paid:
         started=time.monotonic()
         try:
             consume_tikhub_quota(db,operation="detail"); payload=await tikhub.detail(c); extra=normalize_candidate(unwrap_detail(payload, c.note_id), PAID_PROVIDER, 99)
@@ -519,7 +432,7 @@ def rank(c: Candidate, now: datetime) -> float:
     search = max(0.0, 1 - ((platform_rank - 1) / 19))
     likes = min(1.0, math.log1p(max(c.like_count or 0,0))/math.log1p(100000))
     fresh = max(0.0, 1 - max((now - c.published_at).total_seconds(),0)/(7*86400)) if c.published_at else 0
-    dual = 1 if PAID_PROVIDER in c.ranks and FREE_PROVIDER in c.ranks else 0
+    dual = 1 if PAID_PROVIDER in c.ranks and HTML_PROVIDER in c.ranks else 0
     return round((search*.5 + likes*.3 + fresh*.15 + dual*.05)*100, 4)
 
 
@@ -567,7 +480,7 @@ def pre_hydration_rejection(c: Candidate, now: datetime) -> str | None:
 def get_xhs_source(db: Session) -> SourceRegistry:
     source=db.execute(select(SourceRegistry).where(SourceRegistry.platform=="xhs_search")).scalar_one_or_none()
     if source: return source
-    source=SourceRegistry(name="小红书关键词搜索",platform="xhs_search",source_type="xhs",url="https://www.xiaohongshu.com",requires_auth=True,auth_status="ok",fetch_strategy=FETCH_STRATEGY_CRON,fetch_config={"providers":["tikhub","cli"],"sort":"general"},enabled=True,description="TikHub 与 xiaohongshu-cli 同级每日搜索")
+    source=SourceRegistry(name="小红书关键词搜索",platform="xhs_search",source_type="xhs",url="https://www.xiaohongshu.com",requires_auth=True,auth_status="ok",fetch_strategy=FETCH_STRATEGY_CRON,fetch_config={"providers":["tikhub","html"],"sort":"general"},enabled=True,description="TikHub 每日搜索，HTML 免费抓取补全详情")
     db.add(source);db.flush();return source
 
 
@@ -617,7 +530,7 @@ def record_discoveries(db: Session, run_id: int, keyword_id: int, note: XhsNote,
         if not exists: db.add(XhsNoteDiscovery(note_id=note.id,keyword_id=keyword_id,run_id=run_id,provider=provider,provider_rank=provider_rank,discovered_at=now))
 
 
-async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = True, retry_existing: bool = False, allow_cli: bool = True, time_filter: str = "一周内") -> dict:
+async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = True, retry_existing: bool = False, time_filter: str = "一周内") -> dict:
     now=utcnow(); keyword=db.get(XhsKeyword,keyword_id)
     if not keyword or not keyword.enabled: raise ValueError("关键词不存在或已停用")
     run=db.execute(select(XhsKeywordRun).where(XhsKeywordRun.keyword_id==keyword.id,XhsKeywordRun.run_date==now.date(),XhsKeywordRun.wave=="manual")).scalar_one_or_none()
@@ -631,26 +544,20 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
         previous_attempts=0
     try: db.commit()
     except IntegrityError: db.rollback(); return {"skipped":True,"reason":"same_keyword_same_day"}
-    db.refresh(run); cli=CliProvider(); tikhub=TikHubProvider(); batches={FREE_PROVIDER:[],PAID_PROVIDER:[]}
-    async def one(provider_name, provider):
-        started=time.monotonic()
-        if provider_name==FREE_PROVIDER and not allow_cli:
-            log_call(db,provider_name,"search","skipped",run_id=run.id,started=started,request_count=0)
-            return [],None
-        if provider_name==PAID_PROVIDER and not allow_paid:
-            error=TikHubBudgetExhausted("本次运行仅执行免费链路")
-            log_call(db,provider_name,"search","skipped",run_id=run.id,started=started,error=error,request_count=0)
-            return [],error
+    # 单源搜索：CLI 已下线，搜索只走 TikHub；HTML 免费抓取在 hydrate 详情层补全。
+    db.refresh(run); tikhub=TikHubProvider(); batches={PAID_PROVIDER:[]}
+    started=time.monotonic()
+    if not allow_paid:
+        tikhub_error=TikHubBudgetExhausted("本次运行仅执行免费链路")
+        log_call(db,PAID_PROVIDER,"search","skipped",run_id=run.id,started=started,error=tikhub_error,request_count=0)
+    else:
         try:
-            if provider_name==PAID_PROVIDER:
-                consume_tikhub_quota(db,operation="search")
-            items=await provider.search(keyword.keyword,time_filter=time_filter) if provider_name==PAID_PROVIDER else await provider.search(keyword.keyword);log_call(db,provider_name,"search","success",run_id=run.id,started=started);return items,None
+            consume_tikhub_quota(db,operation="search")
+            batches[PAID_PROVIDER]=await tikhub.search(keyword.keyword,time_filter=time_filter);tikhub_error=None;log_call(db,PAID_PROVIDER,"search","success",run_id=run.id,started=started)
         except Exception as e:
-            log_call(db,provider_name,"search","blocked" if isinstance(e,TikHubBudgetExhausted) else "failed",run_id=run.id,started=started,error=e,request_count=0 if isinstance(e,TikHubBudgetExhausted) else 1);return [],e
-    # 两个同级来源每次都执行；任一失败不阻断另一来源。
-    cli_result, tikhub_result = await asyncio.gather(one(FREE_PROVIDER,cli),one(PAID_PROVIDER,tikhub))
-    batches[FREE_PROVIDER],cli_error=cli_result;batches[PAID_PROVIDER],tikhub_error=tikhub_result
-    run.cli_status="skipped" if not allow_cli else "success" if not cli_error else "cooldown" if isinstance(cli_error,CliCoolingDown) else "failed";run.tikhub_status="skipped_free" if not allow_paid else "success" if not tikhub_error else "blocked_budget" if isinstance(tikhub_error,TikHubBudgetExhausted) else "failed";run.cli_raw_count=len(batches[FREE_PROVIDER]);run.tikhub_raw_count=len(batches[PAID_PROVIDER]);db.commit()
+            tikhub_error=e;log_call(db,PAID_PROVIDER,"search","blocked" if isinstance(e,TikHubBudgetExhausted) else "failed",run_id=run.id,started=started,error=e,request_count=0 if isinstance(e,TikHubBudgetExhausted) else 1)
+    # cli_status/cli_raw_count 列保留兼容管理端读取；CLI 下线后固定写 disabled/0，不做数据库迁移。
+    run.cli_status="disabled";run.tikhub_status="skipped_free" if not allow_paid else "success" if not tikhub_error else "blocked_budget" if isinstance(tikhub_error,TikHubBudgetExhausted) else "failed";run.cli_raw_count=0;run.tikhub_raw_count=len(batches[PAID_PROVIDER]);db.commit()
     merged=merge_provider_candidates(batches)
     run.merged_count=len(merged);rejections={"old":0,"low_like":0,"low_like_soft":0,"unknown_metric":0,"unknown_type":0,"core_incomplete":0,"rank_overflow":0};eligible=[];relaxed_pool=[]
     for c in merged.values():
@@ -658,7 +565,7 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
         if reason=="low_like_soft": relaxed_pool.append(c);continue
         if reason:
             rejections[reason]+=1;record_discoveries(db,run.id,keyword.id,upsert_note(db,c,"rejected_"+reason,now),c,now);continue
-        await hydrate(c,cli,tikhub,db,run.id,allow_paid=allow_paid);reason=rejection_reason(c,now);c.score=rank(c,now)
+        await hydrate(c,tikhub,db,run.id,allow_paid=allow_paid);reason=rejection_reason(c,now);c.score=rank(c,now)
         if reason=="low_like_soft": relaxed_pool.append(c);continue
         if reason: rejections[reason]+=1;record_discoveries(db,run.id,keyword.id,upsert_note(db,c,"rejected_"+reason,now),c,now)
         else: eligible.append(c)
@@ -668,7 +575,7 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
         relaxed_pool.sort(key=lambda x:x.like_count or 0,reverse=True)
         for c in relaxed_pool:
             if not topup_left: break
-            await hydrate(c,cli,tikhub,db,run.id,allow_paid=allow_paid)
+            await hydrate(c,tikhub,db,run.id,allow_paid=allow_paid)
             if rejection_reason(c,now,relaxed=True): continue
             c.like_tier="relaxed";c.score=rank(c,now);eligible.append(c);topup_left-=1
     for c in relaxed_pool:
@@ -686,7 +593,7 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
         for nid in selected_ids: cache_note_media_task.apply_async(args=[nid])
     except Exception:
         logger.warning("小红书媒体预缓存入队失败 keyword=%s notes=%d", keyword.keyword, len(selected_ids), exc_info=True)
-    effective_errors=[x for x in ((cli_error if allow_cli else None),tikhub_error if allow_paid else None) if x]
+    effective_errors=[x for x in (tikhub_error if allow_paid else None,) if x]
     daily=[c for c in merged.values() if collection_level(c.published_at,now)=="daily"]
     weekly=[c for c in merged.values() if collection_level(c.published_at,now)=="weekly"]
     rejections["_levels"]={
@@ -700,17 +607,21 @@ async def collect_keyword(db: Session, keyword_id: int, *, allow_paid: bool = Tr
 
 
 async def refresh_note_image(db: Session, note_identity: str, *, allow_paid: bool = False) -> dict:
-    """管理员显式刷新远程图片 URL；免费失败不会自动升级为 TikHub。"""
+    """管理员显式刷新远程图片 URL；HTML 免费抓取失败（含风控）且 allow_paid=True 时才兜底 TikHub。"""
     note=db.execute(select(XhsNote).where(XhsNote.note_id==note_identity)).scalar_one_or_none()
     if not note: raise ValueError("素材不存在")
     candidate=Candidate(note_id=note.note_id,title=note.title or "",content=note.content or "",published_at=note.published_at,note_type=note.note_type,author_id=note.author_id,author_nickname=note.author_nickname or "",avatar_url=note.avatar_url,cover_url=None,like_count=note.like_count,xsec_url=note.latest_xsec_url or note.stable_url)
-    cli=CliProvider();provider_used="cli";started=time.monotonic()
+    provider_used=HTML_PROVIDER;started=time.monotonic();free_error=None
     try:
-        payload=await cli.detail(candidate);extra=normalize_candidate(unwrap_detail(payload, note.note_id),FREE_PROVIDER,1)
-        if extra:candidate.merge(extra)
-        log_call(db,FREE_PROVIDER,"image_refresh","success",note_id=note.note_id,started=started)
-    except Exception as free_error:
-        log_call(db,FREE_PROVIDER,"image_refresh","failed",note_id=note.note_id,started=started,error=free_error)
+        parsed=await extract_xhs(candidate.xsec_url,cookie=settings.XHS_WEB_COOKIE or None)
+        if parsed.get("blocked"): free_error=RuntimeError("HTML 抓取命中风控/登录墙")
+        else:
+            extra=normalize_candidate(_html_detail_payload(parsed,note.note_id,candidate.xsec_url),HTML_PROVIDER,1)
+            if extra:candidate.merge(extra)
+        log_call(db,HTML_PROVIDER,"image_refresh","blocked" if free_error else "success",note_id=note.note_id,started=started,error=free_error)
+    except Exception as e:
+        free_error=e;log_call(db,HTML_PROVIDER,"image_refresh","failed",note_id=note.note_id,started=started,error=e)
+    if free_error is not None:
         if not allow_paid:return {"refreshed":False,"paid_request":False,"reason":str(free_error)[:300]}
         provider_used="tikhub";started=time.monotonic();consume_tikhub_quota(db,operation="detail")
         payload=await TikHubProvider().detail(candidate);extra=normalize_candidate(unwrap_detail(payload, note.note_id),PAID_PROVIDER,1)

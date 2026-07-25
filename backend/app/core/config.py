@@ -218,8 +218,14 @@ class Settings(BaseSettings):
     XHS_COLLECTION_ENABLED: bool = False
     # 本地 Agent 接管搜索后保持 false；不影响素材入库、分析和监测。
     XHS_SERVER_COLLECTION_ENABLED: bool = False
-    # 本地 CLI 已 100% 被风控，服务器集中采集只走 TikHub；置 True 才会并发跑 CLI 免费链路。
+    # 历史遗留：CLI 链路已下线，代码不再引用此开关，仅为兼容存量 .env 保留。
     XHS_CLI_ENABLED: bool = False
+    # 可选的小红书 web cookie，用于提高 HTML 免费抓取成功率。
+    XHS_WEB_COOKIE: Optional[str] = None
+    # 小红书 HTML 免费抓取全局并发上限（槽位锁数量，经 redis 跨进程共享）。
+    XHS_HTML_MAX_CONCURRENCY: int = 2
+    # 等并发槽位的最长秒数；超时视为真拥塞，extract_xhs 返回失败 dict 交给付费兜底。
+    XHS_HTML_GATE_WAIT_SECONDS: float = 30.0
     TIKHUB_TOKEN: Optional[str] = None
     TIKHUB_API_BASE: str = "https://api.tikhub.io"
     TIKHUB_XHS_SEARCH_PATH: str = "/api/v1/xiaohongshu/app_v2/search_notes"

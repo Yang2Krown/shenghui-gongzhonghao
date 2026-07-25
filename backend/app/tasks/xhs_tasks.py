@@ -23,11 +23,10 @@ PUBLIC_XHS_STATUSES = ("ready", "ready_degraded", "synced")
 
 
 @shared_task(name="xhs.collect_keyword")
-def collect_keyword_task(keyword_id: int, allow_paid: bool = True, retry_existing: bool = False, allow_cli: bool | None = None, time_filter: str = "一周内"):
+def collect_keyword_task(keyword_id: int, allow_paid: bool = True, retry_existing: bool = False, time_filter: str = "一周内"):
     if not settings.XHS_SERVER_COLLECTION_ENABLED: return {"skipped": True, "reason": "server_collection_disabled"}
-    # CLI 已 100% 被风控时 allow_cli 取配置默认 False，集中采集只走 TikHub。
-    if allow_cli is None: allow_cli = settings.XHS_CLI_ENABLED
-    with SessionLocal() as db: return asyncio.run(collect_keyword(db, keyword_id, allow_paid=allow_paid, retry_existing=retry_existing, allow_cli=allow_cli, time_filter=time_filter))
+    # CLI 已下线：搜索只走 TikHub 单源，HTML 免费抓取在 hydrate 详情层补全。
+    with SessionLocal() as db: return asyncio.run(collect_keyword(db, keyword_id, allow_paid=allow_paid, retry_existing=retry_existing, time_filter=time_filter))
 
 
 @shared_task(name="xhs.refresh_note_image")

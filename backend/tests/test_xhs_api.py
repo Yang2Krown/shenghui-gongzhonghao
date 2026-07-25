@@ -2,11 +2,13 @@ from app.api.v1 import api_router
 from app.api.deps import get_current_super_admin_user
 from app.api.v1.xhs import note_payload, topic_boards
 from app.models.xhs import XhsDailyQuota, XhsEngagementSnapshot, XhsKeyword, XhsKeywordRun, XhsNote, XhsNoteDiscovery, XhsProviderCall, XhsSemanticTopic, XhsTopicMember, XhsTopicSnapshot
+import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -83,6 +85,90 @@ async def test_fetch_media_to_cache_rejects_bad_upstream(tmp_path,monkeypatch):
         await xhs_module.fetch_media_to_cache("https://cdn.example/c.webp",tmp_path/"k2")
     assert exc.value.status_code==502
     assert not (tmp_path/"k1").exists() and not (tmp_path/"k2").exists()
+
+
+class _FakeMediaLock:  # 内存版 redis 锁：同名锁共享实例，模拟互斥
+    def __init__(self):self.held=False
+    async def acquire(self):
+        while self.held:await asyncio.sleep(0.01)
+        self.held=True;return True
+    async def owned(self):return self.held
+    async def release(self):self.held=False
+
+
+class _FakeMediaRedis:
+    locks={}
+    def lock(self,name,**kwargs):return self.locks.setdefault(name,_FakeMediaLock())
+    async def aclose(self):pass
+
+
+def _counting_fetch(calls,delay=0.1):
+    async def _fake(url,base):
+        calls.append(url)
+        if delay:await asyncio.sleep(delay)  # 制造并发窗口
+        target=base.with_suffix(".webp");target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(b"img")
+        return target
+    return _fake
+
+
+async def _seed_media_note(tmp_path,note_id):
+    engine=create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/media.db")
+    async with engine.begin() as conn:await conn.run_sync(Base.metadata.tables["xhs_notes"].create)
+    async with AsyncSession(engine) as db:
+        now=datetime(2026,7,24,12,0,0)
+        db.add(XhsNote(note_id=note_id,cover_url=f"https://cdn.example/{note_id}.webp",avatar_url=f"https://cdn.example/{note_id}_avatar.webp",stable_url=f"https://www.xiaohongshu.com/explore/{note_id}",first_discovered_at=now,last_discovered_at=now,quality_status="ready"))
+        await db.commit()
+    return engine
+
+
+async def test_note_media_singleflight_dedupes_concurrent_fetch(tmp_path,monkeypatch):
+    monkeypatch.setattr(xhs_module,"MEDIA_CACHE_DIR",tmp_path/"cache")
+    _FakeMediaRedis.locks={};calls=[]
+    monkeypatch.setattr(xhs_module.aioredis,"from_url",lambda *a,**kw:_FakeMediaRedis())
+    monkeypatch.setattr(xhs_module,"fetch_media_to_cache",_counting_fetch(calls))
+    engine=await _seed_media_note(tmp_path,"m1")
+    async with AsyncSession(engine) as db1,AsyncSession(engine) as db2:
+        r1,r2=await asyncio.gather(xhs_module.note_media("m1","cover",db=db1),xhs_module.note_media("m1","cover",db=db2))
+    assert calls==["https://cdn.example/m1.webp"]  # 并发冷请求只回源一次
+    assert isinstance(r1,FileResponse) and isinstance(r2,FileResponse)
+
+
+async def test_media_singleflight_double_check_after_lock_wait(tmp_path,monkeypatch):
+    monkeypatch.setattr(xhs_module,"MEDIA_CACHE_DIR",tmp_path)
+    url="https://cdn.example/backfill.webp"
+    holder=_FakeMediaLock();await holder.acquire()  # 另一请求持锁下载中
+    _FakeMediaRedis.locks={"xhs:media:fetch:9:cover":holder};calls=[]
+    monkeypatch.setattr(xhs_module.aioredis,"from_url",lambda *a,**kw:_FakeMediaRedis())
+    monkeypatch.setattr(xhs_module,"fetch_media_to_cache",_counting_fetch(calls,delay=0))
+    async def _backfill():  # 等锁期间缓存被回填并释放锁
+        await asyncio.sleep(0.02)
+        xhs_module.media_cache_base(9,"cover",url).with_suffix(".webp").write_bytes(b"img")
+        await holder.release()
+    result,_=await asyncio.gather(xhs_module.fetch_media_singleflight(9,"cover",url),_backfill())
+    assert calls==[]  # double-check 命中回填缓存，不再下载
+    assert result==xhs_module.media_cache_base(9,"cover",url).with_suffix(".webp")
+
+
+async def test_note_media_fail_open_when_redis_errors(tmp_path,monkeypatch):
+    monkeypatch.setattr(xhs_module,"MEDIA_CACHE_DIR",tmp_path/"cache")
+    calls=[]
+    monkeypatch.setattr(xhs_module,"fetch_media_to_cache",_counting_fetch(calls,delay=0))
+    def _broken(*a,**kw):raise ConnectionError("redis down")
+    monkeypatch.setattr(xhs_module.aioredis,"from_url",_broken)
+    engine=await _seed_media_note(tmp_path,"m2")
+    async with AsyncSession(engine) as db:
+        result=await xhs_module.note_media("m2","cover",db=db)
+    assert isinstance(result,FileResponse) and calls==["https://cdn.example/m2.webp"]
+    class _BoomLock:
+        async def acquire(self):raise ConnectionError("redis timeout")
+        async def owned(self):return False
+    class _BoomRedis:
+        def lock(self,name,**kwargs):return _BoomLock()
+        async def aclose(self):pass
+    monkeypatch.setattr(xhs_module.aioredis,"from_url",lambda *a,**kw:_BoomRedis())
+    async with AsyncSession(engine) as db:
+        result=await xhs_module.note_media("m2","avatar",db=db)
+    assert isinstance(result,FileResponse) and calls==["https://cdn.example/m2.webp","https://cdn.example/m2_avatar.webp"]
 
 
 def test_xhs_public_and_admin_routes_are_registered():

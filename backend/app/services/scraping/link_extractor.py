@@ -3,15 +3,19 @@
 支持：小红书、微信公众号、抖音、知乎
 """
 import asyncio
+import random
 import re
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from urllib.parse import urlparse, unquote
 
 import httpx
+import redis.asyncio as aioredis
 from bs4 import BeautifulSoup, NavigableString, Tag
+from app.core.config import settings
 from app.core.url_security import UnsafeURL, resolve_redirect_url, validate_public_http_url
 
 logger = logging.getLogger(__name__)
@@ -114,15 +118,100 @@ async def _get_with_checked_redirects(
 
 INITIAL_STATE_PREFIX = "window.__INITIAL_STATE__="
 
+# 风控/登录墙页面特征（仅在页面无 __INITIAL_STATE__ 时检查，避免误伤正常笔记页）
+XHS_BLOCKED_MARKERS = (
+    "300031",            # 小红书风控错误码
+    "安全验证",          # 滑块/验证码页文案
+    "滑块验证",
+    "拖动下方滑块",
+    "captcha",
+    "/login?redirect",   # 跳转登录墙
+    'location.replace("/login',
+    "location.replace('/login",
+)
+
+# 命中风控时的 HTTP 状态码（461/471 为小红书风控码，403 为通用拒绝）
+XHS_BLOCKED_STATUS_CODES = {461, 471, 403}
+
+
+class _XhsGateTimeoutError(Exception):
+    """等满 XHS_HTML_GATE_WAIT_SECONDS 仍拿不到并发槽位（真拥塞）"""
+
+
+async def _acquire_xhs_html_slot():
+    """
+    小红书 HTML 抓取全局并发闸门（槽位锁模式，同 TikHubProvider._call）。
+    :return: (redis, lock)；redis 基础设施故障时 fail-open 返回 (None, None) 放行
+    :raises _XhsGateTimeoutError: 等满 XHS_HTML_GATE_WAIT_SECONDS 仍无槽位（真拥塞）
+    """
+    try:
+        redis = aioredis.from_url(
+            settings.CELERY_BROKER_URL,
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+    except Exception as e:
+        logger.warning(f"小红书 HTML 闸门 redis 初始化失败，放行不限流: {e}")
+        return None, None
+    try:
+        acquired = None
+        deadline = time.monotonic() + settings.XHS_HTML_GATE_WAIT_SECONDS
+        while time.monotonic() < deadline and acquired is None:
+            for slot in range(max(1, settings.XHS_HTML_MAX_CONCURRENCY)):
+                lock = redis.lock(f"xhs:html:slot:{slot}", timeout=45, blocking=False)
+                if await lock.acquire(blocking=False):
+                    acquired = lock
+                    break
+            if acquired is None:
+                await asyncio.sleep(0.25)
+        if acquired is None:
+            raise _XhsGateTimeoutError(f"并发槽位等待超过 {settings.XHS_HTML_GATE_WAIT_SECONDS}s")
+        return redis, acquired
+    except _XhsGateTimeoutError:
+        await redis.aclose()
+        raise
+    except Exception as e:
+        # redis 命令报错属于基础设施故障：fail-open，宁可不限流也不阻断业务
+        logger.warning(f"小红书 HTML 闸门 redis 异常，放行不限流: {e}")
+        try:
+            await redis.aclose()
+        except Exception:
+            pass
+        return None, None
+
+
+async def _release_xhs_html_slot(redis, lock) -> None:
+    """释放槽位并关闭连接；失败只记日志，不影响主流程"""
+    try:
+        if lock is not None and await lock.owned():
+            await lock.release()
+    except Exception as e:
+        logger.warning(f"小红书 HTML 闸门释放槽位失败: {e}")
+    finally:
+        if redis is not None:
+            try:
+                await redis.aclose()
+            except Exception:
+                pass
+
+
 async def extract_xhs(url: str, cookie: str = None) -> Dict[str, Any]:
     """
     提取小红书笔记内容
     :param url: 小红书链接
     :param cookie: 可选的 cookie
-    :return: {title, content, author, tags, platform}
+    :return: {title, content, author, tags, platform}；命中风控/登录墙时字段为空并带 "blocked": True
     """
+    gate_redis = None
+    gate_lock = None
     try:
-        html = await fetch_html(url, cookie=cookie)
+        # 全局并发闸门：所有调用方（管线 hydrate、/extract-link、refresh_note_image）在此统一限流
+        gate_redis, gate_lock = await _acquire_xhs_html_slot()
+        if gate_lock is not None:
+            # 拿到槽位后随机停顿，摊开瞬时并发请求
+            await asyncio.sleep(random.uniform(0.5, 2))
+        html = await _fetch_xhs_html(url, cookie)
         logger.info(f"小红书 HTML 长度: {len(html)}")
 
         # 查找 window.__INITIAL_STATE__ 脚本
@@ -140,11 +229,18 @@ async def extract_xhs(url: str, cookie: str = None) -> Dict[str, Any]:
 
             try:
                 state = json.loads(body)
-                return _parse_xhs_state(state, url)
+                result = _parse_xhs_state(state, url)
+                # INITIAL_STATE 解析后仍缺失的字段（尤其视频封面）用 og:/正则结果补齐，不覆盖已解析值
+                return _merge_xhs_fallback(result, _parse_xhs_html(html, url))
             except json.JSONDecodeError as e:
                 logger.warning(f"小红书 INITIAL_STATE JSON 解析失败: {e}")
                 # 尝试用更宽松的方式提取
                 return _parse_xhs_html(html, url)
+
+        # 无 INITIAL_STATE：先识别风控/登录墙，再走 og:/正则兜底（有的页面没 INITIAL_STATE 但 og: meta 齐全）
+        if _xhs_is_blocked_page(html):
+            logger.warning(f"小红书疑似风控/登录墙: {url}")
+            return _xhs_blocked_result(url)
 
         # 回退：正则提取
         result = _parse_xhs_html(html, url)
@@ -152,11 +248,57 @@ async def extract_xhs(url: str, cookie: str = None) -> Dict[str, Any]:
         return result
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"小红书请求失败: {e.response.status_code}")
-        return {"title": "", "content": f"请求失败，状态码: {e.response.status_code}，可能需要登录或链接已失效", "author": "", "tags": [], "platform": "xhs"}
+        status = e.response.status_code
+        logger.error(f"小红书请求失败: {status}")
+        if status in XHS_BLOCKED_STATUS_CODES:
+            return _xhs_blocked_result(url)
+        return {"title": "", "content": f"请求失败，状态码: {status}，可能需要登录或链接已失效", "author": "", "tags": [], "platform": "xhs"}
     except Exception as e:
         logger.error(f"小红书提取失败: {e}")
         return {"title": "", "content": f"提取失败: {str(e)[:200]}", "author": "", "tags": [], "platform": "xhs"}
+    finally:
+        await _release_xhs_html_slot(gate_redis, gate_lock)
+
+
+async def _fetch_xhs_html(url: str, cookie: str = None) -> str:
+    """抓取小红书页面；httpx 传输层错误（ConnectError/ReadTimeout 等）轻量重试 1 次，HTTPStatusError 不重试"""
+    for attempt in range(2):
+        try:
+            return await fetch_html(url, cookie=cookie)
+        except httpx.TransportError:
+            if attempt:
+                raise
+            await asyncio.sleep(random.uniform(1, 2))
+    return ""  # pragma: no cover - 循环必然 return 或 raise
+
+
+def _xhs_is_blocked_page(html: str) -> bool:
+    """识别风控/登录墙页面（仅在无 __INITIAL_STATE__ 时调用）"""
+    return any(marker in html for marker in XHS_BLOCKED_MARKERS)
+
+
+def _xhs_blocked_result(url: str) -> dict:
+    """命中风控/登录墙：字段为空 + blocked 标记，交给付费兜底，不抛异常"""
+    return {
+        "note_id": _xhs_note_id_from_url(url) or '',
+        "title": "",
+        "content": "",
+        "author": "",
+        "tags": [],
+        "platform": "xhs",
+        "cover_url": None,
+        "published_at": None,
+        "url": url,
+        "blocked": True,
+    }
+
+
+def _merge_xhs_fallback(result: dict, fallback: dict) -> dict:
+    """用 og:/正则兜底结果只补缺失字段，不覆盖 INITIAL_STATE 已解析的值"""
+    for key, value in fallback.items():
+        if result.get(key) in (None, "", []) and value not in (None, "", []):
+            result[key] = value
+    return result
 
 
 def _find_xhs_initial_state(html: str) -> Optional[str]:
@@ -189,13 +331,14 @@ def _parse_xhs_state(state: dict, url: str) -> dict:
     user = note_data.get('user', {}) if isinstance(note_data.get('user'), dict) else {}
     author = user.get('nickname', '')
 
-    # 提取标签
+    # 提取标签：tagList 挂在 note 上（[{id, name, type}]），interactInfo 仅作兜底
     tags = []
     interact_info = note_data.get('interactInfo', {})
-    if isinstance(interact_info, dict):
-        tag_list = interact_info.get('tagList', [])
-        if isinstance(tag_list, list):
-            tags = [t.get('name', '') for t in tag_list if isinstance(t, dict) and t.get('name')]
+    if not isinstance(interact_info, dict):
+        interact_info = {}
+    tag_list = note_data.get('tagList') or note_data.get('tag_list') or interact_info.get('tagList') or interact_info.get('tag_list') or []
+    if isinstance(tag_list, list):
+        tags = [t.get('name', '') for t in tag_list if isinstance(t, dict) and t.get('name')]
 
     # 如果 title 和 content 相同，只保留一个
     if title == content:
@@ -214,15 +357,31 @@ def _parse_xhs_state(state: dict, url: str) -> dict:
         "avatar_url": user.get('image') or user.get('avatar'),
         "tags": tags,
         "platform": "xhs",
-        "published_at": note_data.get('time') or note_data.get('publishTime') or note_data.get('published_at'),
+        "published_at": note_data.get('time') or note_data.get('lastUpdateTime') or note_data.get('last_update_time') or note_data.get('publishTime') or note_data.get('published_at'),
         "note_type": "video" if str(note_data.get('type') or '').lower() == 'video' else "image",
-        "cover_url": cover.get('urlDefault') or cover.get('url_default') or cover.get('url'),
+        # 图文封面取 imageList[0]，视频笔记封面在 note.video 下
+        "cover_url": cover.get('urlDefault') or cover.get('url_default') or cover.get('url') or _xhs_video_cover(note_data),
         "like_count": interact_info.get('likedCount') or interact_info.get('liked_count'),
         "collect_count": interact_info.get('collectedCount') or interact_info.get('collected_count'),
         "comment_count": interact_info.get('commentCount') or interact_info.get('comment_count'),
         "share_count": interact_info.get('shareCount') or interact_info.get('share_count'),
         "url": url,
     }
+
+
+def _xhs_video_cover(note_data: dict) -> Optional[str]:
+    """视频笔记封面在 note.video 下，web 端 camelCase 与 snake_case 都可能出现"""
+    video = note_data.get('video')
+    if not isinstance(video, dict):
+        return None
+    for node in (video.get('cover'), video.get('originCover'), video.get('origin_cover'), video.get('firstFrame'), video.get('first_frame')):
+        if isinstance(node, str) and node:
+            return node
+        if isinstance(node, dict):
+            url = node.get('urlDefault') or node.get('url_default') or node.get('url')
+            if url:
+                return url
+    return video.get('coverUrl') or video.get('cover_url')
 
 
 def _parse_xhs_html(html: str, url: str) -> dict:

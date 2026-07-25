@@ -129,6 +129,29 @@ async def fetch_media_to_cache(url:str,base:Path)->Path:
     return target
 
 
+async def fetch_media_singleflight(note_pk:int,kind:str,url:str)->Path:
+    """同一 (note,kind) 的并发冷请求单飞去重：redis 锁内 double-check 缓存（等锁
+    期间可能已被并发请求回填）；等锁超时或 redis 故障一律 fail-open 直接回源。"""
+    base=media_cache_base(note_pk,kind,url)
+    try:redis=aioredis.from_url(settings.CELERY_BROKER_URL,socket_connect_timeout=2,socket_timeout=2)
+    except Exception:return await fetch_media_to_cache(url,base)
+    try:
+        lock=redis.lock(f"xhs:media:fetch:{note_pk}:{kind}",timeout=30,blocking_timeout=20)
+        try:acquired=await lock.acquire()
+        except Exception:return await fetch_media_to_cache(url,base)
+        if not acquired:return await fetch_media_to_cache(url,base)  # 等锁超时 → fail-open
+        try:
+            cached=media_cache_lookup_exact(note_pk,kind,url)
+            return cached if cached is not None else await fetch_media_to_cache(url,base)
+        finally:
+            try:
+                if await lock.owned():await lock.release()
+            except Exception:pass
+    finally:
+        try:await redis.aclose()
+        except Exception:pass
+
+
 def original_note_url(note:XhsNote)->str:
     """只有真正携带 xsec_token 的搜索链接才作为直达链接返回。"""
     return note.latest_xsec_url if _xsec_token(note.latest_xsec_url) else note.stable_url
@@ -375,7 +398,7 @@ async def note_media(note_id:str,kind:str,db:AsyncSession=Depends(get_db)):
     if not url:raise HTTPException(404,"该素材没有对应图片")
     cached=media_cache_lookup_exact(note.id,kind,url)
     if cached is None:
-        try:cached=await fetch_media_to_cache(url,media_cache_base(note.id,kind,url))
+        try:cached=await fetch_media_singleflight(note.id,kind,url)
         except HTTPException:
             cached=media_cache_lookup_history(note.id,kind)
             if cached is None:raise
@@ -685,9 +708,9 @@ async def retry_free(keyword_id:int,force:bool=False,admin:User=Depends(require_
 
 @admin_router.post("/keywords/{keyword_id}/retry-paid",status_code=202)
 async def retry_paid(keyword_id:int,time_filter:str=Query("一周内",pattern="^(一天内|一周内)$"),admin:User=Depends(get_current_super_admin_user),db:AsyncSession=Depends(get_db)):
-    # CLI 已 100% 被风控，付费重试只走 TikHub 第三方 API，不再并发本地 CLI。
+    # 付费重试走「HTML 免费抓取优先、TikHub 兜底」链路，CLI 已从管线移除。
     # 手动立即搜索：超管已确认费用，允许当天反复采集，不做"已完成即拦截"。
-    task=collect_keyword_task.apply_async(args=[keyword_id,True,True,False,time_filter]);db.add(AdminAuditLog(actor_user_id=admin.id,action="xhs_retry_paid",target_type="xhs_keyword",target_id=str(keyword_id),summary=f"最高管理员确认 TikHub 付费重试({time_filter})",metadata_json={"task_id":task.id,"time_filter":time_filter}));await db.commit();return {"task_id":task.id,"paid":True,"time_filter":time_filter}
+    task=collect_keyword_task.apply_async(args=[keyword_id,True,True,time_filter]);db.add(AdminAuditLog(actor_user_id=admin.id,action="xhs_retry_paid",target_type="xhs_keyword",target_id=str(keyword_id),summary=f"最高管理员确认 TikHub 付费重试({time_filter})",metadata_json={"task_id":task.id,"time_filter":time_filter}));await db.commit();return {"task_id":task.id,"paid":True,"time_filter":time_filter}
 
 
 @admin_router.post("/analyze-topics",status_code=202)
