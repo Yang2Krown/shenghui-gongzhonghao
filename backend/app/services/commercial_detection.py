@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from app.services.llm.llm_client import ChatMessage, get_llm_client
+from app.services.commercial_classification import normalize_commercial_label
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,10 @@ DETECTION_CONFIG: Dict[str, Any] = {
     "llm": {
         "provider": "deepseek",
         "max_content_chars": 3000,
-        "max_tokens": 700,
+        # DeepSeek V4 Flash may spend well over 700 tokens on reasoning before
+        # emitting the JSON result.  2048 avoids truncating normal commercial
+        # analyses; the API still stops early when the answer is complete.
+        "max_tokens": 2048,
         "temperature": 0.0,
         "prompt_template": """你是一位内容审核员。判断下面这篇公众号文章是否属于“商业软文（商单）”，即作者因收了第三方报酬而把某产品/服务作为文章核心主题推荐。
 
@@ -380,8 +384,8 @@ def _build_llm_prompt(title: str, content: str, stat: Dict[str, Any]) -> str:
 {{
   "commercial": true/false,
   "level": "none/suspected/likely",
-  "brand": "投放品牌/甲方；无法判断填空",
-  "product": "推广产品/服务；无法判断填空",
+  "brand": "投放品牌/甲方；无法判断必须填空字符串",
+  "product": "推广产品/服务的官方简称；无法判断必须填空字符串",
   "category": "编程开发/内容创作/图像生成/视频制作/办公效率/数据分析/AI平台/教育学习/营销推广/硬件产品/其他",
   "advantages": ["文章强调的产品优势或卖点，最多4条"],
   "evidence": ["用于判断为商单的文内证据，最多3条"],
@@ -417,8 +421,8 @@ async def _llm_result(title: str, text: str, stat: Dict[str, Any]) -> Commercial
         )
         parsed = result.parsed or {}
         level = _level_from_llm(parsed)
-        product = str(parsed.get("product") or "").strip()
-        brand = str(parsed.get("brand") or "").strip()
+        product = normalize_commercial_label(parsed.get("product"))
+        brand = normalize_commercial_label(parsed.get("brand"))
         category = str(parsed.get("category") or "").strip()
         reason = str(parsed.get("reason") or "")
         advantages = _clean_list(parsed.get("advantages"), limit=4)

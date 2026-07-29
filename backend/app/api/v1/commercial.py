@@ -1,6 +1,7 @@
 """潜在商单 API — 品牌聚合视图 + 兼容时间轴视图。"""
 
 from collections import defaultdict
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,6 +17,7 @@ from app.models.user import User
 from app.services.commercial_classification import (
     BRAND_DISPLAY_ORDER,
     CATEGORY_DISPLAY_ORDER,
+    normalize_commercial_label,
 )
 
 router = APIRouter()
@@ -86,8 +88,8 @@ def _serialize_row(row: Any) -> dict:
     raw = row[0]
     meta = raw.commercial_meta or {}
     account_name = getattr(row, "source_account_name", None) or raw.author or ""
-    brand = raw.commercial_brand or meta.get("brand") or ""
-    product = meta.get("product") or ""
+    brand = normalize_commercial_label(raw.commercial_brand or meta.get("brand"))
+    product = normalize_commercial_label(meta.get("product"))
     return {
         "id": raw.id,
         "title": raw.title,
@@ -108,8 +110,34 @@ def _serialize_row(row: Any) -> dict:
     }
 
 
-def _brand_key(item: dict) -> str:
-    return item.get("commercial_brand") or item.get("product") or "未识别品牌"
+_GENERIC_PRODUCT_SUFFIX_RE = re.compile(
+    r"(?:设计)?(?:agent|智能体|ai助手|平台|制作服务|服务|工具)$",
+    re.IGNORECASE,
+)
+
+
+def _canonical_product(product: str, brand: str = "") -> str:
+    """Normalize product variants enough to keep one product on one card."""
+    value = normalize_commercial_label(product)
+    company = normalize_commercial_label(brand)
+    if company and value.lower().startswith(company.lower()):
+        value = value[len(company):].lstrip(" -·：:")
+    previous = None
+    while value and value != previous:
+        previous = value
+        value = _GENERIC_PRODUCT_SUFFIX_RE.sub("", value).strip(" -·：:")
+    return value
+
+
+def _commercial_subject(item: dict) -> tuple[str, str, str]:
+    """Return stable group key, display label, and canonical product."""
+    brand = normalize_commercial_label(item.get("commercial_brand"))
+    product = _canonical_product(item.get("product") or "", brand)
+    if brand and product:
+        display = brand if product.lower() == brand.lower() else f"{brand} {product}"
+    else:
+        display = product or brand or "未识别品牌"
+    return display.lower(), display, product
 
 
 def _time_value(item: dict) -> str:
@@ -413,11 +441,12 @@ async def get_commercial_groups(
         item = _serialize_row(row)
         if _is_frontend_noise(item):
             continue
-        key = _brand_key(item)
+        key, display_name, product = _commercial_subject(item)
         group = grouped.setdefault(key, {
-            "brand": key,
+            "brand": display_name,
+            "company_brand": item.get("commercial_brand") or "",
             "category": item.get("commercial_category") or "其他",
-            "product": item.get("product") or "",
+            "product": product,
             "count": 0,
             "accounts": [],
             "first_time": None,

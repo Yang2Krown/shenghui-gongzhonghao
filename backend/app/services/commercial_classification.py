@@ -18,6 +18,20 @@ from app.services.llm.llm_client import ChatMessage, get_llm_client
 logger = logging.getLogger(__name__)
 
 
+INVALID_COMMERCIAL_LABELS = {
+    "无法判断", "未识别", "未知", "不明确", "无", "其他",
+    "none", "null", "n/a", "unknown",
+}
+
+
+def normalize_commercial_label(value: Any) -> str:
+    """Turn model placeholders into an empty value before storage/display."""
+    text = str(value or "").strip()
+    if text.lower() in INVALID_COMMERCIAL_LABELS:
+        return ""
+    return text[:100]
+
+
 # ── 甲方(品牌方)映射 ──────────────────────────────────────────
 # key: 归一化品牌名  value: 匹配关键词列表（大小写不敏感）
 BRAND_KEYWORDS: Dict[str, List[str]] = {
@@ -37,6 +51,7 @@ BRAND_KEYWORDS: Dict[str, List[str]] = {
     ],
     "腾讯": [
         "腾讯", "tencent", "元宝", "混元", "微信", "wechat",
+        "marvis", "miora", "workbuddy", "qclaw",
     ],
     "阿里巴巴": [
         "阿里", "alibaba", "通义", "qwen", "钉钉", "dingtalk",
@@ -49,7 +64,7 @@ BRAND_KEYWORDS: Dict[str, List[str]] = {
         "智谱", "zhipu", "chatglm", "glm-", "清言",
     ],
     "科大讯飞": [
-        "讯飞", "iflytek", "星火",
+        "讯飞", "iflytek", "星火", "讯飞星辰",
     ],
     "DeepSeek": [
         "deepseek", "深度求索",
@@ -193,13 +208,13 @@ def _match_category(text: str) -> str:
 
 _CLASSIFY_PROMPT = """你是AI行业分析师。根据以下公众号文章信息，完成两个分类任务：
 
-1. **甲方/品牌方**：文章推广的产品属于哪家公司？从以下选项中选一个最匹配的，无法判断或不属于任何选项则选"其他"：
-   {brands}
+1. **甲方/品牌方**：提取文章实际推广产品所属的公司或品牌。优先使用正文出现的真实名称；
+   常见规范名包括 {brands}，但不限于这些品牌。无法判断时必须输出空字符串，不要输出“无法判断”“未知”或“其他”。
 
 2. **功能方向**：推广的产品主要解决什么场景需求？从以下选项中选一个最匹配的，无法归类则选"其他"：
    {categories}
 
-重要：如果文章与AI/科技产品无关，直接输出 {{"brand": "其他", "category": "其他"}}，不要强行归类。
+重要：品牌可以是名单外的新品牌；不要把标题的普通短语误当品牌。如果文章与AI/科技产品无关，品牌输出空字符串。
 
 只输出 JSON，不要输出其他内容：
 {{"brand": "品牌名", "category": "功能方向"}}
@@ -216,7 +231,7 @@ async def classify_by_llm(
     product: str = "",
 ) -> ClassificationResult:
     """LLM 分类兜底：规则无法匹配时使用。"""
-    brands_str = ", ".join(BRAND_DISPLAY_ORDER) + ", 其他"
+    brands_str = ", ".join(BRAND_DISPLAY_ORDER)
     cats_str = ", ".join(CATEGORY_DISPLAY_ORDER) + ", 其他"
 
     prompt = _CLASSIFY_PROMPT.format(
@@ -239,14 +254,11 @@ async def classify_by_llm(
             json_mode=True,
         )
         parsed = result.parsed or {}
-        brand = str(parsed.get("brand") or "")
+        brand = normalize_commercial_label(parsed.get("brand"))
         category = str(parsed.get("category") or "")
 
-        # 校验返回值是否合法
-        valid_brands = set(BRAND_DISPLAY_ORDER) | {"其他", ""}
+        # 品牌允许开放提取；功能方向仍使用固定维度。
         valid_cats = set(CATEGORY_DISPLAY_ORDER) | {"其他", ""}
-        if brand not in valid_brands:
-            brand = "其他"
         if category not in valid_cats:
             category = ""
 

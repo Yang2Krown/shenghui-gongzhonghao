@@ -12,10 +12,10 @@ from typing import Any, Dict, List, Optional
 from celery import shared_task
 from sqlalchemy.orm import joinedload
 
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 from app.models.raw_info import RawInfo
 from app.services.commercial_detection import detect_commercial_article
-from app.services.commercial_classification import classify_commercial
+from app.services.commercial_classification import classify_commercial, normalize_commercial_label
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,18 @@ def _save_detection_result(
         }
 
 
+def _save_extracted_fulltext(raw_info_id: int, *, content: str, author: str = "") -> None:
+    """Persist direct WeChat extraction before commercial analysis."""
+    with SessionLocal() as db:
+        raw = db.get(RawInfo, raw_info_id)
+        if not raw:
+            return
+        raw.content = content
+        if author and not raw.author:
+            raw.author = author[:200]
+        db.commit()
+
+
 def _recent_wechat_raw_info_ids(
     limit: int = 200,
     *,
@@ -132,6 +144,27 @@ async def _detect_one(raw_info_id: int, *, force_llm: bool = False) -> Dict[str,
     if not is_wechat and not force_llm:
         return {"raw_info_id": raw_info_id, "status": "skipped_non_wechat"}
 
+    # 极致了只返回文章元数据。复用创作工具的公众号直连提取器，确保
+    # DeepSeek 优先基于正文判断；提取失败时仍保留标题级降级能力。
+    if raw["source_type"] == "dajiala_wechat" and not (raw["content"] or "").strip():
+        try:
+            from app.services.scraping.wechat_fulltext import extract_wechat_article
+
+            extracted = await extract_wechat_article(raw["url"])
+            if extracted:
+                _save_extracted_fulltext(
+                    raw_info_id,
+                    content=extracted.content,
+                    author=extracted.author,
+                )
+                raw["content"] = extracted.content
+                logger.info(
+                    "商单检测前正文补抓完成 raw_info_id=%s content_len=%s",
+                    raw_info_id, len(extracted.content),
+                )
+        except Exception as exc:
+            logger.warning("商单检测前正文补抓失败 raw_info_id=%s: %s", raw_info_id, exc)
+
     result = await detect_commercial_article(
         title=raw["title"],
         summary=raw["summary"],
@@ -139,8 +172,8 @@ async def _detect_one(raw_info_id: int, *, force_llm: bool = False) -> Dict[str,
         force_llm=force_llm or raw["source_type"] == "dajiala_wechat",
     )
 
-    brand: Optional[str] = result.brand or None
-    category: Optional[str] = result.category or None
+    brand: Optional[str] = normalize_commercial_label(result.brand) or None
+    category: Optional[str] = str(result.category or "").strip() or None
     summary: Optional[str] = None
 
     # 命中商单 → 自动分类（甲方 + 功能方向）+ AI 摘要
@@ -152,7 +185,7 @@ async def _detect_one(raw_info_id: int, *, force_llm: bool = False) -> Dict[str,
                     content=raw["content"],
                     product=result.product or "",
                 )
-                brand = brand or cls.brand or None
+                brand = brand or normalize_commercial_label(cls.brand) or None
                 category = category or cls.category or None
                 logger.info(
                     "商单分类完成 raw_info_id=%s brand=%s category=%s",
@@ -227,11 +260,37 @@ async def _detect_batch(
     }
 
 
+async def _run_detect_one(raw_info_id: int, *, force_llm: bool = False) -> Dict[str, Any]:
+    """Run one Celery coroutine and release loop-bound async DB connections."""
+    try:
+        return await _detect_one(raw_info_id, force_llm=force_llm)
+    finally:
+        await engine.dispose()
+
+
+async def _run_detect_batch(
+    raw_info_ids: Optional[List[int]] = None,
+    *,
+    force_llm: bool = False,
+    limit: int = 200,
+    days: Optional[int] = None,
+) -> Dict[str, Any]:
+    try:
+        return await _detect_batch(
+            raw_info_ids,
+            force_llm=force_llm,
+            limit=limit,
+            days=days,
+        )
+    finally:
+        await engine.dispose()
+
+
 @shared_task(bind=True, name="commercial.detect_raw_info")
 def detect_commercial_task(self, raw_info_id: int, force_llm: bool = False):
     """Detect commercial signals for a single RawInfo row."""
     try:
-        return asyncio.run(_detect_one(raw_info_id, force_llm=force_llm))
+        return asyncio.run(_run_detect_one(raw_info_id, force_llm=force_llm))
     except Exception as exc:
         logger.error("商单检测任务失败 raw_info_id=%s: %s", raw_info_id, exc)
         self.retry(exc=exc, countdown=60, max_retries=2)
@@ -252,7 +311,12 @@ def detect_commercial_batch_task(
     crawler/backfill tasks have already inserted rows.
     """
     try:
-        return asyncio.run(_detect_batch(raw_info_ids, force_llm=force_llm, limit=limit, days=days))
+        return asyncio.run(_run_detect_batch(
+            raw_info_ids,
+            force_llm=force_llm,
+            limit=limit,
+            days=days,
+        ))
     except Exception as exc:
         logger.error("商单批量检测任务失败: %s", exc)
         self.retry(exc=exc, countdown=60, max_retries=2)

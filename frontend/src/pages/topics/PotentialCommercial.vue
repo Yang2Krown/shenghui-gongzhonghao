@@ -8,7 +8,7 @@
           <p class="pc-subtitle">从公众号投放内容里，快速找到值得跟进的品牌线索。</p>
         </div>
         <div class="pc-stats" v-if="total > 0">
-          <div><b>{{ brandCount }}</b><span>品牌线索</span></div>
+          <div><b>{{ brandCount }}</b><span>产品线索</span></div>
           <div><b>{{ total }}</b><span>篇文章</span></div>
         </div>
       </div>
@@ -76,9 +76,9 @@
     <div v-if="!loading && groups.length" class="result-heading">
       <div>
         <span class="section-eyebrow">BRAND SIGNALS</span>
-        <h2>值得跟进的品牌线索</h2>
+        <h2>值得跟进的品牌产品线索</h2>
       </div>
-      <span class="result-count">{{ brandCount }} 个品牌 · {{ total }} 篇文章</span>
+      <span class="result-count">{{ brandCount }} 个产品 · {{ total }} 篇文章</span>
     </div>
 
     <div v-if="loading" class="pc-loading">加载中...</div>
