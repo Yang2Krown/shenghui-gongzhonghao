@@ -127,7 +127,8 @@ async def _upsert_account(db, *, registry_id: int, handle: Optional[str], displa
             SourceAccount.handle.is_(None),
             SourceAccount.display_name == display_name,
         )
-    existing = (await db.execute(stmt)).scalar_one_or_none()
+    # 历史数据可能已有重复账号；seed 必须幂等且不能因重复记录中断整批导入。
+    existing = (await db.execute(stmt.order_by(SourceAccount.id))).scalars().first()
 
     fields = dict(
         display_name=display_name,

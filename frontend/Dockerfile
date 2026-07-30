@@ -1,5 +1,5 @@
 # 使用Node.js镜像
-FROM node:18-alpine as development
+FROM node:18.20.8-alpine AS development
 
 # 设置工作目录
 WORKDIR /app
@@ -21,7 +21,7 @@ EXPOSE 3000
 CMD ["npm", "run", "dev"]
 
 # 生产环境：直接用本地预构建的 dist 产物，不在服务器上 build
-FROM nginx:alpine as production
+FROM nginx:1.31.3-alpine AS production
 
 # 复制本地已构建好的 dist
 COPY dist /usr/share/nginx/html

@@ -34,12 +34,14 @@ done
 echo "[entrypoint] Postgres 已就绪"
 
 # ─────────────────────────────────────────────
-# 2. 只有 ROLE=web|init 才跑迁移和 seed
-#    (celery-worker / celery-beat 不需要重复跑)
+# 2. 生产只允许 ROLE=init 跑迁移和 seed。
+#    本地 development 的 ROLE=web 继续保留自动初始化行为。
 # ─────────────────────────────────────────────
 ROLE="${ROLE:-web}"
 
-if [ "$ROLE" = "web" ] || [ "$ROLE" = "init" ]; then
+ENVIRONMENT="${ENVIRONMENT:-development}"
+
+if [ "$ROLE" = "init" ] || { [ "$ROLE" = "web" ] && [ "$ENVIRONMENT" != "production" ] && [ "$ENVIRONMENT" != "prod" ]; }; then
     echo "[entrypoint] 跑 Alembic 迁移..."
     python3 -m alembic upgrade head
 

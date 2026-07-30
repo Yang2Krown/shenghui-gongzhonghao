@@ -33,6 +33,7 @@ backend/.env.local
 secrets/
 backend/secrets/
 ssl/
+backups/
 backend/uploads/wechat_images/
 *.cookie
 *.cookies.json

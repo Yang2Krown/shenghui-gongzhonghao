@@ -164,14 +164,31 @@ docker compose -f docker-compose.prod.yml logs --tail=200 celery-worker
 
 ### 数据库备份
 
-```bash
-# 备份
-docker compose -f docker-compose.prod.yml exec postgres \
-  pg_dump -U postgres ai_content_hub > backup_$(date +%Y%m%d).sql
+生产服务器使用 `scripts/backup_gzh.sh` 生成 PostgreSQL custom-format 备份，默认保留最近 8 份，并在写入后用 `pg_restore --list` 做完整性检查。
 
-# 恢复
-docker compose -f docker-compose.prod.yml exec -T postgres \
-  psql -U postgres ai_content_hub < backup_xxx.sql
+建议每周日凌晨 3:30 执行：
+
+```cron
+30 3 * * 0 cd /www/wwwroot/gzh && bash scripts/backup_gzh.sh >> /var/log/gzh-backup.log 2>&1
+```
+
+手工执行一次恢复前检查：
+
+```bash
+cd /www/wwwroot/gzh
+bash scripts/backup_gzh.sh
+docker compose -f docker-compose.prod.yml --env-file backend/.env.production exec -T postgres \
+  pg_restore --list < backups/postgres/最新备份文件.dump
+```
+
+需要恢复时，先创建空数据库，再使用 `pg_restore` 导入；不要直接覆盖正在运行的生产库。
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file backend/.env.production exec -T postgres \
+  createdb -U postgres ai_content_hub_restore_check
+docker compose -f docker-compose.prod.yml --env-file backend/.env.production exec -T postgres \
+  pg_restore -U postgres -d ai_content_hub_restore_check --clean --if-exists \
+  < backups/postgres/最新备份文件.dump
 ```
 
 ---

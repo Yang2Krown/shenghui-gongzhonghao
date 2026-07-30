@@ -25,8 +25,8 @@ from app.api.v1 import api_router
 from app.core.security import decode_token
 from app.db.session import AsyncSessionLocal, engine
 from app.db.init_db import init_db
-from app.models.api_request_log import ApiRequestLog
 from app.models.user import User
+from app.services.api_request_logging import api_request_log_writer
 
 # 配置日志
 logging.basicConfig(
@@ -43,18 +43,23 @@ async def lifespan(app: FastAPI):
     # 启动时执行
     logger.info("正在启动AI公众号内容运营平台...")
     
-    # 初始化数据库
+    # 生产结构变更只由 init 容器负责；本地开发仍保留自动建表和初始数据。
+    if settings.is_production:
+        logger.info("生产环境跳过 Web 进程数据库初始化（由 init 容器负责）")
+    else:
+        try:
+            await init_db()
+            logger.info("数据库初始化完成")
+        except Exception as e:
+            logger.error(f"数据库初始化失败: {e}")
+            raise
+
+    await api_request_log_writer.start()
     try:
-        await init_db()
-        logger.info("数据库初始化完成")
-    except Exception as e:
-        logger.error(f"数据库初始化失败: {e}")
-        raise
-    
-    yield
-    
-    # 关闭时执行
-    logger.info("正在关闭应用...")
+        yield
+    finally:
+        await api_request_log_writer.stop()
+        logger.info("正在关闭应用...")
 
 
 app = FastAPI(
@@ -98,7 +103,7 @@ async def add_process_time_header(request: Request, call_next):
         if "response" in locals():
             response.headers["X-Process-Time"] = str(process_time)
             _apply_security_headers(response)
-        await _record_api_request(request, status_code, process_time * 1000)
+        _record_api_request(request, status_code, process_time * 1000)
 
 
 @app.middleware("http")
@@ -236,8 +241,8 @@ def _apply_security_headers(response) -> None:
         )
 
 
-async def _record_api_request(request: Request, status_code: int, duration_ms: float) -> None:
-    """记录后台接口健康监测日志，失败不影响业务请求。"""
+def _record_api_request(request: Request, status_code: int, duration_ms: float) -> None:
+    """将接口监测日志放入内存队列，由后台任务批量写库。"""
     try:
         path = request.url.path
         if (
@@ -259,15 +264,13 @@ async def _record_api_request(request: Request, status_code: int, duration_ms: f
                 except (TypeError, ValueError):
                     user_id = None
 
-        async with AsyncSessionLocal() as db:
-            db.add(ApiRequestLog(
-                method=request.method[:10],
-                path=path[:500],
-                status_code=status_code,
-                duration_ms=round(duration_ms, 2),
-                user_id=user_id,
-            ))
-            await db.commit()
+        api_request_log_writer.enqueue({
+            "method": request.method[:10],
+            "path": path[:500],
+            "status_code": status_code,
+            "duration_ms": round(duration_ms, 2),
+            "user_id": user_id,
+        })
     except Exception as exc:
         logger.warning("记录 API 请求监测失败: %s", exc)
 

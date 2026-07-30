@@ -14,9 +14,8 @@
 #   - 加 init 容器自动跑 alembic + seed
 # ============================================================
 
-version: '3.8'
-
 x-backend-env: &backend-env
+  ENVIRONMENT: production
   TZ: Asia/Shanghai
   POSTGRES_SERVER: ${POSTGRES_SERVER:-postgres}
   POSTGRES_PORT: ${POSTGRES_PORT:-5432}
@@ -105,7 +104,7 @@ services:
 
   # ─── Postgres + pgvector ───
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
     restart: unless-stopped
     ports:
       - "127.0.0.1:5433:5432"
@@ -127,7 +126,7 @@ services:
 
   # ─── Redis ───
   redis:
-    image: redis:7-alpine
+    image: redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     restart: unless-stopped
     volumes:
       - redis_data:/data
@@ -144,6 +143,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      network: host
     environment:
       <<: *backend-env
       ROLE: init
@@ -161,6 +161,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      network: host
     restart: unless-stopped
     environment:
       <<: *backend-env
@@ -193,6 +194,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      network: host
     restart: unless-stopped
     command: ["celery", "-A", "app.core.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues", "default"]
     environment:
@@ -222,6 +224,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      network: host
     restart: unless-stopped
     command: ["celery", "-A", "app.core.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues", "scraping"]
     environment:
@@ -253,6 +256,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      network: host
     restart: unless-stopped
     command: ["celery", "-A", "app.core.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues", "ai"]
     environment:
@@ -282,6 +286,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      network: host
     restart: unless-stopped
     command: ["celery", "-A", "app.core.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues", "publish"]
     environment:
@@ -311,6 +316,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      network: host
     restart: unless-stopped
     command: ["celery", "-A", "app.core.celery_app", "beat", "--loglevel=info"]
     environment:

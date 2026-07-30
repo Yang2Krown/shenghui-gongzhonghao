@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.10.20-slim
 
 WORKDIR /app
 
@@ -38,8 +38,7 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --upgrade pip \
-    && pip install -r requirements.txt
+RUN pip install -r requirements.txt
 
 RUN playwright install chromium
 
