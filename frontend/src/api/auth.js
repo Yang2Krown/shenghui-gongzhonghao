@@ -2,12 +2,17 @@ import { post, get, put } from './api'
 
 // 刷新token
 export const refreshToken = (refresh_token) => {
-  return post('/auth/refresh', { refresh_token })
+  // 刷新失败由 api.js 的统一认证流程处理，不能再次触发自身的 401 刷新和通用 toast。
+  return post('/auth/refresh', { refresh_token }, {
+    skipAuthRefresh: true,
+    skipErrorToast: true,
+  })
 }
 
 // 获取当前用户信息
 export const getCurrentUser = () => {
-  return get('/users/profile')
+  // 初始化阶段由 user store 负责清理认证态和跳转，避免与全局拦截器重复提示。
+  return get('/users/profile', {}, { skipErrorToast: true })
 }
 
 // 更新用户信息

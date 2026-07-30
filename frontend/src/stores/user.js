@@ -25,6 +25,7 @@ export const useUserStore = defineStore('user', () => {
   const refreshToken = ref(isTokenExpired() ? '' : (localStorage.getItem('refreshToken') || ''))
   const loading = ref(false)
   const initialized = ref(false)
+  let initializePromise = null
 
   // 计算属性
   const isAuthenticated = computed(() => !!token.value)
@@ -39,20 +40,35 @@ export const useUserStore = defineStore('user', () => {
 
   // 初始化 - 从本地存储恢复token
   const initialize = async () => {
-    try {
-      if (isTokenExpired()) {
-        clearAuth()
-        return
-      }
-      if (token.value && !user.value) {
-        try {
-          await fetchUser()
-        } catch (error) {
+    if (initialized.value) return
+    if (initializePromise) return initializePromise
+
+    initializePromise = (async () => {
+      try {
+        if (isTokenExpired()) {
           clearAuth()
+          return
         }
+        if (token.value && !user.value) {
+          try {
+            await fetchUser()
+          } catch (error) {
+            // 只有明确的认证失败才清理登录态；服务端暂时异常时保留 token，
+            // 避免用户被误退出并再次触发登录过期提示。
+            if (error.response?.status === 401) {
+              clearAuth()
+            }
+          }
+        }
+      } finally {
+        initialized.value = true
       }
+    })()
+
+    try {
+      return await initializePromise
     } finally {
-      initialized.value = true
+      initializePromise = null
     }
   }
 
@@ -85,7 +101,10 @@ export const useUserStore = defineStore('user', () => {
       
       return access_token
     } catch (error) {
-      clearAuth()
+      // 只有刷新令牌明确失效时才清理认证态；服务端/网络故障应允许稍后重试。
+      if (error.response?.status === 401) {
+        clearAuth()
+      }
       throw error
     }
   }

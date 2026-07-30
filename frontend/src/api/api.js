@@ -12,6 +12,27 @@ const api = axios.create({
   }
 })
 
+// 所有并发请求共用同一次刷新，避免登录过期时每个请求都单独刷新并重复弹窗。
+let refreshPromise = null
+let authExpiryNotified = false
+
+const isRefreshRequest = (config) => {
+  if (!config) return false
+  // skipAuthRefresh 是显式标记；url 判断用于保护遗漏标记的刷新请求。
+  return config.skipAuthRefresh === true || String(config.url || '').includes('/auth/refresh')
+}
+
+const notifyAuthExpired = (userStore) => {
+  if (authExpiryNotified) return
+  authExpiryNotified = true
+
+  userStore.clearAuth()
+  if (router.currentRoute.value.name !== 'Landing') {
+    router.push({ name: 'Landing' })
+  }
+  ElMessage.error('登录已过期，请重新登录')
+}
+
 // 请求拦截器
 api.interceptors.request.use(
   (config) => {
@@ -32,6 +53,10 @@ api.interceptors.request.use(
 // 响应拦截器
 api.interceptors.response.use(
   (response) => {
+    // 用户重新登录后允许下一次真正的认证过期再次提示。
+    if (String(response.config?.url || '').includes('/auth/login')) {
+      authExpiryNotified = false
+    }
     const body = response.data
     if (body && typeof body === 'object' && 'code' in body && 'data' in body) {
       response.data = body.data
@@ -42,6 +67,7 @@ api.interceptors.response.use(
     const originalRequest = error.config
     const userStore = useUserStore()
     const skipErrorToast = originalRequest?.skipErrorToast === true
+    const refreshRequest = isRefreshRequest(originalRequest)
 
     // 主动取消的请求（AbortController / 页面切换时打断重复请求）不是错误，
     // 静默放行，避免弹出 axios 默认的 "canceled" 提示。
@@ -49,24 +75,41 @@ api.interceptors.response.use(
       return Promise.reject(error)
     }
 
+    // 刷新接口本身失败时不能再次进入刷新流程，否则会递归请求并产生第二个错误提示。
+    if (refreshRequest) {
+      return Promise.reject(error)
+    }
+
     // 如果是401错误且没有重试过
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
       originalRequest._retry = true
       
       try {
-        // 尝试刷新token
-        const newToken = await userStore.refresh()
+        // 尝试刷新 token。并发请求只发起一个刷新请求，其余请求等待同一个结果。
+        if (!refreshPromise) {
+          refreshPromise = userStore.refresh().finally(() => {
+            refreshPromise = null
+          })
+        }
+        const newToken = await refreshPromise
+        authExpiryNotified = false
         
         // 更新请求头
+        originalRequest.headers = originalRequest.headers || {}
         originalRequest.headers.Authorization = `Bearer ${newToken}`
         
         // 重试原请求
         return api(originalRequest)
       } catch (refreshError) {
-        // 刷新失败，跳转到Landing页
-        userStore.clearAuth()
-        router.push('/landing')
-        ElMessage.error('登录已过期，请重新登录')
+        // 刷新 token 无效才判定为登录过期；Redis/网络等服务端故障不清空登录态，
+        // 也不再让刷新请求额外弹出“服务器内部错误”。
+        const refreshStatus = refreshError.response?.status
+        const missingRefreshToken = refreshError.message === 'No refresh token'
+        if (refreshStatus === 401 || missingRefreshToken) {
+          notifyAuthExpired(userStore)
+        } else if (refreshStatus >= 500) {
+          ElMessage.error('登录状态暂时无法验证，请稍后重试')
+        }
         return Promise.reject(refreshError)
       }
     }
@@ -105,10 +148,10 @@ api.interceptors.response.use(
       }
     } else if (status === 404) {
       ElMessage.error('请求的资源不存在')
-    } else if (status === 500) {
-      ElMessage.error('服务器内部错误')
-    } else if (status === 502 || status === 503) {
-      ElMessage.error('服务暂时不可用，请刷新页面重试')
+    } else if (status === 500 || status === 502 || status === 503) {
+      // 页面调用方通常会根据业务场景给出具体文案。5xx 只透传，避免全局提示
+      // 与页面 catch 中的提示叠加成两条消息。
+      return Promise.reject(error)
     } else {
       ElMessage.error(message)
     }
