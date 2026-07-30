@@ -574,13 +574,6 @@ const handleSaveDraft = () => {
 const handlePublishToEditor = async () => {
   // 组装输入内容（文件/链接/文本）
   const inputContent = value.value || fileText.value || linkContent.value || ''
-  console.log('[CreationTitle] handlePublishToEditor', {
-    inputValue: value.value?.length || 0,
-    fileText: fileText.value?.length || 0,
-    linkContent: linkContent.value?.length || 0,
-    inputContent: inputContent.length,
-    selectedTitle: selectedPublishTitle.value,
-  })
   await publishToWechatEditor(router, inputContent, selectedPublishTitle.value)
 }
 

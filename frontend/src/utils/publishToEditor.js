@@ -92,11 +92,6 @@ export async function publishToWechatEditor(router, text, title, creationId = nu
   })
 
   try {
-    console.log('[publishToWechatEditor] 开始', {
-      textLength: text?.length || 0,
-      title,
-    })
-
     let finalText = text || ''
 
     // 调用 LLM 做智能换行（内容不变，只插入段落分隔）
@@ -106,7 +101,6 @@ export async function publishToWechatEditor(router, text, title, creationId = nu
         const formatted = res.data?.content || res.data || ''
         if (formatted && formatted.length > 0) {
           finalText = formatted
-          console.log('[publishToWechatEditor] LLM 换行完成', { newLength: finalText.length })
         }
       } catch (e) {
         console.warn('[publishToWechatEditor] 换行失败，使用原文:', e?.message)

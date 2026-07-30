@@ -301,8 +301,6 @@ const editorConfig = {
     uploadImage: {
       // 自定义上传：选择文件后上传到后端
       customUpload: async (file, insertFn) => {
-        console.log('[uploadImage] 开始上传:', file.name, file.type, file.size)
-
         // 验证文件类型
         const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
         if (!allowedTypes.includes(file.type)) {
@@ -323,7 +321,6 @@ const editorConfig = {
           // 使用 API 模块上传图片到 OSS
           const { uploadImage } = await import('@/api/api')
           const response = await uploadImage(file)
-          console.log('[uploadImage] 上传成功:', response)
 
           // axios 返回的是 response 对象，数据在 response.data 中
           const data = response?.data || response
@@ -870,12 +867,9 @@ function convertToWechatHtml(html, spBefore, spAfter, spacingMap) {
     toRemove.forEach(attr => el.removeAttribute(attr))
   })
 
-  // 调试：把转换结果存到 window 上，方便从控制台查看
   const result = body.innerHTML
-  if (typeof window !== 'undefined') {
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
     window.__lastWechatHtml = result
-    console.log('[convertToWechatHtml] spBefore:', spBefore, 'spAfter:', spAfter)
-    console.log('[convertToWechatHtml] result:', result.substring(0, 500))
   }
   return result
 }

@@ -27,6 +27,20 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
-    sourcemap: true
+    // 生产包不公开源码映射，避免泄露源码并减少静态资源体积。
+    // 如需错误追踪，应改为上传到私有监控服务，而不是随 dist 一起发布。
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        // 将稳定的第三方依赖单独缓存，避免业务页面变动时重复下载整块 vendor。
+        manualChunks: {
+          'vendor-vue': ['vue', 'vue-router', 'pinia'],
+          'vendor-element': ['element-plus', '@element-plus/icons-vue'],
+          'vendor-editor': ['@wangeditor/editor', '@wangeditor/editor-for-vue', '@tiptap/starter-kit', '@tiptap/vue-3'],
+          'vendor-markdown': ['marked'],
+          'vendor-utils': ['axios', 'qrcode']
+        }
+      }
+    }
   }
 })

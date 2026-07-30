@@ -492,11 +492,6 @@ const onContentComplete = (contentData) => {
   isDirty.value = true
   contentStatus.value = 'completed'
   finalContent.value = contentData || null
-  console.log('[CreationEditor] onContentComplete', {
-    contentData,
-    finalText: contentData?.final_text?.slice(0, 100),
-    finalContentSize: JSON.stringify(contentData || {}).length,
-  })
   // 不在这里调 goWorkflowStep —— 由 @next-step 事件统一处理导航
   ElMessage.success('正文生成完成，可切换到标题生成')
 }
@@ -510,12 +505,6 @@ const onTitleComplete = (titleData) => {
   if (titleData?._sourceText && !sourceText.value) {
     sourceText.value = titleData._sourceText
   }
-  console.log('[CreationEditor] onTitleComplete', {
-    titleData,
-    finalContent: finalContent.value,
-    contentStatus: contentStatus.value,
-    sourceTextFromTitle: titleData?._sourceText?.length || 0,
-  })
   showPublishChoice.value = true
 }
 // 标题确认后 → 保存草稿
@@ -570,13 +559,6 @@ const handlePublishAfterTitle = async () => {
     finalText = sourceText.value
   }
 
-  console.log('[PublishChoice] finalText length:', finalText.length, 'title:', titleText, {
-    finalContentRaw: finalContent.value,
-    selectedTitleRaw: selectedTitle.value,
-    isEditing: isEditing.value,
-    outlineDataRaw: currentOutlineData.value,
-    sourceTextLength: sourceText.value.length,
-  })
   if (!finalText) {
     ElMessage.warning('正文内容为空，编辑器将只显示标题。请先完成正文生成或在编辑器中手动输入。')
   }

@@ -218,12 +218,6 @@ onMounted(() => {
   const savedContent = sessionStorage.getItem('wechat_editor_content')
   const savedTitle = sessionStorage.getItem('wechat_editor_title')
   creationId.value = sessionStorage.getItem('wechat_editor_creation_id') || null
-  console.log('[WechatEditor] onMounted', {
-    hasContent: !!savedContent,
-    contentLength: savedContent?.length || 0,
-    contentPreview: (savedContent || '').slice(0, 100),
-    savedTitle,
-  })
   if (savedContent) {
     editorHtml.value = savedContent
     sessionStorage.removeItem('wechat_editor_content')

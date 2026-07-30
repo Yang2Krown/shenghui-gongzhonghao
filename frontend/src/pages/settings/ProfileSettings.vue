@@ -537,7 +537,6 @@ const handleAvatarChange = async (event) => {
     const response = await uploadAvatar(formData)
     // 添加时间戳避免缓存问题
     const avatarUrl = response.data.avatar_url + '?t=' + Date.now()
-    console.log('[Avatar] 上传成功, avatarUrl:', avatarUrl)
     userStore.updateUser({ avatar_url: avatarUrl })
     ElMessage.success('头像更新成功')
   } catch (e) {
