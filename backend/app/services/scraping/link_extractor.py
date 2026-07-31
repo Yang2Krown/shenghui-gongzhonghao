@@ -32,14 +32,25 @@ WECHAT_UA = (
     "NetType/WIFI Language/zh_CN"
 )
 
+# 抖音提取整体时间预算(秒):抖音链路串行(短链→机领网→WebAPI→HTML→yt-dlp→Ark)
+# 最坏数分钟,前端 60s 已超时,后端却仍烧 worker/连接甚至付 Ark 费。超预算即取消。
+# 模块级常量便于测试 monkeypatch 成小值。
+DOUYIN_EXTRACT_BUDGET_SECONDS = 45.0
+
 
 def extract_url_from_text(text: str) -> Optional[str]:
-    """从分享文本中提取 URL"""
+    """从分享文本中提取 URL。
+
+    字符集只含合法 URL 字符(ASCII 可见,排除空白/中文/全角/中文括号),
+    这样 App 复制的「… https://xhslink.com/a/AbC12）快看」里,
+    尾部紧跟的中文/全角括号会被天然切掉,不再靠脆弱的标点清单 rstrip。
+    """
     if not text:
         return None
-    m = re.search(r'https?://[^\s]+', text)
+    m = re.search(r'https?://[A-Za-z0-9\-._~:/?#@!$&\'*+,;=%]+', text)
     if m:
-        return m.group(0).rstrip('.,;:!?。，；：！？')
+        # 再剥一次末尾的半角标点(如句末的 . , ; ),它们虽在字符集内但不是 URL 一部分
+        return m.group(0).rstrip('.,;:!?\'')
     return None
 
 
@@ -277,6 +288,23 @@ def _xhs_is_blocked_page(html: str) -> bool:
     return any(marker in html for marker in XHS_BLOCKED_MARKERS)
 
 
+# 知乎登录墙/安全验证页特征（页面解析兜底时识别,避免把样板文案当正文）
+ZHIHU_BLOCKED_MARKERS = (
+    "安全验证",
+    "验证码",
+    "请完成安全验证",
+    "unhuman",           # 知乎反爬拦截页 URL/标记
+    "请登录",
+    "登录后查看",
+    "知乎 - 有问题，就会有答案",  # 登录墙通用 title
+)
+
+
+def _zhihu_is_blocked_page(html: str) -> bool:
+    """识别知乎登录墙/风控页（仅在页面解析兜底分支调用）"""
+    return any(marker in html for marker in ZHIHU_BLOCKED_MARKERS)
+
+
 def _xhs_blocked_result(url: str) -> dict:
     """命中风控/登录墙：字段为空 + blocked 标记，交给付费兜底，不抛异常"""
     return {
@@ -392,10 +420,6 @@ def _parse_xhs_html(html: str, url: str) -> dict:
     # 清理标题中的 " - 小红书" 后缀
     title = re.sub(r'\s*[-–—]\s*小红书\s*$', '', title)
 
-    # 提取描述内容
-    desc_match = re.search(r'content="([^"]*?)"', html)
-    content = desc_match.group(1).strip() if desc_match else ''
-
     # 提取作者
     author = ''
     author_match = re.search(r'"nickname"\s*:\s*"([^"]+)"', html)
@@ -405,6 +429,10 @@ def _parse_xhs_html(html: str, url: str) -> dict:
     def meta(name: str) -> str:
         match = re.search(rf'<meta[^>]+(?:property|name)=["\']{re.escape(name)}["\'][^>]+content=["\']([^"\']*)', html, re.I)
         return match.group(1).strip() if match else ''
+
+    # 提取描述内容：锚定 og:description/description meta,不能全文裸搜 content="..."
+    # (否则会抓到 viewport/keywords 等排在最前的 content 属性,把垃圾串当正文)
+    content = meta('og:description') or meta('description')
 
     return {
         "note_id": _xhs_note_id_from_url(url) or '',
@@ -873,6 +901,11 @@ async def _extract_via_api(url: str, cookie: str = None) -> Dict[str, Any]:
     except httpx.HTTPStatusError as e:
         logger.error(f"知乎 API 请求失败: {e.response.status_code}")
         return {"title": "", "content": f"API 请求失败，状态码: {e.response.status_code}", "author": "", "tags": [], "platform": "zhihu"}
+    except Exception as e:
+        # 捕获 ConnectError/ReadTimeout/JSONDecodeError/UnsafeURL 等,返回"请求失败"
+        # 结构让 extract_zhihu 继续走 Jina/页面兜底,而不是异常直达路由 500 短路全部降级
+        logger.warning(f"知乎 API 提取异常(将尝试兜底): {type(e).__name__}: {e}")
+        return {"title": "", "content": f"API 请求失败: {type(e).__name__}", "author": "", "tags": [], "platform": "zhihu"}
 
 
 async def extract_zhihu(url: str, cookie: str = None) -> Dict[str, Any]:
@@ -921,6 +954,11 @@ async def _extract_zhihu_page(url: str, cookie: str = None) -> Dict[str, Any]:
         title = ""
         content = ""
         author = ""
+
+        # 先识别登录墙/风控页(xhs 有同款识别,zhihu 之前没有会把样板文案当正文)
+        if _zhihu_is_blocked_page(html):
+            logger.warning(f"知乎疑似登录墙/风控页: {url}")
+            return {"title": "", "content": "提取失败，知乎要求登录或触发了安全验证，请改用「粘贴文字」", "author": "", "tags": [], "platform": "zhihu"}
 
         # 提取标题
         title_match = re.search(r'<h1[^>]*class="QuestionHeader-title"[^>]*>(.*?)</h1>', html)
@@ -990,8 +1028,22 @@ async def extract_link_content(url: str, cookie: str = None) -> Dict[str, Any]:
     elif platform == 'gzh':
         return await extract_wechat(actual_url, cookie)
     elif platform == 'douyin':
-        # 抖音需要传入原始分享文本（包含文案）
-        return await extract_douyin(url, cookie)
+        # 抖音需要传入原始分享文本（包含文案）。
+        # 整体时间预算兜底:抖音链路串行(短链→机领网→WebAPI→HTML→yt-dlp→Ark)
+        # 最坏数分钟,前端 60s 已超时,后端却仍烧 worker/连接甚至付 Ark 视频分析费。
+        # 超预算即取消任务并返回失败,不再无界执行。
+        budget = DOUYIN_EXTRACT_BUDGET_SECONDS
+        try:
+            return await asyncio.wait_for(extract_douyin(url, cookie), timeout=budget)
+        except asyncio.TimeoutError:
+            logger.warning(f"抖音提取超 {budget:.0f}s 预算,已取消: {url[:80]}")
+            return {
+                "title": "",
+                "content": "请求失败，抖音链接提取超时，请稍后重试或改用「粘贴文字」",
+                "author": "",
+                "tags": [],
+                "platform": "douyin",
+            }
     elif platform == 'zhihu':
         return await extract_zhihu(actual_url, cookie)
     else:

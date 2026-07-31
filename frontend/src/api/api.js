@@ -188,7 +188,8 @@ export const uploadFile = (file) => {
  * @returns {Promise<{title: string, content: string, author: string, platform: string}>}
  */
 export const extractLinkContent = (url) => {
-  return api.post('/creation-tools/extract-link', { url }, { timeout: 30000 })
+  // 60s:对齐后端小红书排队+慢抓取、抖音串行策略的最坏耗时,避免慢链接被误判"提取失败"
+  return api.post('/creation-tools/extract-link', { url }, { timeout: 60000 })
 }
 
 /**
