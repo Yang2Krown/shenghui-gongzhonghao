@@ -6,12 +6,64 @@
 """
 
 import logging
+import re
 from typing import Optional
 
 from app.services.llm import get_llm_client
 from app.services.llm.llm_client import ChatMessage, parse_json_loose
 
 logger = logging.getLogger(__name__)
+
+# 喂给 LLM 的原文上限。DeepSeek-V3 上下文 64K，30K 字符（约 2 万 token）很安全。
+# 商单 brief 常把「禁忌/红线」「审核要求」「发布时间」放在文档末尾，
+# 简单从头砍会整段丢失，导致 banned/must_cover/publish 字段为空（看似“解析被截断”）。
+_MAX_INPUT_CHARS = 30000
+
+# 命中这些词的段落，在超长截断时优先保留（多为 brief 尾部的高价值约束）。
+_KEY_FIELD_RE = re.compile(
+    r"禁忌|红线|不得|禁止|必须|务必|勿|审核|审稿|确认|档期|发布时间|发布|排期|"
+    r"违禁|敏感|合规|注意事项|附加|备注|邀约|福利|优惠|链接|邀请码",
+    re.IGNORECASE,
+)
+
+
+def _smart_truncate(text: str, limit: int = _MAX_INPUT_CHARS) -> str:
+    """超长时智能截断：保开头 + 优先保留含关键约束词的段落，避免尾部红线/审核丢失。"""
+    if len(text) <= limit:
+        return text
+
+    paragraphs = [p.strip() for p in re.split(r"\n+", text) if p.strip()]
+    head_budget = int(limit * 0.6)   # 开头背景/产品介绍占 60%
+    tail_budget = limit - head_budget  # 关键段落占 40%
+
+    head_parts, used = [], 0
+    for p in paragraphs:
+        if used + len(p) > head_budget:
+            # 该段放不下：若开头还没收到任何内容，按字符切下开头的剩余额度，
+            # 避免“第一段就是巨段”导致开头全丢。
+            if not head_parts:
+                head_parts.append(text[:head_budget])
+                used = head_budget
+            break
+        head_parts.append(p)
+        used += len(p)
+    head_text = "\n".join(head_parts)
+
+    # 从全文收集命中关键词的段落（保持原顺序、去掉已进开头的），塞进剩余预算
+    key_parts, used_tail = [], 0
+    for p in paragraphs:
+        if p in head_parts or p in head_text:
+            continue
+        if _KEY_FIELD_RE.search(p) and used_tail + len(p) <= tail_budget:
+            key_parts.append(p)
+            used_tail += len(p)
+
+    kept = head_parts + key_parts
+    logger.info(
+        f"[brief 总结] 原文 {len(text)} 字超上限，智能截断为 {sum(len(p) for p in kept)} 字"
+        f"（开头 {len(head_parts)} 段 + 关键段落 {len(key_parts)} 段）"
+    )
+    return "\n".join(kept)
 
 _SYS = """你是商单 brief 分析助手。下面是品牌方给博主的「商单写作要求」原文（可能含排版噪音、表格、图片占位）。
 请把它归纳成结构化 JSON，**只输出 JSON**，字段如下（缺失填 null 或空数组，不要编造）：
@@ -37,13 +89,13 @@ async def summarize_brief(raw_text: str, title: str = "") -> dict:
     if not text:
         return _fallback("", title)
 
-    user = (f"文档标题：{title}\n\n" if title else "") + f"原文：\n{text[:12000]}"
+    user = (f"文档标题：{title}\n\n" if title else "") + f"原文：\n{_smart_truncate(text)}"
     client = get_llm_client()
     try:
         res = await client.chat(
             [ChatMessage(role="system", content=_SYS),
              ChatMessage(role="user", content=user)],
-            max_tokens=3000,  # deepseek 推理模型先吃 reasoning，给足空间避免 JSON 被截
+            max_tokens=4000,  # deepseek 推理模型先吃 reasoning，给足空间避免 JSON 被截
             json_mode=True,
         )
         data = res.parsed or parse_json_loose(res.text)
