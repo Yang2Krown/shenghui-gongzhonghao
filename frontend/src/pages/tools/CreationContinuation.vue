@@ -347,7 +347,7 @@ const inputModes = [
 
 const styleChips = ['呼应开头', '金句收尾', '行动号召', '反思升华', '故事延续', '悬念留白']
 
-const mode = ref('text')
+const mode = ref('file')
 const contentText = ref('')
 const fileName = ref('')
 const fileText = ref('')

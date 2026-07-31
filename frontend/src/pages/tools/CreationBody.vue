@@ -132,7 +132,7 @@ const submitting = ref(false)
 
 const styleChips = ['理性克制', '犀利观点', '亲切口语', '故事化', '干货清单', '反共识']
 
-const inputMode = ref('text')
+const inputMode = ref('file')
 const outlineText = ref('')
 const fileName = ref('')
 const fileText = ref('')

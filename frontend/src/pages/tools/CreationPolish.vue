@@ -387,7 +387,7 @@ const inputModes = [
   { key: 'text', label: '文本' },
 ]
 
-const mode = ref('text')
+const mode = ref('file')
 const title = ref('')
 const contentText = ref('')
 const preference = ref('')
