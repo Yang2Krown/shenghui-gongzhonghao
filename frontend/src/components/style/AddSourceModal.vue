@@ -48,40 +48,16 @@
       <div v-if="tab === 'file'" class="modal-field">
         <label>
           上传文件
-          <span class="field-hint">支持 PDF / DOCX 格式</span>
+          <span class="field-hint">支持 PDF / DOCX / 图片</span>
         </label>
-        <div v-if="!file" class="file-drop-zone">
-          <div class="file-drop-icon">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-          </div>
-          <p class="file-drop-text">拖拽文件到此处，或 <span class="file-drop-browse">点击选择文件</span></p>
-          <p class="file-drop-hint">PDF / DOCX / 图片，建议单文件 20MB 以内</p>
-          <input
-            type="file"
-            accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp"
-            class="file-input-hidden"
-            @change="handleFileDrop"
-          />
-        </div>
-        <div v-else class="file-selected-card">
-          <div class="file-selected-icon">
-            {{ file.name.toLowerCase().endsWith('.pdf') ? '📕' : file.name.toLowerCase().match(/\.(png|jpg|jpeg|webp)$/) ? '🖼️' : '📘' }}
-          </div>
-          <div class="file-selected-info">
-            <div class="file-selected-name">{{ file.name }}</div>
-            <div class="file-selected-size">{{ (file.size / 1024 / 1024).toFixed(1) }} MB</div>
-          </div>
-          <button class="file-remove-btn" @click="file = null" title="移除文件">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
-        </div>
+        <FileUploadZone
+          v-model="fileName"
+          policy="style"
+          :meta-text="file ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : ''"
+          title="点击或拖拽上传 PDF / Word / TXT / MD / 图片"
+          @select="onFileSelect"
+          @remove="removeFile"
+        />
       </div>
 
       <div v-if="error" class="modal-error">{{ error }}</div>
@@ -103,6 +79,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { addStyleSource, uploadStyleSourceFile } from '@/api/style'
+import FileUploadZone from '@/components/upload/FileUploadZone.vue'
 
 const emit = defineEmits(['done', 'close'])
 
@@ -110,6 +87,7 @@ const tab = ref('text')
 const title = ref('')
 const text = ref('')
 const file = ref(null)
+const fileName = ref('')
 const loading = ref(false)
 const error = ref('')
 
@@ -120,17 +98,14 @@ const canSubmit = computed(() => {
   return false
 })
 
-const handleFileDrop = (e) => {
-  const f = e.target?.files?.[0]
-  if (!f) return
-  const name = f.name.toLowerCase()
-  const validExts = ['.pdf', '.docx', '.png', '.jpg', '.jpeg', '.webp']
-  const isValid = validExts.some(ext => name.endsWith(ext))
-  if (!isValid) {
-    error.value = '支持 PDF、DOCX、PNG、JPG 格式'
-    return
-  }
+// 组件已做类型/大小校验(非法的被拦下并 toast),这里只接住合法 File,提交时再上传
+const onFileSelect = (f) => {
   file.value = f
+  error.value = ''
+}
+
+const removeFile = () => {
+  file.value = null
   error.value = ''
 }
 
@@ -286,88 +261,6 @@ const handleSubmit = async () => {
   font-size: 12px;
   color: var(--ink-4, #999);
   margin-top: 4px;
-}
-
-.file-drop-zone {
-  border: 2px dashed var(--line, #e5e5e5);
-  border-radius: 12px;
-  padding: 32px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  position: relative;
-}
-
-.file-drop-zone:hover {
-  border-color: var(--clay, #cc785c);
-  background: var(--clay-tint, #fdf0ec);
-}
-
-.file-input-hidden {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.file-drop-icon {
-  color: var(--ink-4, #999);
-  margin-bottom: 12px;
-}
-
-.file-drop-text {
-  font-size: 14px;
-  color: var(--ink-3, #666);
-}
-
-.file-drop-browse {
-  color: var(--clay, #cc785c);
-  text-decoration: underline;
-}
-
-.file-drop-hint {
-  font-size: 12px;
-  color: var(--ink-4, #999);
-  margin-top: 8px;
-}
-
-.file-selected-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  background: var(--bone, #f5f5f5);
-  border-radius: 8px;
-}
-
-.file-selected-icon {
-  font-size: 24px;
-}
-
-.file-selected-info {
-  flex: 1;
-}
-
-.file-selected-name {
-  font-size: 14px;
-  color: var(--ink, #333);
-}
-
-.file-selected-size {
-  font-size: 12px;
-  color: var(--ink-4, #999);
-}
-
-.file-remove-btn {
-  background: none;
-  border: none;
-  color: var(--ink-4, #999);
-  cursor: pointer;
-  padding: 4px;
-}
-
-.file-remove-btn:hover {
-  color: #e74c3c;
 }
 
 .modal-error {

@@ -78,11 +78,7 @@
               <div style="font-size: 14px; font-weight: 600; color: var(--ink);">封面图</div>
               <div style="font-size: 12px; color: var(--ink-4);">公众号草稿必须带封面图</div>
             </div>
-            <div style="display: flex; gap: 8px;">
-              <label class="cover-btn cover-btn-upload">
-                <el-icon><Upload /></el-icon> 上传
-                <input type="file" accept="image/*" style="display:none" @change="handleCoverUpload" />
-              </label>
+            <div style="display: flex; gap: 8px; align-items: center;">
               <!-- AI 封面：暂时隐藏，保留代码以便日后恢复
               <button class="cover-btn cover-btn-ai" @click="handleGenerateCover" :disabled="generatingCover">
                 <el-icon v-if="generatingCover" class="spin"><Loading /></el-icon>
@@ -96,6 +92,17 @@
                 {{ bingLoading ? '加载中...' : 'Bing 每日一图' }}
               </button>
             </div>
+          </div>
+
+          <!-- 本地封面上传 -->
+          <div style="margin-top: 10px;">
+            <FileUploadZone
+              v-model="coverFileName"
+              policy="cover"
+              title="点击或拖拽上传封面图"
+              @select="onCoverSelect"
+              @remove="removeCover"
+            />
           </div>
 
           <!-- Bing 每日一图选择器 -->
@@ -153,8 +160,9 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { EditPen, Promotion, CopyDocument, Upload, Loading, Picture } from '@element-plus/icons-vue'
+import { EditPen, Promotion, CopyDocument, Loading, Picture } from '@element-plus/icons-vue'
 import WechatRichEditor from '@/components/ui/WechatRichEditor.vue'
+import FileUploadZone from '@/components/upload/FileUploadZone.vue'
 import { get, createWechatDraft, generateWechatCover, getBingImages } from '@/api/api'
 import { markCreationPublished } from '@/api/creation'
 
@@ -181,6 +189,7 @@ const digest = ref('')
 const coverPreview = ref('')
 const coverBase64 = ref('')
 const coverFile = ref(null)
+const coverFileName = ref('')
 const generatingCover = ref(false)
 const coverError = ref('')
 
@@ -337,10 +346,8 @@ const copyPlainText = () => {
 }
 
 // 封面图
-const handleCoverUpload = (e) => {
-  const file = e.target.files?.[0]
+const onCoverSelect = (file) => {
   if (!file) return
-  if (file.size > 5 * 1024 * 1024) { ElMessage.error('封面图不能超过 5MB'); return }
   coverFile.value = file
   coverError.value = ''
   const reader = new FileReader()
@@ -354,6 +361,7 @@ const removeCover = () => {
   coverPreview.value = ''
   coverBase64.value = ''
   coverFile.value = null
+  coverFileName.value = ''
 }
 const handleGenerateCover = async () => {
   if (!articleTitle.value && !editorHtml.value) {
@@ -371,6 +379,8 @@ const handleGenerateCover = async () => {
     if (data.url) {
       coverPreview.value = data.url
       coverBase64.value = ''
+      coverFile.value = null
+      coverFileName.value = ''
       ElMessage.success('封面生成成功')
     }
   } catch (e) {
@@ -405,6 +415,7 @@ const selectBingImage = (img) => {
   coverPreview.value = img.url
   coverBase64.value = ''   // 远程 URL，发布走 cover_image_url 分支
   coverFile.value = null
+  coverFileName.value = ''
   coverError.value = ''
   bingPickerOpen.value = false
 }

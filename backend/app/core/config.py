@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     AIGOCODE_MODEL: str = "claude-opus-4-8-r"
     TONGYI_API_KEY: Optional[str] = None
     TONGYI_API_BASE: str = "https://dashscope.aliyuncs.com/api/v1"
+    # 图片/扫描版 PDF 的视觉 OCR(dashscope qwen-vl,走 OpenAI 兼容端点)。
+    # 复用 dashscope 系列里任一已配置的 key,无需单独申请。
+    VISION_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    VISION_MODEL: str = "qwen-vl-plus"
+    VISION_MAX_TOKENS: int = 2048
 
     # 默认 LLM provider 切换（deepseek / anthropic / openai / aigocode）
     LLM_PROVIDER: str = "deepseek"

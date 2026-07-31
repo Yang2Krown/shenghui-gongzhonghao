@@ -27,7 +27,7 @@
         <div style="padding: 22px;">
           <div class="form-section">
             <label class="form-label">产品 / 工具名 <span class="req">*</span></label>
-            <input class="input" v-model="form.product" type="text" placeholder="请输入产品名称">
+            <input data-testid="practical-product-name" class="input" v-model="form.product" type="text" placeholder="请输入产品名称">
           </div>
           <div class="form-section">
             <label class="form-label">商单 brief <span class="opt">选填</span></label>
@@ -86,20 +86,34 @@
                       <button @click="source.fileName = ''; source.file = null" class="btn-text text-sm">移除</button>
                     </div>
                   </div>
-                  <div v-else class="dropzone" @click="$refs['fileInput' + index]?.click()">
+                  <label v-else class="dropzone"
+                    :class="{ 'dropzone-active': source.dragOver }"
+                    :data-testid="`brief-upload-dropzone-${index}`"
+                    role="button"
+                    tabindex="0"
+                    :aria-label="`上传第 ${index + 1} 份商单 brief 文件`"
+                    @dragover.prevent="source.dragOver = true"
+                    @dragleave="source.dragOver = false"
+                    @drop.prevent="(e) => handleSourceDrop(source, e)"
+                    @keydown.enter.prevent="openBriefFilePicker"
+                    @keydown.space.prevent="openBriefFilePicker">
                     <el-icon :size="22" style="margin: 0 auto 6px;"><Upload /></el-icon>
-                    <div class="text-sm font-medium">点击或拖拽上传 PDF / Word / TXT / MD</div>
-                  </div>
-                  <input :ref="'fileInput' + index" type="file" accept=".pdf,.docx,.txt,.md" style="display:none"
-                    @change="(e) => handleSourceFile(source, e)" />
+                    <div class="text-sm font-medium">点击或拖拽上传 PDF / Word / TXT / MD / 图片</div>
+                    <input type="file"
+                      :data-testid="`brief-upload-input-${index}`"
+                      :accept="briefAccept"
+                      tabindex="-1"
+                      style="display:none"
+                      @change="(e) => handleSourceFile(source, e)" />
+                  </label>
                 </div>
               </div>
 
               <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
-                <button @click="addBriefSource" class="btn-ghost" style="border-style: dashed;">
+                <button data-testid="brief-add-source" @click="addBriefSource" class="btn-ghost" style="border-style: dashed;">
                   <el-icon :size="15"><Plus /></el-icon> 添加 brief
                 </button>
-                <button class="btn-clay" style="padding: 8px 16px;" :disabled="briefLoading" @click="importBrief">
+                <button data-testid="brief-import" class="btn-clay" style="padding: 8px 16px;" :disabled="briefLoading" @click="importBrief">
                   <template v-if="briefLoading">
                     <el-icon class="is-loading" :size="14"><Loading /></el-icon> 解析中...
                   </template>
@@ -112,7 +126,7 @@
 
             <!-- 已解析：结构化卡片 + 折叠的原文 -->
             <template v-else>
-              <BriefStructuredCard :brief="structuredBrief">
+              <BriefStructuredCard data-testid="brief-structured-card" :brief="structuredBrief">
                 <template #actions>
                   <el-button text size="small" @click="clearBrief">清除</el-button>
                 </template>
@@ -426,6 +440,7 @@ import { useAgentProgress } from '@/composables/useAgentProgress'
 import { publishToWechatEditor } from '@/utils/publishToEditor'
 import api from '@/api/api'
 import { marked } from 'marked'
+import { validateUploadFile, UPLOAD_POLICIES } from '@/utils/uploadPolicy'
 import { useCreditStore } from '@/stores/credit'
 import CreditHint from '@/components/credit/CreditHint.vue'
 
@@ -451,12 +466,14 @@ const sourceKinds = [
   { key: 'link', label: '链接' },
   { key: 'text', label: '文本' },
 ]
-const briefSources = ref([{ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '' }])
+const briefSources = ref([{ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '', dragOver: false }])
 const briefLoading = ref(false)
 const structuredBrief = ref(null)
 const showRawBrief = ref(false)
+// 商单 brief 可上传类型(含图片,后端 qwen-vl OCR),与 uploadPolicy.brief 对齐
+const briefAccept = UPLOAD_POLICIES.brief.accept
 
-const clearBrief = () => { structuredBrief.value = null; form.value.brief = ''; briefSources.value = [{ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '' }]; showRawBrief.value = false }
+const clearBrief = () => { structuredBrief.value = null; form.value.brief = ''; briefSources.value = [{ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '', dragOver: false }]; showRawBrief.value = false }
 
 // 获取链接类型图标
 const getLinkType = (url) => {
@@ -590,15 +607,33 @@ const addFeature = () => {
 const unwrap = (res) => (res && res.data !== undefined ? res.data : res)
 
 const addBriefSource = () => {
-  briefSources.value.push({ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '' })
+  briefSources.value.push({ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '', dragOver: false })
+}
+
+const setBriefSourceFile = (source, file) => {
+  if (!file) return
+  const errorMessage = validateUploadFile(file, 'brief')
+  if (errorMessage) {
+    ElMessage.error(errorMessage)
+    return
+  }
+  source.file = file
+  source.fileName = file.name
+}
+
+const openBriefFilePicker = (event) => {
+  event.currentTarget.querySelector('input[type="file"]')?.click()
 }
 
 const handleSourceFile = (source, e) => {
-  const file = e.target.files?.[0]
-  if (file) {
-    source.file = file
-    source.fileName = file.name
-  }
+  setBriefSourceFile(source, e.target.files?.[0])
+  // 允许移除后重新选择同一文件。
+  e.target.value = ''
+}
+
+const handleSourceDrop = (source, e) => {
+  source.dragOver = false
+  setBriefSourceFile(source, e.dataTransfer?.files?.[0])
 }
 
 // 把结构化 brief 拼成可读文本，喂进 research 的 brief
@@ -850,8 +885,10 @@ onUnmounted(() => progress.stop())
 .seg-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: none; background: transparent; color: var(--ink-3); font-family: inherit; font-size: 13px; font-weight: 600; border-radius: var(--r-pill); cursor: pointer; transition: all .18s; }
 .seg-btn:hover { color: var(--ink); }
 .seg-btn-active { background: var(--paper); color: var(--clay-deep); box-shadow: var(--sh-1); }
-.dropzone { border: 1px dashed var(--line); border-radius: var(--r-lg); background: var(--paper); padding: 22px; text-align: center; cursor: pointer; transition: all .15s; color: var(--ink-3); }
+.dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 104px; box-sizing: border-box; border: 1px dashed var(--line); border-radius: var(--r-lg); background: var(--paper); padding: 22px; text-align: center; cursor: pointer; transition: all .15s; color: var(--ink-3); }
 .dropzone:hover { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
+.dropzone-active { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
+.dropzone:focus-visible { outline: 2px solid var(--clay); outline-offset: 3px; border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
 .btn-ghost { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: 1.5px solid var(--line); border-radius: var(--r-md); background: transparent; color: var(--ink-3); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: all .18s; }
 .btn-ghost:hover { border-color: var(--clay-soft); color: var(--clay-deep); background: var(--ivory); }
 .btn-text { background: none; border: none; cursor: pointer; font-family: inherit; }

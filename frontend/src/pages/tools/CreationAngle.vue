@@ -95,33 +95,11 @@
           </div>
 
           <div v-else-if="source.kind === 'file'">
-            <div v-if="source.fileUploading" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
-              <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
-              <span class="text-sm text-ink-3">正在提取文件内容…</span>
-            </div>
-            <div v-else-if="source.fileName" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
-              <div style="display: flex; align-items: center; justify-content: space-between;">
-                <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
-                  <el-icon class="text-clay"><Document /></el-icon> {{ source.fileName }}
-                  <span v-if="source.fileText" class="text-xs text-ink-4">· {{ source.fileText.length }} 字</span>
-                </span>
-                <button @click="removeFile(source)" class="btn-text text-sm">移除</button>
-              </div>
-              <div v-if="source.fileText" class="text-xs text-ink-4" style="margin-top: 8px; max-height: 60px; overflow: hidden; line-height: 1.5;">
-                {{ source.fileText.slice(0, 200) }}…
-              </div>
-            </div>
-            <div v-else class="dropzone" :class="{ 'dropzone-active': source.dragOver }"
-              @click="triggerFileInput(index)"
-              @dragover.prevent="source.dragOver = true"
-              @dragleave="source.dragOver = false"
-              @drop="handleFileDrop(source, $event)">
-              <el-icon :size="22" style="margin: 0 auto 6px;"><Upload /></el-icon>
-              <div class="text-sm font-medium">点击或拖拽上传 PDF / Word / TXT / MD</div>
-              <div class="text-xs text-ink-4" style="margin-top: 2px;">单文件不超过 20MB</div>
-            </div>
-            <input :ref="(el) => setFileInputRef(el, index)" type="file" accept=".pdf,.docx,.txt,.md" style="display:none"
-              @change="(e) => handleFileUpload(source, e)" />
+            <FileUploadZone v-model="source.fileName" policy="reference" :uploading="source.fileUploading"
+              :meta-text="source.fileText ? `${source.fileText.length} 字` : ''"
+              :preview-text="source.fileText ? source.fileText.slice(0, 200) + '…' : ''"
+              title="点击或拖拽上传 PDF / Word / TXT / MD / 图片"
+              @select="(file) => onFileSelect(source, file)" @remove="removeFile(source)" />
           </div>
         </div>
         <button @click="addSource" class="btn-ghost" style="border-style: dashed; margin-top: 8px;">
@@ -300,16 +278,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  EditPen, Document, Delete, Plus, Upload, Link,
+  EditPen, Document, Delete, Plus, Link,
   Edit, Loading, Refresh, ArrowRight, CopyDocument, Check, Promotion
 } from '@element-plus/icons-vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
 import { publishToWechatEditor } from '@/utils/publishToEditor'
 import PublishChoiceDialog from '@/components/PublishChoiceDialog.vue'
+import FileUploadZone from '@/components/upload/FileUploadZone.vue'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
 
 const router = useRouter()
@@ -330,14 +309,12 @@ const sources = ref([{
   fileName: '',
   fileText: '',
   fileUploading: false,
-  dragOver: false,
   linkExtracting: false,
   linkTitle: '',
   linkContent: '',
   linkPlatform: '',
   linkAuthor: '',
 }])
-const fileInputs = reactive({})
 const preference = ref('')
 
 // ── 面板状态 ──
@@ -439,7 +416,6 @@ const addSource = () => {
     fileName: '',
     fileText: '',
     fileUploading: false,
-    dragOver: false,
     linkExtracting: false,
     linkTitle: '',
     linkContent: '',
@@ -450,19 +426,6 @@ const addSource = () => {
 
 const removeSource = (index) => {
   sources.value.splice(index, 1)
-  delete fileInputs[index]
-}
-
-const setFileInputRef = (el, index) => {
-  if (el) fileInputs[index] = el
-}
-
-const triggerFileInput = (index) => {
-  const input = fileInputs[index]
-  if (input) {
-    input.value = ''
-    input.click()
-  }
 }
 
 const toggleStyleChip = (chip) => {
@@ -475,11 +438,9 @@ const toggleStyleChip = (chip) => {
   }
 }
 
-const handleFileUpload = async (source, event) => {
-  const file = event.target.files?.[0]
+const onFileSelect = async (source, file) => {
   if (!file) return
 
-  source.fileName = file.name
   source.fileUploading = true
   source.fileText = ''
 
@@ -531,32 +492,6 @@ const handleLinkExtract = async (source) => {
     source.linkPlatform = ''
   } finally {
     source.linkExtracting = false
-  }
-}
-
-const handleFileDrop = async (source, event) => {
-  event.preventDefault()
-  source.dragOver = false
-  const file = event.dataTransfer?.files?.[0]
-  if (!file) return
-
-  source.fileName = file.name
-  source.fileUploading = true
-  source.fileText = ''
-
-  try {
-    const res = await uploadFile(file)
-    const data = res.data || res
-    source.fileText = data.text || ''
-    if (!source.fileText) {
-      ElMessage.warning('文件内容提取为空，请检查文件')
-      source.fileName = ''
-    }
-  } catch (err) {
-    ElMessage.error(err?.response?.data?.detail || '文件上传失败')
-    source.fileName = ''
-  } finally {
-    source.fileUploading = false
   }
 }
 
@@ -751,9 +686,6 @@ const reshuffleCandidates = () => {
 }
 .cta-bar:hover:not([disabled]) { transform: translateY(-2px); box-shadow: 0 16px 38px rgba(204,120,92,.38); }
 .cta-bar[disabled] { background: var(--bone); color: var(--ink-4); box-shadow: none; cursor: not-allowed; transform: none; }
-.dropzone { border: 1px dashed var(--line); border-radius: var(--r-lg); background: var(--paper); padding: 22px; text-align: center; cursor: pointer; transition: all .15s; color: var(--ink-3); }
-.dropzone:hover { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
-.dropzone-active { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
 .type-chip { display: inline-flex; align-items: center; gap: 4px; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 500; background: var(--paper); color: #6B6862; border: 1px solid var(--line); cursor: pointer; transition: all 0.15s; }
 .type-chip:hover { background: #F0EDE3; color: var(--ink); }
 .type-chip-active { background: var(--clay); color: #fff; border-color: var(--clay); }

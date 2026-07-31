@@ -1,6 +1,6 @@
 """
 从上传的文件中提取纯文本，供风格分析使用。
-支持：PDF / DOCX / TXT / MD / 图片（OpenAI Vision OCR）。
+支持：PDF / DOCX / TXT / MD / 图片 / 扫描版 PDF(dashscope qwen-vl 视觉 OCR)。
 """
 import base64
 import io
@@ -54,27 +54,30 @@ def _extract_pdf(data: bytes) -> str:
 
 
 async def _ocr_pdf_via_vision(data: bytes) -> str:
-    """扫描版 PDF 兜底：逐页转图片走 Vision OCR。需要 pdf2image + poppler。"""
-    if not settings.OPENAI_API_KEY:
-        logger.warning("未配置 OPENAI_API_KEY，跳过 PDF OCR 兜底")
+    """扫描版 PDF 兜底：用 PyMuPDF 逐页转图片走视觉 OCR(qwen-vl)。"""
+    if not _vision_api_key():
+        logger.warning("未配置 dashscope key(TONGYI/EMBEDDING)，跳过 PDF OCR 兜底")
         return ""
     try:
-        from pdf2image import convert_from_bytes
+        import fitz  # PyMuPDF
     except ImportError:
-        logger.warning("未安装 pdf2image，无法对扫描 PDF 做 OCR。pip install pdf2image 并安装 poppler")
+        logger.warning("未安装 PyMuPDF，无法对扫描 PDF 做 OCR。pip install PyMuPDF")
         return ""
 
     try:
-        images = convert_from_bytes(data, dpi=150)
+        doc = fitz.open(stream=data, filetype="pdf")
     except Exception as e:
-        logger.error(f"PDF 转图片失败: {e}")
+        logger.error(f"扫描 PDF 打开失败: {e}")
         return ""
 
     pieces = []
-    for idx, img in enumerate(images[:20]):  # 限 20 页，防超额
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        text = await _extract_image_via_vision(buf.getvalue(), "image/png")
+    for idx in range(min(len(doc), 20)):  # 限 20 页，防超额
+        try:
+            png = doc[idx].get_pixmap(dpi=150).tobytes("png")
+        except Exception as e:
+            logger.warning(f"PDF 第 {idx+1} 页转图失败: {e}")
+            continue
+        text = await _extract_image_via_vision(png, "image/png")
         logger.info(f"PDF OCR 第 {idx+1} 页字符数: {len(text)}")
         if text:
             pieces.append(text)
@@ -114,29 +117,30 @@ def _extract_text(data: bytes) -> str:
     return data.decode("utf-8", errors="ignore").strip()
 
 
+def _vision_api_key() -> Optional[str]:
+    """视觉 OCR 用的 dashscope key:优先 TONGYI,回退到 embedding 的 dashscope key。"""
+    return settings.TONGYI_API_KEY or settings.EMBEDDING_API_KEY
+
+
 async def _extract_image_via_vision(data: bytes, mime: str) -> str:
-    """用 OpenAI Vision 对图片 OCR / 内容描述。"""
-    if not settings.OPENAI_API_KEY:
-        logger.warning("未配置 OPENAI_API_KEY，跳过图片 OCR")
+    """用 dashscope qwen-vl 对图片 OCR / 内容描述(OpenAI 兼容端点)。"""
+    api_key = _vision_api_key()
+    if not api_key:
+        logger.warning("未配置 dashscope key(TONGYI/EMBEDDING)，跳过图片 OCR")
         return ""
 
     try:
         import openai
 
         client = openai.AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_API_BASE,
+            api_key=api_key,
+            base_url=settings.VISION_API_BASE,
         )
         b64 = base64.b64encode(data).decode()
         data_url = f"data:{mime or 'image/png'};base64,{b64}"
 
-        # 选择支持视觉的模型；DEFAULT_AI_MODEL 可能不支持，使用 gpt-4o-mini 兜底
-        model = settings.DEFAULT_AI_MODEL
-        if "gpt-4" not in model and "gpt-4o" not in model:
-            model = "gpt-4o-mini"
-
         resp = await client.chat.completions.create(
-            model=model,
+            model=settings.VISION_MODEL,
             messages=[
                 {
                     "role": "user",
@@ -150,7 +154,7 @@ async def _extract_image_via_vision(data: bytes, mime: str) -> str:
                 }
             ],
             temperature=0,
-            max_tokens=1500,
+            max_tokens=settings.VISION_MAX_TOKENS,
         )
         return (resp.choices[0].message.content or "").strip()
     except Exception as e:

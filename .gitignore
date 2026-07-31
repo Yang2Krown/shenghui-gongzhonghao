@@ -56,6 +56,9 @@ Thumbs.db
 # Test / temp
 /tmp/
 seed_test.db
+cypress/screenshots/
+cypress/videos/
+output/playwright/
 
 # Dev tools (local only)
 .agents/

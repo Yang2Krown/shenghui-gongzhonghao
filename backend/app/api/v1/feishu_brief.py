@@ -244,6 +244,11 @@ async def brief_upload(
     except Exception as e:
         logger.error(f"brief 文件解析失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="文件解析失败")
+    if not text or not text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="未能从文件中提取到文字内容（可能是空白文件、扫描件过于模糊或文件已加密），请上传文字版 PDF/Word，或改用粘贴文本",
+        )
     return BriefReadResponse(title=file.filename or "", raw_text=text)
 
 

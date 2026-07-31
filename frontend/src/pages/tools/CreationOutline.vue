@@ -84,32 +84,11 @@
             </div>
           </div>
           <div v-else-if="source.kind === 'file'">
-            <div v-if="source.fileUploading" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
-              <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
-              <span class="text-sm text-ink-3">正在提取文件内容…</span>
-            </div>
-            <div v-else-if="source.fileName" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
-              <div style="display: flex; align-items: center; justify-content: space-between;">
-                <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
-                  <el-icon class="text-clay"><Document /></el-icon> {{ source.fileName }}
-                  <span v-if="source.fileText" class="text-xs text-ink-4">· {{ source.fileText.length }} 字</span>
-                </span>
-                <button @click="removeFile(source)" class="btn-text text-sm">移除</button>
-              </div>
-              <div v-if="source.fileText" class="text-xs text-ink-4" style="margin-top: 8px; max-height: 60px; overflow: hidden; line-height: 1.5;">
-                {{ source.fileText.slice(0, 200) }}…
-              </div>
-            </div>
-            <div v-else class="dropzone" :class="{ 'dropzone-active': source.dragOver }"
-              @click="triggerFileInput(index)"
-              @dragover.prevent="source.dragOver = true"
-              @dragleave="source.dragOver = false"
-              @drop="handleFileDrop(source, $event)">
-              <el-icon :size="22" style="margin: 0 auto 6px;"><Upload /></el-icon>
-              <div class="text-sm font-medium">点击或拖拽上传 PDF / Word / TXT / MD</div>
-            </div>
-            <input :ref="(el) => setFileInputRef(el, index)" type="file" accept=".pdf,.docx,.txt,.md" style="display:none"
-              @change="(e) => handleFileUpload(source, e)" />
+            <FileUploadZone v-model="source.fileName" policy="reference" :uploading="source.fileUploading"
+              :meta-text="source.fileText ? `${source.fileText.length} 字` : ''"
+              :preview-text="source.fileText ? source.fileText.slice(0, 200) + '…' : ''"
+              title="点击或拖拽上传 PDF / Word / TXT / MD / 图片"
+              @select="(file) => onFileSelect(source, file)" @remove="removeFile(source)" />
           </div>
         </div>
         <button @click="sources.push({ kind: 'file', text: '', url: '', fileName: '', fileText: '', fileUploading: false, dragOver: false })" class="btn-ghost" style="border-style: dashed; margin-top: 8px;">
@@ -154,16 +133,17 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  Document, Delete, Plus, Upload, Link, Edit,
+  Document, Delete, Plus, Link, Edit,
   Loading
 } from '@element-plus/icons-vue'
 import api, { uploadFile, extractLinkContent } from '@/api/api'
 import { useCreditStore } from '@/stores/credit'
 import CreditHint from '@/components/credit/CreditHint.vue'
+import FileUploadZone from '@/components/upload/FileUploadZone.vue'
 
 const creditStore = useCreditStore()
 
@@ -192,14 +172,12 @@ const sources = ref([{
   linkPlatform: '',
   linkAuthor: '',
 }])
-const fileInputs = reactive({})
 const preference = ref('')
 
 const filledCount = computed(() => sources.value.filter(s => s.text || s.url || s.fileText).length)
 const canGenerate = computed(() => filledCount.value > 0 && !submitting.value)
 
-const handleFileUpload = async (source, event) => {
-  const file = event.target.files?.[0]
+const onFileSelect = async (source, file) => {
   if (!file) return
 
   source.fileName = file.name
@@ -255,44 +233,6 @@ const removeLink = (source) => {
   source.linkContent = ''
   source.linkPlatform = ''
   source.linkAuthor = ''
-}
-
-const setFileInputRef = (el, index) => {
-  if (el) fileInputs[index] = el
-}
-
-const triggerFileInput = (index) => {
-  const input = fileInputs[index]
-  if (input) {
-    input.value = ''
-    input.click()
-  }
-}
-
-const handleFileDrop = async (source, event) => {
-  event.preventDefault()
-  source.dragOver = false
-  const file = event.dataTransfer?.files?.[0]
-  if (!file) return
-
-  source.fileName = file.name
-  source.fileUploading = true
-  source.fileText = ''
-
-  try {
-    const res = await uploadFile(file)
-    const data = res.data || res
-    source.fileText = data.text || ''
-    if (!source.fileText) {
-      ElMessage.warning('文件内容提取为空，请检查文件')
-      source.fileName = ''
-    }
-  } catch (err) {
-    ElMessage.error(err?.response?.data?.detail || '文件上传失败')
-    source.fileName = ''
-  } finally {
-    source.fileUploading = false
-  }
 }
 
 const toggleChip = (chip) => {

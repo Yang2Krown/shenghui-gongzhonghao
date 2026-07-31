@@ -64,6 +64,12 @@ async def upload_file(
         logger.error(f"文件提取失败: {e}")
         raise HTTPException(status_code=500, detail=f"文件提取失败: {e}")
 
+    if not text or not text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="未能从文件中提取到文字内容（可能是空白文件、扫描件过于模糊或文件已加密），请上传文字版 PDF/Word，或改用粘贴文本",
+        )
+
     return {
         "filename": file.filename,
         "text": text,

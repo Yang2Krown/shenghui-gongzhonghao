@@ -35,32 +35,11 @@
 
         <div class="tab-grid">
           <div v-show="mode === 'file'">
-            <div v-if="fileUploading" style="display: flex; align-items: center; justify-content: center; padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
-              <el-icon class="spin" style="margin-right: 8px;"><Loading /></el-icon>
-              <span class="text-sm text-ink-3">正在提取文件内容…</span>
-            </div>
-            <div v-else-if="fileName" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
-              <div style="display: flex; align-items: center; justify-content: space-between;">
-                <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
-                  <el-icon class="text-clay"><Document /></el-icon> {{ fileName }}
-                  <span v-if="fileText" class="text-xs text-ink-4">· {{ fileText.length }} 字</span>
-                </span>
-                <button @click="removeFile" class="btn-text text-sm">移除</button>
-              </div>
-              <div v-if="fileText" class="text-xs text-ink-4" style="margin-top: 8px; max-height: 60px; overflow: hidden; line-height: 1.5;">
-                {{ fileText.slice(0, 200) }}…
-              </div>
-            </div>
-            <div v-else class="dropzone" :class="{ 'dropzone-active': dragOver }"
-              @click="$refs.fileInput?.click()"
-              @dragover.prevent="dragOver = true"
-              @dragleave="dragOver = false"
-              @drop="handleFileDrop">
-              <el-icon :size="22" style="margin: 0 auto 6px;"><Upload /></el-icon>
-              <div class="text-sm font-medium">点击或拖拽上传 PDF / Word / TXT / MD</div>
-            </div>
-            <input ref="fileInput" type="file" accept=".pdf,.docx,.txt,.md" style="display:none"
-              @change="handleFileUpload" />
+            <FileUploadZone v-model="fileName" policy="reference" :uploading="fileUploading"
+              :meta-text="fileText ? `${fileText.length} 字` : ''"
+              :preview-text="fileText ? fileText.slice(0, 200) + '…' : ''"
+              title="点击或拖拽上传 PDF / Word / TXT / MD"
+              @select="onFileSelect" @remove="removeFile" />
           </div>
 
           <div v-show="mode === 'link'">
@@ -149,10 +128,11 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Document, Edit, Loading, Link, Upload } from '@element-plus/icons-vue'
+import { Document, Edit, Loading, Link } from '@element-plus/icons-vue'
 import { extractLinkContent, uploadFile, imitateContent } from '@/api/api'
 import generationRecordApi from '@/api/generationRecord'
 import RewriteResult from './RewriteResult.vue'
+import FileUploadZone from '@/components/upload/FileUploadZone.vue'
 
 const rewriteChips = ['更口语', '更精简', '更有网感', '加 emoji', '去 AI 味', '保留原意']
 
@@ -166,7 +146,6 @@ const result = ref(null)
 const fileName = ref('')
 const fileText = ref('')
 const fileUploading = ref(false)
-const dragOver = ref(false)
 
 // 链接提取相关
 const linkUrl = ref('')
@@ -223,8 +202,7 @@ const removeLink = () => {
   linkAuthor.value = ''
 }
 
-const handleFileUpload = async (event) => {
-  const file = event.target.files?.[0]
+const onFileSelect = async (file) => {
   if (!file) return
 
   fileName.value = file.name
@@ -250,32 +228,6 @@ const handleFileUpload = async (event) => {
 const removeFile = () => {
   fileName.value = ''
   fileText.value = ''
-}
-
-const handleFileDrop = async (event) => {
-  event.preventDefault()
-  dragOver.value = false
-  const file = event.dataTransfer?.files?.[0]
-  if (!file) return
-
-  fileName.value = file.name
-  fileUploading.value = true
-  fileText.value = ''
-
-  try {
-    const res = await uploadFile(file)
-    const data = res.data || res
-    fileText.value = data.text || ''
-    if (!fileText.value) {
-      ElMessage.warning('文件内容提取为空，请检查文件')
-      fileName.value = ''
-    }
-  } catch (err) {
-    ElMessage.error(err?.response?.data?.detail || '文件上传失败')
-    fileName.value = ''
-  } finally {
-    fileUploading.value = false
-  }
 }
 
 const handleGenerate = async () => {

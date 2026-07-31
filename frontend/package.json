@@ -7,6 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "test:smoke": "bash ./scripts/run-cypress-smoke.sh",
+    "test:regression": "npm run test:unit && npm run test:smoke",
+    "smoke:production": "bash ./scripts/open-production-smoke.sh",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix",
     "format": "prettier --write src/",
     "postinstall": "sed -i '' 's/text:\"H2\"/text:\"二级标题\"/g' node_modules/@wangeditor/editor/dist/index.esm.js 2>/dev/null; sed -i '' 's/t\\.title=\"H2\"/t.title=\"二级标题\"/g' node_modules/@wangeditor/editor/dist/index.esm.js 2>/dev/null; sed -i '' 's/text:\"H2\"/text:\"二级标题\"/g' node_modules/@wangeditor/editor/dist/index.js 2>/dev/null; sed -i '' 's/t\\.title=\"H2\"/t.title=\"二级标题\"/g' node_modules/@wangeditor/editor/dist/index.js 2>/dev/null; true"
@@ -32,10 +37,12 @@
   "devDependencies": {
     "@types/node": "^20.10.6",
     "@vitejs/plugin-vue": "^4.5.2",
+    "cypress": "^13.17.0",
     "eslint": "^8.56.0",
     "eslint-plugin-vue": "^9.19.2",
     "prettier": "^3.1.1",
     "typescript": "^5.3.3",
-    "vite": "^5.0.8"
+    "vite": "^5.0.8",
+    "vitest": "^1.6.1"
   }
 }

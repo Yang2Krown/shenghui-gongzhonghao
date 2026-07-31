@@ -56,13 +56,19 @@
           <button class="cover-remove" @click="removeCover" title="移除封面">×</button>
         </div>
 
+        <!-- 封面上传区（无预览时显示） -->
+        <FileUploadZone
+          v-if="!coverPreview"
+          v-model="coverFileName"
+          policy="cover"
+          :uploading="coverReading"
+          title="点击或拖拽上传封面图片"
+          @select="onCoverSelect"
+          @remove="removeCover"
+        />
+
         <!-- 封面操作按钮 -->
         <div class="cover-actions">
-          <label class="cover-btn cover-btn-upload">
-            <el-icon><Upload /></el-icon>
-            上传封面
-            <input type="file" accept="image/*" style="display:none" @change="handleCoverUpload" />
-          </label>
           <!-- AI 生成封面：暂时隐藏，保留代码以便日后恢复
           <button class="cover-btn cover-btn-ai" @click="handleGenerateCover" :disabled="generatingCover">
             <el-icon v-if="generatingCover" class="spin"><Loading /></el-icon>
@@ -155,9 +161,10 @@ import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Loading, Promotion, CircleCheckFilled, CircleCloseFilled,
-  Connection, Upload, MagicStick, Picture
+  Connection, MagicStick, Picture
 } from '@element-plus/icons-vue'
 import { get, post, createWechatDraft, testWechatConnection, generateWechatCover, getBingImages } from '@/api/api'
+import FileUploadZone from '@/components/upload/FileUploadZone.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -183,6 +190,8 @@ const resultMediaId = ref('')
 const coverPreview = ref('')
 const coverBase64 = ref('')
 const coverFile = ref(null)
+const coverFileName = ref('')
+const coverReading = ref(false)
 const generatingCover = ref(false)
 const coverError = ref('')
 
@@ -243,10 +252,12 @@ watch(() => props.modelValue, (val) => {
       coverPreview.value = props.coverImageUrl
       coverBase64.value = ''
       coverFile.value = null
+      coverFileName.value = ''
     } else {
       coverPreview.value = ''
       coverBase64.value = ''
       coverFile.value = null
+      coverFileName.value = ''
     }
     if (props.author && !form.value.author) form.value.author = props.author
     if (props.digest && !form.value.digest) form.value.digest = props.digest
@@ -264,23 +275,32 @@ const saveCredentials = () => {
 
 // ========== 封面图操作 ==========
 
-const handleCoverUpload = (e) => {
-  const file = e.target.files?.[0]
+const onCoverSelect = (file) => {
   if (!file) return
 
+  // 保留页面原有的 5MB 限制（cover 策略上限为 10MB，此处更严格以维持原行为）
   if (file.size > 5 * 1024 * 1024) {
     ElMessage.error('封面图不能超过 5MB')
+    coverFileName.value = ''
     return
   }
 
   coverFile.value = file
   coverError.value = ''
+  coverReading.value = true
 
   const reader = new FileReader()
   reader.onload = (ev) => {
     coverPreview.value = ev.target.result
     // 转为 base64（去掉 data:image/xxx;base64, 前缀）
     coverBase64.value = ev.target.result
+    coverReading.value = false
+  }
+  reader.onerror = () => {
+    coverReading.value = false
+    coverFileName.value = ''
+    coverFile.value = null
+    ElMessage.error('封面读取失败，请重试')
   }
   reader.readAsDataURL(file)
 }
@@ -289,6 +309,7 @@ const removeCover = () => {
   coverPreview.value = ''
   coverBase64.value = ''
   coverFile.value = null
+  coverFileName.value = ''
   coverError.value = ''
 }
 
@@ -306,6 +327,7 @@ const handleGenerateCover = async () => {
       coverPreview.value = data.url
       coverBase64.value = ''  // AI 生成的是远程 URL，不转 base64
       coverFile.value = null
+      coverFileName.value = ''
       ElMessage.success('封面生成成功')
     }
   } catch (e) {
@@ -345,6 +367,7 @@ const selectBingImage = (img) => {
   coverPreview.value = img.url
   coverBase64.value = ''   // 远程 URL，发布时走 cover_image_url 分支
   coverFile.value = null
+  coverFileName.value = ''
   coverError.value = ''
   bingPickerOpen.value = false
 }
@@ -556,17 +579,6 @@ const handleClose = () => {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
-}
-
-.cover-btn-upload {
-  border: 1.5px dashed var(--line);
-  background: var(--paper);
-  color: var(--ink-2);
-}
-
-.cover-btn-upload:hover {
-  border-color: var(--clay-soft);
-  background: var(--clay-tint);
 }
 
 .cover-btn-ai {
