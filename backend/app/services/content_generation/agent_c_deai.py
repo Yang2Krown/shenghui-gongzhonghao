@@ -188,7 +188,8 @@ def _parse_llm_output(raw: dict, original_word_count: int) -> AgentCOutput:
         ))
 
     qc = raw.get("quality_check", {})
-    rewritten_count = qc.get("rewritten_word_count", len(raw.get("rewritten_text", "")))
+    # 字数不信任 LLM 自报(常报 0 或胡诌),一律按改写后正文实测长度为准
+    rewritten_count = len(rewritten)
     word_change = qc.get("word_change_pct", 0.0)
     if word_change == 0.0 and original_word_count > 0:
         word_change = round((rewritten_count - original_word_count) / original_word_count * 100, 1)
