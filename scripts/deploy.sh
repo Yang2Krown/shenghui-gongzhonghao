@@ -9,6 +9,9 @@
 #   bash deploy.sh --db               # 只跑数据库迁移（alembic upgrade head + seeds）
 #   bash deploy.sh --skip-frontend    # 全量部署但跳过前端构建（旧参数，兼容）
 #
+# 质量门：部署前自动跑测试（前端 vitest + 后端 pytest 快速子集），失败则拒绝部署。
+#   SKIP_TESTS=1 bash deploy.sh --backend   # 紧急跳过质量门（不推荐）
+#
 # 可用环境变量覆盖默认值：
 #   DEPLOY_HOST   (默认 root@1.13.92.57)
 #   DEPLOY_PATH   (默认 /www/wwwroot/gzh)
@@ -60,6 +63,58 @@ if [ ! -f "$COMPOSE_FILE" ]; then
   echo "✗ 在 $REPO_ROOT 找不到 $COMPOSE_FILE，确认在 gzh 项目根目录运行。"
   exit 1
 fi
+
+# ─── 质量门：部署前跑测试，挂了就拒绝部署 ───
+# 只拦新回归，不追全量；当前全绿的快速子集。紧急跳过：SKIP_TESTS=1 bash deploy.sh ...
+# 后端门禁子集（纯逻辑、无 DB、快、当前全绿）：
+#   file_extractor(文件解析) agent_a(正文) schemas upload_security refresh_tokens(登录)
+# 注：test_agent_c 有 1 个预存在失败(标题预测模块,与改动无关),暂不纳入,待存量清理。
+BACKEND_GATE_TESTS="tests/test_file_extractor.py tests/test_agent_a.py tests/test_schemas.py tests/test_upload_security.py tests/test_refresh_tokens.py"
+
+run_quality_gate() {
+  if [ "${SKIP_TESTS:-0}" = "1" ]; then
+    echo "⚠  SKIP_TESTS=1，跳过质量门（紧急模式）。"
+    echo
+    return 0
+  fi
+
+  local failed=0
+
+  if [ "$DEPLOY_FRONTEND" -eq 1 ]; then
+    echo "==> [质量门] 前端单元测试 (vitest)..."
+    if (cd frontend && npm run test:unit --silent); then
+      echo "    ✓ 前端测试通过"
+    else
+      echo "    ✗ 前端测试失败"
+      failed=1
+    fi
+    echo
+  fi
+
+  if [ "$DEPLOY_BACKEND" -eq 1 ]; then
+    echo "==> [质量门] 后端快速回归 (pytest 子集)..."
+    if [ ! -x backend/.venv/bin/python ]; then
+      echo "    ✗ 找不到 backend/.venv/bin/python，无法跑后端测试。"
+      echo "      若确认无需测试可 SKIP_TESTS=1 重试。"
+      exit 1
+    fi
+    if (cd backend && ./.venv/bin/python -m pytest $BACKEND_GATE_TESTS -q); then
+      echo "    ✓ 后端测试通过"
+    else
+      echo "    ✗ 后端测试失败"
+      failed=1
+    fi
+    echo
+  fi
+
+  if [ "$failed" -eq 1 ]; then
+    echo "✗ 质量门未通过：有测试失败，已阻止部署。"
+    echo "  先修复失败测试再部署；紧急情况可 SKIP_TESTS=1 跳过（不推荐）。"
+    exit 1
+  fi
+}
+
+run_quality_gate
 
 echo "==> 部署目标: $DEPLOY_HOST:$DEPLOY_PATH"
 echo "==> 仓库根: $REPO_ROOT"
