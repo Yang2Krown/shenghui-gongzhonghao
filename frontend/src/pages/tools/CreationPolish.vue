@@ -37,7 +37,7 @@
         <div class="tab-grid">
           <div v-show="mode === 'file'">
             <FileUploadZone v-model="fileName" policy="reference" :uploading="fileUploading"
-              :meta-text="fileText ? `· ${fileText.length} 字` : ''"
+              :meta-text="fileText ? `${fileText.length} 字` : ''"
               :preview-text="fileText ? fileText.slice(0, 200) + '…' : ''"
               title="点击或拖拽上传 PDF / Word / TXT / MD"
               @select="onFileSelect" @remove="removeFile" />
@@ -790,9 +790,6 @@ onUnmounted(() => {
 .seg-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: none; background: transparent; color: var(--ink-3); font-family: inherit; font-size: 13px; font-weight: 600; border-radius: var(--r-pill); cursor: pointer; transition: all .18s; }
 .seg-btn:hover { color: var(--ink); }
 .seg-btn-active { background: var(--paper); color: var(--clay-deep); box-shadow: var(--sh-1); }
-.dropzone { border: 1px dashed var(--line); border-radius: var(--r-lg); background: var(--paper); padding: 22px; text-align: center; cursor: pointer; transition: all .15s; color: var(--ink-3); }
-.dropzone:hover { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
-.dropzone-active { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
 .tab-grid > div { min-height: 0; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

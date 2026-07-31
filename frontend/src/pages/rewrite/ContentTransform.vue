@@ -444,9 +444,6 @@ const handleGenerate = async () => {
 .seg-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: none; background: transparent; color: var(--ink-3); font-family: inherit; font-size: 13px; font-weight: 600; border-radius: var(--r-pill); cursor: pointer; transition: all .18s; }
 .seg-btn:hover { color: var(--ink); }
 .seg-btn-active { background: var(--paper); color: var(--clay-deep); box-shadow: var(--sh-1); }
-.dropzone { border: 1px dashed var(--line); border-radius: var(--r-lg); background: var(--paper); padding: 22px; text-align: center; cursor: pointer; transition: all .15s; color: var(--ink-3); }
-.dropzone:hover { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
-.dropzone-active { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
 .btn-extract { padding: 9px 18px; border: none; border-radius: var(--r-md); background: linear-gradient(135deg, var(--clay) 0%, var(--clay-deep) 100%); color: #fff; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: all .15s; }
 .btn-extract:hover:not([disabled]) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(204,120,92,.3); }
 .btn-extract[disabled] { cursor: not-allowed; }

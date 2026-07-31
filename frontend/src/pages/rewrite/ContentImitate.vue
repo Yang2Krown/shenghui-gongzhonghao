@@ -305,9 +305,6 @@ const handleGenerate = async () => {
 .btn-extract[disabled] { cursor: not-allowed; }
 .btn-text { border: none; background: transparent; color: var(--clay); font-family: inherit; font-weight: 600; cursor: pointer; padding: 2px 6px; border-radius: var(--r-sm); transition: background .12s; }
 .btn-text:hover { background: var(--clay-tint); }
-.dropzone { border: 1px dashed var(--line); border-radius: var(--r-lg); background: var(--paper); padding: 22px; text-align: center; cursor: pointer; transition: all .15s; color: var(--ink-3); }
-.dropzone:hover { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
-.dropzone-active { border-color: var(--clay); background: var(--clay-tint); color: var(--clay-deep); }
 .type-chip { display: inline-flex; align-items: center; gap: 4px; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 500; background: var(--paper); color: #6B6862; border: 1px solid var(--line); cursor: pointer; transition: all 0.15s; }
 .type-chip:hover { background: #F0EDE3; color: var(--ink); }
 .type-chip-active { background: var(--clay); color: #fff; border-color: var(--clay); }
