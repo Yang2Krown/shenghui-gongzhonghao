@@ -49,6 +49,7 @@ NEW_RSS = [
     ("Berkeley AI Research", "https://bair.berkeley.edu/blog/feed.xml", "AI"),
     ("ZDNet AI", "https://www.zdnet.com/topic/artificial-intelligence/rss.xml", "AI"),
     ("SiliconANGLE AI", "https://siliconangle.com/category/ai/feed/", "AI"),
+    ("小互 · AI 解读站", "https://best.xiaohu.ai/rss.xml", "AI"),
 ]
 
 # ── 被墙域名（国内无代理直连不通）。命中 url 的源一律禁用 ──
