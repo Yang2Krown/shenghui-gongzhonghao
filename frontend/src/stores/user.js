@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { refreshToken as refreshTokenApi, getCurrentUser } from '@/api/auth'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
+import { isTerminalAuthError } from '@/utils/authSession'
 
 export const useUserStore = defineStore('user', () => {
   // 状态
@@ -53,9 +54,9 @@ export const useUserStore = defineStore('user', () => {
           try {
             await fetchUser()
           } catch (error) {
-            // 只有明确的认证失败才清理登录态；服务端暂时异常时保留 token，
+            // 只有明确的认证终态失败才清理登录态；服务端暂时异常时保留 token，
             // 避免用户被误退出并再次触发登录过期提示。
-            if (error.response?.status === 401) {
+            if (isTerminalAuthError(error)) {
               clearAuth()
             }
           }
@@ -101,8 +102,8 @@ export const useUserStore = defineStore('user', () => {
       
       return access_token
     } catch (error) {
-      // 只有刷新令牌明确失效时才清理认证态；服务端/网络故障应允许稍后重试。
-      if (error.response?.status === 401) {
+      // 只有刷新令牌/用户明确失效时才清理认证态；服务端/网络故障应允许稍后重试。
+      if (isTerminalAuthError(error)) {
         clearAuth()
       }
       throw error

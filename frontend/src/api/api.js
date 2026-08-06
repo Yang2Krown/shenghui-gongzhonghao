@@ -2,6 +2,7 @@ import axios from 'axios'
 import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
+import { isTerminalAuthError } from '@/utils/authSession'
 
 // 创建axios实例
 const api = axios.create({
@@ -101,13 +102,12 @@ api.interceptors.response.use(
         // 重试原请求
         return api(originalRequest)
       } catch (refreshError) {
-        // 刷新 token 无效才判定为登录过期；Redis/网络等服务端故障不清空登录态，
-        // 也不再让刷新请求额外弹出“服务器内部错误”。
-        const refreshStatus = refreshError.response?.status
+        // 刷新 token 或关联用户返回终态 4xx 才判定为登录过期；Redis/网络等
+        // 服务端故障不清空登录态，也不再让刷新请求额外弹出“服务器内部错误”。
         const missingRefreshToken = refreshError.message === 'No refresh token'
-        if (refreshStatus === 401 || missingRefreshToken) {
+        if (isTerminalAuthError(refreshError) || missingRefreshToken) {
           notifyAuthExpired(userStore)
-        } else if (refreshStatus >= 500) {
+        } else if (refreshError.response?.status >= 500) {
           ElMessage.error('登录状态暂时无法验证，请稍后重试')
         }
         return Promise.reject(refreshError)
