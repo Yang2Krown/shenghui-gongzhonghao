@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     
     # 安全配置
     SECRET_KEY: str = "dev-insecure-change-me"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24小时
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 72  # 72小时
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7天
     ALGORITHM: str = "HS256"
     API_DOCS_ENABLED: Optional[bool] = None
