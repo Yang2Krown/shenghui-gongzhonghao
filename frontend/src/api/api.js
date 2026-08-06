@@ -31,7 +31,7 @@ const notifyAuthExpired = (userStore) => {
   if (router.currentRoute.value.name !== 'Landing') {
     router.push({ name: 'Landing' })
   }
-  ElMessage.error('登录已过期，请重新登录')
+  ElMessage.error('登录已过期，请刷新页面后重新登录')
 }
 
 // 请求拦截器
