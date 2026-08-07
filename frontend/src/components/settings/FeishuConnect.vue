@@ -6,7 +6,6 @@
           <h3>飞书 Brief 插件</h3>
           <p>无需绑定飞书账号，用浏览器插件读取你当前有权限查看的 Brief。</p>
         </div>
-        <el-tag type="success" effect="light">推荐用法</el-tag>
       </div>
 
       <div class="feishu-summary">
@@ -22,7 +21,6 @@
         <a class="guide-download-btn" :href="pluginDownloadUrl" download>
           <span aria-hidden="true">↓</span> 下载插件 ZIP
         </a>
-        <span class="guide-hint">开发者模式版本，更新后在扩展页点击“重新加载”</span>
       </div>
     </div>
   </div>
@@ -196,7 +194,7 @@ const goToPractical = () => {
 .feishu-summary strong { display: block; margin-bottom: 2px; color: var(--ink-2, #3a3935); font-size: 13px; }
 .feishu-summary span { display: block; color: var(--ink-4); font-size: 12px; line-height: 1.5; }
 
-.guide-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 15px; }
+.guide-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: auto; padding-top: 15px; }
 .guide-download-btn {
   display: inline-flex;
   align-items: center;
@@ -214,7 +212,6 @@ const goToPractical = () => {
   transition: background .18s, color .18s, border-color .18s;
 }
 .guide-download-btn:hover { background: var(--clay-tint, #fbede7); border-color: var(--clay-deep, #8e513f); color: var(--clay-deep, #8e513f); }
-.guide-hint { color: var(--ink-4); font-size: 11px; }
 
 .feishu-tutorial { color: var(--ink-2, #3a3935); }
 .tutorial-intro {

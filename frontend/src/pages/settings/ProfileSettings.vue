@@ -796,6 +796,9 @@ onMounted(() => {
 }
 
 .account-card-inner {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
   padding: 2px 0;
 }
 
@@ -1118,10 +1121,22 @@ onMounted(() => {
 .feishu-card {
   grid-column: auto;
   width: 100%;
+  min-height: 244px;
+  box-sizing: border-box;
   align-self: stretch;
 }
 
-.account-card { align-self: stretch; }
+.account-card {
+  min-height: 244px;
+  box-sizing: border-box;
+  align-self: stretch;
+}
+
+.feishu-card :deep(.integration-card-inner) {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+}
 
 .style-section {
   grid-column: 1 / -1;
@@ -1130,8 +1145,12 @@ onMounted(() => {
 /* 公众号账号列表 */
 .account-list {
   display: flex;
+  max-height: 138px;
   flex-direction: column;
   gap: 12px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 .account-item {
   display: flex;
@@ -1422,6 +1441,15 @@ onMounted(() => {
   .profile-form-footer { align-items: flex-start; flex-direction: column; }
   .profile-form { max-width: 100%; }
   .style-section { grid-column: 1 / -1; }
+
+  .account-card,
+  .feishu-card {
+    min-height: 0;
+  }
+
+  .account-list {
+    max-height: 138px;
+  }
 
   .style-analysis-grid { grid-template-columns: 1fr; }
   .account-item {
