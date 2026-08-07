@@ -3,7 +3,7 @@
   "name": "飞书 Brief 导入",
   "version": "0.2.4",
   "description": "在用户自己的浏览器中读取已授权的飞书 Wiki/文档，并导入公众号智能体。",
-  "permissions": ["tabs", "scripting"],
+  "permissions": ["tabs", "scripting", "windows"],
   "host_permissions": [
     "https://*.feishu.cn/*",
     "https://*.feishu.net/*",

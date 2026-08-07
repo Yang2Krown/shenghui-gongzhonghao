@@ -40,7 +40,7 @@
                     <span class="src-number">{{ index + 1 }}</span>
                     <div class="seg">
                       <button v-for="kind in sourceKinds" :key="kind.key"
-                        @click="source.kind = kind.key"
+                        @click="setBriefSourceKind(source, kind.key, index)"
                         :class="['seg-btn', { 'seg-btn-active': source.kind === kind.key }]">
                         {{ kind.label }}
                       </button>
@@ -56,23 +56,40 @@
                   placeholder="粘贴商单要求：必提卖点、禁忌、调性、官网链接等" />
 
                 <!-- 链接输入 -->
-                <div v-else-if="source.kind === 'link'">
-                  <div v-if="source.linkTitle" style="padding: 11px 14px; background: var(--bone); border-radius: var(--r-md);">
-                    <div style="display: flex; align-items: center; justify-content: space-between;">
-                      <span style="display: flex; align-items: center; gap: 9px;" class="text-sm text-ink-2">
-                        <el-icon class="text-clay"><Link /></el-icon> {{ source.linkTitle }}
-                      </span>
-                      <button @click="source.linkTitle = ''; source.url = ''" class="btn-text text-sm">移除</button>
+                <div v-else-if="source.kind === 'link'" class="feishu-link-source">
+                  <div class="feishu-link-row">
+                    <div class="feishu-link-input">
+                      <el-icon :size="16"><Link /></el-icon>
+                      <el-input v-model="source.url"
+                        placeholder="粘贴飞书文档 / Wiki 链接"
+                        @input="resetFeishuLinkState(source)" />
                     </div>
+                    <button :data-testid="`feishu-open-link-${index}`"
+                      class="btn-clay feishu-open-btn"
+                      :disabled="briefLoading || feishuExtLoading"
+                      @click="openFeishuBrief(source, index)">
+                      <el-icon v-if="source.feishuState === 'parsing' || feishuExtLoading" class="is-loading" :size="14"><Loading /></el-icon>
+                      {{ source.feishuState === 'waiting' ? '重新打开' : source.feishuState === 'parsing' ? '解析中…' : '打开并提取' }}
+                    </button>
                   </div>
-                  <div v-else style="position: relative;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <div style="flex: 1; position: relative;">
-                        <el-icon :size="16" style="position: absolute; left: 13px; top: 13px; color: var(--ink-4); z-index: 1;"><Link /></el-icon>
-                        <el-input v-model="source.url" placeholder="粘贴飞书文档/wiki 链接（需先在「设置」连接飞书）"
-                          style="padding-left: 38px;" />
-                      </div>
-                    </div>
+
+                  <div v-if="source.feishuState === 'waiting'" class="feishu-link-guide">
+                    <div class="feishu-link-guide-title"><el-icon><InfoFilled /></el-icon> 已打开飞书 Brief，请按下面步骤完成提取</div>
+                    <ol>
+                      <li>确认当前飞书账号已经可以阅读这份 Brief。</li>
+                      <li>回到文档顶部，让正文从头到尾加载完成。</li>
+                      <li>点击浏览器右上角的「飞书 Brief 导入」插件，点击「提取当前文档」。</li>
+                      <li>确认预览内容无误后，点击「发送到网站」。发送后会自动回到这里并开始解析。</li>
+                    </ol>
+                    <div class="feishu-link-warning">⚠️ 提取中请勿离开、点击或刷新飞书页面。</div>
+                    <div v-if="!feishuExtReady" class="feishu-link-plugin-hint">未检测到插件：请先安装并重新加载插件，然后刷新本页面。</div>
+                  </div>
+                  <div v-else-if="source.feishuState === 'parsing'" class="feishu-link-processing">
+                    <el-icon class="is-loading"><Loading /></el-icon>
+                    插件已发送正文，正在回传并解析，请稍候…
+                  </div>
+                  <div v-else-if="source.feishuState === 'error'" class="feishu-link-error">
+                    {{ source.feishuError || '提取失败，请重新打开文档后重试。' }}
                   </div>
                 </div>
 
@@ -114,19 +131,6 @@
                   <el-icon :size="15"><Plus /></el-icon> 添加 brief
                 </button>
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <button data-testid="brief-import-extension"
-                    class="btn-ghost"
-                    style="padding: 8px 16px;"
-                    :disabled="feishuExtLoading || !feishuExtReady"
-                    :title="feishuExtReady ? '读取当前已打开的飞书文档' : '安装 feishu-brief-extension 后刷新本页面'"
-                    @click="importBriefFromExtension">
-                    <template v-if="feishuExtLoading">
-                      <el-icon class="is-loading" :size="14"><Loading /></el-icon> 读取中...
-                    </template>
-                    <template v-else>
-                      {{ feishuExtReady ? '从当前飞书导入' : '安装插件后刷新' }}
-                    </template>
-                  </button>
                   <button data-testid="brief-import" class="btn-clay" style="padding: 8px 16px;" :disabled="briefLoading" @click="importBrief">
                     <template v-if="briefLoading">
                       <el-icon class="is-loading" :size="14"><Loading /></el-icon> 解析中...
@@ -447,8 +451,8 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { MagicStick, UploadFilled, Delete, Plus, Upload, Document, Link, Loading } from '@element-plus/icons-vue'
-import { feishuBriefRead, feishuBriefUpload, feishuBriefSummarize } from '@/api/feishu'
+import { MagicStick, UploadFilled, Delete, Plus, Upload, Document, Link, Loading, InfoFilled } from '@element-plus/icons-vue'
+import { feishuBriefUpload, feishuBriefSummarize } from '@/api/feishu'
 import AgentStatusBar from '@/components/creation/AgentStatusBar.vue'
 import BriefStructuredCard from '@/components/creation/BriefStructuredCard.vue'
 import { useAgentProgress } from '@/composables/useAgentProgress'
@@ -478,19 +482,53 @@ const linkStatus = ref({})         // 阶段2：补充链接状态
 // brief 导入
 const sourceKinds = [
   { key: 'file', label: '文件' },
-  { key: 'link', label: '链接' },
+  { key: 'link', label: '飞书链接' },
   { key: 'text', label: '文本' },
 ]
-const briefSources = ref([{ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '', dragOver: false }])
 const briefLoading = ref(false)
 const feishuExtReady = ref(false)
 const feishuExtLoading = ref(false)
+const pendingFeishuUrl = ref('')
+const pendingFeishuSourceIndex = ref(-1)
 const structuredBrief = ref(null)
 const showRawBrief = ref(false)
 // 商单 brief 可上传类型(含图片,后端 qwen-vl OCR),与 uploadPolicy.brief 对齐
 const briefAccept = UPLOAD_POLICIES.brief.accept
 
-const clearBrief = () => { structuredBrief.value = null; form.value.brief = ''; briefSources.value = [{ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '', dragOver: false }]; showRawBrief.value = false }
+const createBriefSource = (kind = 'file') => ({
+  kind,
+  text: '',
+  url: '',
+  file: null,
+  fileName: '',
+  linkTitle: '',
+  dragOver: false,
+  feishuState: kind === 'link' ? 'idle' : '',
+  feishuError: '',
+})
+
+const briefSources = ref([createBriefSource('link')])
+
+const clearBrief = () => {
+  structuredBrief.value = null
+  form.value.brief = ''
+  briefSources.value = [createBriefSource('link')]
+  feishuExtLoading.value = false
+  pendingFeishuUrl.value = ''
+  pendingFeishuSourceIndex.value = -1
+  showRawBrief.value = false
+}
+
+const FEISHU_HOST_RE = /(^|\.)(feishu\.cn|feishu\.net|larkoffice\.com|larksuite\.com)$/i
+const normalizeFeishuDocumentUrl = (value = '') => {
+  try {
+    const parsed = new URL(String(value).trim())
+    if (!['http:', 'https:'].includes(parsed.protocol) || !FEISHU_HOST_RE.test(parsed.hostname)) return ''
+    return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '')
+  } catch {
+    return ''
+  }
+}
 
 // 获取链接类型图标
 const getLinkType = (url) => {
@@ -623,8 +661,24 @@ const addFeature = () => {
 
 const unwrap = (res) => (res && res.data !== undefined ? res.data : res)
 
+const setBriefSourceKind = (source, kind, index = -1) => {
+  source.kind = kind
+  source.feishuState = kind === 'link' ? 'idle' : ''
+  source.feishuError = ''
+  if (kind !== 'link' && pendingFeishuSourceIndex.value === index) {
+    pendingFeishuUrl.value = ''
+    pendingFeishuSourceIndex.value = -1
+  }
+}
+
+const resetFeishuLinkState = (source) => {
+  source.feishuState = 'idle'
+  source.feishuError = ''
+  source.linkTitle = ''
+}
+
 const addBriefSource = () => {
-  briefSources.value.push({ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '', dragOver: false })
+  briefSources.value.push(createBriefSource())
 }
 
 const setBriefSourceFile = (source, file) => {
@@ -686,7 +740,47 @@ const summarizeCurrent = async () => {
   }
 }
 
+const openFeishuBrief = (source, index) => {
+  const rawUrl = source.url?.trim() || ''
+  const normalizedUrl = normalizeFeishuDocumentUrl(rawUrl)
+  if (!normalizedUrl) {
+    source.feishuState = 'error'
+    source.feishuError = '请粘贴有效的飞书文档 / Wiki 链接。'
+    ElMessage.warning(source.feishuError)
+    return false
+  }
+
+  const opened = window.open(rawUrl, '_blank')
+  if (!opened) {
+    source.feishuState = 'error'
+    source.feishuError = '浏览器拦截了新标签页，请允许本站打开飞书文档后重试。'
+    ElMessage.error(source.feishuError)
+    return false
+  }
+
+  source.url = rawUrl
+  source.feishuState = 'waiting'
+  source.feishuError = ''
+  source.linkTitle = '等待插件从这份 Brief 提取正文'
+  pendingFeishuUrl.value = normalizedUrl
+  pendingFeishuSourceIndex.value = index
+  ElMessage.success('已打开飞书文档，请按页面提示用插件提取并发送')
+  return true
+}
+
 const importBrief = async () => {
+  // 飞书链接必须先在用户自己的飞书页面完成提取；网站不能靠链接本身绕过文档权限。
+  const linkIndex = briefSources.value.findIndex(source => source.kind === 'link')
+  if (linkIndex >= 0) {
+    const source = briefSources.value[linkIndex]
+    if (source.feishuState === 'waiting' || source.feishuState === 'parsing') {
+      ElMessage.info('请回到已打开的飞书 Brief，完成插件提取并点击“发送到网站”')
+      return
+    }
+    openFeishuBrief(source, linkIndex)
+    return
+  }
+
   briefLoading.value = true
   try {
     // 1) 取原文
@@ -694,11 +788,6 @@ const importBrief = async () => {
     for (const source of briefSources.value) {
       if (source.kind === 'text') {
         if (source.text?.trim()) parts.push(source.text.trim())
-      } else if (source.kind === 'link') {
-        if (source.url?.trim()) {
-          const d = unwrap(await feishuBriefRead('feishu_link', source.url.trim()))
-          if (d.raw_text) parts.push(d.raw_text)
-        }
       } else if (source.kind === 'file') {
         if (source.file) {
           const d = unwrap(await feishuBriefUpload(source.file))
@@ -728,15 +817,6 @@ const postToFeishuExtension = (type, payload = {}) => {
   window.postMessage({ __gzhFeishuBrief: true, dir: 'to-ext', type, payload }, '*')
 }
 
-const importBriefFromExtension = () => {
-  if (!feishuExtReady.value) {
-    ElMessage.warning('未检测到插件，请先安装插件并刷新当前页面')
-    return
-  }
-  feishuExtLoading.value = true
-  postToFeishuExtension('extract-current')
-}
-
 const onFeishuExtensionMessage = (event) => {
   if (event?.source !== window) return
   const message = event?.data
@@ -749,6 +829,13 @@ const onFeishuExtensionMessage = (event) => {
   if (message.type === 'accepted') return
   if (message.type === 'error') {
     feishuExtLoading.value = false
+    const source = briefSources.value[pendingFeishuSourceIndex.value]
+    if (source) {
+      source.feishuState = 'error'
+      source.feishuError = message.error || '飞书插件读取失败'
+    }
+    pendingFeishuUrl.value = ''
+    pendingFeishuSourceIndex.value = -1
     ElMessage.error(message.error || '飞书插件读取失败')
     return
   }
@@ -757,22 +844,46 @@ const onFeishuExtensionMessage = (event) => {
   const payload = message.payload || {}
   if (!payload.rawText?.trim()) {
     feishuExtLoading.value = false
+    const source = briefSources.value[pendingFeishuSourceIndex.value]
+    if (source) {
+      source.feishuState = 'error'
+      source.feishuError = '插件没有提取到正文'
+    }
     ElMessage.warning('插件没有提取到正文')
     return
   }
 
-  briefSources.value = [{
-    kind: 'text',
-    // 插件同时保留纯文本和 Markdown：网站后续解析/预览优先使用 Markdown，
-    // 旧版本插件或异常情况下再回退到 rawText。
+  const extractedUrl = normalizeFeishuDocumentUrl(payload.sourceUrl || '')
+  if (pendingFeishuUrl.value && extractedUrl !== pendingFeishuUrl.value) {
+    const source = briefSources.value[pendingFeishuSourceIndex.value]
+    if (source) {
+      source.feishuState = 'error'
+      source.feishuError = '提取到的文档与刚才打开的链接不一致，请回到对应 Brief 重试。'
+    }
+    feishuExtLoading.value = false
+    pendingFeishuUrl.value = ''
+    pendingFeishuSourceIndex.value = -1
+    ElMessage.error('提取到的文档与刚才打开的链接不一致，请回到对应 Brief 重试')
+    return
+  }
+
+  const sourceIndex = pendingFeishuSourceIndex.value
+  const source = sourceIndex >= 0 ? briefSources.value[sourceIndex] : null
+  if (source) source.feishuState = 'parsing'
+  feishuExtLoading.value = true
+
+  // 插件同时保留纯文本和 Markdown：网站后续解析/预览优先使用 Markdown，
+  // 旧版本插件或异常情况下再回退到 rawText。
+  briefSources.value = [Object.assign(createBriefSource('text'), {
     text: payload.markdown || payload.rawText,
     url: payload.sourceUrl || '',
-    file: null,
-    fileName: '',
     linkTitle: payload.title || '',
-    dragOver: false,
-  }]
-  void importBrief().finally(() => { feishuExtLoading.value = false })
+  })]
+  void importBrief().finally(() => {
+    feishuExtLoading.value = false
+    pendingFeishuUrl.value = ''
+    pendingFeishuSourceIndex.value = -1
+  })
 }
 
 const startResearch = async () => {
@@ -918,6 +1029,10 @@ const reset = () => {
   linkStatus.value = {}
   research.value = null; selected.value = []; draft.value = null
   structuredBrief.value = null
+  briefSources.value = [createBriefSource('link')]
+  feishuExtLoading.value = false
+  pendingFeishuUrl.value = ''
+  pendingFeishuSourceIndex.value = -1
   openSteps.value = new Set()
 }
 
@@ -1076,6 +1191,22 @@ onUnmounted(() => {
 .seg-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: none; background: transparent; color: var(--ink-3); font-family: inherit; font-size: 13px; font-weight: 600; border-radius: var(--r-pill); cursor: pointer; transition: all .18s; }
 .seg-btn:hover { color: var(--ink); }
 .seg-btn-active { background: var(--paper); color: var(--clay-deep); box-shadow: var(--sh-1); }
+.feishu-link-source { display: flex; flex-direction: column; gap: 12px; }
+.feishu-link-row { display: flex; align-items: stretch; gap: 9px; }
+.feishu-link-input { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; padding: 0 12px; border: 1.5px solid var(--line); border-radius: var(--r-md); background: var(--paper); color: var(--ink-4); }
+.feishu-link-input:focus-within { border-color: var(--clay); box-shadow: 0 0 0 3px rgba(204,120,92,.12); }
+.feishu-link-input :deep(.el-input) { flex: 1; }
+.feishu-link-input :deep(.el-input__wrapper) { padding: 0; box-shadow: none; background: transparent; }
+.feishu-link-input :deep(.el-input__wrapper.is-focus) { box-shadow: none; }
+.feishu-open-btn { flex-shrink: 0; min-width: 108px; justify-content: center; }
+.feishu-link-guide { padding: 15px 16px 14px; border: 1px solid rgba(204,120,92,.28); border-radius: var(--r-md); background: linear-gradient(135deg, rgba(204,120,92,.10), rgba(247,241,232,.70)); color: var(--ink-2); }
+.feishu-link-guide-title { display: flex; align-items: center; gap: 7px; color: var(--clay-deep); font-size: 14px; font-weight: 700; }
+.feishu-link-guide ol { margin: 10px 0 10px 21px; padding: 0; color: var(--ink-2); font-size: 13px; line-height: 1.75; }
+.feishu-link-guide li { padding-left: 3px; }
+.feishu-link-warning { display: inline-flex; align-items: center; padding: 7px 10px; border-radius: 8px; background: #fff0e7; color: #a2482f; font-size: 13px; font-weight: 800; letter-spacing: .01em; }
+.feishu-link-plugin-hint { margin-top: 9px; color: var(--ink-4); font-size: 12px; line-height: 1.5; }
+.feishu-link-processing { display: flex; align-items: center; gap: 7px; padding: 10px 12px; border-radius: var(--r-md); background: var(--clay-tint); color: var(--clay-deep); font-size: 13px; font-weight: 600; }
+.feishu-link-error { padding: 10px 12px; border-radius: var(--r-md); background: #fff1f0; color: var(--crimson); font-size: 13px; line-height: 1.5; }
 .template-hint { margin-top: 10px; font-size: 13px; color: var(--ink-4); line-height: 1.5; }
 
 .form-section { margin-bottom: 22px; }

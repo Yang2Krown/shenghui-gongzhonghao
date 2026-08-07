@@ -177,7 +177,7 @@ $('send').addEventListener('click', () => {
         status(response?.error || chrome.runtime.lastError?.message || '发送失败', true)
         return
       }
-      status('已发送到网站，请回到实操创作页继续解析。')
+      status('已发送到网站，正在自动返回实操创作页并开始解析。')
     }
   )
 })

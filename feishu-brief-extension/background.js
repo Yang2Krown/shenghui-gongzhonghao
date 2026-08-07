@@ -3,6 +3,14 @@ const CHANNEL = 'gzh-feishu-brief'
 
 const isFeishuUrl = (url = '') => /^https:\/\/([^/]+\.)?(feishu\.cn|feishu\.net|larkoffice\.com|larksuite\.com)\//i.test(url)
 const SITE_HOSTS = new Set(['gzh.midonghub.com', 'localhost', '127.0.0.1', '192.168.0.246', '1.13.92.57'])
+const canonicalDocumentUrl = (value = '') => {
+  try {
+    const parsed = new URL(String(value).trim())
+    return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '')
+  } catch {
+    return ''
+  }
+}
 const isSiteUrl = (url = '') => {
   try {
     const parsed = new URL(url)
@@ -16,18 +24,39 @@ async function allTabs() {
   return chrome.tabs.query({})
 }
 
-async function findFeishuTab(excludeTabId) {
+async function findFeishuTab(excludeTabId, targetUrl = '') {
   const tabs = await allTabs()
-  return tabs
+  const candidates = tabs
     .filter((tab) => tab.id !== excludeTabId && isFeishuUrl(tab.url))
-    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] || null
+  const normalizedTarget = canonicalDocumentUrl(targetUrl)
+  if (normalizedTarget) {
+    // 链接模式只允许读取用户刚才打开的那一份文档，不能在多标签时猜“最近访问”的页面。
+    return candidates.find((tab) => canonicalDocumentUrl(tab.url) === normalizedTarget) || null
+  }
+  return candidates.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] || null
 }
 
-async function findSiteTab(excludeTabId) {
+async function findSiteTab(excludeTabId, preferredTabId = null) {
   const tabs = await allTabs()
-  return tabs
+  const candidates = tabs
     .filter((tab) => tab.id !== excludeTabId && isSiteUrl(tab.url))
-    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] || null
+  if (preferredTabId != null) {
+    const preferred = candidates.find((tab) => tab.id === preferredTabId)
+    if (preferred) return preferred
+  }
+  return candidates.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] || null
+}
+
+let lastSiteTabId = null
+
+async function activateSiteTab(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId)
+    if (tab?.windowId != null) await chrome.windows.update(tab.windowId, { focused: true })
+    await chrome.tabs.update(tabId, { active: true })
+  } catch {
+    // 标签页可能在发送完成前被关闭，聚焦失败不影响已经发送的内容。
+  }
 }
 
 // 这个函数会在飞书页面的 MAIN world 执行，因而可以访问飞书页面自己的
@@ -462,20 +491,25 @@ async function sendToSite(siteTabId, payload) {
   }
 }
 
-async function extractForSite(siteTabId) {
-  const feishuTab = await findFeishuTab(siteTabId)
+async function extractForSite(siteTabId, targetUrl = '') {
+  const feishuTab = await findFeishuTab(siteTabId, targetUrl)
   if (!feishuTab) {
-    await sendToSite(siteTabId, { ok: false, error: '没有找到已打开的飞书文档，请先在浏览器打开 Brief' })
+    await sendToSite(siteTabId, {
+      ok: false,
+      error: targetUrl ? '没有找到刚才打开的那份飞书 Brief，请确认文档已加载并保持打开' : '没有找到已打开的飞书文档，请先在浏览器打开 Brief'
+    })
     return
   }
   const result = await extractFromTab(feishuTab.id)
-  await sendToSite(siteTabId, result)
+  const sent = await sendToSite(siteTabId, result)
+  if (sent && result?.ok) await activateSiteTab(siteTabId)
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || message.channel !== CHANNEL) return false
 
   if (message.type === 'ping') {
+    if (sender.tab?.id != null && isSiteUrl(sender.tab.url)) lastSiteTabId = sender.tab.id
     sendResponse({ channel: CHANNEL, type: 'ready' })
     return false
   }
@@ -483,7 +517,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'extract-current') {
     // 网站按钮触发：把结果异步推回同一个网站标签页。
     if (sender.tab?.id != null && isSiteUrl(sender.tab.url)) {
-      extractForSite(sender.tab.id).catch((error) => {
+      lastSiteTabId = sender.tab.id
+      extractForSite(sender.tab.id, message.payload?.targetUrl || '').catch((error) => {
         sendToSite(sender.tab.id, { ok: false, error: error?.message || '提取失败' })
       })
       sendResponse({ channel: CHANNEL, type: 'accepted' })
@@ -501,9 +536,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'deliver-to-site') {
-    findSiteTab(sender.tab?.id)
-      .then((siteTab) => siteTab ? sendToSite(siteTab.id, message.payload || {}) : false)
-      .then((sent) => sendResponse({ ok: sent, error: sent ? undefined : '没有找到可接收消息的公众号智能体页面，请先打开并刷新网站页面后重试' }))
+    findSiteTab(sender.tab?.id, lastSiteTabId)
+      .then(async (siteTab) => {
+        if (!siteTab) return { sent: false, siteTab: null }
+        const sent = await sendToSite(siteTab.id, message.payload || {})
+        if (sent && message.payload?.ok) await activateSiteTab(siteTab.id)
+        return { sent, siteTab }
+      })
+      .then(({ sent }) => sendResponse({ ok: sent, error: sent ? undefined : '没有找到可接收消息的公众号智能体页面，请先打开并刷新网站页面后重试' }))
       .catch((error) => sendResponse({ ok: false, error: error?.message || '发送失败' }))
     return true
   }
