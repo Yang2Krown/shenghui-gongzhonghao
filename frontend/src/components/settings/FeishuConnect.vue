@@ -158,6 +158,18 @@ const goToPractical = () => {
 </script>
 
 <style scoped>
+.feishu-connect-card {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 244px;
+  padding: 24px;
+  border: 1px solid var(--line, #e5e5e5);
+  border-radius: 16px;
+  background: var(--paper, #fff);
+  display: flex;
+  flex-direction: column;
+}
+
 .integration-card-inner { padding: 2px 0; }
 .integration-card-header {
   display: flex;
@@ -339,6 +351,7 @@ const goToPractical = () => {
 :global(.feishu-tutorial-modal .el-dialog__body) { padding: 4px 22px 22px; }
 
 @media (max-width: 768px) {
+  .feishu-connect-card { min-height: 0; }
   .integration-card-header { align-items: flex-start; }
   .guide-actions { align-items: flex-start; flex-direction: column; gap: 8px; }
   .tutorial-step { grid-template-columns: 1fr; gap: 11px; }
