@@ -37,12 +37,9 @@
     modal-class="feishu-tutorial-modal"
   >
     <div class="feishu-tutorial">
-      <div class="tutorial-intro">
-        <div class="tutorial-intro-mark" aria-hidden="true">飞</div>
-        <div>
-          <strong>用你当前的飞书权限读取 Brief</strong>
-          <p>插件只读取当前打开文档中你能看到的文字，不需要在网站绑定飞书账号。</p>
-        </div>
+      <div class="tutorial-browser-note" role="note">
+        <strong>使用要求</strong>
+        <span>目前只支持 Google Chrome（谷歌浏览器）</span>
       </div>
 
       <div class="tutorial-steps">
@@ -51,58 +48,56 @@
             <span class="tutorial-step-number">1</span>
             <div class="tutorial-step-copy">
               <h4>下载并解压插件</h4>
-              <p>点击下方“下载插件 ZIP”，将压缩包解压到一个固定文件夹。后续不要随意移动或删除这个文件夹。</p>
+              <p>在个人中心的飞书 Brief 插件卡片中，点击“下载插件 ZIP”。下载完成后，将压缩包解压到一个固定位置，后续不要随意移动或删除这个文件夹。</p>
               <a class="tutorial-inline-link" :href="pluginDownloadUrl" download>下载 feishu-brief-extension-0.2.4.zip</a>
             </div>
           </div>
-          <div class="tutorial-image-placeholder" aria-label="步骤一截图待补充">
-            <span>待补充截图 01</span>
-            <small>建议：下载文件与解压后的插件文件夹</small>
-          </div>
+          <figure class="tutorial-shot-figure">
+            <img class="tutorial-shot" src="/images/feishu-tutorial/01-download.webp" alt="在个人中心点击下载插件 ZIP" loading="lazy" decoding="async" />
+          </figure>
         </section>
 
         <section class="tutorial-step">
           <div class="tutorial-step-main">
             <span class="tutorial-step-number">2</span>
             <div class="tutorial-step-copy">
-              <h4>在 Chrome 中加载插件</h4>
-              <p>在地址栏打开 <code>chrome://extensions</code>，开启右上角“开发者模式”，点击“加载已解压的扩展程序”，选择刚才解压的文件夹。</p>
-              <p class="tutorial-muted">更新插件时，用新文件覆盖原文件夹，然后回到扩展管理页点击“重新加载”。</p>
+              <h4>打开 Chrome 扩展管理页并开启开发者模式</h4>
+              <p>在 Chrome 地址栏输入 <code>chrome://extensions</code> 并回车，确认进入“扩展程序”页面。点击右上角“开发者模式”，页面上会出现“加载未打包的扩展程序”按钮。</p>
             </div>
           </div>
-          <div class="tutorial-image-placeholder" aria-label="步骤二截图待补充">
-            <span>待补充截图 02</span>
-            <small>建议：Chrome 扩展管理页与“加载已解压的扩展程序”</small>
-          </div>
+          <figure class="tutorial-shot-figure">
+            <img class="tutorial-shot" src="/images/feishu-tutorial/02-developer-mode.webp" alt="Chrome 扩展管理页开启开发者模式" loading="lazy" decoding="async" />
+          </figure>
         </section>
 
         <section class="tutorial-step">
           <div class="tutorial-step-main">
             <span class="tutorial-step-number">3</span>
             <div class="tutorial-step-copy">
-              <h4>从实操 / 商稿打开 Brief</h4>
-              <p>回到「实操 / 商稿」，在“飞书链接”输入框粘贴文档或 Wiki 链接，点击“打开并提取”。网站会打开对应的飞书页面。</p>
-              <el-button text type="primary" class="tutorial-practical-link" @click="goToPractical">现在去实操 / 商稿</el-button>
+              <h4>加载已解压的插件文件夹</h4>
+              <p>点击“加载未打包的扩展程序”。在文件选择窗口中选择解压后的 <code>feishu-brief-extension-0.2.4</code> 文件夹，选择文件夹本身，不要进入文件夹再选某个文件，最后点击“选择”。</p>
             </div>
           </div>
-          <div class="tutorial-image-placeholder" aria-label="步骤三截图待补充">
-            <span>待补充截图 03</span>
-            <small>建议：网站中的飞书链接输入框</small>
-          </div>
+          <figure class="tutorial-shot-figure">
+            <img class="tutorial-shot" src="/images/feishu-tutorial/03-select-folder.webp" alt="在文件选择窗口选择解压后的插件文件夹" loading="lazy" decoding="async" />
+          </figure>
         </section>
 
-        <section class="tutorial-step tutorial-step--important">
+        <section class="tutorial-step">
           <div class="tutorial-step-main">
             <span class="tutorial-step-number">4</span>
             <div class="tutorial-step-copy">
-              <h4>从头到尾加载，再提取正文</h4>
-              <p>确认当前账号可以正常查看 Brief。请先将 Brief 从头到尾加载一遍，再点击浏览器右上角的插件，选择“提取当前文档”。</p>
-              <div class="tutorial-warning">提取中请勿离开、点击或刷新飞书页面。长文档请等待提取完成后再进行下一步。</div>
+              <h4>确认插件开启，并固定到浏览器工具栏</h4>
+              <p>回到扩展管理页，在“飞书 Brief 导入”卡片右下角确认开关为蓝色。然后点击浏览器右上角的拼图图标，找到“飞书 Brief 导入”，点击图钉将它固定到工具栏。</p>
             </div>
           </div>
-          <div class="tutorial-image-placeholder" aria-label="步骤四截图待补充">
-            <span>待补充截图 04</span>
-            <small>建议：打开的飞书 Brief 与浏览器插件按钮</small>
+          <div class="tutorial-shot-grid">
+            <figure class="tutorial-shot-figure">
+              <img class="tutorial-shot" src="/images/feishu-tutorial/04-enable.webp" alt="确认飞书 Brief 导入插件开关为蓝色" loading="lazy" decoding="async" />
+            </figure>
+            <figure class="tutorial-shot-figure">
+              <img class="tutorial-shot" src="/images/feishu-tutorial/05-pin.webp" alt="将飞书 Brief 导入插件固定到浏览器工具栏" loading="lazy" decoding="async" />
+            </figure>
           </div>
         </section>
 
@@ -110,14 +105,41 @@
           <div class="tutorial-step-main">
             <span class="tutorial-step-number">5</span>
             <div class="tutorial-step-copy">
-              <h4>确认内容并发送回网站</h4>
-              <p>在插件预览区检查标题、正文和字数是否完整；确认无误后点击“发送到网站”。浏览器回到网站后，系统会继续进行 Brief 解析。</p>
+              <h4>在实操 / 商稿中打开 Brief</h4>
+              <p>进入「实操 / 商稿」，选择“飞书链接”，在输入框粘贴飞书文档或 Wiki 链接，点击“打开并提取”。网站会打开对应的飞书页面。</p>
+              <el-button text type="primary" class="tutorial-practical-link" @click="goToPractical">现在去实操 / 商稿</el-button>
             </div>
           </div>
-          <div class="tutorial-image-placeholder" aria-label="步骤五截图待补充">
-            <span>待补充截图 05</span>
-            <small>建议：插件预览与“发送到网站”按钮</small>
+          <figure class="tutorial-shot-figure">
+            <img class="tutorial-shot" src="/images/feishu-tutorial/06-paste-link.webp" alt="在实操商稿中选择飞书链接并点击打开并提取" loading="lazy" decoding="async" />
+          </figure>
+        </section>
+
+        <section class="tutorial-step tutorial-step--important">
+          <div class="tutorial-step-main">
+            <span class="tutorial-step-number">6</span>
+            <div class="tutorial-step-copy">
+              <h4>从头到尾加载 Brief，再提取正文</h4>
+              <p>进入飞书页面后，先确认当前账号有权限查看文档。请将 Brief 从头到尾加载一遍，再点击工具栏中的飞书插件，点击“提取当前文档”。</p>
+              <div class="tutorial-warning">提取中请勿离开、点击或刷新飞书页面。长文档请等待提取完成后再进行下一步。</div>
+            </div>
           </div>
+          <figure class="tutorial-shot-figure">
+            <img class="tutorial-shot" src="/images/feishu-tutorial/07-extract.webp" alt="在飞书页面点击插件并提取当前文档" loading="lazy" decoding="async" />
+          </figure>
+        </section>
+
+        <section class="tutorial-step">
+          <div class="tutorial-step-main">
+            <span class="tutorial-step-number">7</span>
+            <div class="tutorial-step-copy">
+              <h4>检查内容并发送到网站</h4>
+              <p>插件显示提取成功后，检查标题、字数和正文是否完整。确认无误后点击“发送到网站”，浏览器回到网站后，系统会继续读取并解析 Brief。</p>
+            </div>
+          </div>
+          <figure class="tutorial-shot-figure">
+            <img class="tutorial-shot" src="/images/feishu-tutorial/08-send.webp" alt="在插件预览区检查内容并发送到网站" loading="lazy" decoding="async" />
+          </figure>
         </section>
       </div>
 
@@ -131,7 +153,6 @@
       </div>
 
       <div class="tutorial-footer">
-        <span>安装一次后，之后只需打开有权限的 Brief 并提取即可。</span>
         <div class="tutorial-footer-actions">
           <a class="guide-download-btn" :href="pluginDownloadUrl" download>
             <span aria-hidden="true">↓</span> 下载插件 ZIP
@@ -226,37 +247,26 @@ const goToPractical = () => {
 .guide-download-btn:hover { background: var(--clay-tint, #fbede7); border-color: var(--clay-deep, #8e513f); color: var(--clay-deep, #8e513f); }
 
 .feishu-tutorial { color: var(--ink-2, #3a3935); }
-.tutorial-intro {
+.tutorial-browser-note {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 18px;
-  padding: 14px 16px;
-  border: 1px solid #ead6c7;
-  border-radius: 11px;
-  background: #fff8f2;
-}
-.tutorial-intro-mark {
-  display: inline-flex;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 32px;
   align-items: center;
-  justify-content: center;
-  border-radius: 9px;
-  background: var(--clay, #b86d53);
-  color: #fff;
-  font-size: 15px;
-  font-weight: 700;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border: 1px solid #ead6c7;
+  border-radius: 8px;
+  background: #fff8f2;
+  color: var(--ink-3, #66615a);
+  font-size: 12px;
+  line-height: 1.5;
 }
-.tutorial-intro strong { display: block; margin: 1px 0 4px; font-size: 14px; }
-.tutorial-intro p { margin: 0; color: var(--ink-4); font-size: 12px; line-height: 1.6; }
+.tutorial-browser-note strong { color: var(--clay-deep, #8e513f); font-weight: 650; }
 
 .tutorial-steps { display: grid; gap: 12px; }
 .tutorial-step {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 190px;
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
   padding: 15px 16px;
   border: 1px solid var(--line, #e5e5e5);
   border-radius: 11px;
@@ -303,24 +313,28 @@ const goToPractical = () => {
   font-weight: 650;
   line-height: 1.6;
 }
-.tutorial-image-placeholder {
-  display: flex;
-  min-height: 106px;
-  box-sizing: border-box;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 10px;
-  border: 1px dashed #d6c6b8;
-  border-radius: 8px;
-  background: #fbf8f4;
-  color: var(--ink-4);
-  text-align: center;
+.tutorial-shot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding-left: 36px;
 }
-.tutorial-image-placeholder span { color: var(--clay-deep, #8e513f); font-size: 12px; font-weight: 650; }
-.tutorial-image-placeholder small { max-width: 150px; font-size: 10px; line-height: 1.45; }
-
+.tutorial-shot-figure {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid #eadfd7;
+  border-radius: 9px;
+  background: #fbf8f4;
+}
+.tutorial-shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 360px;
+  object-fit: contain;
+  border-radius: 5px;
+  background: #fff;
+}
 .tutorial-notice {
   margin-top: 14px;
   padding: 12px 14px;
@@ -338,7 +352,7 @@ const goToPractical = () => {
 .tutorial-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 14px;
   margin-top: 16px;
   color: var(--ink-4);
@@ -354,8 +368,9 @@ const goToPractical = () => {
   .feishu-connect-card { min-height: 0; }
   .integration-card-header { align-items: flex-start; }
   .guide-actions { align-items: flex-start; flex-direction: column; gap: 8px; }
-  .tutorial-step { grid-template-columns: 1fr; gap: 11px; }
-  .tutorial-image-placeholder { min-height: 90px; }
+  .tutorial-step { gap: 11px; }
+  .tutorial-shot-grid { grid-template-columns: 1fr; padding-left: 0; }
+  .tutorial-shot { max-height: 280px; }
   .tutorial-footer { align-items: flex-start; flex-direction: column; }
   .tutorial-footer-actions { width: 100%; flex-wrap: wrap; }
   :global(.feishu-tutorial-modal .el-dialog__body) { padding: 2px 16px 16px; }
