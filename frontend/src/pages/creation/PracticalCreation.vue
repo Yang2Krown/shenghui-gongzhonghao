@@ -60,7 +60,10 @@
                   <div class="feishu-link-row">
                     <div class="feishu-link-input">
                       <el-icon :size="16"><Link /></el-icon>
-                      <el-input v-model="source.url"
+                      <input v-model="source.url"
+                        class="feishu-link-native-input"
+                        type="url"
+                        aria-label="飞书文档或 Wiki 链接"
                         placeholder="粘贴飞书文档 / Wiki 链接"
                         @input="resetFeishuLinkState(source)" />
                     </div>
@@ -1195,9 +1198,8 @@ onUnmounted(() => {
 .feishu-link-row { display: flex; align-items: stretch; gap: 9px; }
 .feishu-link-input { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; padding: 0 12px; border: 1.5px solid var(--line); border-radius: var(--r-md); background: var(--paper); color: var(--ink-4); }
 .feishu-link-input:focus-within { border-color: var(--clay); box-shadow: 0 0 0 3px rgba(204,120,92,.12); }
-.feishu-link-input :deep(.el-input) { flex: 1; }
-.feishu-link-input :deep(.el-input__wrapper) { padding: 0; box-shadow: none; background: transparent; }
-.feishu-link-input :deep(.el-input__wrapper.is-focus) { box-shadow: none; }
+.feishu-link-native-input { flex: 1; min-width: 0; width: 100%; padding: 0; border: 0; outline: none; background: transparent; color: var(--ink); font-family: inherit; font-size: 14px; line-height: 1.5; }
+.feishu-link-native-input::placeholder { color: var(--ink-4); }
 .feishu-open-btn { flex-shrink: 0; min-width: 108px; justify-content: center; }
 .feishu-link-guide { padding: 15px 16px 14px; border: 1px solid rgba(204,120,92,.28); border-radius: var(--r-md); background: linear-gradient(135deg, rgba(204,120,92,.10), rgba(247,241,232,.70)); color: var(--ink-2); }
 .feishu-link-guide-title { display: flex; align-items: center; gap: 7px; color: var(--clay-deep); font-size: 14px; font-weight: 700; }

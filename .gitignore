@@ -52,6 +52,8 @@ Thumbs.db
 # Build artifacts
 *.tar.gz
 *.zip
+!frontend/public/plugins/
+!frontend/public/plugins/*.zip
 
 # Test / temp
 /tmp/

@@ -13,22 +13,22 @@
         <div class="guide-step">
           <span class="guide-step-number">1</span>
           <div>
-            <b>安装插件</b>
-            <p>打开 Chrome 扩展管理页，开启“开发者模式”，加载项目中的 <code>feishu-brief-extension</code> 文件夹。</p>
+            <b>下载并解压插件</b>
+            <p>先下载下面的 ZIP 压缩包，解压到一个不会随意移动的文件夹。</p>
           </div>
         </div>
         <div class="guide-step">
           <span class="guide-step-number">2</span>
           <div>
-            <b>打开 Brief</b>
-            <p>在「实操 / 商稿」中粘贴飞书链接，点击“打开飞书并提取”。</p>
+            <b>在 Chrome 中加载</b>
+            <p>打开 <code>chrome://extensions</code>，开启右上角“开发者模式”，点击“加载已解压的扩展程序”，选择刚才解压的文件夹。</p>
           </div>
         </div>
         <div class="guide-step">
           <span class="guide-step-number">3</span>
           <div>
-            <b>提取并发送</b>
-            <p>等 Brief 从头到尾加载完成后，点击浏览器右上角插件，提取当前文档并发送到网站。</p>
+            <b>打开 Brief 并提取</b>
+            <p>回到「实操 / 商稿」粘贴飞书链接，点击“打开并提取”，再按页面提示使用浏览器右上角插件。</p>
           </div>
         </div>
       </div>
@@ -39,8 +39,11 @@
       </div>
 
       <div class="guide-actions">
+        <a class="guide-download-btn" href="/plugins/feishu-brief-extension-0.2.4.zip" download>
+          <span aria-hidden="true">↓</span> 下载插件 ZIP
+        </a>
         <el-button type="primary" @click="goToPractical">去实操 / 商稿导入 Brief</el-button>
-        <span class="guide-hint">插件发布版后续再提供一键安装</span>
+        <span class="guide-hint">这是开发者模式版本，更新后在扩展页点击“重新加载”</span>
       </div>
     </div>
   </div>
@@ -103,7 +106,24 @@ const goToPractical = () => router.push('/creation/practical')
   line-height: 1.6;
 }
 .guide-notice strong { color: #8a3d29; }
-.guide-actions { display: flex; align-items: center; gap: 12px; margin-top: 15px; }
+.guide-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 15px; }
+.guide-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border: 1px solid var(--clay, #b86d53);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--clay-deep, #8e513f);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background .18s, color .18s, border-color .18s;
+}
+.guide-download-btn:hover { background: var(--clay-tint, #fbede7); border-color: var(--clay-deep, #8e513f); color: var(--clay-deep, #8e513f); }
 .guide-hint { color: var(--ink-4); font-size: 11px; }
 @media (max-width: 768px) {
   .integration-card-header { align-items: flex-start; }
