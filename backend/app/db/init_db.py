@@ -65,6 +65,15 @@ async def _ensure_schema_compatibility(conn):
     if not await conn.run_sync(has_column, "raw_infos", "commercial_meta"):
         await conn.execute(text("ALTER TABLE raw_infos ADD COLUMN commercial_meta JSONB"))
 
+    if not await conn.run_sync(has_column, "source_accounts", "wechat_ghid"):
+        await conn.execute(text("ALTER TABLE source_accounts ADD COLUMN wechat_ghid VARCHAR(200)"))
+    if not await conn.run_sync(has_column, "source_accounts", "wechat_reference_url"):
+        await conn.execute(text("ALTER TABLE source_accounts ADD COLUMN wechat_reference_url VARCHAR(1000)"))
+    await conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_source_accounts_wechat_ghid "
+        "ON source_accounts (wechat_ghid)"
+    ))
+
     await conn.execute(text(
         "CREATE INDEX IF NOT EXISTS ix_raw_infos_commercial_level ON raw_infos (commercial_level)"
     ))

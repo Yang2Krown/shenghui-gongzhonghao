@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>飞书 Brief 导入</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <div class="layout">
+        <section class="controls">
+          <header>
+            <div class="eyebrow">公众号智能体</div>
+            <h1>飞书 Brief 导入</h1>
+            <p>只读取当前账号已经能看到的飞书页面。</p>
+          </header>
+          <div id="status" class="status">请先将 Brief 从头到尾加载一遍，再进行提取。</div>
+          <button id="extract" class="primary">提取当前文档</button>
+          <button id="send" class="secondary" disabled>发送到网站</button>
+          <p class="note">请将 Brief 从头到尾加载一遍，再点击“提取当前文档”。</p>
+        </section>
+        <section id="result" class="result" hidden>
+          <div class="result-header">
+            <div class="result-title" id="title"></div>
+            <div class="result-meta" id="meta"></div>
+          </div>
+          <article id="preview" class="markdown-preview"></article>
+        </section>
+      </div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

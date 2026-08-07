@@ -1,7 +1,8 @@
 """极致了公众号历史/当天发文 adapter。
 
 用于替换不稳定的搜狗微信搜索：固定公众号账号从 SourceAccount 读取，
-日常用 post_condition 拉当天发文；历史补库通过任务显式调用 post_history。
+日常优先用 post_condition 拉当天发文；接口被限制时自动切到
+history_by_ghid（用公众号原始 ID或已有文章链接反查）。历史补库仍可通过任务显式调用。
 """
 
 import asyncio
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 API_BASE = "https://www.dajiala.com/fbmain/monitor/v3"
+HISTORY_BY_GHID_ENDPOINT = "history_by_ghid"
 
 
 def _api_key() -> str:
@@ -66,6 +68,113 @@ def _account_payload(account: SourceAccount, page: Optional[int] = None) -> Dict
     if page is not None:
         payload["page"] = page
     return payload
+
+
+def _history_by_ghid_payload(account: SourceAccount, *, offset: str = "") -> Dict[str, Any]:
+    """构造官方文档中的 history_by_ghid 请求体。
+
+    该接口支持 ghid、公众号文章链接两种定位方式。历史数据迁移后，旧账号
+    至少会有一条 wechat_reference_url；接口成功返回 AccountInfo 后再记住 ghid。
+    """
+    handle = (account.handle or "").strip()
+    ghid = (getattr(account, "wechat_ghid", None) or "").strip()
+    if not ghid and handle.startswith("gh_"):
+        ghid = handle
+    return {
+        "ghid": ghid,
+        "url": (getattr(account, "wechat_reference_url", None) or "").strip(),
+        "nickname": (account.display_name or "").strip(),
+        "offset": offset or "",
+        "key": _api_key(),
+        "verifycode": _verifycode(),
+    }
+
+
+def _should_use_history_by_ghid(data: Dict[str, Any]) -> bool:
+    """只对供应商明确表示当天接口不可用的业务错误做一次备用切换。"""
+    code = data.get("code")
+    message = str(data.get("msg") or data.get("message") or "")
+    return code in (500, "500") or "接口暂时无法使用" in message or "历史发文" in message
+
+
+def _remember_account_identity(account: SourceAccount, data: Dict[str, Any]) -> None:
+    """保存备用接口返回的公众号原始 ID，后续请求不必再依赖文章链接。"""
+    account_info = data.get("AccountInfo")
+    if not isinstance(account_info, dict):
+        return
+    ghid = str(account_info.get("UserName") or "").strip()
+    if ghid and not getattr(account, "wechat_ghid", None):
+        account.wechat_ghid = ghid
+
+
+def _history_by_ghid_items(
+    data: Dict[str, Any],
+    account: SourceAccount,
+) -> List[FetchedItem]:
+    """把 history_by_ghid 的 MsgList 结构转换为统一 FetchedItem。"""
+    msg_list = data.get("MsgList") or {}
+    messages = msg_list.get("Msg") if isinstance(msg_list, dict) else None
+    if not isinstance(messages, list):
+        return []
+
+    items: List[FetchedItem] = []
+    offset = ""
+    paging = data.get("PagingInfo") or {}
+    if isinstance(paging, dict):
+        offset = str(paging.get("Offset") or "")
+    nested_paging = msg_list.get("PagingInfo") if isinstance(msg_list, dict) else None
+    if not offset and isinstance(nested_paging, dict):
+        offset = str(nested_paging.get("Offset") or "")
+
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        app_msg = message.get("AppMsg") or {}
+        if not isinstance(app_msg, dict):
+            continue
+        app_base = app_msg.get("BaseInfo") or {}
+        if not isinstance(app_base, dict):
+            app_base = {}
+        details = app_msg.get("DetailInfo") or []
+        if not isinstance(details, list):
+            continue
+        message_base = message.get("BaseInfo") or {}
+        if not isinstance(message_base, dict):
+            message_base = {}
+
+        for detail in details:
+            if not isinstance(detail, dict):
+                continue
+            raw = dict(detail)
+            raw.update(
+                {
+                    "title": detail.get("Title"),
+                    "digest": detail.get("Digest"),
+                    "url": detail.get("ContentUrl"),
+                    "cover_url": detail.get("CoverImgUrl")
+                    or detail.get("CoverImgUrl_1_1")
+                    or detail.get("CoverImgUrl_16_9"),
+                    "post_time": detail.get("send_time")
+                    or app_base.get("CreateTime")
+                    or message_base.get("DateTime"),
+                    "appmsgid": app_base.get("AppMsgId"),
+                    "position": detail.get("ItemIndex"),
+                    "original": detail.get("IsOriginal"),
+                    "read": detail.get("Read"),
+                    "zan": detail.get("Zan"),
+                }
+            )
+            item = _article_to_item(
+                raw,
+                account,
+                endpoint=HISTORY_BY_GHID_ENDPOINT,
+                page=None,
+            )
+            if item:
+                item.extras["offset"] = offset
+                item.extras["history_by_ghid"] = True
+                items.append(item)
+    return items
 
 
 def _article_to_item(
@@ -259,6 +368,13 @@ class DajialaWechatAdapter(SourceAdapter):
             return []
 
         if data.get("code") not in (0, "0"):
+            if endpoint == "post_condition" and _should_use_history_by_ghid(data):
+                logger.warning(
+                    "[%s] 极致了当天接口不可用，切换 history_by_ghid account=%s",
+                    platform,
+                    account.display_name,
+                )
+                return await self._post_history_by_ghid(client, platform, account)
             logger.warning(
                 "[%s] 极致了 %s 返回异常 account=%s page=%s code=%s msg=%s",
                 platform, endpoint, account.display_name, page, data.get("code"), data.get("msg"),
@@ -280,6 +396,56 @@ class DajialaWechatAdapter(SourceAdapter):
             for item in (_article_to_item(row, account, endpoint=endpoint, page=page) for row in rows if isinstance(row, dict))
             if item
         ]
+
+    async def _post_history_by_ghid(
+        self,
+        client: httpx.AsyncClient,
+        platform: str,
+        account: SourceAccount,
+    ) -> List[FetchedItem]:
+        payload = _history_by_ghid_payload(account)
+        if not payload["ghid"] and not payload["url"]:
+            logger.error(
+                "[%s] 极致了 history_by_ghid 缺少 ghid/文章链接 account=%s",
+                platform,
+                account.display_name,
+            )
+            return []
+
+        try:
+            resp = await client.post(
+                f"{API_BASE}/{HISTORY_BY_GHID_ENDPOINT}",
+                json=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            logger.warning(
+                "[%s] 极致了 %s 请求失败 account=%s: %s",
+                platform,
+                HISTORY_BY_GHID_ENDPOINT,
+                account.display_name,
+                exc,
+            )
+            return []
+
+        _remember_account_identity(account, data)
+        if data.get("code") not in (0, "0"):
+            logger.warning(
+                "[%s] 极致了 %s 返回异常 account=%s code=%s msg=%s",
+                platform,
+                HISTORY_BY_GHID_ENDPOINT,
+                account.display_name,
+                data.get("code"),
+                data.get("msg") or data.get("message"),
+            )
+            return []
+
+        items = _history_by_ghid_items(data, account)
+        if items and not getattr(account, "wechat_reference_url", None):
+            account.wechat_reference_url = items[0].url[:1000]
+        return items
 
     @staticmethod
     def _merge_batches(batches: List[Any]) -> List[FetchedItem]:

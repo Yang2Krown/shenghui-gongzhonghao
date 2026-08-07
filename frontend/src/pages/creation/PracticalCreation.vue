@@ -113,14 +113,29 @@
                 <button data-testid="brief-add-source" @click="addBriefSource" class="btn-ghost" style="border-style: dashed;">
                   <el-icon :size="15"><Plus /></el-icon> 添加 brief
                 </button>
-                <button data-testid="brief-import" class="btn-clay" style="padding: 8px 16px;" :disabled="briefLoading" @click="importBrief">
-                  <template v-if="briefLoading">
-                    <el-icon class="is-loading" :size="14"><Loading /></el-icon> 解析中...
-                  </template>
-                  <template v-else>
-                    读取并解析
-                  </template>
-                </button>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <button data-testid="brief-import-extension"
+                    class="btn-ghost"
+                    style="padding: 8px 16px;"
+                    :disabled="feishuExtLoading || !feishuExtReady"
+                    :title="feishuExtReady ? '读取当前已打开的飞书文档' : '安装 feishu-brief-extension 后刷新本页面'"
+                    @click="importBriefFromExtension">
+                    <template v-if="feishuExtLoading">
+                      <el-icon class="is-loading" :size="14"><Loading /></el-icon> 读取中...
+                    </template>
+                    <template v-else>
+                      {{ feishuExtReady ? '从当前飞书导入' : '安装插件后刷新' }}
+                    </template>
+                  </button>
+                  <button data-testid="brief-import" class="btn-clay" style="padding: 8px 16px;" :disabled="briefLoading" @click="importBrief">
+                    <template v-if="briefLoading">
+                      <el-icon class="is-loading" :size="14"><Loading /></el-icon> 解析中...
+                    </template>
+                    <template v-else>
+                      读取并解析
+                    </template>
+                  </button>
+                </div>
               </div>
             </template>
 
@@ -429,7 +444,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { MagicStick, UploadFilled, Delete, Plus, Upload, Document, Link, Loading } from '@element-plus/icons-vue'
@@ -468,6 +483,8 @@ const sourceKinds = [
 ]
 const briefSources = ref([{ kind: 'file', text: '', url: '', file: null, fileName: '', linkTitle: '', dragOver: false }])
 const briefLoading = ref(false)
+const feishuExtReady = ref(false)
+const feishuExtLoading = ref(false)
 const structuredBrief = ref(null)
 const showRawBrief = ref(false)
 // 商单 brief 可上传类型(含图片,后端 qwen-vl OCR),与 uploadPolicy.brief 对齐
@@ -706,6 +723,58 @@ const importBrief = async () => {
   }
 }
 
+// 独立浏览器插件桥接：插件在用户自己的飞书页面读取正文，网站只接收提取结果。
+const postToFeishuExtension = (type, payload = {}) => {
+  window.postMessage({ __gzhFeishuBrief: true, dir: 'to-ext', type, payload }, '*')
+}
+
+const importBriefFromExtension = () => {
+  if (!feishuExtReady.value) {
+    ElMessage.warning('未检测到插件，请先安装插件并刷新当前页面')
+    return
+  }
+  feishuExtLoading.value = true
+  postToFeishuExtension('extract-current')
+}
+
+const onFeishuExtensionMessage = (event) => {
+  if (event?.source !== window) return
+  const message = event?.data
+  if (!message || message.__gzhFeishuBrief !== true || message.dir !== 'to-page') return
+
+  if (message.type === 'ready') {
+    feishuExtReady.value = true
+    return
+  }
+  if (message.type === 'accepted') return
+  if (message.type === 'error') {
+    feishuExtLoading.value = false
+    ElMessage.error(message.error || '飞书插件读取失败')
+    return
+  }
+  if (message.type !== 'extracted') return
+
+  const payload = message.payload || {}
+  if (!payload.rawText?.trim()) {
+    feishuExtLoading.value = false
+    ElMessage.warning('插件没有提取到正文')
+    return
+  }
+
+  briefSources.value = [{
+    kind: 'text',
+    // 插件同时保留纯文本和 Markdown：网站后续解析/预览优先使用 Markdown，
+    // 旧版本插件或异常情况下再回退到 rawText。
+    text: payload.markdown || payload.rawText,
+    url: payload.sourceUrl || '',
+    file: null,
+    fileName: '',
+    linkTitle: payload.title || '',
+    dragOver: false,
+  }]
+  void importBrief().finally(() => { feishuExtLoading.value = false })
+}
+
 const startResearch = async () => {
   if (!form.value.product.trim()) return
   progress.stop(); draft.value = null
@@ -852,7 +921,16 @@ const reset = () => {
   openSteps.value = new Set()
 }
 
-onUnmounted(() => progress.stop())
+onMounted(() => {
+  window.addEventListener('message', onFeishuExtensionMessage)
+  // site-bridge 可能在 Vue 挂载前发送过 ready，主动 ping 保证状态可恢复。
+  postToFeishuExtension('ping')
+})
+
+onUnmounted(() => {
+  window.removeEventListener('message', onFeishuExtensionMessage)
+  progress.stop()
+})
 </script>
 
 <style scoped>

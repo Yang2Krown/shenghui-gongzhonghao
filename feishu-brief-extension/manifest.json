@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "飞书 Brief 导入",
+  "version": "0.2.4",
+  "description": "在用户自己的浏览器中读取已授权的飞书 Wiki/文档，并导入公众号智能体。",
+  "permissions": ["tabs", "scripting"],
+  "host_permissions": [
+    "https://*.feishu.cn/*",
+    "https://*.feishu.net/*",
+    "https://*.larkoffice.com/*",
+    "https://*.larksuite.com/*",
+    "http://gzh.midonghub.com/*",
+    "https://gzh.midonghub.com/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*",
+    "https://localhost/*",
+    "https://127.0.0.1/*",
+    "http://192.168.0.246/*",
+    "https://192.168.0.246/*",
+    "http://1.13.92.57/*",
+    "https://1.13.92.57/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "导入当前飞书 Brief",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.feishu.cn/*",
+        "https://*.feishu.net/*",
+        "https://*.larkoffice.com/*",
+        "https://*.larksuite.com/*"
+      ],
+      "js": ["extractor.js", "feishu-content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://gzh.midonghub.com/*",
+        "http://gzh.midonghub.com/*",
+        "http://localhost:3000/*",
+        "http://127.0.0.1:3000/*",
+        "https://localhost/*",
+        "https://127.0.0.1/*",
+        "http://192.168.0.246/*",
+        "https://192.168.0.246/*",
+        "http://1.13.92.57/*",
+        "https://1.13.92.57/*"
+      ],
+      "js": ["site-bridge.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

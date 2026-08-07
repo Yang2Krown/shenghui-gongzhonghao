@@ -74,6 +74,8 @@ class SourceAccount(BaseModel):
     priority = Column(String(50), nullable=True)                       # 每日必看 / 深度研究 / AI编程 / 中文内容参考
     fans_count = Column(Integer, nullable=True)
     note = Column(String(200), nullable=True)                          # 备注/来源（"截图1" 等）
+    wechat_ghid = Column(String(200), nullable=True, index=True)       # 公众号原始 ID（gh_xxx），极致了备用接口使用
+    wechat_reference_url = Column(String(1000), nullable=True)         # 已知文章链接，原始 ID 缺失时用于反查公众号
     enabled = Column(Boolean, default=True, index=True)
 
     source = relationship("SourceRegistry", back_populates="accounts")
