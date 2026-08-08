@@ -126,7 +126,7 @@
         <div class="panel-title panel-title-clickable" @click="togglePanel('roles')">
           <div>
             <span>后台角色</span>
-            <span class="muted title-note">按职责分配：运营 / 客服 / 财务 / 审计 / 管理员</span>
+            <span class="muted title-note">员工（全产品权限）/ 管理员 / 普通用户</span>
           </div>
           <button class="btn-ghost btn-sm" type="button">{{ openPanels.roles ? '收起' : '展开' }}</button>
         </div>
@@ -135,10 +135,7 @@
             <el-input v-model="phone" placeholder="输入用户手机号" clearable />
             <el-select v-model="roleDraft" placeholder="选择角色">
               <el-option label="管理员" value="admin" />
-              <el-option label="运营" value="ops" />
-              <el-option label="客服" value="support" />
-              <el-option label="财务" value="finance" />
-              <el-option label="审计" value="auditor" />
+              <el-option label="员工" value="employee" />
               <el-option label="普通用户" value="user" />
             </el-select>
             <button class="btn-primary btn-uniform" @click="grantRole" :disabled="!phone || saving">更新角色</button>
@@ -783,10 +780,7 @@ function roleLabel(item) {
   if (item.is_superuser) return '最高管理员'
   const map = {
     admin: '管理员',
-    ops: '运营',
-    support: '客服',
-    finance: '财务',
-    auditor: '审计',
+    employee: '员工',
     user: '普通用户',
   }
   return map[item.role] || item.role || '普通用户'

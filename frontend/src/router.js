@@ -143,6 +143,13 @@ const routes = [
         component: () => import('@/pages/tools/WechatEditor.vue'),
         meta: { title: '公众号编辑器' }
       },
+      // ===== 团队协作（P0：员工身份底座） =====
+      {
+        path: 'team',
+        name: 'TeamMembers',
+        component: () => import('@/pages/team/TeamMembers.vue'),
+        meta: { title: '团队管理', requiresTeam: true }
+      },
       // ⚠️ 临时：公众号抓取测试页（feature 验证后整段删除）
       {
         path: 'tools/gzh-test',
@@ -420,6 +427,8 @@ router.beforeEach(async (to, from, next) => {
     // 未登录/token过期 → 统一跳 Landing 页
     next({ name: 'Landing', query: { redirect: to.fullPath } })
   } else if (to.meta.requiresAdmin && !userStore.isAdmin) {
+    next({ path: '/' })
+  } else if (to.meta.requiresTeam && !userStore.isTeamMember) {
     next({ path: '/' })
   } else if (isPublic && userStore.isAuthenticated && to.name === 'Login') {
     // 已登录用户访问登录页 → 跳首页

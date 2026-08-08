@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_super_admin_user
 from app.api.v1.commercial import UNTITLED_PREFIX, _is_frontend_noise
-from app.core.admin_permissions import ADMIN_ROLES, allowed_roles_text, require_admin_permission
+from app.core.admin_permissions import ADMIN_ROLES, require_admin_permission
 from app.core.config import settings
 from app.core.product_access import (
     ALL_PRODUCTS,
@@ -69,7 +69,7 @@ class AdminGrantRequest(BaseModel):
     is_admin: bool = Field(True, description="true=设为管理员，false=取消管理员")
     role: Optional[str] = Field(
         None,
-        description="细分后台角色：admin/ops/support/finance/auditor；为空时兼容 is_admin",
+        description="角色：admin/employee/user；为空时兼容 is_admin",
     )
 
 
@@ -1266,10 +1266,10 @@ async def set_admin(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该手机号用户")
 
     target_role = (req.role or ("admin" if req.is_admin else "user")).strip().lower()
-    if target_role != "user" and target_role not in ADMIN_ROLES:
+    if target_role not in {"user", "admin", "employee"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"无效后台角色，可选：user, {allowed_roles_text()}",
+            detail="无效角色，可选：user / admin / employee",
         )
     if user.phone == settings.SUPER_ADMIN_PHONE and target_role == "user":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能取消最高管理员权限")

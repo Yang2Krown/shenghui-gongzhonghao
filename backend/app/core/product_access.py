@@ -27,6 +27,8 @@ PRODUCT_LABELS = {
 }
 
 ADMIN_ROLES = {"admin"}
+# 员工与管理员一样默认拥有全部产品权限；区别仅在后台管理（由 admin_permissions 守门）。
+EMPLOYEE_ROLES = {"employee"}
 
 
 def normalize_product_access(value: object) -> list[str]:
@@ -46,8 +48,12 @@ def is_admin_user(user: User) -> bool:
     return bool(user.is_superuser) or (user.role or "").strip().lower() in ADMIN_ROLES
 
 
+def is_employee_user(user: User) -> bool:
+    return bool(user.is_superuser) or (user.role or "").strip().lower() in EMPLOYEE_ROLES
+
+
 def effective_product_access(user: User) -> list[str]:
-    if is_admin_user(user):
+    if is_admin_user(user) or is_employee_user(user):
         return sorted(ALL_PRODUCTS)
     return normalize_product_access(user.product_access)
 

@@ -261,6 +261,7 @@ const openGroups = reactive({
   'topic-info': true,
   create: true,
   rewrite: true,
+  team: true,
   admin: true,
 })
 
@@ -327,6 +328,15 @@ const navItems = [
     icon: 'User',
   },
   {
+    id: 'team',
+    label: '团队协作',
+    icon: 'User',
+    employeeOnly: true,
+    children: [
+      { id: 'team-members', label: '团队管理' },
+    ],
+  },
+  {
     id: 'admin',
     label: '后台管理',
     icon: 'Setting',
@@ -357,6 +367,7 @@ const canSeeAdminChild = (child) => {
 const visibleNavItems = computed(() => navItems
   .filter(item => {
     if (item.adminOnly && !userStore.isAdmin) return false
+    if (item.employeeOnly && !userStore.isTeamMember) return false
     if (item.product && !userStore.hasProduct(item.product)) return false
     return true
   })
@@ -394,6 +405,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/content-imitate')) return 'content-imitate'
   if (path.startsWith('/history') || path.startsWith('/creation-history')) return 'creation-history'
   if (path.startsWith('/settings') || path.startsWith('/profile')) return 'profile'
+  if (path.startsWith('/team')) return 'team-members'
   if (path.startsWith('/admin/source-health')) return 'admin-source-health'
   if (path.startsWith('/admin/xhs-monitoring')) return 'admin-xhs-monitoring'
   if (path.startsWith('/admin/commercial-diagnostics')) return 'admin-commercial-diagnostics'
@@ -462,6 +474,7 @@ const routeMap = {
   'content-imitate': '/content-imitate',
   'creation-history': '/creation-history',
   'profile': '/profile',
+  'team-members': '/team',
   'creation': '/creation',
   'admin-dashboard': '/admin',
   'admin-source-health': '/admin/source-health',

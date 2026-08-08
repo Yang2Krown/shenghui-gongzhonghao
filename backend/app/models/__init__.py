@@ -27,6 +27,10 @@ from app.models.wechat_account import WechatAccount
 # 飞书授权绑定（商单 brief 接入）
 from app.models.feishu_auth import FeishuAuth
 
+# P0 团队协作底座
+from app.models.employee_profile import EmployeeProfile
+from app.models.article_member import ArticleMember
+
 # 积分系统
 from app.models.credit import UserCredit, CreditTransaction, CreditPackage
 
@@ -86,6 +90,9 @@ __all__ = [
     "WechatAccount",
     # 飞书授权绑定
     "FeishuAuth",
+    # P0 团队协作底座
+    "EmployeeProfile",
+    "ArticleMember",
     # 积分系统
     "UserCredit",
     "CreditTransaction",

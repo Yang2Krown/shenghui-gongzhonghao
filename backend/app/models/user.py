@@ -37,6 +37,12 @@ class User(BaseModel):
     style_profiles = relationship("StyleProfile", back_populates="user", cascade="all, delete-orphan")
     style_sources = relationship("StyleSource", back_populates="user", cascade="all, delete-orphan")
     articles = relationship("ArticleForAnalysis", back_populates="user", cascade="all, delete-orphan")
+    employee_profile = relationship(
+        "EmployeeProfile",
+        back_populates="user",
+        uselist=False,
+        foreign_keys="EmployeeProfile.user_id",
+    )
     
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', email='{self.email}')>"
