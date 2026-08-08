@@ -364,7 +364,7 @@ async def monitoring_commercial_diagnostics(
     current_user: User = Depends(require_admin_permission("monitoring:read")),
 ) -> Any:
     """极致了公众号商单链路诊断。"""
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = utcnow() - timedelta(days=days)
     rows = (await db.execute(
         select(
             RawInfo.content,

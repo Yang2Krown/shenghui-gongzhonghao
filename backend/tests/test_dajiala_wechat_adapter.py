@@ -7,6 +7,7 @@ from app.services.scraping.adapters.dajiala_wechat_adapter import (
     DajialaWechatAdapter,
     _history_by_ghid_items,
     _history_by_ghid_payload,
+    _should_use_history_by_ghid,
 )
 
 
@@ -97,6 +98,10 @@ def test_history_by_ghid_items_parse_msg_list():
     assert items[0].url.endswith("new-article")
     assert items[0].extras["endpoint"] == HISTORY_BY_GHID_ENDPOINT
     assert items[0].extras["history_by_ghid"] is True
+
+
+def test_stopped_condition_endpoint_uses_history_fallback():
+    assert _should_use_history_by_ghid({"code": 2005, "msg": "接口已停止维护，请停止调用"})
 
 
 @pytest.mark.asyncio

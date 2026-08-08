@@ -94,7 +94,12 @@ def _should_use_history_by_ghid(data: Dict[str, Any]) -> bool:
     """只对供应商明确表示当天接口不可用的业务错误做一次备用切换。"""
     code = data.get("code")
     message = str(data.get("msg") or data.get("message") or "")
-    return code in (500, "500") or "接口暂时无法使用" in message or "历史发文" in message
+    return (
+        code in (500, "500", 2005, "2005")
+        or "接口暂时无法使用" in message
+        or "接口已停止维护" in message
+        or "历史发文" in message
+    )
 
 
 def _remember_account_identity(account: SourceAccount, data: Dict[str, Any]) -> None:

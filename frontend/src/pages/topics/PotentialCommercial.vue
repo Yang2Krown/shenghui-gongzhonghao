@@ -112,10 +112,10 @@
 
         <div class="placements-heading">
           <span class="placements-heading-title"><span class="article-icon">▤</span>投放文章</span>
-          <span>{{ group.items.length > 5 ? `前 5 / 共 ${group.items.length}` : `${group.items.length} 篇` }}</span>
+          <span>{{ group.items.length > 3 ? `滚动查看 · 共 ${group.items.length}` : `${group.items.length} 篇` }}</span>
         </div>
-        <div class="placements">
-          <article v-for="item in group.items.slice(0, 5)" :key="item.id" class="placement">
+        <div class="placements" :aria-label="`${group.brand} 投放文章列表`">
+          <article v-for="item in group.items" :key="item.id" class="placement">
             <div class="placement-main" @click="openDetail(item)">
               <span :class="['placement-dot', item.commercial_level]"></span>
               <div class="placement-title">{{ item.title }}</div>
@@ -131,10 +131,6 @@
             <button class="link-btn" @click.stop="openOriginal(item.url)">原文</button>
           </article>
         </div>
-
-        <button v-if="group.items.length > 5" class="more-btn" @click="openGroup(group)">
-          查看全部 {{ group.items.length }} 篇
-        </button>
       </section>
     </div>
 
@@ -164,22 +160,6 @@
         </div>
       </div>
 
-      <div v-else-if="detailGroup" class="detail">
-        <h3>{{ detailGroup.brand }}</h3>
-        <div class="placements drawer-list">
-          <article v-for="item in detailGroup.items" :key="item.id" class="placement">
-            <div class="placement-main" @click="openDetail(item)">
-              <span :class="['placement-dot', item.commercial_level]"></span>
-              <div class="placement-title">{{ item.title }}</div>
-              <div class="placement-sub">
-                <span>{{ item.source_account_name || item.author || '未知账号' }}</span>
-                <span>{{ timeLabel(item) }}</span>
-              </div>
-            </div>
-            <button class="link-btn" @click.stop="openOriginal(item.url)">原文</button>
-          </article>
-        </div>
-      </div>
     </el-drawer>
   </div>
 </template>
@@ -212,9 +192,8 @@ const DISPLAY_WINDOW_DAYS = 10
 
 const drawerVisible = ref(false)
 const detailItem = ref(null)
-const detailGroup = ref(null)
 const drawerScrollY = ref(0)
-const drawerTitle = computed(() => detailItem.value?.title || detailGroup.value?.brand || '商单详情')
+const drawerTitle = computed(() => detailItem.value?.title || '商单详情')
 const hasActiveFilters = computed(() => Boolean(
   selectedLevel.value || selectedBrand.value || selectedCategory.value || keyword.value.trim()
 ))
@@ -297,14 +276,7 @@ const restoreDrawerScroll = () => {
   })
 }
 const openDetail = (item) => {
-  detailGroup.value = null
   detailItem.value = item
-  rememberDrawerScroll()
-  drawerVisible.value = true
-}
-const openGroup = (group) => {
-  detailItem.value = null
-  detailGroup.value = group
   rememberDrawerScroll()
   drawerVisible.value = true
 }
@@ -446,7 +418,11 @@ onMounted(() => {
 .placements-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 18px 0 10px; color: var(--ink-4); font-size: 11px; }
 .placements-heading-title { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-2); font-size: 13px; font-weight: 750; }
 .article-icon { display: inline-grid; width: 21px; height: 21px; place-items: center; border-radius: 6px; background: var(--clay); color: var(--paper); font-size: 12px; line-height: 1; }
-.placements { display: flex; flex-direction: column; gap: 8px; }
+.placements { display: flex; flex-direction: column; gap: 8px; max-height: 452px; padding-right: 5px; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: var(--clay-soft, var(--clay)) transparent; scrollbar-width: thin; }
+.placements::-webkit-scrollbar { width: 6px; }
+.placements::-webkit-scrollbar-track { background: transparent; }
+.placements::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--clay-soft, var(--clay)); }
+.placements::-webkit-scrollbar-thumb:hover { background: var(--clay); }
 .placement { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 13px; border: 1px solid var(--bone); border-radius: 10px; background: var(--ivory); transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
 .placement:hover { border-color: var(--clay-soft, var(--clay)); background: var(--paper); box-shadow: 0 5px 14px rgba(71, 54, 39, .06); }
 .placement:last-child { border-bottom: 1px solid var(--bone); }
@@ -463,10 +439,9 @@ onMounted(() => {
 .placement-insight span { display: inline-flex; align-items: center; max-width: 100%; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--ink-3); font-size: 11px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .placement-insight .placement-product-tag { border-color: rgba(204, 120, 92, .32); background: var(--clay-tint); color: var(--clay-deep, var(--clay)); font-weight: 650; }
 .placement-insight .placement-advantage-tag { background: var(--paper); color: var(--ink-3); }
-.link-btn, .more-btn { border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink-3); cursor: pointer; transition: border-color .18s ease, color .18s ease, background .18s ease; }
-.link-btn:hover, .more-btn:hover { border-color: var(--clay-soft, var(--clay)); background: var(--clay-tint); color: var(--clay); }
+.link-btn { border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink-3); cursor: pointer; transition: border-color .18s ease, color .18s ease, background .18s ease; }
+.link-btn:hover { border-color: var(--clay-soft, var(--clay)); background: var(--clay-tint); color: var(--clay); }
 .link-btn { flex: none; padding: 6px 8px; font-size: 11px; }
-.more-btn { width: 100%; margin-top: 10px; padding: 8px; font-size: 12px; }
 .detail ul { margin: 0; padding-left: 18px; color: var(--ink-3); font-size: 13px; line-height: 1.7; }
 .detail-markdown { color: var(--ink-3); font-size: 13px; line-height: 1.75; }
 .detail-markdown :deep(p) { margin: 0 0 9px; }
@@ -492,7 +467,6 @@ onMounted(() => {
 .detail h4 { margin: 16px 0 8px; color: var(--ink); }
 .detail p { color: var(--ink-3); line-height: 1.7; }
 .detail-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); }
-.drawer-list { margin-top: 12px; }
 @media (max-width: 900px) {
   .filter-controls { grid-template-columns: 1fr 1fr; }
   .search-field { grid-column: 1 / -1; }
@@ -510,6 +484,7 @@ onMounted(() => {
   .search-field { grid-column: auto; }
   .brand-card { padding: 16px; }
   .brand-meta { grid-template-columns: 1fr; gap: 10px; }
+  .placements { max-height: 430px; }
   .result-count { padding: 0; }
 }
 </style>

@@ -1,6 +1,7 @@
 """潜在商单 API — 品牌聚合视图 + 兼容时间轴视图。"""
 
 from collections import defaultdict
+from datetime import timedelta
 import re
 from typing import Any, Dict, List, Optional
 
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.admin_permissions import require_admin_permission
 from app.core.security import get_current_user
+from app.core.timezone import utcnow
 from app.db.session import get_db
 from app.models.raw_info import RawInfo
 from app.models.source_registry import SourceRegistry, SourceAccount
@@ -159,6 +161,11 @@ def _is_frontend_noise(item: dict) -> bool:
     return any(term in haystack for term in FOREIGN_PRODUCT_TERMS)
 
 
+def _published_cutoff(days: int):
+    """按北京时间计算发布时间 cutoff；数据库里的 naive 时间也是北京时间。"""
+    return utcnow() - timedelta(days=days)
+
+
 # ── GET /commercial/timeline ──────────────────────────────────
 
 @router.get("/timeline", response_model=dict)
@@ -174,9 +181,8 @@ async def get_commercial_timeline(
     """时间轴：按天分组，返回潜在商单列表。"""
     filters = _wechat_commercial_filters(level=level, brand=brand, category=category, keyword=keyword)
 
-    # 截断日期范围（published_at 是 naive datetime，cutoff 也要 naive）
-    from datetime import datetime, timedelta
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    # published_at 是 naive 北京时间，cutoff 也按北京时间计算。
+    cutoff = _published_cutoff(days)
 
     filters.append(RawInfo.published_at >= cutoff)
 
@@ -229,9 +235,7 @@ async def get_commercial_diagnostics(
     days: int = Query(30, ge=1, le=180, description="前端当前时间范围"),
 ) -> Any:
     """诊断潜在商单为空的具体原因。"""
-    from datetime import datetime, timedelta
-
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = _published_cutoff(days)
 
     rows = (await db.execute(
         select(
@@ -418,8 +422,7 @@ async def get_commercial_groups(
     """品牌聚合：按品牌/产品聚合投放账号、时间、链接和主体信息。"""
     filters = _wechat_commercial_filters(level=level, brand=brand, category=category, keyword=keyword)
 
-    from datetime import datetime, timedelta
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = _published_cutoff(days)
     filters.append(RawInfo.published_at >= cutoff)
 
     query = (
