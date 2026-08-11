@@ -22,7 +22,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { dismissAnnouncement, getActiveAnnouncements } from '@/api/announcements'
 
@@ -30,6 +30,7 @@ const userStore = useUserStore()
 const announcements = ref([])
 const dismissing = ref(false)
 const currentAnnouncement = computed(() => announcements.value[0] || null)
+let sessionRecoveryPromise = null
 const announcementVisible = computed({
   get: () => Boolean(currentAnnouncement.value),
   set: () => {},
@@ -67,10 +68,39 @@ const formatAnnouncementTime = (value) => value
   ? new Date(value).toLocaleString('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
   : '-'
 
+const recoverSession = () => {
+  if (!userStore.initialized || !userStore.isAuthenticated || document.visibilityState !== 'visible') return
+  if (!sessionRecoveryPromise) {
+    sessionRecoveryPromise = userStore.recoverSession({ force: true })
+      .catch(() => {})
+      .finally(() => {
+        sessionRecoveryPromise = null
+      })
+  }
+  return sessionRecoveryPromise
+}
+
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') recoverSession()
+}
+
+const handlePageShow = () => recoverSession()
+const handleOnline = () => recoverSession()
+
 onMounted(async () => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  window.addEventListener('pageshow', handlePageShow)
+  window.addEventListener('online', handleOnline)
+
   // 初始化时检查用户登录状态
   await userStore.initialize()
   await fetchAnnouncements()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  window.removeEventListener('pageshow', handlePageShow)
+  window.removeEventListener('online', handleOnline)
 })
 
 // 短信登录成功后 App 不会重新挂载，监听用户切换以补拉公告。

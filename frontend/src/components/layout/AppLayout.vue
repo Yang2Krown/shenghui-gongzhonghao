@@ -334,6 +334,7 @@ const navItems = [
     employeeOnly: true,
     children: [
       { id: 'team-members', label: '团队管理' },
+      { id: 'meetings', label: '会议方法论' },
     ],
   },
   {
@@ -406,6 +407,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/history') || path.startsWith('/creation-history')) return 'creation-history'
   if (path.startsWith('/settings') || path.startsWith('/profile')) return 'profile'
   if (path.startsWith('/team')) return 'team-members'
+  if (path.startsWith('/meetings')) return 'meetings'
   if (path.startsWith('/admin/source-health')) return 'admin-source-health'
   if (path.startsWith('/admin/xhs-monitoring')) return 'admin-xhs-monitoring'
   if (path.startsWith('/admin/commercial-diagnostics')) return 'admin-commercial-diagnostics'
@@ -475,6 +477,7 @@ const routeMap = {
   'creation-history': '/creation-history',
   'profile': '/profile',
   'team-members': '/team',
+  'meetings': '/meetings',
   'creation': '/creation',
   'admin-dashboard': '/admin',
   'admin-source-health': '/admin/source-health',

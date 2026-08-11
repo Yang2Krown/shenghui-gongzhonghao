@@ -2,7 +2,11 @@ import axios from 'axios'
 import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
-import { isTerminalAuthError } from '@/utils/authSession'
+import {
+  isTerminalAuthError,
+  isTransientAuthError,
+  retryTransientAuth,
+} from '@/utils/authSession'
 
 // 创建axios实例
 const api = axios.create({
@@ -29,9 +33,20 @@ const notifyAuthExpired = (userStore) => {
 
   userStore.clearAuth()
   if (router.currentRoute.value.name !== 'Landing') {
-    router.push({ name: 'Landing' })
+    router.replace({ name: 'Landing' })
   }
   ElMessage.error('登录已过期，请刷新页面后重新登录')
+}
+
+const notifyAuthRecoveryFailed = (userStore) => {
+  if (authExpiryNotified) return
+  authExpiryNotified = true
+
+  userStore.clearAuth()
+  if (router.currentRoute.value.name !== 'Landing') {
+    router.replace({ name: 'Landing' })
+  }
+  ElMessage.error('登录状态无法恢复，请重新登录')
 }
 
 // 请求拦截器
@@ -88,9 +103,11 @@ api.interceptors.response.use(
       try {
         // 尝试刷新 token。并发请求只发起一个刷新请求，其余请求等待同一个结果。
         if (!refreshPromise) {
-          refreshPromise = userStore.refresh().finally(() => {
-            refreshPromise = null
-          })
+          refreshPromise = retryTransientAuth(() => userStore.refresh()).finally(
+            () => {
+              refreshPromise = null
+            },
+          )
         }
         const newToken = await refreshPromise
         authExpiryNotified = false
@@ -102,13 +119,13 @@ api.interceptors.response.use(
         // 重试原请求
         return api(originalRequest)
       } catch (refreshError) {
-        // 刷新 token 或关联用户返回终态 4xx 才判定为登录过期；Redis/网络等
-        // 服务端故障不清空登录态，也不再让刷新请求额外弹出“服务器内部错误”。
+        // 终态 4xx 立即退出；短暂故障由 retryTransientAuth 先重试，重试耗尽后
+        // 也要清理旧 token 并回到 Landing，避免用户一直卡在不可用页面。
         const missingRefreshToken = refreshError.message === 'No refresh token'
         if (isTerminalAuthError(refreshError) || missingRefreshToken) {
           notifyAuthExpired(userStore)
-        } else if (refreshError.response?.status >= 500) {
-          ElMessage.error('登录状态暂时无法验证，请稍后重试')
+        } else if (isTransientAuthError(refreshError)) {
+          notifyAuthRecoveryFailed(userStore)
         }
         return Promise.reject(refreshError)
       }

@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.product_access import is_admin_user
+from app.core.product_access import is_admin_user, is_employee_user
 from app.models.article_member import ArticleMember
 from app.models.creation import ContentCreation
 from app.models.employee_profile import EmployeeProfile
@@ -48,6 +48,17 @@ async def is_active_team_user(db: AsyncSession, user: User) -> bool:
         select(EmployeeProfile.status).where(EmployeeProfile.user_id == user.id)
     )).scalar_one_or_none()
     return profile_status != "left"
+
+
+async def can_access_team_collaboration(db: AsyncSession, user: User) -> bool:
+    """会议/SOP 等内部协作模块的统一访问检查。
+
+    普通用户仍可按原有规则访问自己或被共享的文章，但不能进入团队协作模块；
+    只有在职员工、管理员和超级管理员可以访问这里的会议数据。
+    """
+    if not await is_active_team_user(db, user):
+        return False
+    return is_admin_user(user) or is_employee_user(user)
 
 
 async def can_edit_creation(

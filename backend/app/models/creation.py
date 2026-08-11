@@ -63,6 +63,11 @@ class ContentCreation(BaseModel):
     user = relationship("User", back_populates="creations")
     topic = relationship("Topic", back_populates="creations")
     style_profile = relationship("StyleProfile", back_populates="creations")
+    meeting_suggestions = relationship(
+        "MeetingSuggestion",
+        foreign_keys="MeetingSuggestion.related_creation_id",
+        back_populates="creation",
+    )
     
     def __repr__(self):
         return f"<ContentCreation(id={self.id}, title='{self.title[:50]}...', status='{self.status}')>"

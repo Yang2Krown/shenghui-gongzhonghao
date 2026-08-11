@@ -43,6 +43,17 @@ class User(BaseModel):
         uselist=False,
         foreign_keys="EmployeeProfile.user_id",
     )
+    meetings_created = relationship(
+        "Meeting",
+        foreign_keys="Meeting.created_by",
+        cascade="all, delete-orphan",
+        back_populates="creator",
+    )
+    meeting_suggestions_owned = relationship(
+        "MeetingSuggestion",
+        foreign_keys="MeetingSuggestion.owner_id",
+        back_populates="owner",
+    )
     
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', email='{self.email}')>"

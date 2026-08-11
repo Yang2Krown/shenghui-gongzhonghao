@@ -9,6 +9,7 @@ export const useUserStore = defineStore('user', () => {
   // 状态
   const user = ref(null)
   const TOKEN_MAX_AGE = 7 * 24 * 60 * 60 * 1000 // 7天
+  const ACCESS_TOKEN_REFRESH_WINDOW = 5 * 60 * 1000 // access token 到期前 5 分钟主动恢复
 
   const isTokenExpired = () => {
     const hasToken = localStorage.getItem('token')
@@ -20,6 +21,22 @@ export const useUserStore = defineStore('user', () => {
       return false
     }
     return Date.now() - Number(savedAt) > TOKEN_MAX_AGE
+  }
+
+  const accessTokenNeedsRefresh = () => {
+    if (!token.value) return false
+
+    try {
+      const payload = token.value.split('.')[1]
+      if (!payload) return true
+      const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+      const decoded = JSON.parse(atob(normalized))
+      const expiresAt = Number(decoded.exp) * 1000
+      return !Number.isFinite(expiresAt) || expiresAt - Date.now() <= ACCESS_TOKEN_REFRESH_WINDOW
+    } catch {
+      // 解析失败交给后端验证，避免把仍可用的会话误清掉。
+      return false
+    }
   }
 
   const token = ref(isTokenExpired() ? '' : (localStorage.getItem('token') || ''))
@@ -83,6 +100,27 @@ export const useUserStore = defineStore('user', () => {
       user.value = response.data
       return response.data
     } catch (error) {
+      throw error
+    }
+  }
+
+  // 浏览器从休眠/后台恢复时主动确认会话，避免等到用户点击功能后才暴露旧 token。
+  const recoverSession = async ({ force = true } = {}) => {
+    if (!token.value) return false
+    if (isTokenExpired()) {
+      clearAuth()
+      if (router.currentRoute.value.name !== 'Landing') {
+        router.push({ name: 'Landing' })
+      }
+      return false
+    }
+    if (!force && user.value && !accessTokenNeedsRefresh()) return true
+
+    try {
+      await fetchUser()
+      return true
+    } catch (error) {
+      if (isTerminalAuthError(error)) clearAuth()
       throw error
     }
   }
@@ -160,6 +198,7 @@ export const useUserStore = defineStore('user', () => {
     // 方法
     initialize,
     fetchUser,
+    recoverSession,
     refresh,
     logout,
     clearAuth,

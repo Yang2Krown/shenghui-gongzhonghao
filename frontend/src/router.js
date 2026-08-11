@@ -150,6 +150,18 @@ const routes = [
         component: () => import('@/pages/team/TeamMembers.vue'),
         meta: { title: '团队管理', requiresTeam: true }
       },
+      {
+        path: 'meetings',
+        name: 'Meetings',
+        component: () => import('@/pages/meetings/MeetingList.vue'),
+        meta: { title: '会议方法论', requiresTeam: true }
+      },
+      {
+        path: 'meetings/:id',
+        name: 'MeetingDetail',
+        component: () => import('@/pages/meetings/MeetingDetail.vue'),
+        meta: { title: '会议详情', requiresTeam: true }
+      },
       // ⚠️ 临时：公众号抓取测试页（feature 验证后整段删除）
       {
         path: 'tools/gzh-test',

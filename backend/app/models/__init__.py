@@ -31,6 +31,8 @@ from app.models.feishu_auth import FeishuAuth
 # P0 团队协作底座
 from app.models.employee_profile import EmployeeProfile
 from app.models.article_member import ArticleMember
+from app.models.meeting import Meeting, MeetingSuggestion, MeetingSynthesis
+from app.models.meeting_methodology import MeetingMethodologyCluster, MeetingMethodologySource
 
 # 积分系统
 from app.models.credit import UserCredit, CreditTransaction, CreditPackage
@@ -95,6 +97,11 @@ __all__ = [
     # P0 团队协作底座
     "EmployeeProfile",
     "ArticleMember",
+    "Meeting",
+    "MeetingSuggestion",
+    "MeetingSynthesis",
+    "MeetingMethodologyCluster",
+    "MeetingMethodologySource",
     # 积分系统
     "UserCredit",
     "CreditTransaction",

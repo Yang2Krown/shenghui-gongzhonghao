@@ -165,15 +165,19 @@ async def refresh_token(
             detail="刷新令牌已失效，请重新登录",
         )
 
+    # 先登记新 token，再撤销旧 token。否则如果登记新 token 时 Redis 短暂故障，
+    # 旧 token 已被撤销，客户端就会陷入“刷新失败后只能重新登录”的状态。
+    token_pair = await _issue_token_pair(user.id)
+
     try:
         await revoke_refresh_token(payload["jti"])
     except RefreshTokenStoreUnavailable as exc:
+        # 新 token 已经登记成功；撤销旧 token 失败时返回临时错误，客户端会重试，
+        # 保留旧 token 可用性，避免一次 Redis 抖动造成不可恢复的登录态。
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="刷新令牌服务暂不可用，请稍后重试",
         ) from exc
-
-    token_pair = await _issue_token_pair(user.id)
     
     return {
         "code": 200,
