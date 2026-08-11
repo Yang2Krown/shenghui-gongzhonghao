@@ -25,6 +25,15 @@ class TeamMemberUpdateRequest(BaseModel):
     joined_at: Optional[date] = None
     status: Optional[str] = Field(None, description="active / left")
 
+    @validator("status")
+    def validate_status(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        normalized = v.strip().lower()
+        if normalized not in {"active", "left"}:
+            raise ValueError("员工状态仅支持 active / left")
+        return normalized
+
 
 class TeamMemberOut(BaseModel):
     user_id: int

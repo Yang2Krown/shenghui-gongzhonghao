@@ -16,7 +16,7 @@ class ContentCreation(BaseModel):
     topic_id = Column(Integer, ForeignKey("topics.id"), nullable=True)
     title = Column(String(500), nullable=False)
     content = Column(Text, nullable=True)
-    status = Column(String(20), default="draft")  # draft, published, archived
+    status = Column(String(20), default="draft")  # draft, wechat_draft, published, archived
     style_profile_id = Column(Integer, ForeignKey("style_profiles.id"), nullable=True)
     
     # 关联选题候选和话题簇

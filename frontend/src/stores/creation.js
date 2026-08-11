@@ -14,7 +14,7 @@ export const useCreationStore = defineStore('creation', () => {
 
   // 计算属性
   const hasCreations = computed(() => creations.value.length > 0)
-  const draftCreations = computed(() => creations.value.filter(c => c.status === 'draft'))
+  const draftCreations = computed(() => creations.value.filter(c => ['draft', 'wechat_draft'].includes(c.status)))
   const publishedCreations = computed(() => creations.value.filter(c => c.status === 'published'))
 
   // 获取创作列表

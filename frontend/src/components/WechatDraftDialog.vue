@@ -173,7 +173,8 @@ const props = defineProps({
   contentHtml: { type: String, default: '' },
   author: { type: String, default: '' },
   digest: { type: String, default: '' },
-  coverImageUrl: { type: String, default: '' }
+  coverImageUrl: { type: String, default: '' },
+  creationId: { type: [Number, String], default: null }
 })
 
 const emit = defineEmits(['update:modelValue', 'success'])
@@ -185,6 +186,7 @@ const publishing = ref(false)
 const testing = ref(false)
 const testResult = ref(null)
 const resultMediaId = ref('')
+const requestKey = ref('')
 
 // 封面图状态
 const coverPreview = ref('')
@@ -403,6 +405,9 @@ const handlePublish = async () => {
   }
 
   saveCredentials()
+  if (props.creationId && !requestKey.value) {
+    requestKey.value = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  }
   step.value = 'publishing'
   publishing.value = true
 
@@ -427,6 +432,10 @@ const handlePublish = async () => {
       digest: form.value.digest || '',
       account_id: selectedAccountId.value,
     }
+    if (props.creationId) {
+      params.creation_id = Number(props.creationId)
+      params.request_key = requestKey.value
+    }
 
     // 封面图：优先 base64（本地上传），其次 URL（AI 生成/外部链接）
     if (coverBase64.value) {
@@ -441,7 +450,7 @@ const handlePublish = async () => {
     if (data.success) {
       resultMediaId.value = data.media_id || ''
       step.value = 'success'
-      emit('success', data)
+      emit('success', { ...data, request_key: requestKey.value || data.request_key })
     } else {
       errorMsg.value = data.message || '发布失败'
       step.value = 'error'
@@ -467,6 +476,7 @@ const handleClose = () => {
   errorMsg.value = ''
   testResult.value = null
   resultMediaId.value = ''
+  requestKey.value = ''
 }
 </script>
 

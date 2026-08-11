@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     REDIS_CONNECT_TIMEOUT_SECONDS: float = 2.0
     REDIS_SOCKET_TIMEOUT_SECONDS: float = 2.0
 
+    # 生成进度：Redis 作为跨进程共享存储，内存仅作降级缓存。
+    PROGRESS_STORE_REDIS_ENABLED: bool = True
+    PROGRESS_STORE_TTL_SECONDS: int = 3600
+    PROGRESS_STORE_REDIS_PREFIX: str = "progress"
+
     # 限流配置
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_FAIL_OPEN: Optional[bool] = None

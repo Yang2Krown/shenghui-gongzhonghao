@@ -172,6 +172,7 @@ const articleTitle = ref('')
 const editorHtml = ref('')
 const editorRef = ref(null)
 const creationId = ref(null)
+const publishRequestKey = ref('')
 
 // 发布相关
 const showPublishDialog = ref(false)
@@ -429,11 +430,18 @@ const handlePublish = async () => {
   publishing.value = true
   publishResult.value = null
   try {
+    if (creationId.value && !publishRequestKey.value) {
+      publishRequestKey.value = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    }
     const params = {
       title: articleTitle.value.trim(),
       content: editorRef.value ? editorRef.value.getWechatHtml() : editorHtml.value,
       account_id: defaultAccountId.value,
       digest: digest.value || '',
+    }
+    if (creationId.value) {
+      params.creation_id = Number(creationId.value)
+      params.request_key = publishRequestKey.value
     }
     if (coverBase64.value) params.cover_image_base64 = coverBase64.value
     else if (coverPreview.value) params.cover_image_url = coverPreview.value
@@ -443,7 +451,10 @@ const handlePublish = async () => {
     if (data.success) {
       if (creationId.value) {
         try {
-          await markCreationPublished(creationId.value, 'wechat_draft')
+          await markCreationPublished(creationId.value, 'wechat_draft', {
+            external_id: data.media_id || null,
+            request_key: data.request_key || publishRequestKey.value || null,
+          })
         } catch (statusError) {
           console.error('回写创作发布状态失败:', statusError)
           ElMessage.warning('文章已上传草稿箱，但创作历史状态同步失败，请稍后刷新重试')

@@ -2,7 +2,7 @@
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -144,8 +144,13 @@ async def update_member_role(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能修改最高管理员角色")
     before = target.role
     if req.role == "employee":
-        await get_or_create_employee_profile(db, target.id)
+        profile = await get_or_create_employee_profile(db, target.id)
+        profile.status = "active"
     target.role = req.role
+    if req.role == "user":
+        # 角色撤销必须同时清理文章共享关系，避免用户降级后仍凭旧 member
+        # 记录访问团队内容。
+        await db.execute(delete(ArticleMember).where(ArticleMember.user_id == target.id))
     _audit(
         db,
         actor_user_id=current_user.id,
@@ -214,6 +219,11 @@ async def update_team_member(
         if value is not None and getattr(profile, field) != value:
             setattr(profile, field, value)
             changed[field] = value
+
+    if req.status == "left" and target.role == "employee":
+        target.role = "user"
+        changed["role"] = "user"
+        await db.execute(delete(ArticleMember).where(ArticleMember.user_id == target.id))
     _audit(
         db,
         actor_user_id=current_user.id,
@@ -259,6 +269,12 @@ async def share_creation(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="目标用户不存在或已禁用")
     if not (is_admin_user(target) or is_employee_user(target)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅可共享给团队成员")
+    if target.role == "employee":
+        target_profile_status = (await db.execute(
+            select(EmployeeProfile.status).where(EmployeeProfile.user_id == target.id)
+        )).scalar_one_or_none()
+        if target_profile_status == "left":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能共享给已离职员工")
     member = (await db.execute(
         select(ArticleMember).where(
             ArticleMember.creation_id == creation.id,

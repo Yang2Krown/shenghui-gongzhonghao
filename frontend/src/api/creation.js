@@ -26,8 +26,8 @@ export const updateCreation = (id, creationData) => {
 }
 
 // 公众号草稿箱上传成功后回写本地创作状态
-export const markCreationPublished = (id, platform = 'wechat_draft') => {
-  return post(`/creations/${id}/mark-published`, { platform })
+export const markCreationPublished = (id, platform = 'wechat_draft', metadata = {}) => {
+  return post(`/creations/${id}/mark-published`, { platform, ...metadata })
 }
 
 // 删除创作

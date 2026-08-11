@@ -65,8 +65,8 @@
       >
         <div class="draft-card-main">
           <div class="draft-card-head">
-            <span :class="['draft-status-badge', draft.status === 'published' ? 'draft-status-published' : 'draft-status-unpublished']">
-              {{ draft.status === 'published' ? '已发布' : '未发布' }}
+            <span :class="['draft-status-badge', draft.status === 'published' ? 'draft-status-published' : (draft.status === 'wechat_draft' ? 'draft-status-wechat' : 'draft-status-unpublished')]">
+              {{ draft.status === 'published' ? '已发布' : (draft.status === 'wechat_draft' ? '公众号草稿箱' : '未发布') }}
             </span>
             <span class="text-sm text-ink-4">{{ formatTime(draft.updated_at) }}</span>
           </div>
@@ -75,7 +75,7 @@
           <div class="draft-meta">
             <span>{{ draft.word_count || draftContentText(draft).length || 0 }} 字</span>
             <span v-if="draft.topic_direction">{{ draft.topic_direction }}</span>
-            <span v-if="draft.published_platform">已上传公众号草稿箱</span>
+            <span v-if="draft.published_platform && draft.status !== 'published'">已上传公众号草稿箱</span>
           </div>
         </div>
         <div class="draft-card-actions">
@@ -283,6 +283,7 @@ const categories = [
 const draftStatuses = [
   { value: '', label: '全部' },
   { value: 'draft', label: '未发布' },
+  { value: 'wechat_draft', label: '公众号草稿箱' },
   { value: 'published', label: '已发布' },
 ]
 
@@ -401,7 +402,7 @@ const fetchDrafts = async () => {
   loading.value = true
   try {
     const params = { page: currentPage.value, page_size: pageSize }
-    params.status = draftStatus.value || 'draft,published'
+    params.status = draftStatus.value || 'draft,wechat_draft,published'
     const res = await getCreations(params)
     drafts.value = res.data.items || []
     total.value = res.data.total || 0
@@ -465,6 +466,7 @@ onMounted(fetchRecords)
 .draft-status-badge { display: inline-flex; padding: 3px 10px; border-radius: var(--r-pill); font-size: 12px; font-weight: 600; }
 .draft-status-unpublished { background: rgba(230, 162, 60, .12); color: #A66A08; }
 .draft-status-published { background: rgba(82, 196, 26, .12); color: #3B8B19; }
+.draft-status-wechat { background: rgba(64, 135, 205, .12); color: #2A5D8F; }
 .draft-title { margin: 0; color: var(--ink); font-family: var(--font-serif); font-size: 20px; line-height: 1.4; }
 .draft-preview { margin: 8px 0 12px; color: var(--ink-3); font-size: 14px; line-height: 1.7; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .draft-meta { display: flex; gap: 14px; color: var(--ink-4); font-size: 12px; }

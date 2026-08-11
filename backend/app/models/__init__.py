@@ -1,6 +1,7 @@
 from app.models.user import User, UserProfile
 from app.models.topic import Topic, TopicCollection
 from app.models.creation import ContentCreation
+from app.models.creation_publication import CreationPublication
 from app.models.style import StyleProfile, ArticleForAnalysis
 
 # v2.0 选题挖掘 pipeline 新增模型
@@ -68,6 +69,7 @@ __all__ = [
     "Topic",
     "TopicCollection",
     "ContentCreation",
+    "CreationPublication",
     "StyleProfile",
     "ArticleForAnalysis",
     # v2.0 选题 pipeline

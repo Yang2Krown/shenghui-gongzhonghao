@@ -132,6 +132,7 @@
       :title="editableTitle || creation.title || ''"
       :content="editableText"
       :content-html="editableText"
+      :creation-id="creation.id"
       @success="handleWechatDraftSuccess"
     />
 
@@ -367,12 +368,15 @@ const copyText = async () => {
   }
 }
 
-const handleWechatDraftSuccess = async () => {
+const handleWechatDraftSuccess = async (draftData = {}) => {
   if (!creation.value.id) return
   try {
-    const res = await markCreationPublished(creation.value.id, 'wechat_draft')
-    creation.value = res.data || res
-    ElMessage.success('创作历史已标记为已发布')
+    const res = await markCreationPublished(creation.value.id, 'wechat_draft', {
+      external_id: draftData.media_id || null,
+      request_key: draftData.request_key || null,
+    })
+    creation.value = res.data?.creation || res.data || res
+    ElMessage.success('已记录到公众号草稿箱')
   } catch (e) {
     console.error('同步创作发布状态失败:', e)
     ElMessage.warning('文章已上传草稿箱，但创作历史状态同步失败，请稍后刷新重试')
@@ -416,7 +420,7 @@ function escapeHtml(s) {
 
 // 工具函数
 const getStatusName = (status) => {
-  const map = { draft: '草稿', published: '已发布', archived: '已归档' }
+  const map = { draft: '草稿', wechat_draft: '公众号草稿箱', published: '已发布', archived: '已归档' }
   return map[status] || status
 }
 
@@ -907,6 +911,12 @@ const formatDate = (dateString) => {
   background: #DAF0DC;
   color: #2A6B3A;
   border: 1px solid #A8D6B0;
+}
+
+.c-status-wechat_draft {
+  background: #E6F0FA;
+  color: #2A5D8F;
+  border: 1px solid #B8D2EC;
 }
 
 .c-status-archived {

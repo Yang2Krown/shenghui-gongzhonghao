@@ -599,9 +599,9 @@ const saveDraft = async (openDraft = true) => {
       outline_status: outlineStatus.value,
       title_status: titleStatus.value,
       content_status: contentStatus.value,
-      // 编辑已有创作时保留其发布状态；新建创作默认是未发布草稿。
-      status: isEditing.value && creationStore.currentCreation?.status === 'published'
-        ? 'published'
+      // 编辑已有创作时保留生命周期状态；状态变更走专用发布接口。
+      status: isEditing.value && ['published', 'wechat_draft'].includes(creationStore.currentCreation?.status)
+        ? creationStore.currentCreation.status
         : 'draft',
     }
 

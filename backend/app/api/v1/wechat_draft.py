@@ -18,7 +18,15 @@ from app.core.security import get_current_user
 from app.core.rate_limit import limit_ai_generation
 from app.core.url_security import resolve_redirect_url, validate_public_http_url
 from app.db.session import get_db
+from app.models.creation import ContentCreation
 from app.models.user import User
+from app.services.creation_publication import (
+    begin_creation_publication,
+    fail_creation_publication,
+    record_creation_publication,
+    publication_payload,
+)
+from app.services.team_service import can_publish_creation
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -170,6 +178,8 @@ class WechatDraftRequest(BaseModel):
     content_source_url: Optional[str] = Field(None, description="原文链接")
     need_open_comment: int = Field(0, description="是否打开评论（0 关闭 1 打开）")
     only_fans_can_comment: int = Field(0, description="是否仅粉丝可评论（0 否 1 是）")
+    creation_id: Optional[int] = Field(None, description="关联的本地创作 ID")
+    request_key: Optional[str] = Field(None, max_length=100, description="外部推送幂等键")
 
 
 class WechatDraftResponse(BaseModel):
@@ -200,7 +210,47 @@ async def create_wechat_draft(
     )
     import httpx
 
+    publication_context = None
+    claimed_publication = False
     try:
+        if request.creation_id is not None:
+            creation = (await db.execute(
+                select(ContentCreation).where(ContentCreation.id == request.creation_id)
+            )).scalars().first()
+            if creation is None:
+                raise HTTPException(status_code=404, detail="创作不存在")
+            if not await can_publish_creation(db, current_user, creation):
+                raise HTTPException(status_code=403, detail="无权发布他人创作")
+            publication_context = {
+                "creation_id": creation.id,
+                "request_key": request.request_key,
+            }
+            if request.request_key:
+                _, publication, duplicate = await begin_creation_publication(
+                    db,
+                    creation_id=creation.id,
+                    initiated_by=current_user.id,
+                    platform="wechat_draft",
+                    operation="draft_upload",
+                    request_key=request.request_key,
+                )
+                claimed_publication = not duplicate
+                if duplicate and publication.status == "succeeded":
+                    return {
+                        "code": 200,
+                        "message": "重复请求，返回原草稿结果",
+                        "data": {
+                            "success": True,
+                            "media_id": publication.external_id,
+                            "item_id": None,
+                            "message": "文章已保存到公众号草稿箱",
+                            "idempotent": True,
+                            "request_key": publication.request_key,
+                        },
+                    }
+                if duplicate and publication.status == "pending":
+                    raise HTTPException(status_code=409, detail="相同草稿请求正在处理中，请勿重复提交")
+
         # 0. 解析凭证：优先 account_id，其次 appid+app_secret
         appid, app_secret = await _resolve_credentials(db, current_user, request.account_id, request.appid, request.app_secret)
 
@@ -266,6 +316,19 @@ async def create_wechat_draft(
             only_fans_can_comment=request.only_fans_can_comment,
         )
 
+        publication_payload_data = None
+        if publication_context:
+            _, publication, _ = await record_creation_publication(
+                db,
+                creation_id=publication_context["creation_id"],
+                initiated_by=current_user.id,
+                platform="wechat_draft",
+                operation="draft_upload",
+                external_id=result.media_id,
+                request_key=publication_context["request_key"],
+            )
+            publication_payload_data = publication_payload(publication)
+
         return {
             "code": 200,
             "message": "草稿创建成功",
@@ -274,12 +337,56 @@ async def create_wechat_draft(
                 "media_id": result.media_id,
                 "item_id": result.item_id,
                 "message": "文章已保存到公众号草稿箱",
+                "idempotent": False,
+                "request_key": publication_context["request_key"] if publication_context else None,
+                "publication": publication_payload_data,
             },
         }
 
+    except HTTPException:
+        if publication_context and claimed_publication:
+            try:
+                await fail_creation_publication(
+                    db,
+                    creation_id=publication_context["creation_id"],
+                    initiated_by=current_user.id,
+                    platform="wechat_draft",
+                    operation="draft_upload",
+                    request_key=publication_context["request_key"],
+                    error_message="请求在外部推送前失败",
+                )
+            except Exception:
+                logger.warning("写入微信草稿失败状态失败", exc_info=True)
+        raise
     except ValueError as e:
+        if publication_context and claimed_publication:
+            try:
+                await fail_creation_publication(
+                    db,
+                    creation_id=publication_context["creation_id"],
+                    initiated_by=current_user.id,
+                    platform="wechat_draft",
+                    operation="draft_upload",
+                    request_key=publication_context["request_key"],
+                    error_message=str(e),
+                )
+            except Exception:
+                logger.warning("写入微信草稿失败状态失败", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        if publication_context and claimed_publication:
+            try:
+                await fail_creation_publication(
+                    db,
+                    creation_id=publication_context["creation_id"],
+                    initiated_by=current_user.id,
+                    platform="wechat_draft",
+                    operation="draft_upload",
+                    request_key=publication_context["request_key"],
+                    error_message=str(e),
+                )
+            except Exception:
+                logger.warning("写入微信草稿失败状态失败", exc_info=True)
         logger.error(f"创建微信草稿失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"创建草稿失败: {str(e)[:200]}")
 

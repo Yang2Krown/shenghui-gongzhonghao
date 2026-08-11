@@ -1,11 +1,12 @@
 import json
 from typing import Any, Dict, List, Optional, Union
-from sqlalchemy import select, and_
+from sqlalchemy import func, or_, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
 from app.crud.base import CRUDBase
 from app.models.creation import ContentCreation
+from app.models.article_member import ArticleMember
 from app.schemas.creation import (
     ContentCreationCreate,
     ContentCreationUpdate
@@ -109,6 +110,83 @@ class CRUDContentCreation(CRUDBase[ContentCreation, ContentCreationCreate, Conte
         
         result = await db.execute(statement)
         return result.scalar()
+
+    async def get_accessible(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        skip: int = 0,
+        limit: int = 100,
+        status: str = None,
+        topic_id: int = None,
+        include_all: bool = False,
+    ) -> List[ContentCreation]:
+        """获取用户有权查看的创作：自己的 + 被共享的，管理员可看全部。"""
+        statement = select(ContentCreation)
+        if not include_all:
+            statement = statement.outerjoin(
+                ArticleMember,
+                (ArticleMember.creation_id == ContentCreation.id)
+                & (ArticleMember.user_id == user_id),
+            ).where(
+                or_(
+                    ContentCreation.user_id == user_id,
+                    ArticleMember.id.is_not(None),
+                )
+            )
+
+        if status:
+            statuses = [item.strip() for item in status.split(",") if item.strip()]
+            statement = statement.where(
+                ContentCreation.status.in_(statuses)
+                if len(statuses) > 1
+                else ContentCreation.status == statuses[0]
+            )
+        if topic_id:
+            statement = statement.where(ContentCreation.topic_id == topic_id)
+
+        statement = (
+            statement.order_by(ContentCreation.updated_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await db.execute(statement)
+        return result.scalars().unique().all()
+
+    async def count_accessible(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        status: str = None,
+        topic_id: int = None,
+        include_all: bool = False,
+    ) -> int:
+        """统计用户有权查看的创作数量。"""
+        statement = select(func.count(func.distinct(ContentCreation.id))).select_from(ContentCreation)
+        if not include_all:
+            statement = statement.outerjoin(
+                ArticleMember,
+                (ArticleMember.creation_id == ContentCreation.id)
+                & (ArticleMember.user_id == user_id),
+            ).where(
+                or_(
+                    ContentCreation.user_id == user_id,
+                    ArticleMember.id.is_not(None),
+                )
+            )
+        if status:
+            statuses = [item.strip() for item in status.split(",") if item.strip()]
+            statement = statement.where(
+                ContentCreation.status.in_(statuses)
+                if len(statuses) > 1
+                else ContentCreation.status == statuses[0]
+            )
+        if topic_id:
+            statement = statement.where(ContentCreation.topic_id == topic_id)
+        result = await db.execute(statement)
+        return result.scalar() or 0
     
     async def create(
         self,

@@ -3,6 +3,16 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, validator
 
 
+CREATION_STATUSES = {"draft", "wechat_draft", "published", "archived"}
+
+
+def _validate_creation_status(value: Optional[str]) -> Optional[str]:
+    if value is not None and value not in CREATION_STATUSES:
+        allowed = ", ".join(sorted(CREATION_STATUSES))
+        raise ValueError(f"状态必须是以下之一: {allowed}")
+    return value
+
+
 class ContentCreationBase(BaseModel):
     """内容创作基础模型"""
     topic_id: Optional[int] = Field(None, description="选题ID")
@@ -23,6 +33,8 @@ class ContentCreationBase(BaseModel):
     outline_status: Optional[str] = Field(None, description="大纲生成状态")
     title_status: Optional[str] = Field(None, description="标题生成状态")
     content_status: Optional[str] = Field(None, description="正文生成状态")
+
+    _status_validator = validator("status", allow_reuse=True)(_validate_creation_status)
 
 
 class ContentCreationCreate(ContentCreationBase):
@@ -47,6 +59,8 @@ class ContentCreationUpdate(BaseModel):
     outline_status: Optional[str] = None
     title_status: Optional[str] = None
     content_status: Optional[str] = None
+
+    _status_validator = validator("status", allow_reuse=True)(_validate_creation_status)
 
 
 class ContentCreationInDB(ContentCreationBase):

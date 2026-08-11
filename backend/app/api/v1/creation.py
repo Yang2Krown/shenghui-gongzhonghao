@@ -1,10 +1,11 @@
 import json
 from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.product_access import is_admin_user
 from app.core.security import get_current_user
 from app.crud.creation import creation as creation_crud
 from app.db.session import get_db
@@ -19,6 +20,17 @@ from app.schemas.creation import (
     ContentGenerationRequest,
     ContentGenerationResponse
 )
+from app.services.creation_publication import (
+    publication_payload,
+    record_creation_publication,
+)
+from app.services.team_service import (
+    can_access_creation,
+    can_delete_creation,
+    can_edit_creation,
+    can_publish_creation,
+    is_active_team_user,
+)
 
 router = APIRouter()
 
@@ -27,6 +39,9 @@ class CreationPublishedRequest(BaseModel):
     """公众号草稿箱上传成功后的本地状态回写。"""
 
     platform: str = "wechat_draft"
+    external_id: Optional[str] = Field(None, max_length=200)
+    external_url: Optional[str] = Field(None, max_length=1000)
+    request_key: Optional[str] = Field(None, max_length=100)
 
 
 def _decode_creation_content(raw: Optional[str]) -> str:
@@ -57,6 +72,11 @@ async def create_creation(
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """创建新创作"""
+    if creation_in.status not in (None, "draft"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="新创作只能从 draft 状态开始",
+        )
     # 创建创作记录
     creation = await creation_crud.create(
         db,
@@ -81,25 +101,29 @@ async def get_creations(
     topic_id: Optional[int] = Query(None, description="选题ID筛选")
 ) -> Any:
     """获取创作列表"""
+    if not await is_active_team_user(db, current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="团队账号已停用")
     # 计算偏移量
     skip = (page - 1) * page_size
     
     # 获取创作列表
-    creations = await creation_crud.get_by_user(
+    creations = await creation_crud.get_accessible(
         db,
         user_id=current_user.id,
         skip=skip,
         limit=page_size,
         status=status,
-        topic_id=topic_id
+        topic_id=topic_id,
+        include_all=is_admin_user(current_user),
     )
     
     # 获取总数
-    total = await creation_crud.count_by_user(
+    total = await creation_crud.count_accessible(
         db,
         user_id=current_user.id,
         status=status,
-        topic_id=topic_id
+        topic_id=topic_id,
+        include_all=is_admin_user(current_user),
     )
     
     return {
@@ -125,7 +149,7 @@ async def get_creation_adjustment_options(
     creation = await creation_crud.get(db, id=creation_id)
     if not creation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="创作不存在")
-    if creation.user_id != current_user.id:
+    if not await can_access_creation(db, current_user, creation):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问他人创作")
 
     current_content = _decode_creation_content(creation.content)
@@ -252,22 +276,31 @@ async def mark_creation_published(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    """公众号草稿箱上传成功后，将本地创作标记为已发布。"""
+    """公众号草稿箱上传成功后，记录为“草稿箱”而不是正式发布。"""
     creation = await creation_crud.get(db, id=creation_id)
     if not creation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="创作不存在")
-    if creation.user_id != current_user.id:
+    if not await can_publish_creation(db, current_user, creation):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权发布他人创作")
 
-    published_creation = await creation_crud.publish(
+    stored_creation, publication, idempotent = await record_creation_publication(
         db,
-        db_obj=creation,
+        creation_id=creation.id,
+        initiated_by=current_user.id,
         platform=req.platform or "wechat_draft",
+        operation="draft_upload",
+        external_id=req.external_id,
+        external_url=req.external_url,
+        request_key=req.request_key,
     )
     return {
         "code": 200,
-        "message": "创作状态已更新为已发布",
-        "data": ContentCreationResponse.from_orm(published_creation).dict(),
+        "message": "已记录公众号草稿箱状态",
+        "data": {
+            "creation": ContentCreationResponse.from_orm(stored_creation).dict(),
+            "publication": publication_payload(publication),
+            "idempotent": idempotent,
+        },
     }
 
 
@@ -285,8 +318,7 @@ async def get_creation(
             detail="创作不存在"
         )
     
-    # 检查是否是当前用户的创作
-    if creation.user_id != current_user.id:
+    if not await can_access_creation(db, current_user, creation):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无权访问他人创作"
@@ -315,11 +347,19 @@ async def update_creation(
             detail="创作不存在"
         )
     
-    # 检查是否是当前用户的创作
-    if creation.user_id != current_user.id:
+    if not await can_edit_creation(db, current_user, creation):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无权修改他人创作"
+        )
+
+    # 生命周期状态只能由专用动作修改，避免普通保存把“草稿箱”和“正式发布”
+    # 互相覆盖；标题、正文等编辑字段仍可由 editor 角色更新。
+    update_data = creation_in.dict(exclude_unset=True)
+    if "status" in update_data and update_data["status"] != creation.status:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请使用专用发布接口修改创作状态",
         )
     
     # 更新创作
@@ -351,8 +391,7 @@ async def delete_creation(
             detail="创作不存在"
         )
     
-    # 检查是否是当前用户的创作
-    if creation.user_id != current_user.id:
+    if not await can_delete_creation(db, current_user, creation):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无权删除他人创作"
@@ -383,27 +422,34 @@ async def publish_creation(
             detail="创作不存在"
         )
     
-    # 检查是否是当前用户的创作
-    if creation.user_id != current_user.id:
+    if not await can_publish_creation(db, current_user, creation):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无权发布他人创作"
         )
-    
-    # 检查状态
-    if creation.status == "published":
+
+    if creation.status == "archived":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="创作已发布"
+            detail="已归档创作不能直接发布"
         )
-    
-    # 发布创作
-    published_creation = await creation_crud.publish(db, db_obj=creation)
+
+    published_creation, publication, idempotent = await record_creation_publication(
+        db,
+        creation_id=creation.id,
+        initiated_by=current_user.id,
+        platform="local",
+        operation="publish",
+    )
     
     return {
         "code": 200,
         "message": "创作发布成功",
-        "data": ContentCreationResponse.from_orm(published_creation).dict()
+        "data": {
+            "creation": ContentCreationResponse.from_orm(published_creation).dict(),
+            "publication": publication_payload(publication),
+            "idempotent": idempotent,
+        },
     }
 
 
