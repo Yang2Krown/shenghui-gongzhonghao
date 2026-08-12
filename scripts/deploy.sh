@@ -70,7 +70,7 @@ fi
 #   file_extractor(文件解析) agent_a(正文) schemas upload_security refresh_tokens(登录)
 #   link_extractor_high_severity/link_extractor_xhs(链接提取)
 # 注：test_agent_c 有 1 个预存在失败(标题预测模块,与改动无关),暂不纳入,待存量清理。
-BACKEND_GATE_TESTS="tests/test_file_extractor.py tests/test_agent_a.py tests/test_schemas.py tests/test_upload_security.py tests/test_refresh_tokens.py tests/test_link_extractor_high_severity.py tests/test_link_extractor_xhs.py"
+BACKEND_GATE_TESTS="tests/test_file_extractor.py tests/test_content_versions.py tests/test_article_reviews.py tests/test_agent_a.py tests/test_schemas.py tests/test_upload_security.py tests/test_refresh_tokens.py tests/test_link_extractor_high_severity.py tests/test_link_extractor_xhs.py"
 
 run_quality_gate() {
   if [ "${SKIP_TESTS:-0}" = "1" ]; then

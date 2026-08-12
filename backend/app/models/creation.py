@@ -68,6 +68,18 @@ class ContentCreation(BaseModel):
         foreign_keys="MeetingSuggestion.related_creation_id",
         back_populates="creation",
     )
+    versions = relationship(
+        "ContentVersion",
+        back_populates="creation",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ContentVersion.version_no",
+    )
+    experience_cards = relationship(
+        "ExperienceCard",
+        back_populates="creation",
+        passive_deletes=True,
+    )
     
     def __repr__(self):
         return f"<ContentCreation(id={self.id}, title='{self.title[:50]}...', status='{self.status}')>"

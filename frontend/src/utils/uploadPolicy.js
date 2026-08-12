@@ -9,14 +9,14 @@
  * 走 dashscope qwen-vl 视觉 OCR)。
  */
 
-export const DOCUMENT_EXTS = ['.pdf', '.docx', '.txt', '.md']
+export const DOCUMENT_EXTS = ['.pdf', '.docx', '.txt', '.md', '.markdown']
 export const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif']
 
 // 后端各接口实际上限(MB),与 upload_security / 路由里的 max_size 对齐
 export const UPLOAD_LIMITS = {
-  brief: 10,      // POST /feishu/brief/upload
+  brief: 20,      // POST /feishu/brief/upload
   reference: 20,  // POST /creation-tools/upload(创作工具 8 页共用)
-  style: 10,      // POST /styles/sources/upload
+  style: 20,      // POST /styles/sources/upload
   cover: 10,      // POST /images/upload(封面)
 }
 
@@ -24,7 +24,7 @@ const DOC_ACCEPT = DOCUMENT_EXTS.join(',')
 const DOC_IMAGE_ACCEPT = [...DOCUMENT_EXTS, ...IMAGE_EXTS].join(',')
 
 export const UPLOAD_POLICIES = {
-  /** 商单 brief(PracticalCreation)→ /feishu/brief/upload,10MB */
+  /** 商单 brief(PracticalCreation)→ /feishu/brief/upload,20MB */
   brief: {
     accept: DOC_IMAGE_ACCEPT,
     extensions: [...DOCUMENT_EXTS, ...IMAGE_EXTS],
@@ -40,7 +40,7 @@ export const UPLOAD_POLICIES = {
     allowImage: true,
     hint: `PDF / Word / TXT / MD / 图片,单文件不超过 ${UPLOAD_LIMITS.reference}MB`,
   },
-  /** 风格源(AddSourceModal)→ /styles/sources/upload,10MB */
+  /** 风格源(AddSourceModal)→ /styles/sources/upload,20MB */
   style: {
     accept: DOC_IMAGE_ACCEPT,
     extensions: [...DOCUMENT_EXTS, ...IMAGE_EXTS],

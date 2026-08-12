@@ -1,6 +1,6 @@
 """会议纪要、方法论沉淀与兼容行动项模型（Phase 1b）。"""
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.base import BaseModel, JSONField
@@ -134,8 +134,11 @@ class MeetingSuggestion(BaseModel):
         ForeignKey("content_creations.id", ondelete="SET NULL"),
         nullable=True,
     )
-    # Phase 1c 尚未实现。保留字段，但不建立不存在的外键。
-    related_version_id = Column(Integer, nullable=True, index=True)
+    related_version_id = Column(
+        ForeignKey("content_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     closed_at = Column(DateTime, nullable=True)
     raw_json = Column(JSONField, nullable=True)
     is_manually_edited = Column(Boolean, nullable=False, default=False)
@@ -150,4 +153,21 @@ class MeetingSuggestion(BaseModel):
         "ContentCreation",
         foreign_keys=[related_creation_id],
         back_populates="meeting_suggestions",
+    )
+    related_version = relationship(
+        "ContentVersion",
+        foreign_keys=[related_version_id],
+        back_populates="related_suggestions",
+    )
+    content_versions = relationship(
+        "ContentVersion",
+        foreign_keys="ContentVersion.suggestion_id",
+        back_populates="suggestion",
+        passive_deletes=True,
+    )
+    experience_cards = relationship(
+        "ExperienceCard",
+        foreign_keys="ExperienceCard.suggestion_id",
+        back_populates="suggestion",
+        passive_deletes=True,
     )

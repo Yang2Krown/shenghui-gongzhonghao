@@ -28,6 +28,15 @@ def _blank_pdf() -> bytes:
     return buf.getvalue()
 
 
+def _short_text_pdf() -> bytes:
+    import fitz
+
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "short PDF text")
+    return document.tobytes()
+
+
 def _table_docx() -> bytes:
     d = Document()
     d.add_paragraph("产品:测试面霜")
@@ -86,6 +95,15 @@ async def test_scanned_pdf_falls_back_to_ocr(monkeypatch):
     text = await extract_text(filename="scan.pdf", data=_blank_pdf())
     assert called.get("hit"), "空白 PDF 未触发 OCR 兜底"
     assert text == "扫描件里的文字"
+
+
+async def test_short_text_pdf_is_kept_without_ocr(monkeypatch):
+    async def fail_if_called(data, mime):
+        raise AssertionError("有文本层的短 PDF 不应触发 OCR")
+
+    monkeypatch.setattr(file_extractor, "_ocr_pdf_via_vision", fail_if_called)
+    text = await extract_text(filename="short.pdf", data=_short_text_pdf())
+    assert "short PDF text" in text
 
 
 async def test_image_upload_routes_to_vision(monkeypatch):

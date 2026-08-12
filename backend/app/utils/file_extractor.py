@@ -176,8 +176,11 @@ async def extract_text(
         return _extract_text(data)
     if ext in PDF_EXTS:
         text = _extract_pdf(data)
-        if not text or len(text) < 20:
-            logger.warning(f"PDF 文本提取结果过短({len(text)})，尝试 OCR 兜底")
+        # 文本层只要有内容就保留。短 PDF（封面、单句说明、短经验卡）
+        # 仍然是合法的可复制文档，不能因为字符数少而被 OCR 结果覆盖；
+        # OCR 只针对真正没有文本层的扫描版 PDF。
+        if not text:
+            logger.warning("PDF 没有可复制文本，尝试 OCR 兜底")
             ocr_text = await _ocr_pdf_via_vision(data)
             if ocr_text:
                 return ocr_text

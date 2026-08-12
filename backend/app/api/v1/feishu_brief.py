@@ -36,6 +36,7 @@ from app.utils.file_extractor import extract_text, UnsupportedFileType
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+MAX_BRIEF_UPLOAD_SIZE = 20 * 1024 * 1024  # 20MB
 
 
 # ── 辅助 ─────────────────────────────────────────────────
@@ -229,7 +230,7 @@ async def brief_upload(
         safe = validate_document_upload(
             filename=file.filename,
             data=data,
-            max_size=10 * 1024 * 1024,
+            max_size=MAX_BRIEF_UPLOAD_SIZE,
         )
     except UploadSecurityError as e:
         raise HTTPException(status_code=400, detail=str(e))

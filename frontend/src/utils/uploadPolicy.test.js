@@ -8,10 +8,10 @@ import {
 const file = (name, size = 1, type = '') => ({ name, size, type })
 
 describe('uploadPolicy 与后端契约一致', () => {
-  it('brief 上限 10MB,reference/style/cover 各就其位', () => {
-    expect(UPLOAD_POLICIES.brief.maxMB).toBe(10)
+  it('文档类 brief/reference/style 统一 20MB,cover 保持 10MB', () => {
+    expect(UPLOAD_POLICIES.brief.maxMB).toBe(20)
     expect(UPLOAD_POLICIES.reference.maxMB).toBe(20)
-    expect(UPLOAD_POLICIES.style.maxMB).toBe(10) // styles 接口实为 10MB,不是 20
+    expect(UPLOAD_POLICIES.style.maxMB).toBe(20)
     expect(UPLOAD_LIMITS.cover).toBe(10)
   })
 
@@ -32,6 +32,13 @@ describe('validateUploadFile', () => {
     }
   })
 
+  it('document 策略支持文章复盘文件并统一 20MB 上限', () => {
+    expect(validateUploadFile(file('before.pdf'), 'document')).toBeNull()
+    expect(validateUploadFile(file('after.markdown'), 'document')).toBeNull()
+    const limit = UPLOAD_POLICIES.document.maxMB * 1024 * 1024
+    expect(validateUploadFile(file('large.docx', limit + 1), 'document')).toBe('文件大小不能超过 20MB')
+  })
+
   it('document 策略拒绝图片', () => {
     expect(validateUploadFile(file('a.png', 1, 'image/png'), 'document')).toMatch(/仅支持/)
   })
@@ -49,7 +56,7 @@ describe('validateUploadFile', () => {
   it('大小边界:恰好上限通过,超 1 字节拒绝,文案含正确上限', () => {
     const brief = UPLOAD_POLICIES.brief.maxMB * 1024 * 1024
     expect(validateUploadFile(file('a.txt', brief), 'brief')).toBeNull()
-    expect(validateUploadFile(file('a.txt', brief + 1), 'brief')).toBe('文件大小不能超过 10MB')
+    expect(validateUploadFile(file('a.txt', brief + 1), 'brief')).toBe('文件大小不能超过 20MB')
 
     const ref = UPLOAD_POLICIES.reference.maxMB * 1024 * 1024
     expect(validateUploadFile(file('a.txt', ref + 1), 'reference')).toBe('文件大小不能超过 20MB')

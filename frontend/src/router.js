@@ -162,6 +162,18 @@ const routes = [
         component: () => import('@/pages/meetings/MeetingDetail.vue'),
         meta: { title: '会议详情', requiresTeam: true }
       },
+      {
+        path: 'experience',
+        name: 'ExperienceLibrary',
+        component: () => import('@/pages/experience/ExperienceLibrary.vue'),
+        meta: { title: '经验库', requiresTeam: true }
+      },
+      {
+        path: 'article-reviews',
+        name: 'ArticleReviews',
+        component: () => import('@/pages/article-reviews/ArticleReviews.vue'),
+        meta: { title: '文章复盘', requiresTeam: true }
+      },
       // ⚠️ 临时：公众号抓取测试页（feature 验证后整段删除）
       {
         path: 'tools/gzh-test',
@@ -251,6 +263,12 @@ const routes = [
         name: 'EditCreation',
         component: () => import('@/pages/creation/CreationEditor.vue'),
         meta: { title: '编辑创作' }
+      },
+      {
+        path: 'creation/:id/versions',
+        name: 'ContentVersions',
+        component: () => import('@/pages/creation/ContentVersions.vue'),
+        meta: { title: '文章版本' }
       },
       {
         path: 'creation/:id',

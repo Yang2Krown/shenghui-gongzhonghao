@@ -33,6 +33,8 @@ from app.models.employee_profile import EmployeeProfile
 from app.models.article_member import ArticleMember
 from app.models.meeting import Meeting, MeetingSuggestion, MeetingSynthesis
 from app.models.meeting_methodology import MeetingMethodologyCluster, MeetingMethodologySource
+from app.models.content_version import ContentVersion, ExperienceCard
+from app.models.article_review import ArticleReview, ArticleReviewComment
 
 # 积分系统
 from app.models.credit import UserCredit, CreditTransaction, CreditPackage
@@ -102,6 +104,10 @@ __all__ = [
     "MeetingSynthesis",
     "MeetingMethodologyCluster",
     "MeetingMethodologySource",
+    "ContentVersion",
+    "ExperienceCard",
+    "ArticleReview",
+    "ArticleReviewComment",
     # 积分系统
     "UserCredit",
     "CreditTransaction",

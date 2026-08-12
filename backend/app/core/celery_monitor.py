@@ -22,7 +22,7 @@ def task_category(task_name: str) -> str:
     name = (task_name or "").lower()
     if name.startswith("scraper."):
         return "scraping"
-    if name.startswith(("preprocess.", "mining.", "commercial.", "ai.", "content.", "title.", "outline.")):
+    if name.startswith(("preprocess.", "mining.", "commercial.", "ai.", "content.", "title.", "outline.", "versions.", "experience.")):
         return "ai"
     if name.startswith(("publish.", "xhs.")):
         return "publish"

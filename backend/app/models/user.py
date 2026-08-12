@@ -1,5 +1,3 @@
-from datetime import datetime
-from typing import Optional, List
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
 
@@ -53,6 +51,18 @@ class User(BaseModel):
         "MeetingSuggestion",
         foreign_keys="MeetingSuggestion.owner_id",
         back_populates="owner",
+    )
+    content_versions_created = relationship(
+        "ContentVersion",
+        foreign_keys="ContentVersion.created_by",
+        back_populates="creator",
+        passive_deletes=True,
+    )
+    experience_cards_created = relationship(
+        "ExperienceCard",
+        foreign_keys="ExperienceCard.created_by",
+        back_populates="creator",
+        passive_deletes=True,
     )
     
     def __repr__(self):

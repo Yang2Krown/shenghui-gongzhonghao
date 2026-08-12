@@ -151,12 +151,12 @@ describe('实操 / 商稿 brief 上传 smoke', () => {
     cy.get('@unexpectedUpload.all').should('have.length', 0)
 
     cy.get('[data-testid="brief-upload-input-0"]').selectFile({
-      contents: Cypress.Buffer.alloc(10 * 1024 * 1024 + 1),
+      contents: Cypress.Buffer.alloc(20 * 1024 * 1024 + 1),
       fileName: 'too-large.txt',
       mimeType: 'text/plain',
       lastModified: Date.now(),
     }, { force: true })
-    cy.contains('文件大小不能超过 10MB').should('be.visible')
+    cy.contains('文件大小不能超过 20MB').should('be.visible')
     cy.get('[data-testid="brief-import"]').click()
     cy.get('@unexpectedUpload.all').should('have.length', 0)
   })
