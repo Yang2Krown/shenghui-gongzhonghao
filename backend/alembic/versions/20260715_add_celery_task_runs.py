@@ -2,7 +2,7 @@
 
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -16,7 +16,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     # Older application startups could create this model through metadata before
     # Alembic reached this revision. Treat that schema as already provisioned.
-    if "celery_task_runs" in inspect(op.get_bind()).get_table_names():
+    if not context.is_offline_mode() and "celery_task_runs" in inspect(op.get_bind()).get_table_names():
         return
     op.create_table(
         "celery_task_runs",

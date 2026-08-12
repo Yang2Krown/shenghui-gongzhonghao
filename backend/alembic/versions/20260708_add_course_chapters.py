@@ -7,7 +7,7 @@ Create Date: 2026-07-08
 """
 from typing import Union, Sequence
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy.engine.reflection import Inspector
 
@@ -19,9 +19,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    inspector = Inspector(bind)
-    if not inspector.has_table("course_chapters"):
+    table_exists = (
+        False
+        if context.is_offline_mode()
+        else Inspector(op.get_bind()).has_table("course_chapters")
+    )
+    if not table_exists:
         op.create_table(
             "course_chapters",
             sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),

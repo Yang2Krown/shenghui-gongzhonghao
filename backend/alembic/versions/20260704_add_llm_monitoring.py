@@ -7,7 +7,7 @@ Create Date: 2026-07-04
 
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 from datetime import datetime, timezone, timedelta
@@ -20,11 +20,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
+    inspector = None if context.is_offline_mode() else inspect(op.get_bind())
     now = datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
 
-    if not inspector.has_table("llm_model_pricing"):
+    if inspector is None or not inspector.has_table("llm_model_pricing"):
         op.create_table(
             "llm_model_pricing",
             sa.Column("provider", sa.String(length=50), nullable=False),
@@ -42,7 +41,7 @@ def upgrade() -> None:
             sa.UniqueConstraint("provider", "model", name="uq_llm_model_pricing_provider_model"),
         )
 
-    if not inspector.has_table("llm_call_logs"):
+    if inspector is None or not inspector.has_table("llm_call_logs"):
         op.create_table(
             "llm_call_logs",
             sa.Column("provider", sa.String(length=50), nullable=False),

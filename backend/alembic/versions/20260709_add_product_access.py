@@ -7,7 +7,7 @@ Create Date: 2026-07-09
 
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 from sqlalchemy.dialects import postgresql
@@ -20,12 +20,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
-    if not inspector.has_table("users"):
-        return
-
-    columns = {col["name"] for col in inspector.get_columns("users")}
+    if context.is_offline_mode():
+        inspector = None
+        columns = set()
+        tables = {"users"}
+    else:
+        inspector = inspect(op.get_bind())
+        if not inspector.has_table("users"):
+            return
+        columns = {col["name"] for col in inspector.get_columns("users")}
+        tables = set(inspector.get_table_names())
     if "product_access" not in columns:
         op.add_column(
             "users",
@@ -52,9 +56,9 @@ def upgrade() -> None:
 
     # 手机号是唯一身份；旧的默认邮箱管理员和无手机号账号不再保留。
     target_users = "SELECT id FROM users WHERE email = 'admin@example.com' OR phone IS NULL OR phone = ''"
-    tables = set(inspector.get_table_names())
-
     def _has_column(table_name: str, column_name: str) -> bool:
+        if context.is_offline_mode():
+            return False
         return table_name in tables and column_name in {
             col["name"] for col in inspector.get_columns(table_name)
         }
@@ -109,8 +113,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
+    if context.is_offline_mode():
+        op.drop_column("users", "product_access")
+        return
+    inspector = inspect(op.get_bind())
     if inspector.has_table("users"):
         columns = {col["name"] for col in inspector.get_columns("users")}
         if "product_access" in columns:

@@ -7,7 +7,7 @@ Create Date: 2026-07-07
 
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -19,8 +19,22 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
+    if context.is_offline_mode():
+        # Optional application-created tables cannot be discovered while
+        # rendering SQL. Keep the structural part in the offline artifact;
+        # the online migration retains the historical data cleanup below.
+        op.add_column("users", sa.Column(
+            "is_member", sa.Boolean(), nullable=False, server_default=sa.text("false")
+        ))
+        op.add_column("users", sa.Column(
+            "member_since", sa.DateTime(), nullable=True
+        ))
+        op.add_column("payment_orders", sa.Column(
+            "order_type", sa.String(20), nullable=False, server_default="credits"
+        ))
+        return
+
+    inspector = inspect(op.get_bind())
     tables = set(inspector.get_table_names())
 
     # 1. users 表加 is_member / member_since
@@ -91,8 +105,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
+    if context.is_offline_mode():
+        op.drop_column("payment_orders", "order_type")
+        op.drop_column("users", "member_since")
+        op.drop_column("users", "is_member")
+        return
+    inspector = inspect(op.get_bind())
 
     if inspector.has_table("payment_orders"):
         columns = {col["name"] for col in inspector.get_columns("payment_orders")}

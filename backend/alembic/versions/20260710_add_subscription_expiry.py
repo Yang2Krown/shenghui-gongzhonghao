@@ -13,7 +13,7 @@ Create Date: 2026-07-10
 
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -25,12 +25,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
-    if not inspector.has_table("user_credits"):
-        return
-
-    columns = {col["name"] for col in inspector.get_columns("user_credits")}
+    if context.is_offline_mode():
+        columns = set()
+    else:
+        inspector = inspect(op.get_bind())
+        if not inspector.has_table("user_credits"):
+            return
+        columns = {col["name"] for col in inspector.get_columns("user_credits")}
     if "subscription_expires_at" not in columns:
         op.add_column(
             "user_credits",
@@ -54,8 +55,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
+    if context.is_offline_mode():
+        op.drop_column("user_credits", "gift_credits_at")
+        op.drop_column("user_credits", "subscription_expires_at")
+        return
+    inspector = inspect(op.get_bind())
     if not inspector.has_table("user_credits"):
         return
     columns = {col["name"] for col in inspector.get_columns("user_credits")}

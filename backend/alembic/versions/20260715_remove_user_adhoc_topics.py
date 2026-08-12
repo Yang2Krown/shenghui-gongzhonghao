@@ -19,10 +19,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Delete only user-input topic clusters; keep candidates and creations usable."""
-    bind = op.get_bind()
-
     # 先保存受影响的簇 ID。只按 adhoc_input 来源识别，不碰定时抓取的数据。
-    bind.execute(sa.text(
+    op.execute(sa.text(
         """
         CREATE TEMPORARY TABLE _user_adhoc_cluster_ids AS
         SELECT DISTINCT r.info_cluster_id AS id
@@ -34,14 +32,14 @@ def upgrade() -> None:
     ))
 
     # 保留用户自己的候选、大纲、草稿，只解除它们对即将删除信息簇的引用。
-    bind.execute(sa.text(
+    op.execute(sa.text(
         """
         UPDATE topic_candidates
         SET info_cluster_id = NULL
         WHERE info_cluster_id IN (SELECT id FROM _user_adhoc_cluster_ids)
         """
     ))
-    bind.execute(sa.text(
+    op.execute(sa.text(
         """
         UPDATE content_creations
         SET cluster_id = NULL
@@ -49,7 +47,7 @@ def upgrade() -> None:
         """
     ))
 
-    bind.execute(sa.text(
+    op.execute(sa.text(
         """
         DELETE FROM raw_infos
         WHERE source_registry_id IN (
@@ -57,13 +55,13 @@ def upgrade() -> None:
         )
         """
     ))
-    bind.execute(sa.text(
+    op.execute(sa.text(
         """
         DELETE FROM info_clusters
         WHERE id IN (SELECT id FROM _user_adhoc_cluster_ids)
         """
     ))
-    bind.execute(sa.text("DROP TABLE _user_adhoc_cluster_ids"))
+    op.execute(sa.text("DROP TABLE _user_adhoc_cluster_ids"))
 
 
 def downgrade() -> None:

@@ -5,7 +5,7 @@ Revises: 20260715_remove_adhoc_topics
 """
 from typing import Sequence, Union
 from datetime import datetime
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 from sqlalchemy.dialects.postgresql import insert
@@ -28,6 +28,10 @@ def _timestamps():
 
 
 def _seed_base_keywords() -> None:
+    if context.is_offline_mode():
+        # Data seeding needs a live connection. The structural SQL remains
+        # reviewable offline and the online migration seeds idempotently.
+        return
     normalized_keywords = [" ".join(k.lower().split()) for k in BASE_KEYWORDS]
     if len(BASE_KEYWORDS) != 33 or len(set(normalized_keywords)) != 33:
         raise RuntimeError("小红书基础关键词必须正好 33 个且标准化后唯一")
@@ -50,7 +54,11 @@ def upgrade() -> None:
         "xhs_keywords", "xhs_keyword_runs", "xhs_notes", "xhs_note_discoveries",
         "xhs_provider_calls", "xhs_engagement_snapshots", "xhs_daily_quotas", "xhs_image_failure_reports",
     }
-    existing_tables = expected_tables.intersection(inspect(op.get_bind()).get_table_names())
+    existing_tables = (
+        set()
+        if context.is_offline_mode()
+        else expected_tables.intersection(inspect(op.get_bind()).get_table_names())
+    )
     if existing_tables:
         if existing_tables != expected_tables:
             missing = ", ".join(sorted(expected_tables - existing_tables))
@@ -67,7 +75,8 @@ def upgrade() -> None:
     op.create_table("xhs_image_failure_reports", *_timestamps(), sa.Column("note_id", sa.Integer(), sa.ForeignKey("xhs_notes.id", ondelete="CASCADE"), nullable=False), sa.Column("image_kind", sa.String(20), nullable=False, server_default="cover"), sa.Column("failed_url", sa.String(2000), nullable=False), sa.Column("reporter_user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL")), sa.Column("failure_count", sa.Integer(), nullable=False, server_default="1"), sa.Column("last_failed_at", sa.DateTime(), nullable=False), sa.Column("status", sa.String(20), nullable=False, server_default="open"), sa.UniqueConstraint("note_id", "image_kind", "failed_url", name="uq_xhs_image_failure"))
     indexes = {"xhs_keywords":["normalized_keyword","keyword_type","schedule_group","enabled","cooldown_until"],"xhs_keyword_runs":["keyword_id","run_date","status"],"xhs_notes":["note_id","published_at","note_type","author_id","like_count","last_discovered_at","detail_status","media_status","quality_status","comprehensive_score","raw_info_id"],"xhs_note_discoveries":["note_id","keyword_id","run_id","provider"],"xhs_provider_calls":["provider","operation","run_id","note_identity","status"],"xhs_engagement_snapshots":["note_id","snapshot_date"],"xhs_daily_quotas":["quota_date"],"xhs_image_failure_reports":["note_id","reporter_user_id","status"]}
     for table, columns in indexes.items():
-        for column in columns: op.create_index(f"ix_{table}_{column}", table, [column])
+        for column in columns:
+            op.create_index(f"ix_{table}_{column}", table, [column])
     op.create_index("ix_xhs_notes_public", "xhs_notes", ["quality_status", "published_at", "like_count"])
     _seed_base_keywords()
 

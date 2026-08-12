@@ -7,7 +7,7 @@ Create Date: 2026-07-10
 
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import context, op
 from sqlalchemy import inspect
 
 
@@ -19,11 +19,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Give legacy manual creation-tool grants their first subscription month and 6000 credits."""
-    bind = op.get_bind()
-    inspector = inspect(bind)
-    required_tables = {"users", "user_credits", "credit_transactions"}
-    if not required_tables.issubset(set(inspector.get_table_names())):
-        return
+    if not context.is_offline_mode():
+        inspector = inspect(op.get_bind())
+        required_tables = {"users", "user_credits", "credit_transactions"}
+        if not required_tables.issubset(set(inspector.get_table_names())):
+            return
 
     # Product access is JSONB in the entitlement migration. Admins already have permanent access
     # and are intentionally excluded from subscription/credit expiry bookkeeping.

@@ -5,7 +5,7 @@ Revises: 20260716_xhs_materials
 """
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -25,8 +25,9 @@ def _timestamps():
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    existing_tables = set(inspect(bind).get_table_names())
+    offline = context.is_offline_mode()
+    bind = None if offline else op.get_bind()
+    existing_tables = set() if offline else set(inspect(bind).get_table_names())
     if "xhs_collector_devices" not in existing_tables:
         op.create_table(
         "xhs_collector_devices", *_timestamps(),
@@ -95,12 +96,12 @@ def upgrade() -> None:
         sa.UniqueConstraint("device_id", "local_batch_key", name="uq_xhs_agent_batch_device_local"),
         )
         existing_tables.add("xhs_agent_batches")
-    run_columns = {column["name"] for column in inspect(bind).get_columns("xhs_keyword_runs")}
+    run_columns = set() if offline else {column["name"] for column in inspect(bind).get_columns("xhs_keyword_runs")}
     if "run_source" not in run_columns:
         op.add_column("xhs_keyword_runs", sa.Column("run_source", sa.String(30), nullable=False, server_default="server_cli"))
     if "agent_batch_id" not in run_columns:
         op.add_column("xhs_keyword_runs", sa.Column("agent_batch_id", sa.Integer(), nullable=True))
-    run_foreign_keys = {foreign_key.get("name") for foreign_key in inspect(bind).get_foreign_keys("xhs_keyword_runs")}
+    run_foreign_keys = set() if offline else {foreign_key.get("name") for foreign_key in inspect(bind).get_foreign_keys("xhs_keyword_runs")}
     if "fk_xhs_keyword_runs_agent_batch" not in run_foreign_keys:
         op.create_foreign_key("fk_xhs_keyword_runs_agent_batch", "xhs_keyword_runs", "xhs_agent_batches", ["agent_batch_id"], ["id"], ondelete="SET NULL")
     if "xhs_agent_uploads" not in existing_tables:
@@ -127,7 +128,7 @@ def upgrade() -> None:
         "xhs_keyword_runs": ["run_source", "agent_batch_id"],
     }
     for table, columns in indexes.items():
-        existing_indexes = {index["name"] for index in inspect(bind).get_indexes(table)}
+        existing_indexes = set() if offline else {index["name"] for index in inspect(bind).get_indexes(table)}
         for column in columns:
             index_name = f"ix_{table}_{column}"
             if index_name not in existing_indexes:

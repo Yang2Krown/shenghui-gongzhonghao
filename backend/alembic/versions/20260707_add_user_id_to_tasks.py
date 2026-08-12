@@ -7,7 +7,7 @@ Create Date: 2026-07-07
 
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -19,17 +19,25 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
-    columns = {col["name"] for col in inspector.get_columns("tasks")} if inspector.has_table("tasks") else set()
+    if context.is_offline_mode():
+        # The historical base schema creates ``tasks`` before this revision.
+        # Offline SQL has no live catalog to inspect, so use the clean-baseline
+        # assumption and emit the additive change exactly once.
+        columns = set()
+    else:
+        inspector = inspect(op.get_bind())
+        columns = {col["name"] for col in inspector.get_columns("tasks")} if inspector.has_table("tasks") else set()
     if "user_id" not in columns:
         op.add_column("tasks", sa.Column("user_id", sa.Integer(), nullable=True))
     op.execute("CREATE INDEX IF NOT EXISTS ix_tasks_user_id ON tasks (user_id)")
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
+    if context.is_offline_mode():
+        op.execute("DROP INDEX IF EXISTS ix_tasks_user_id")
+        op.drop_column("tasks", "user_id")
+        return
+    inspector = inspect(op.get_bind())
     if inspector.has_table("tasks"):
         op.execute("DROP INDEX IF EXISTS ix_tasks_user_id")
         columns = {col["name"] for col in inspector.get_columns("tasks")}

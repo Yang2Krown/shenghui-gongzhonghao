@@ -7,7 +7,7 @@ Create Date: 2026-07-04
 
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -19,9 +19,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    inspector = inspect(bind)
-    if not inspector.has_table("api_request_logs"):
+    table_exists = (
+        False
+        if context.is_offline_mode()
+        else inspect(op.get_bind()).has_table("api_request_logs")
+    )
+    if not table_exists:
         op.create_table(
             "api_request_logs",
             sa.Column("method", sa.String(length=10), nullable=False),
