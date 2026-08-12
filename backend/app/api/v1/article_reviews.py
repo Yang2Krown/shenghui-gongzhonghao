@@ -501,11 +501,10 @@ async def stream_article_review_progress(
             # Redis 降级到内存时，API 和 Celery 进程看不到同一份事件；此时用数据库终态
             # 收口 SSE，避免前端因进度存储故障一直等待。
             if snapshot is None or index % 5 == 0:
-                async with AsyncSessionLocal() as status_db:
-                    row = (await status_db.execute(
-                        select(ArticleReview.status, ArticleReview.analysis_error)
-                        .where(ArticleReview.id == review_id)
-                    )).one_or_none()
+                row = (await db.execute(
+                    select(ArticleReview.status, ArticleReview.analysis_error)
+                    .where(ArticleReview.id == review_id)
+                )).one_or_none()
                 if row and row[0] not in {"processing", "analyzing"}:
                     fallback = {
                         "exists": True,
