@@ -34,7 +34,17 @@ from app.models.article_member import ArticleMember
 from app.models.meeting import Meeting, MeetingSuggestion, MeetingSynthesis
 from app.models.meeting_methodology import MeetingMethodologyCluster, MeetingMethodologySource
 from app.models.content_version import ContentVersion, ExperienceCard
-from app.models.article_review import ArticleReview, ArticleReviewComment
+from app.models.article_review import (
+    ArticleReview,
+    ArticleReviewComment,
+    ArticleReviewRun,
+    ArticleReviewStage,
+    ArticleReviewSemanticBlock,
+    ArticleReviewChange,
+    ArticleReviewReorderEvent,
+    ArticleReviewMethodologyCandidate,
+    ArticleReviewExperienceSource,
+)
 
 # 积分系统
 from app.models.credit import UserCredit, CreditTransaction, CreditPackage
@@ -108,6 +118,13 @@ __all__ = [
     "ExperienceCard",
     "ArticleReview",
     "ArticleReviewComment",
+    "ArticleReviewRun",
+    "ArticleReviewStage",
+    "ArticleReviewSemanticBlock",
+    "ArticleReviewChange",
+    "ArticleReviewReorderEvent",
+    "ArticleReviewMethodologyCandidate",
+    "ArticleReviewExperienceSource",
     # 积分系统
     "UserCredit",
     "CreditTransaction",

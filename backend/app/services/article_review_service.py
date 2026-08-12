@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import logging
 import re
@@ -19,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 MAX_GROUP_TEXT = 8_000
 MAX_ANALYSIS_GROUPS = 40
+SEMANTIC_MAX_BLOCK_CHARS = 420
+SEMANTIC_MERGE_TARGET_CHARS = 110
+SEMANTIC_SPLIT_TARGET_CHARS = 190
 
 
 def _clip(value: Any, max_length: int) -> str:
@@ -35,95 +39,421 @@ def normalize_review_text(text: str) -> str:
     return value.strip()
 
 
-def split_review_blocks(text: str) -> list[str]:
-    """优先按段落切分；没有空行的 PDF 文本则按非空行切分。"""
+def normalize_semantic_text(text: str) -> str:
+    """为语义匹配生成规范化投影，不修改界面展示的原文。"""
 
-    normalized = normalize_review_text(text)
-    if not normalized:
+    value = normalize_review_text(text)
+    value = re.sub(r"\s+", "", value)
+    # 全角/半角标点、空格和常见虚词不应单独制造重点修改。
+    value = re.sub(r"[，。！？；：、“”‘’（）《》【】…,.!?;:\"'()\[\]<>~—_\-]", "", value)
+    value = re.sub(r"[的了着过地得而且也都就呢吧啊呀哦嘛喽]", "", value)
+    return value.casefold()
+
+
+def _is_heading(text: str) -> bool:
+    value = re.sub(r"\s+", "", text or "")
+    if not value or len(value) > 36:
+        return False
+    return bool(
+        value.startswith(("#", "一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、", "九、", "十、"))
+        or re.match(r"^(\d+[.)、]|[（(]\d+[）)])", value)
+        or (len(value) <= 18 and not re.search(r"[。！？；]$", value))
+    )
+
+
+def _display_segment(source: str, start: int, end: int) -> str:
+    return re.sub(r"[ \t]+", " ", source[start:end]).strip()
+
+
+def _line_units(source: str) -> list[dict]:
+    """保留原始行和空行边界，后续再按语义合并。"""
+
+    units: list[dict] = []
+    paragraph = 0
+    line_no = 1
+    for match in re.finditer(r"[^\n]*(?:\n|$)", source):
+        raw_line = match.group(0)
+        if not raw_line and match.start() == len(source):
+            continue
+        content = raw_line.rstrip("\n")
+        if not content.strip():
+            paragraph += 1
+        else:
+            units.append({
+                "start": match.start(),
+                "end": match.start() + len(content),
+                "line_start": line_no,
+                "line_end": line_no,
+                "raw_count": 1,
+                "paragraph": paragraph,
+            })
+        line_no += 1
+    return units
+
+
+def _is_structure_marker(text: str) -> bool:
+    value = re.sub(r"\s+", "", text or "")
+    return bool(re.match(
+        r"^(?:第.{1,8}[章节部分]|[一二三四五六七八九十]+[、.：:]|"
+        r"(?:背景|问题|方法|案例|结论|总结|第一步|第二步|第三步)[：:])",
+        value,
+    ))
+
+
+def _has_line_level_signal(source: str) -> bool:
+    """判断是否需要把同一视觉段落的短句拆开进行跨稿对齐。
+
+    普通公众号短句换行默认合并；一旦出现编号结构或明显较长的插入/论证行，
+    两侧统一采用行级语义单元，避免新增内容被包在整段里而无法识别。
+    """
+
+    units = _line_units(source)
+    grouped: dict[int, list[dict]] = {}
+    for unit in units:
+        grouped.setdefault(unit["paragraph"], []).append(unit)
+    for paragraph_units in grouped.values():
+        if len(paragraph_units) > 1 and any(
+            _is_structure_marker(_display_segment(source, item["start"], item["end"]))
+            or len(_display_segment(source, item["start"], item["end"])) >= 20
+            for item in paragraph_units
+        ):
+            return True
+    return False
+
+
+def _split_long_unit(source: str, unit: dict) -> list[dict]:
+    raw = source[unit["start"]:unit["end"]]
+    if len(raw.strip()) <= SEMANTIC_MAX_BLOCK_CHARS:
+        return [unit]
+
+    sentence_matches = list(re.finditer(r".+?(?:[。！？!?；;](?:[”’」』】）)]*)|$)", raw, re.S))
+    if not sentence_matches:
+        sentence_matches = [re.match(r"[\s\S]+", raw)]
+    # 重复排比/模板句常见于公众号正文。把同一句重复几十次拆开会制造
+    # 一串“新增”，掩盖真正的整段重写，因此保留为一个语义块。
+    sentence_values = {
+        normalize_semantic_text(sentence.group(0))
+        for sentence in sentence_matches
+        if sentence is not None and sentence.group(0).strip()
+    }
+    if len(sentence_matches) >= 4 and len(sentence_values) <= 2:
+        return [unit]
+    fragments: list[dict] = []
+    fragment_start: Optional[int] = None
+    fragment_end: Optional[int] = None
+    fragment_len = 0
+
+    def flush() -> None:
+        nonlocal fragment_start, fragment_end, fragment_len
+        if fragment_start is None or fragment_end is None:
+            return
+        text = _display_segment(source, unit["start"] + fragment_start, unit["start"] + fragment_end)
+        if text:
+            fragments.append({
+                "start": unit["start"] + fragment_start,
+                "end": unit["start"] + fragment_end,
+                "line_start": unit["line_start"],
+                "line_end": unit["line_end"],
+                "raw_count": 1,
+                "paragraph": unit.get("paragraph"),
+            })
+        fragment_start = None
+        fragment_end = None
+        fragment_len = 0
+
+    for sentence in sentence_matches:
+        if sentence is None:
+            continue
+        start, end = sentence.span()
+        sentence_len = len(sentence.group(0).strip())
+        if fragment_start is None:
+            fragment_start = start
+        if fragment_len and fragment_len + sentence_len > SEMANTIC_MAX_BLOCK_CHARS:
+            flush()
+            fragment_start = start
+        fragment_end = end
+        fragment_len += sentence_len
+        if fragment_len >= SEMANTIC_SPLIT_TARGET_CHARS:
+            flush()
+    flush()
+    return fragments or [unit]
+
+
+def build_semantic_blocks(
+    text: str,
+    *,
+    side: str,
+    split_short_lines: bool = False,
+) -> list[dict]:
+    """按主题/论证上下文生成稳定语义块，并保留原文字符位置。"""
+
+    # 只统一换行，不做首尾 strip；这样 start_offset/end_offset 仍然对应
+    # 提取文本中的原始字符位置，前端可以准确回溯到原文上下文。
+    source = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not source:
         return []
-    raw_blocks = re.split(r"\n\s*\n+", normalized)
-    if len(raw_blocks) == 1:
-        raw_blocks = normalized.splitlines()
-    blocks = []
-    for block in raw_blocks:
-        cleaned = re.sub(r"[ \t]+", " ", block).strip()
-        if cleaned:
-            blocks.append(cleaned)
+    raw_units = _line_units(source)
+    grouped: dict[int, list[dict]] = {}
+    for unit in raw_units:
+        grouped.setdefault(unit["paragraph"], []).append(unit)
+
+    semantic_units: list[dict] = []
+    for paragraph_units in grouped.values():
+        values = [
+            _display_segment(source, item["start"], item["end"])
+            for item in paragraph_units
+        ]
+        split_paragraph = split_short_lines or any(
+            _is_structure_marker(value) or _is_heading(value) for value in values
+        )
+        if not split_paragraph and len(paragraph_units) > 1:
+            merged_unit = {
+                "start": paragraph_units[0]["start"],
+                "end": paragraph_units[-1]["end"],
+                "line_start": paragraph_units[0]["line_start"],
+                "line_end": paragraph_units[-1]["line_end"],
+                "raw_count": len(paragraph_units),
+                "paragraph": paragraph_units[0]["paragraph"],
+            }
+            semantic_units.extend(_split_long_unit(source, merged_unit))
+        else:
+            for unit in paragraph_units:
+                semantic_units.extend(_split_long_unit(source, unit))
+
+    # 只有明显的语义/结构边界才拆开，避免把每个公众号短句换行误判成独立段落。
+    merged: list[dict] = []
+    for unit in semantic_units:
+        text_value = _display_segment(source, unit["start"], unit["end"])
+        if not text_value:
+            continue
+        current = {**unit, "text": text_value}
+        if merged:
+            previous = merged[-1]
+            previous_match = normalize_semantic_text(previous["text"])
+            if (
+                not split_short_lines
+                and previous.get("paragraph") == current.get("paragraph")
+                and len(previous_match) < SEMANTIC_MERGE_TARGET_CHARS
+                and not _is_heading(previous["text"])
+                and not _is_heading(current["text"])
+                and not re.search(r"[。！？；!?;]$", previous["text"].rstrip())
+                and previous["end"] <= current["start"]
+            ):
+                previous["end"] = current["end"]
+                previous["line_end"] = current["line_end"]
+                previous["raw_count"] += current["raw_count"]
+                previous["text"] = _display_segment(source, previous["start"], previous["end"])
+                continue
+        merged.append(current)
+
+    blocks: list[dict] = []
+    occurrences: dict[str, int] = {}
+    for ordinal, unit in enumerate(merged, start=1):
+        normalized = normalize_semantic_text(unit["text"])
+        digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
+        occurrences[digest] = occurrences.get(digest, 0) + 1
+        stable_id = f"sb-{side[:1]}-{digest}-{occurrences[digest]:02d}"
+        blocks.append({
+            "id": stable_id,
+            "stable_id": stable_id,
+            "side": side,
+            "ordinal": ordinal,
+            "text": unit["text"],
+            "normalized_text": normalized,
+            "start_offset": unit["start"],
+            "end_offset": unit["end"],
+            "source_line_start": unit["line_start"],
+            "source_line_end": unit["line_end"],
+            "raw_block_count": unit["raw_count"],
+            "user_edited": False,
+            "locked": False,
+        })
     return blocks
 
 
-def _impact(before_text: str, after_text: str, before_count: int, after_count: int) -> tuple[str, bool, float]:
+def split_review_blocks(text: str) -> list[str]:
+    """兼容旧调用方，但实际使用语义块而非原始换行。"""
+
+    return [block["text"] for block in build_semantic_blocks(text, side="before")]
+
+
+def _block_similarity(left: dict, right: dict) -> float:
+    left_text = left.get("normalized_text") or normalize_semantic_text(left.get("text", ""))
+    right_text = right.get("normalized_text") or normalize_semantic_text(right.get("text", ""))
+    if not left_text or not right_text:
+        return 0.0
+    sequence_ratio = difflib.SequenceMatcher(None, left_text, right_text, autojunk=False).ratio()
+    left_tokens = set(re.findall(r"[\u4e00-\u9fff]|[a-z0-9]+", left_text))
+    right_tokens = set(re.findall(r"[\u4e00-\u9fff]|[a-z0-9]+", right_text))
+    overlap = len(left_tokens & right_tokens) / max(len(left_tokens | right_tokens), 1)
+    return round(0.72 * sequence_ratio + 0.28 * overlap, 4)
+
+
+def _classify_pair(
+    before: Optional[dict],
+    after: Optional[dict],
+    similarity: float,
+    *,
+    order_changed: bool = False,
+) -> tuple[str, str, bool, float, str]:
+    before_text = before.get("text", "") if before else ""
+    after_text = after.get("text", "") if after else ""
+    before_normalized = before.get("normalized_text", "") if before else ""
+    after_normalized = after.get("normalized_text", "") if after else ""
+    change_ratio = round(1 - similarity, 4) if before and after else 1.0
+    position_delta = abs((after.get("ordinal", 0) if after else 0) - (before.get("ordinal", 0) if before else 0))
     max_chars = max(len(before_text), len(after_text))
-    if before_text and after_text:
-        similarity = difflib.SequenceMatcher(
-            None,
+
+    if before is None:
+        kind = "addition"
+        return kind, "high" if max_chars >= 80 else "medium", max_chars >= 80, change_ratio, "改后出现了改前没有的语义内容"
+    if after is None:
+        kind = "deletion"
+        return kind, "high" if max_chars >= 80 else "medium", max_chars >= 80, change_ratio, "改前语义内容在改后被删除"
+    if before_normalized == after_normalized:
+        if order_changed:
+            return "reorder", "medium", True, 0.0, "规范化后的内容基本不变，但语义块位置发生变化"
+        if before_text == after_text:
+            return "unchanged", "low", False, 0.0, "规范化后内容基本一致"
+        return "minor_edit", "low", False, 0.0, "规范化后内容基本一致，仅存在低价值格式或虚词变化"
+    if similarity >= 0.88 and order_changed and change_ratio <= 0.2:
+        return "reorder", "medium", True, change_ratio, "内容变化很小，主要差异来自语义块顺序变化"
+    if similarity >= 0.82 or change_ratio <= 0.2:
+        return "minor_edit", "low", False, change_ratio, "变化主要是措辞、虚词、标点或轻微表达调整"
+    if min(len(before_text), len(after_text)) >= 120 and similarity < 0.75:
+        return "rewrite", "high", True, change_ratio, "前后都是完整长语义块，但核心文本相似度较低，优先视为整段重写"
+    if position_delta >= 2 and similarity < 0.72:
+        return "structural_change", "high", True, change_ratio, "语义内容与位置同时发生明显变化，可能影响文章结构或论证顺序"
+    if similarity < 0.5:
+        return "uncertain", "high", True, change_ratio, "算法无法仅凭文本相似度确定是重写还是结构性调整，需要人工确认"
+    return "structural_change", "medium", max_chars >= 80, change_ratio, "语义内容发生了超过轻微措辞层面的变化"
+
+
+def build_change_groups(
+    before_text: str,
+    after_text: str,
+    *,
+    semantic_blocks: Optional[dict[str, list[dict]]] = None,
+) -> dict:
+    """以语义块为基本单位做对齐，保留低价值修改并单独识别顺序变化。"""
+
+    if semantic_blocks is None:
+        split_short_lines = _has_line_level_signal(before_text) or _has_line_level_signal(after_text)
+        before_blocks = build_semantic_blocks(
             before_text,
+            side="before",
+            split_short_lines=split_short_lines,
+        )
+        after_blocks = build_semantic_blocks(
             after_text,
-            autojunk=False,
-        ).ratio()
-        change_ratio = round(1 - similarity, 4)
+            side="after",
+            split_short_lines=split_short_lines,
+        )
     else:
-        change_ratio = 1.0
+        before_blocks = list(semantic_blocks.get("before") or [])
+        after_blocks = list(semantic_blocks.get("after") or [])
+    pairs: list[tuple[Optional[int], Optional[int], float]] = []
+    used_before: set[int] = set()
+    used_after: set[int] = set()
 
-    major = (
-        (max_chars >= 160 and change_ratio >= 0.28)
-        or max(before_count, after_count) >= 3
-        or (max_chars >= 80 and change_ratio >= 0.45)
-    )
-    if major:
-        return "high", True, change_ratio
-    if max_chars >= 40 or change_ratio >= 0.2:
-        return "medium", False, change_ratio
-    return "low", False, change_ratio
-
-
-def build_change_groups(before_text: str, after_text: str) -> dict:
-    """按段落/行生成可评论的改动块，并标记较大修改。"""
-
-    before_blocks = split_review_blocks(before_text)
-    after_blocks = split_review_blocks(after_text)
-    matcher = difflib.SequenceMatcher(
-        None,
-        before_blocks,
-        after_blocks,
-        autojunk=False,
-    )
-    groups: list[dict] = []
-    for index, (tag, start_before, end_before, start_after, end_after) in enumerate(
-        matcher.get_opcodes(),
-        start=1,
-    ):
-        if tag == "equal":
+    candidates = []
+    for before_index, before in enumerate(before_blocks):
+        for after_index, after in enumerate(after_blocks):
+            similarity = _block_similarity(before, after)
+            exact = before["normalized_text"] == after["normalized_text"]
+            if exact or similarity >= 0.55:
+                position_penalty = abs(before_index - after_index) * 0.015
+                candidates.append((1 if exact else 0, similarity - position_penalty, similarity, before_index, after_index))
+    candidates.sort(reverse=True)
+    for _exact, _score, similarity, before_index, after_index in candidates:
+        if before_index in used_before or after_index in used_after:
             continue
-        before_values = before_blocks[start_before:end_before]
-        after_values = after_blocks[start_after:end_after]
-        before_segment = "\n\n".join(before_values)
-        after_segment = "\n\n".join(after_values)
-        impact, is_major, change_ratio = _impact(
-            before_segment,
-            after_segment,
-            len(before_values),
-            len(after_values),
+        used_before.add(before_index)
+        used_after.add(after_index)
+        pairs.append((before_index, after_index, similarity))
+
+    # 同位置的长文本即使相似度很低，也应形成一个“整段重写”对，而不是拆成多处句子替换。
+    for index in range(min(len(before_blocks), len(after_blocks))):
+        if index in used_before or index in used_after:
+            continue
+        if min(len(before_blocks[index]["text"]), len(after_blocks[index]["text"])) >= 120:
+            used_before.add(index)
+            used_after.add(index)
+            pairs.append((index, index, _block_similarity(before_blocks[index], after_blocks[index])))
+
+    for index in range(len(before_blocks)):
+        if index not in used_before:
+            pairs.append((index, None, 0.0))
+    for index in range(len(after_blocks)):
+        if index not in used_after:
+            pairs.append((None, index, 0.0))
+    pairs.sort(key=lambda item: min(
+        before_blocks[item[0]]["ordinal"] if item[0] is not None else 10_000,
+        after_blocks[item[1]]["ordinal"] if item[1] is not None else 10_000,
+    ))
+    matched_pairs = [
+        (before_index, after_index)
+        for before_index, after_index, _similarity in pairs
+        if before_index is not None and after_index is not None
+    ]
+    reordered_pairs: set[tuple[int, int]] = set()
+    for left_index, left_pair in enumerate(matched_pairs):
+        for right_pair in matched_pairs[left_index + 1:]:
+            if (left_pair[0] - right_pair[0]) * (left_pair[1] - right_pair[1]) < 0:
+                reordered_pairs.update((left_pair, right_pair))
+
+    alignments: list[dict] = []
+    groups: list[dict] = []
+    reorder_events: list[dict] = []
+    for before_index, after_index, similarity in pairs:
+        before = before_blocks[before_index] if before_index is not None else None
+        after = after_blocks[after_index] if after_index is not None else None
+        change_type, impact, is_major, change_ratio, reason = _classify_pair(
+            before,
+            after,
+            similarity,
+            order_changed=(before_index, after_index) in reordered_pairs,
         )
-        groups.append(
-            {
-                "id": f"change-{len(groups) + 1:03d}",
-                "kind": tag,
-                "impact": impact,
-                "is_major": is_major,
-                "change_ratio": change_ratio,
-                "before_block_start": start_before + 1 if before_values else None,
-                "before_block_end": end_before if before_values else None,
-                "after_block_start": start_after + 1 if after_values else None,
-                "after_block_end": end_after if after_values else None,
-                "before_block_count": len(before_values),
-                "after_block_count": len(after_values),
-                "before_char_count": len(before_segment),
-                "after_char_count": len(after_segment),
-                "before": _clip(before_segment, MAX_GROUP_TEXT),
-                "after": _clip(after_segment, MAX_GROUP_TEXT),
-            }
-        )
+        alignment_id = f"change-{len(alignments) + 1:03d}"
+        before_ids = [before["stable_id"]] if before else []
+        after_ids = [after["stable_id"]] if after else []
+        alignment = {
+            "id": alignment_id,
+            "stable_id": alignment_id,
+            "change_type": change_type,
+            "kind": {"addition": "insert", "deletion": "delete"}.get(change_type, "replace"),
+            "impact": impact,
+            "is_major": is_major,
+            "confidence": round(similarity if before and after else 0.92, 3),
+            "change_ratio": change_ratio,
+            "significance_reason": reason,
+            "before_block_ids": before_ids,
+            "after_block_ids": after_ids,
+            "before_block_start": before["ordinal"] if before else None,
+            "before_block_end": before["ordinal"] if before else None,
+            "after_block_start": after["ordinal"] if after else None,
+            "after_block_end": after["ordinal"] if after else None,
+            "before_block_count": 1 if before else 0,
+            "after_block_count": 1 if after else 0,
+            "before_char_count": len(before["text"]) if before else 0,
+            "after_char_count": len(after["text"]) if after else 0,
+            "before": _clip(before["text"], MAX_GROUP_TEXT) if before else "",
+            "after": _clip(after["text"], MAX_GROUP_TEXT) if after else "",
+            "position_delta": (after["ordinal"] - before["ordinal"]) if before and after else None,
+        }
+        alignments.append(alignment)
+        if change_type != "unchanged":
+            groups.append(alignment)
+        if change_type == "reorder":
+            reorder_events.append({
+                "id": f"reorder-{len(reorder_events) + 1:03d}",
+                "before_block_ids": before_ids,
+                "after_block_ids": after_ids,
+                "summary": "语义内容基本不变，但在文章中的位置发生变化",
+                "confidence": alignment["confidence"],
+                "before_position": before["ordinal"] if before else None,
+                "after_position": after["ordinal"] if after else None,
+            })
 
     major_ids = [group["id"] for group in groups if group["is_major"]]
     return {
@@ -133,8 +463,11 @@ def build_change_groups(before_text: str, after_text: str) -> dict:
         "major_group_count": len(major_ids),
         "major_group_ids": major_ids,
         "groups": groups,
-        "added_blocks": sum(group["after_block_count"] for group in groups),
-        "removed_blocks": sum(group["before_block_count"] for group in groups),
+        "alignments": alignments,
+        "reorder_events": reorder_events,
+        "semantic_blocks": {"before": before_blocks, "after": after_blocks},
+        "added_blocks": sum(1 for item in groups if item["change_type"] == "addition"),
+        "removed_blocks": sum(1 for item in groups if item["change_type"] == "deletion"),
     }
 
 

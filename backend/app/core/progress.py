@@ -235,10 +235,24 @@ class ProgressStore:
         done_steps: set[int] = set()
         result = None
         error = None
+        partial_result = None
+        last_event_id = 0
+        current_stage = None
+        current_message = None
+        waiting_stage = None
+        waiting_message = None
         for ev in run.events:
+            try:
+                last_event_id = max(last_event_id, int(ev.get("event_id", 0)))
+            except (TypeError, ValueError):
+                pass
             et = ev.get("event")
             data = ev.get("data", {}) or {}
             if et == "step_start":
+                current_stage = data.get("stage") or current_stage
+                current_message = data.get("action") or current_message
+                waiting_stage = None
+                waiting_message = None
                 step = data.get("step", 0)
                 step_map[step] = {
                     "step": step,
@@ -252,6 +266,14 @@ class ProgressStore:
                 result = data
             elif et == "error":
                 error = data.get("message")
+                current_message = error
+            elif et == "partial_result":
+                partial_result = data
+                waiting_stage = None
+                waiting_message = None
+            elif et == "stage_waiting":
+                waiting_stage = data.get("stage")
+                waiting_message = data.get("message")
 
         steps = [step_map[key] for key in sorted(step_map)]
         current = max(step_map) if step_map else 0
@@ -264,10 +286,14 @@ class ProgressStore:
             "done_steps": sorted(done_steps),
             "result": result,
             "error": error,
+            "partial_result": partial_result,
             "step": current,
             "agent": cur_info.get("agent"),
-            "action": cur_info.get("action"),
             "avatar": cur_info.get("avatar"),
+            "last_event_id": last_event_id,
+            "stage": waiting_stage or current_stage,
+            "stage_message": waiting_message,
+            "action": waiting_message or current_message or cur_info.get("action"),
         }
 
     def snapshot(self, run_id: str, user_id: Optional[int] = None) -> Optional[dict]:
@@ -302,9 +328,15 @@ class ProgressStore:
         if run is None:
             logger.warning("[ProgressStore] push 到不存在的 run: %s", run_id)
             return
+        event = dict(event)
+        event["event_id"] = len(run.events) + 1
         run.events.append(event)
-        if event.get("event") in ("result", "error"):
+        if event.get("event") in ("result", "error", "stage_waiting"):
             run.done = True
+        elif event.get("event") not in {"keep_alive"}:
+            # 同一个 run 在人工确认后会继续进入下游阶段；不要让上一个
+            # stage_waiting 的终态阻止新的 SSE 连接读取后续事件。
+            run.done = False
         await self._persist_event(run_id, run, event)
 
     # ── 自动清理过期 run ──────────────────────────────
