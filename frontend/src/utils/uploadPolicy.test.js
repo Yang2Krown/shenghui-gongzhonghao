@@ -34,12 +34,12 @@ describe('validateUploadFile', () => {
     }
   })
 
-  it('document 策略支持文章复盘文件并统一 20MB 上限', () => {
+  it('document 保持 20MB，文章复盘单文件允许 80MB', () => {
     expect(validateUploadFile(file('before.pdf'), 'document')).toBeNull()
     expect(validateUploadFile(file('after.markdown'), 'document')).toBeNull()
-    const limit = UPLOAD_POLICIES.document.maxMB * 1024 * 1024
-    expect(validateUploadFile(file('large.docx', limit + 1), 'articleReview')).toContain('实际 20.00MB')
-    expect(validateUploadFile(file('large.docx', limit + 1), 'articleReview')).toContain('限制 20MB')
+    const limit = ARTICLE_REVIEW_UPLOAD_LIMITS.singleMB * 1024 * 1024
+    expect(validateUploadFile(file('large.docx', limit + 1), 'articleReview')).toContain('实际 80.00MB')
+    expect(validateUploadFile(file('large.docx', limit + 1), 'articleReview')).toContain('限制 80MB')
   })
 
   it('document 策略拒绝图片', () => {
@@ -67,9 +67,9 @@ describe('validateUploadFile', () => {
 
   it('文章复盘同时校验两份文件合计大小', () => {
     const limit = ARTICLE_REVIEW_UPLOAD_LIMITS.filesTotalMB * 1024 * 1024
-    expect(validateArticleReviewFiles(file('before.txt', 20 * 1024 * 1024), file('after.txt', 20 * 1024 * 1024))).toBeNull()
+    expect(validateArticleReviewFiles(file('before.txt', 80 * 1024 * 1024), file('after.txt', 80 * 1024 * 1024))).toBeNull()
     expect(validateArticleReviewFiles(file('before.txt', limit - 1), file('after.txt', 2))).toContain('实际')
-    expect(validateArticleReviewFiles(file('before.txt', limit), file('after.txt', 1))).toContain('限制 40MB')
+    expect(validateArticleReviewFiles(file('before.txt', limit), file('after.txt', 1))).toContain('限制 160MB')
   })
 
   it('空文件返回 null(由后端空校验兜底)', () => {

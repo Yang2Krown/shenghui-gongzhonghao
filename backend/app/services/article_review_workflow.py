@@ -34,7 +34,26 @@ STAGE_DEFINITIONS = (
 )
 STAGE_ORDER = {key: order for key, order, _label in STAGE_DEFINITIONS}
 STAGE_LABELS = {key: label for key, _order, label in STAGE_DEFINITIONS}
+QUEUED_STAGE_STALE_SECONDS = 10 * 60
+RUNNING_STAGE_STALE_SECONDS = 45 * 60
 _UNSET = object()
+
+
+def is_stage_stale(stage: ArticleReviewStage, *, now=None) -> bool:
+    """判断持久化任务是否已失联，让用户可以安全地重提当前阶段。"""
+
+    if stage.status not in {"queued", "running"}:
+        return False
+    heartbeat = stage.updated_at or stage.started_at or stage.created_at
+    if heartbeat is None:
+        return True
+    age_seconds = max(0.0, ((now or utcnow()) - heartbeat).total_seconds())
+    threshold = (
+        QUEUED_STAGE_STALE_SECONDS
+        if stage.status == "queued"
+        else RUNNING_STAGE_STALE_SECONDS
+    )
+    return age_seconds >= threshold
 
 
 async def load_current_run(
@@ -278,6 +297,8 @@ def stage_payload(stage: ArticleReviewStage) -> dict:
         "error": stage.error,
         "started_at": stage.started_at.isoformat() if stage.started_at else None,
         "finished_at": stage.finished_at.isoformat() if stage.finished_at else None,
+        "updated_at": stage.updated_at.isoformat() if stage.updated_at else None,
+        "is_stale": is_stage_stale(stage),
         "output": stage.output,
     }
 

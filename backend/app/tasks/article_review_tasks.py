@@ -16,8 +16,8 @@ from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.core.progress import progress_store
 from app.core.timezone import utcnow
-from app.core.upload_security import UploadSecurityError, validate_document_upload
-from app.db.session import AsyncSessionLocal
+from app.core.upload_security import UploadSecurityError, validate_document_path
+from app.db.session import AsyncSessionLocal, engine
 from app.models.article_review import (
     ArticleReview,
     ArticleReviewChange,
@@ -25,7 +25,11 @@ from app.models.article_review import (
     ArticleReviewReorderEvent,
     ArticleReviewSemanticBlock,
 )
-from app.services.article_review_service import analyze_article_review, build_change_groups
+from app.services.article_review_service import (
+    analyze_article_review,
+    build_change_groups,
+    normalize_review_text,
+)
 from app.services.article_review_workflow import (
     load_current_run,
     persist_diff_artifacts,
@@ -34,7 +38,7 @@ from app.services.article_review_workflow import (
     update_run,
     update_stage,
 )
-from app.utils.file_extractor import UnsupportedFileType, extract_text
+from app.utils.file_extractor import UnsupportedFileType, extract_text_from_path
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +48,19 @@ MAX_REVIEW_UPLOAD_CHARS = 150_000
 async def _push(run_id: Optional[str], event: dict) -> None:
     if run_id:
         await progress_store.push(run_id, event)
+
+
+def _same_task_stage_finished(run, stage_key: str, task_id: Optional[str]) -> bool:
+    """Celery late-ack 重投同一 task 时，不重复执行已经持久化成功的阶段。"""
+
+    if run is None or not task_id:
+        return False
+    return any(
+        stage.stage_key == stage_key
+        and stage.task_id == task_id
+        and stage.status in {"succeeded", "awaiting_confirmation"}
+        for stage in (run.stages or [])
+    )
 
 
 def _safe_review_path(raw_path: str) -> Path:
@@ -58,20 +75,20 @@ def _safe_review_path(raw_path: str) -> Path:
 
 async def _parse_saved_file(path: str, filename: str) -> tuple[str, int, bool]:
     file_path = _safe_review_path(path)
-    data = await asyncio.to_thread(file_path.read_bytes)
     try:
-        safe = validate_document_upload(
+        safe = await asyncio.to_thread(
+            validate_document_path,
             filename=filename,
-            data=data,
+            path=file_path,
             max_size=settings.ARTICLE_REVIEW_MAX_FILE_SIZE,
         )
     except UploadSecurityError as exc:
         raise ValueError(str(exc)) from exc
 
     try:
-        extracted = await extract_text(
+        extracted = await extract_text_from_path(
             filename=filename,
-            data=safe.data,
+            path=safe.path,
             content_type=mimetypes.guess_type(filename)[0],
         )
     except UnsupportedFileType as exc:
@@ -102,6 +119,18 @@ async def _mark_failed(
     failed = (await db.execute(
         select(ArticleReview).where(ArticleReview.id == review_id)
     )).scalar_one_or_none()
+    if failed is not None and task_id and failed.analysis_task_id not in (None, task_id):
+        logger.info(
+            "忽略已被新任务替代的失败结果 review_id=%s old_task_id=%s active_task_id=%s",
+            review_id,
+            task_id,
+            failed.analysis_task_id,
+        )
+        return {
+            "status": "skipped",
+            "review_id": review_id,
+            "task_id": failed.analysis_task_id,
+        }
     if failed is not None and failed.analysis_task_id in (None, task_id):
         failed.status = "failed"
         failed.analysis_error = message[:1_000] or "文章复盘任务失败"
@@ -162,6 +191,8 @@ async def _run_article_review_prepare(
                 "task_id": review.analysis_task_id,
             }
         run = await load_current_run(db, review_id, with_stages=True)
+        if _same_task_stage_finished(run, "parse", task_id):
+            return {"status": "already_completed", "review_id": review_id, "task_id": task_id}
         await update_run(
             db,
             actual_run_id,
@@ -376,6 +407,8 @@ async def _run_article_review_semantic_segmentation(
                 "task_id": review.analysis_task_id,
             }
         run = await load_current_run(db, review_id, with_stages=True)
+        if _same_task_stage_finished(run, "semantic_segmentation", task_id):
+            return {"status": "already_completed", "review_id": review_id, "task_id": task_id}
         await update_run(
             db,
             actual_run_id,
@@ -397,6 +430,10 @@ async def _run_article_review_semantic_segmentation(
         try:
             if not review.before_text or not review.after_text:
                 raise ValueError("改前稿或改后稿文本为空，无法重新生成语义分段")
+            review.before_text = normalize_review_text(review.before_text)
+            review.after_text = normalize_review_text(review.after_text)
+            review.before_char_count = len(review.before_text)
+            review.after_char_count = len(review.after_text)
             diff = await asyncio.to_thread(
                 build_change_groups,
                 review.before_text,
@@ -515,6 +552,8 @@ async def _run_article_review_alignment(
                 "task_id": review.analysis_task_id,
             }
         run = await load_current_run(db, review_id, with_stages=True)
+        if _same_task_stage_finished(run, "semantic_alignment", task_id):
+            return {"status": "already_completed", "review_id": review_id, "task_id": task_id}
         await update_run(
             db,
             actual_run_id,
@@ -723,6 +762,8 @@ async def _run_article_review_analysis(
                 "task_id": review.analysis_task_id,
             }
         run = await load_current_run(db, review_id, with_stages=True)
+        if _same_task_stage_finished(run, "ai_review", task_id):
+            return {"status": "already_completed", "review_id": review_id, "task_id": task_id}
         await update_run(
             db,
             actual_run_id,
@@ -757,6 +798,15 @@ async def _run_article_review_analysis(
                 change_groups=list(review.change_groups or []),
                 comments=comments,
             )
+            # 用户可能已从“失联”阶段发起了新任务。旧 LLM 调用即使随后返回，
+            # 也不能覆盖新任务的状态和结果。
+            await db.refresh(review, attribute_names=["analysis_task_id"])
+            if task_id and review.analysis_task_id != task_id:
+                return {
+                    "status": "skipped",
+                    "review_id": review_id,
+                    "task_id": review.analysis_task_id,
+                }
             review.ai_analysis = {
                 **analysis,
                 "status": "succeeded",
@@ -839,25 +889,60 @@ async def _run_article_review_analysis(
             )
 
 
-@celery_app.task(bind=True, name="reviews.prepare_diff", max_retries=0)
+async def _run_with_engine_cleanup(awaitable):
+    """Celery 每次用 asyncio.run 创建事件循环，任务结束必须释放旧连接池。"""
+
+    try:
+        return await awaitable
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(
+    bind=True,
+    name="reviews.prepare_diff",
+    max_retries=0,
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
 def prepare_article_review_task(self, review_id: int, run_id: Optional[str] = None) -> dict:
     task_id = getattr(getattr(self, "request", None), "id", None)
-    return asyncio.run(_run_article_review_prepare(review_id, run_id, task_id))
+    return asyncio.run(_run_with_engine_cleanup(_run_article_review_prepare(review_id, run_id, task_id)))
 
 
-@celery_app.task(bind=True, name="reviews.segment_semantic_blocks", max_retries=0)
+@celery_app.task(
+    bind=True,
+    name="reviews.segment_semantic_blocks",
+    max_retries=0,
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
 def segment_article_review_task(self, review_id: int, run_id: Optional[str] = None) -> dict:
     task_id = getattr(getattr(self, "request", None), "id", None)
-    return asyncio.run(_run_article_review_semantic_segmentation(review_id, run_id, task_id))
+    return asyncio.run(_run_with_engine_cleanup(
+        _run_article_review_semantic_segmentation(review_id, run_id, task_id)
+    ))
 
 
-@celery_app.task(bind=True, name="reviews.analyze_diff", max_retries=0)
+@celery_app.task(
+    bind=True,
+    name="reviews.analyze_diff",
+    max_retries=0,
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
 def analyze_article_review_task(self, review_id: int, run_id: Optional[str] = None) -> dict:
     task_id = getattr(getattr(self, "request", None), "id", None)
-    return asyncio.run(_run_article_review_analysis(review_id, run_id, task_id))
+    return asyncio.run(_run_with_engine_cleanup(_run_article_review_analysis(review_id, run_id, task_id)))
 
 
-@celery_app.task(bind=True, name="reviews.align_semantic_blocks", max_retries=0)
+@celery_app.task(
+    bind=True,
+    name="reviews.align_semantic_blocks",
+    max_retries=0,
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
 def align_article_review_task(self, review_id: int, run_id: Optional[str] = None) -> dict:
     task_id = getattr(getattr(self, "request", None), "id", None)
-    return asyncio.run(_run_article_review_alignment(review_id, run_id, task_id))
+    return asyncio.run(_run_with_engine_cleanup(_run_article_review_alignment(review_id, run_id, task_id)))

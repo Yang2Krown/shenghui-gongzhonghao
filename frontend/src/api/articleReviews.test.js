@@ -19,7 +19,12 @@ import {
   createArticleReview,
   deleteArticleReview,
   getArticleReview,
+  getArticleReviewSemanticBlocks,
+  getArticleReviewSourceText,
+  getArticleReviewSummary,
   getArticleReviewWorkflow,
+  listArticleReviewChanges,
+  listArticleReviewComments,
   listArticleReviews,
   promoteArticleReview,
   retryArticleReviewStage,
@@ -61,7 +66,22 @@ describe('article reviews API', () => {
     expect(formData.get('before_file')).toBe(before)
     expect(formData.get('after_file')).toBe(after)
     expect(formData.get('title')).toBe('一篇复盘')
-    expect(config.timeout).toBe(30000)
+    expect(config.timeout).toBe(300000)
+  })
+
+  it('按需读取轻量详情、分段、改动、评论和原文', () => {
+    const controller = new AbortController()
+    getArticleReviewSummary(7, { signal: controller.signal })
+    getArticleReviewSemanticBlocks(7, { signal: controller.signal })
+    listArticleReviewChanges(7, { page: 2, page_size: 12 }, { signal: controller.signal })
+    listArticleReviewComments(7, { signal: controller.signal })
+    getArticleReviewSourceText(7, { signal: controller.signal })
+
+    expect(apiFns.get).toHaveBeenNthCalledWith(1, '/reviews/7/summary', {}, { signal: controller.signal })
+    expect(apiFns.get).toHaveBeenNthCalledWith(2, '/reviews/7/semantic-blocks', {}, { signal: controller.signal })
+    expect(apiFns.get).toHaveBeenNthCalledWith(3, '/reviews/7/changes', { page: 2, page_size: 12 }, { signal: controller.signal })
+    expect(apiFns.get).toHaveBeenNthCalledWith(4, '/reviews/7/comments', {}, { signal: controller.signal })
+    expect(apiFns.get).toHaveBeenNthCalledWith(5, '/reviews/7/source-text', {}, { signal: controller.signal })
   })
 
   it('调用可恢复工作流、语义确认、人工判断和阶段重试接口', () => {

@@ -87,7 +87,7 @@ app.add_middleware(
 async def enforce_article_review_request_size(request: Request, call_next):
     """在 FastAPI 解析 multipart 之前拦截过大的文章复盘请求。
 
-    单文件限制由复盘路由再次校验；这里限制整个 HTTP 请求体，给两份 20MB
+    单文件限制由复盘路由再次校验；这里限制整个 HTTP 请求体，给两份 80MB
     文件预留 multipart 边界和表单字段开销。分块传输没有 Content-Length 时，
     路由会再按两份文件的实际字节数校验。
     """

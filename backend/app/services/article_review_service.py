@@ -15,14 +15,16 @@ from app.services.llm.llm_client import (
     get_llm_client,
     parse_json_loose,
 )
+from app.utils.file_extractor import normalize_extracted_text
 
 logger = logging.getLogger(__name__)
 
 MAX_GROUP_TEXT = 8_000
 MAX_ANALYSIS_GROUPS = 40
-SEMANTIC_MAX_BLOCK_CHARS = 420
-SEMANTIC_MERGE_TARGET_CHARS = 110
-SEMANTIC_SPLIT_TARGET_CHARS = 190
+SEMANTIC_MAX_BLOCK_CHARS = 720
+SEMANTIC_MERGE_TARGET_CHARS = 220
+SEMANTIC_SPLIT_TARGET_CHARS = 360
+SEMANTIC_TRANSITION_MIN_CHARS = 140
 
 
 def _clip(value: Any, max_length: int) -> str:
@@ -33,10 +35,9 @@ def _clip(value: Any, max_length: int) -> str:
 
 
 def normalize_review_text(text: str) -> str:
-    """统一换行，但不改写文章正文。"""
+    """统一提取文本中的换行、控制字符和兼容字形。"""
 
-    value = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    return value.strip()
+    return normalize_extracted_text(text)
 
 
 def _is_extraction_noise_line(text: str) -> bool:
@@ -130,6 +131,17 @@ def _is_structure_marker(text: str) -> bool:
     ))
 
 
+def _is_topic_transition(text: str) -> bool:
+    """识别常见论证转折；只在已有足够上下文时才作为新块起点。"""
+
+    value = re.sub(r"\s+", "", text or "")
+    return bool(re.match(
+        r"^(?:但是|不过|然而|与此同时|接下来|然后|于是|所以|因此|更重要的是|"
+        r"换句话说|回到|最后|总的来说|总结一下|先说结论|再来看)",
+        value,
+    ))
+
+
 def _has_line_level_signal(source: str) -> bool:
     """兼容旧调用方，但不再根据单行长度推断语义边界。"""
 
@@ -164,11 +176,13 @@ def _split_long_unit(source: str, unit: dict) -> list[dict]:
             return
         text = _display_segment(source, unit["start"] + fragment_start, unit["start"] + fragment_end)
         if text:
+            absolute_start = unit["start"] + fragment_start
+            absolute_end = unit["start"] + fragment_end
             fragments.append({
-                "start": unit["start"] + fragment_start,
-                "end": unit["start"] + fragment_end,
-                "line_start": unit["line_start"],
-                "line_end": unit["line_end"],
+                "start": absolute_start,
+                "end": absolute_end,
+                "line_start": source.count("\n", 0, absolute_start) + 1,
+                "line_end": source.count("\n", 0, max(absolute_start, absolute_end - 1)) + 1,
                 "raw_count": 1,
                 "paragraph": unit.get("paragraph"),
             })
@@ -217,37 +231,42 @@ def build_semantic_blocks(
 
     # 只统一换行，不做首尾 strip；这样 start_offset/end_offset 仍然对应
     # 提取文本中的原始字符位置，前端可以准确回溯到原文上下文。
-    source = _mask_extraction_noise_lines(
-        (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    )
+    source = _mask_extraction_noise_lines(normalize_review_text(text))
     if not source:
         return []
     raw_units = _line_units(source)
-    grouped: dict[int, list[dict]] = {}
-    for unit in raw_units:
-        grouped.setdefault(unit["paragraph"], []).append(unit)
-
     semantic_units: list[dict] = []
-    for paragraph_units in grouped.values():
-        values = [
-            _display_segment(source, item["start"], item["end"])
-            for item in paragraph_units
-        ]
-        if split_short_lines:
-            for unit in paragraph_units:
-                semantic_units.extend(_split_long_unit(source, unit))
-            continue
-
-        # 公众号正文经常“一句一行”。只有明确的标题/结构标记才形成边界，
-        # 普通换行全部先合并，再按句子和长度切成语义块。
+    if split_short_lines:
+        for unit in raw_units:
+            semantic_units.extend(_split_long_unit(source, unit))
+    else:
+        # PDF 常把每个视觉文本框输出成“一句 + 空行”。空行只代表排版，不能直接
+        # 成为语义边界；将全文连续视觉行放在同一上下文中，再按结构、论证转折和
+        # 句子长度切块。这样 Word/PDF 的不同排版不会制造完全不同的分段数量。
         partitions: list[list[dict]] = []
         current: list[dict] = []
-        for unit, value in zip(paragraph_units, values):
-            is_boundary = _is_structure_marker(value) or _is_heading(value)
+        current_chars = 0
+        for unit in raw_units:
+            value = _display_segment(source, unit["start"], unit["end"])
+            normalized_length = len(normalize_semantic_text(value))
+            is_boundary = (
+                _is_structure_marker(value)
+                or _is_heading(value)
+                or (
+                    current_chars >= SEMANTIC_TRANSITION_MIN_CHARS
+                    and _is_topic_transition(value)
+                )
+            )
             if is_boundary and current:
                 partitions.append(current)
                 current = []
+                current_chars = 0
             current.append(unit)
+            current_chars += normalized_length
+            if current_chars >= SEMANTIC_MAX_BLOCK_CHARS:
+                partitions.append(current)
+                current = []
+                current_chars = 0
         if current:
             partitions.append(current)
         for partition in partitions:
@@ -265,11 +284,11 @@ def build_semantic_blocks(
             previous_match = normalize_semantic_text(previous["text"])
             if (
                 not split_short_lines
-                and previous.get("paragraph") == current.get("paragraph")
                 and len(previous_match) < SEMANTIC_MERGE_TARGET_CHARS
                 and not _is_heading(previous["text"])
                 and not _is_heading(current["text"])
-                and not re.search(r"[。！？；!?;]$", previous["text"].rstrip())
+                and not _is_structure_marker(current["text"])
+                and len(previous_match) + len(normalize_semantic_text(current["text"])) <= SEMANTIC_MAX_BLOCK_CHARS
                 and previous["end"] <= current["start"]
             ):
                 previous["end"] = current["end"]

@@ -26,6 +26,17 @@ class SafeUpload:
     ext: str
 
 
+@dataclass(frozen=True)
+class SafeUploadPath:
+    """已经落盘并通过类型校验的上传文件。"""
+
+    filename: str
+    content_type: str
+    path: Path
+    size: int
+    ext: str
+
+
 IMAGE_TYPES = {
     "jpeg": ("image/jpeg", ".jpg"),
     "png": ("image/png", ".png"),
@@ -90,6 +101,15 @@ def _is_docx(data: bytes) -> bool:
         return False
 
 
+def _is_docx_path(path: Path) -> bool:
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = set(zf.namelist())
+            return "[Content_Types].xml" in names and any(name.startswith("word/") for name in names)
+    except (OSError, zipfile.BadZipFile):
+        return False
+
+
 def detect_document_type(data: bytes) -> Optional[str]:
     if data.startswith(b"%PDF-"):
         return ".pdf"
@@ -99,6 +119,26 @@ def detect_document_type(data: bytes) -> Optional[str]:
     if image_type:
         return IMAGE_TYPES[image_type][1]
     if _looks_like_text(data) and not _is_probably_html_or_svg(data):
+        return ".txt"
+    return None
+
+
+def detect_document_type_path(path: Path) -> Optional[str]:
+    """只读取文件头/ZIP 目录识别落盘文档，避免把大文件整体载入内存。"""
+
+    try:
+        with path.open("rb") as source:
+            prefix = source.read(4096)
+    except OSError:
+        return None
+    if prefix.startswith(b"%PDF-"):
+        return ".pdf"
+    if prefix.startswith(b"PK") and _is_docx_path(path):
+        return ".docx"
+    image_type = detect_image_type(prefix)
+    if image_type:
+        return IMAGE_TYPES[image_type][1]
+    if _looks_like_text(prefix) and not _is_probably_html_or_svg(prefix):
         return ".txt"
     return None
 
@@ -229,5 +269,70 @@ def validate_document_upload(
         content_type=content_type,
         data=data,
         size=len(data),
+        ext=normalized_ext,
+    )
+
+
+def validate_document_path(
+    *,
+    filename: Optional[str],
+    path: Path,
+    max_size: int,
+) -> SafeUploadPath:
+    """校验已经暂存到磁盘的文档，不在 Web/Worker 进程里复制整份文件。"""
+
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise UploadSecurityError("上传文件无法读取") from exc
+    if size <= 0:
+        raise UploadSecurityError("上传文件不能为空")
+    if size > max_size:
+        raise UploadSecurityError(f"文件大小不能超过 {max_size // 1024 // 1024}MB")
+
+    ext = _extension(filename)
+    if ext not in DOCUMENT_EXTS and ext not in IMAGE_EXTS:
+        raise UploadSecurityError("文件扩展名不受支持")
+    detected_ext = detect_document_type_path(path)
+    if not detected_ext:
+        raise UploadSecurityError("无法识别文件真实类型")
+
+    normalized_ext = ".jpg" if ext == ".jpeg" else ext
+    normalized_detected = ".jpg" if detected_ext == ".jpeg" else detected_ext
+    if normalized_ext in TEXT_EXTS and detected_ext == ".txt":
+        normalized_detected = normalized_ext
+    if normalized_ext != normalized_detected:
+        raise UploadSecurityError("文件扩展名与真实类型不一致")
+
+    if normalized_detected in IMAGE_EXTS:
+        try:
+            with path.open("rb") as source:
+                image_type = detect_image_type(source.read(16))
+        except OSError as exc:
+            raise UploadSecurityError("上传文件无法读取") from exc
+        if not image_type:
+            raise UploadSecurityError("无法识别图片真实类型")
+        try:
+            with Image.open(path) as image:
+                image.verify()
+        except (UnidentifiedImageError, OSError) as exc:
+            raise UploadSecurityError("图片文件已损坏或格式不受支持") from exc
+
+    content_type = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".txt": "text/plain",
+        ".md": "text/markdown",
+        ".markdown": "text/markdown",
+        ".jpg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+    }.get(normalized_ext, "application/octet-stream")
+    return SafeUploadPath(
+        filename=_random_filename(normalized_ext),
+        content_type=content_type,
+        path=path,
+        size=size,
         ext=normalized_ext,
     )

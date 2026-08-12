@@ -1,15 +1,17 @@
 """团队协作文章复盘工作台测试。"""
 
 import io
+from datetime import timedelta
 
 import pytest
 from fastapi import HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from starlette.datastructures import Headers, UploadFile
 
 from app.api.v1 import article_reviews as reviews_api
 from app.core.progress import progress_store
+from app.core.timezone import utcnow
 from app.models.article_review import (
     ArticleReview,
     ArticleReviewChange,
@@ -38,8 +40,10 @@ from app.services.article_review_service import (
 )
 from app.services.article_review_workflow import (
     create_run_with_stages,
+    is_stage_stale,
     load_workflow_entities,
     persist_diff_artifacts,
+    stage_payload,
 )
 from app.tasks import article_review_tasks as review_tasks
 
@@ -118,12 +122,12 @@ def test_change_groups_only_include_changes_and_mark_major_blocks():
 def test_semantic_blocks_merge_short_lines_and_keep_source_offsets():
     text = "第一句先说明冲突。\n然后补充背景。\n\n最后给出结论。"
     blocks = build_semantic_blocks(text, side="before")
-    assert len(blocks) == 2
-    assert blocks[0]["raw_block_count"] == 2
-    assert blocks[0]["text"] == "第一句先说明冲突。\n然后补充背景。"
+    assert len(blocks) == 1
+    assert blocks[0]["raw_block_count"] == 3
+    assert blocks[0]["text"] == text
     assert text[blocks[0]["start_offset"]:blocks[0]["end_offset"]] == blocks[0]["text"]
     assert blocks[0]["source_line_start"] == 1
-    assert blocks[0]["source_line_end"] == 2
+    assert blocks[0]["source_line_end"] == 4
     assert blocks[0]["stable_id"].startswith("sb-b-")
 
 
@@ -139,10 +143,22 @@ def test_semantic_blocks_do_not_split_one_sentence_per_line_or_keep_version_nois
     blocks = build_semantic_blocks(text, side="before")
 
     assert all(block["text"] != "1.0" for block in blocks)
-    assert len(blocks) == 2
+    assert len(blocks) == 1
     assert blocks[0]["source_line_start"] == 2
-    assert blocks[0]["source_line_end"] == 4
-    assert blocks[0]["raw_block_count"] == 3
+    assert blocks[0]["source_line_end"] == 6
+    assert blocks[0]["raw_block_count"] == 4
+
+
+def test_semantic_blocks_merge_pdf_control_noise_and_blank_line_sentences():
+    sentences = [f"这是第{i}句正文，用来说明同一个案例中的背景、过程和结果。" for i in range(1, 31)]
+    text = "1.0\x01" + "\n\n".join(sentences)
+
+    blocks = build_semantic_blocks(text, side="after")
+
+    assert 1 < len(blocks) < 10
+    assert all("1.0" not in block["text"] for block in blocks)
+    assert sum(block["raw_block_count"] for block in blocks) <= len(sentences)
+    assert any(block["source_line_end"] > block["source_line_start"] for block in blocks)
 
 
 def test_semantic_diff_distinguishes_minor_rewrite_addition_and_reorder():
@@ -257,12 +273,18 @@ async def test_prepare_task_persists_parse_and_waiting_semantic_stage(review_db,
         "prepare-run-1",
         "prepare-task-1",
     )
+    repeated = await review_tasks._run_article_review_prepare(
+        review_id,
+        "prepare-run-1",
+        "prepare-task-1",
+    )
 
     async with review_db() as db:
         payload = await load_workflow_entities(db, review_id)
         stored = await db.get(ArticleReview, review_id)
     statuses = {stage["stage_key"]: stage["status"] for stage in payload["run"]["stages"]}
     assert result["status"] == "waiting_confirmation"
+    assert repeated["status"] == "already_completed"
     assert statuses["parse"] == "succeeded"
     assert statuses["semantic_segmentation"] == "awaiting_confirmation"
     assert statuses["semantic_alignment"] == "blocked"
@@ -308,12 +330,18 @@ async def test_semantic_segmentation_retry_stops_for_human_confirmation(review_d
         "segment-retry-1",
         "segment-task-1",
     )
+    repeated = await review_tasks._run_article_review_semantic_segmentation(
+        review_id,
+        "segment-retry-1",
+        "segment-task-1",
+    )
 
     async with review_db() as db:
         payload = await load_workflow_entities(db, review_id)
         stored = await db.get(ArticleReview, review_id)
     statuses = {stage["stage_key"]: stage["status"] for stage in payload["run"]["stages"]}
     assert result["status"] == "waiting_confirmation"
+    assert repeated["status"] == "already_completed"
     assert statuses["semantic_segmentation"] == "awaiting_confirmation"
     assert statuses["semantic_alignment"] == "blocked"
     assert stored.status == "processing"
@@ -470,6 +498,216 @@ async def test_review_list_does_not_lazy_load_comments(review_db):
     assert item["id"] == review.id
     assert item["comments"] == []
     assert item["change_groups"] == []
+
+
+@pytest.mark.asyncio
+async def test_lightweight_review_endpoints_load_artifacts_on_demand(review_db):
+    employee = _user(1)
+    async with review_db() as db:
+        db.add(employee)
+        review = ArticleReview(
+            title="轻量详情",
+            before_filename="before.txt",
+            after_filename="after.txt",
+            before_text="旧稿全文",
+            after_text="新稿全文",
+            before_char_count=4,
+            after_char_count=4,
+            change_groups=[],
+            ai_analysis={"status": "succeeded", "summary": "重点摘要"},
+            status="reviewing",
+            progress_run_id="lightweight-run",
+            created_by=employee.id,
+        )
+        db.add(review)
+        await db.flush()
+        run = await create_run_with_stages(
+            db,
+            review,
+            run_id="lightweight-run",
+            created_by=employee.id,
+        )
+        block = ArticleReviewSemanticBlock(
+            review_id=review.id,
+            review_run_id=run.id,
+            stable_id="sb-b-light-01",
+            side="before",
+            ordinal=1,
+            text="旧稿全文",
+            normalized_text="旧稿全文",
+        )
+        db.add(block)
+        db.add(ArticleReviewChange(
+            review_id=review.id,
+            review_run_id=run.id,
+            stable_id="change-light-01",
+            ordinal=1,
+            change_type="rewrite",
+            impact="high",
+            is_major=True,
+            before_block_ids=[block.stable_id],
+            after_block_ids=[],
+            before_text="旧稿全文",
+            after_text="新稿全文",
+        ))
+        db.add(ArticleReviewComment(
+            review_id=review.id,
+            change_group_id="change-light-01",
+            body="保留这个改法",
+            author_id=employee.id,
+        ))
+        await db.commit()
+        review_id = review.id
+
+        summary = await reviews_api.get_article_review_summary(review_id, 12, db, employee)
+        source = await reviews_api.get_article_review_source_text(review_id, db, employee)
+        blocks = await reviews_api.get_article_review_semantic_blocks(review_id, db, employee)
+        changes = await reviews_api.list_article_review_changes(review_id, 1, 12, db, employee)
+        comments = await reviews_api.list_article_review_comments(review_id, db, employee)
+
+    payload = summary["data"]
+    assert payload["review"]["before_text"] is None
+    assert payload["review"]["stats"]["total_groups"] == 1
+    assert payload["review"]["comments_count"] == 1
+    assert payload["review"]["change_groups"][0]["id"] == "change-light-01"
+    assert payload["blocks"] == []
+    assert source["data"]["before_text"] == "旧稿全文"
+    assert blocks["data"]["blocks"][0]["stable_id"] == "sb-b-light-01"
+    assert changes["data"]["changes"][0]["stable_id"] == "change-light-01"
+    assert comments["data"]["comments"][0]["body"] == "保留这个改法"
+
+
+def test_stage_payload_marks_stale_queued_and_running_tasks():
+    stage = ArticleReviewStage(
+        review_run_id=1,
+        stage_key="ai_review",
+        stage_order=4,
+        status="queued",
+        progress=0,
+    )
+    stage.created_at = utcnow() - timedelta(minutes=11)
+    stage.updated_at = stage.created_at
+    assert is_stage_stale(stage) is True
+    assert stage_payload(stage)["is_stale"] is True
+
+    stage.status = "running"
+    stage.updated_at = utcnow() - timedelta(minutes=30)
+    assert is_stage_stale(stage) is False
+    stage.updated_at = utcnow() - timedelta(minutes=46)
+    assert is_stage_stale(stage) is True
+
+
+@pytest.mark.asyncio
+async def test_stale_running_stage_can_be_requeued(review_db, monkeypatch):
+    employee = _user(1)
+    run_id = progress_store.create_run(user_id=employee.id)
+    queued = {"calls": 0}
+
+    def fake_apply(*args, **kwargs):
+        queued["calls"] += 1
+        queued.update(kwargs)
+
+    monkeypatch.setattr(reviews_api.analyze_article_review_task, "apply_async", fake_apply)
+    try:
+        async with review_db() as db:
+            db.add(employee)
+            review = ArticleReview(
+                title="失联任务重提",
+                before_filename="before.txt",
+                after_filename="after.txt",
+                before_text="旧稿",
+                after_text="新稿",
+                change_groups=[],
+                status="analyzing",
+                progress_run_id=run_id,
+                analysis_task_id="old-task",
+                created_by=employee.id,
+            )
+            db.add(review)
+            await db.flush()
+            run = await create_run_with_stages(db, review, run_id=run_id, created_by=employee.id)
+            run.status = "running"
+            run.current_stage = "ai_review"
+            run.task_id = "old-task"
+            await db.commit()
+            await db.execute(
+                update(ArticleReviewStage)
+                .where(
+                    ArticleReviewStage.review_run_id == run.id,
+                    ArticleReviewStage.stage_key == "ai_review",
+                )
+                .values(
+                    status="running",
+                    task_id="old-task",
+                    updated_at=utcnow() - timedelta(minutes=46),
+                )
+            )
+            await db.commit()
+
+            result = await reviews_api.retry_article_review_stage(
+                review.id,
+                "ai_review",
+                db,
+                employee,
+            )
+            repeated = await reviews_api.retry_article_review_stage(
+                review.id,
+                "ai_review",
+                db,
+                employee,
+            )
+
+        assert result["code"] == 202
+        assert result["data"]["task"]["task_id"] != "old-task"
+        assert queued["task_id"] == result["data"]["task"]["task_id"]
+        assert repeated["code"] == 200
+        assert queued["calls"] == 1
+    finally:
+        progress_store.cleanup(run_id)
+
+
+@pytest.mark.asyncio
+async def test_superseded_task_failure_does_not_overwrite_active_task(review_db, monkeypatch):
+    employee = _user(1)
+    pushed = []
+
+    async def fake_push(run_id, event):
+        pushed.append((run_id, event))
+
+    monkeypatch.setattr(review_tasks, "_push", fake_push)
+    async with review_db() as db:
+        db.add(employee)
+        review = ArticleReview(
+            title="新任务已接管",
+            before_filename="before.txt",
+            after_filename="after.txt",
+            before_text="旧稿",
+            after_text="新稿",
+            change_groups=[],
+            status="analyzing",
+            progress_run_id="superseded-run",
+            analysis_task_id="new-task",
+            created_by=employee.id,
+        )
+        db.add(review)
+        await db.commit()
+        review_id = review.id
+
+        result = await review_tasks._mark_failed(
+            db,
+            review_id,
+            "旧任务晚到的失败",
+            task_id="old-task",
+            run_id="superseded-run",
+            stage_key="ai_review",
+        )
+        await db.refresh(review)
+
+    assert result["status"] == "skipped"
+    assert review.status == "analyzing"
+    assert review.analysis_task_id == "new-task"
+    assert review.analysis_error is None
+    assert pushed == []
 
 
 @pytest.mark.asyncio

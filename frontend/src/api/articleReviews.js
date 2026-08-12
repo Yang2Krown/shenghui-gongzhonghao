@@ -4,6 +4,16 @@ export const listArticleReviews = (params = {}) => get('/reviews', params)
 
 export const getArticleReview = (id) => get(`/reviews/${id}`)
 
+export const getArticleReviewSummary = (id, config = {}) => get(`/reviews/${id}/summary`, {}, config)
+
+export const getArticleReviewSemanticBlocks = (id, config = {}) => get(`/reviews/${id}/semantic-blocks`, {}, config)
+
+export const listArticleReviewChanges = (id, params = {}, config = {}) => get(`/reviews/${id}/changes`, params, config)
+
+export const listArticleReviewComments = (id, config = {}) => get(`/reviews/${id}/comments`, {}, config)
+
+export const getArticleReviewSourceText = (id, config = {}) => get(`/reviews/${id}/source-text`, {}, config)
+
 export const deleteArticleReview = (id) => del(`/reviews/${id}`)
 
 export const getArticleReviewWorkflow = (id, params = {}) => get(`/reviews/${id}/workflow`, params)
@@ -16,7 +26,7 @@ export const createArticleReview = (beforeFile, afterFile, title = '') => {
   return post('/reviews', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     // 这里只负责接收文件并投递后台任务，正常应在几十秒内返回；不让前端为后台解析任务长连接。
-    timeout: 30000,
+    timeout: 300000,
   })
 }
 

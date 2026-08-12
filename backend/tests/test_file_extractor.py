@@ -17,7 +17,12 @@ from docx import Document
 from PIL import Image
 
 from app.utils import file_extractor
-from app.utils.file_extractor import extract_text, UnsupportedFileType
+from app.utils.file_extractor import (
+    UnsupportedFileType,
+    extract_text,
+    extract_text_from_path,
+    normalize_extracted_text,
+)
 
 
 def _blank_pdf() -> bytes:
@@ -63,11 +68,31 @@ async def test_docx_extracts_paragraphs_and_table_cells():
     assert "必须提及" in text and "烟酰胺" in text  # 表格单元格也要被提到
 
 
+async def test_docx_path_extracts_text_without_loading_media_parts(tmp_path):
+    path = tmp_path / "brief.docx"
+    path.write_bytes(_table_docx())
+
+    text = await extract_text_from_path(filename=path.name, path=path)
+
+    assert "测试面霜" in text
+    assert "必须提及" in text and "烟酰胺" in text
+
+
 async def test_txt_utf8_and_gbk():
     utf8 = await extract_text(filename="b.txt", data="商单要求口语化。".encode("utf-8"))
     assert "口语化" in utf8
     gbk = await extract_text(filename="b.txt", data="GBK编码的内容。".encode("gbk"))
     assert "编码" in gbk
+
+
+def test_normalize_extracted_text_splits_pdf_control_noise():
+    assert normalize_extracted_text("1.0\x01AI短剧正文。") == "1.0\nAI短剧正文。"
+
+
+def test_normalize_extracted_text_preserves_chinese_punctuation():
+    source = "上传的经验正文：先写冲突，再给案例。"
+
+    assert normalize_extracted_text(source) == source
 
 
 async def test_old_doc_raises_unsupported():
@@ -87,18 +112,31 @@ async def test_scanned_pdf_falls_back_to_ocr(monkeypatch):
     """文本层为空的 PDF 必须走视觉 OCR 兜底,而不是静默返回空。"""
     called = {}
 
-    async def fake_vision(data, mime):
+    async def fake_pdf_ocr(data):
         called["hit"] = True
         return "扫描件里的文字"
 
-    monkeypatch.setattr(file_extractor, "_extract_image_via_vision", fake_vision)
+    monkeypatch.setattr(file_extractor, "_ocr_pdf_via_vision", fake_pdf_ocr)
     text = await extract_text(filename="scan.pdf", data=_blank_pdf())
     assert called.get("hit"), "空白 PDF 未触发 OCR 兜底"
     assert text == "扫描件里的文字"
 
 
+async def test_scanned_pdf_path_falls_back_without_reading_whole_file(tmp_path, monkeypatch):
+    path = tmp_path / "scan.pdf"
+    path.write_bytes(_blank_pdf())
+
+    async def fake_path_ocr(received_path):
+        assert received_path == path
+        return "路径扫描件文字"
+
+    monkeypatch.setattr(file_extractor, "_ocr_pdf_path_via_vision", fake_path_ocr)
+    text = await extract_text_from_path(filename=path.name, path=path)
+    assert text == "路径扫描件文字"
+
+
 async def test_short_text_pdf_is_kept_without_ocr(monkeypatch):
-    async def fail_if_called(data, mime):
+    async def fail_if_called(data):
         raise AssertionError("有文本层的短 PDF 不应触发 OCR")
 
     monkeypatch.setattr(file_extractor, "_ocr_pdf_via_vision", fail_if_called)

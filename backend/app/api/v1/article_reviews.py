@@ -12,9 +12,9 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, selectinload
 
 from app.core.config import settings
 from app.core.progress import progress_store
@@ -22,7 +22,12 @@ from app.core.product_access import is_admin_user
 from app.core.rate_limit import enforce_rate_limit, rule_from_setting, user_actor
 from app.core.security import get_current_user
 from app.core.timezone import utcnow
-from app.core.upload_security import UploadSecurityError, validate_document_upload
+from app.core.upload_security import (
+    DOCUMENT_EXTS,
+    UploadSecurityError,
+    validate_document_path,
+    validate_document_upload,
+)
 from app.db.session import AsyncSessionLocal, get_db
 from app.models.article_review import (
     ArticleReview,
@@ -62,11 +67,16 @@ from app.tasks.article_review_tasks import (
 )
 from app.services.article_review_workflow import (
     STAGE_ORDER,
+    block_payload,
+    change_payload,
     create_run_with_stages,
     invalidate_downstream,
+    is_stage_stale,
     load_current_run,
     load_workflow_entities,
     persist_methodology_candidates,
+    reorder_payload,
+    run_payload,
     update_run,
     update_stage,
 )
@@ -181,6 +191,169 @@ def _review_payload(
     }
 
 
+def _review_metadata_payload(
+    review: ArticleReview,
+    *,
+    stats: Optional[dict] = None,
+    include_analysis: bool = True,
+) -> dict:
+    """不访问全文、旧 change_groups 或 comments 关系的轻量投影。"""
+
+    analysis = review.ai_analysis if include_analysis and isinstance(review.ai_analysis, dict) else None
+    return {
+        "id": review.id,
+        "title": review.title,
+        "status": review.status,
+        "analysis_task_id": review.analysis_task_id,
+        "progress": {"run_id": review.progress_run_id, "status": review.status},
+        "analysis_error": review.analysis_error,
+        "created_by": review.created_by,
+        "created_by_user": _user_payload(review.creator),
+        "created_at": _iso(review.created_at),
+        "updated_at": _iso(review.updated_at),
+        "before": {
+            "filename": review.before_filename,
+            "char_count": review.before_char_count,
+            "truncated": bool(review.before_truncated),
+        },
+        "after": {
+            "filename": review.after_filename,
+            "char_count": review.after_char_count,
+            "truncated": bool(review.after_truncated),
+        },
+        "stats": {
+            "total_groups": 0,
+            "major_group_count": 0,
+            "added_blocks": 0,
+            "removed_blocks": 0,
+            **(stats or {}),
+        },
+        "change_groups": [],
+        "major_changes": [],
+        "before_text": None,
+        "after_text": None,
+        "ai_analysis": analysis,
+        "comments": [],
+        "promoted_card_ids": list(review.promoted_card_ids or []) if include_analysis else [],
+    }
+
+
+def _change_group_payload(change: ArticleReviewChange) -> dict:
+    """把规范化 change 表映射为旧界面仍使用的 change_group 结构。"""
+
+    return {
+        "id": change.stable_id,
+        "stable_id": change.stable_id,
+        "change_id": change.id,
+        "kind": {"addition": "insert", "deletion": "delete"}.get(change.change_type, "replace"),
+        "change_type": change.change_type,
+        "impact": change.impact,
+        "is_major": bool(change.is_major),
+        "confidence": change.confidence,
+        "change_ratio": change.change_ratio,
+        "significance_reason": change.significance_reason,
+        "effect": change.effect,
+        "before_block_ids": list(change.before_block_ids or []),
+        "after_block_ids": list(change.after_block_ids or []),
+        "before_block_count": len(change.before_block_ids or []),
+        "after_block_count": len(change.after_block_ids or []),
+        "before_char_count": len(change.before_text or ""),
+        "after_char_count": len(change.after_text or ""),
+        "before": change.before_text or "",
+        "after": change.after_text or "",
+        "position_delta": change.position_delta,
+        "human_label": change.human_label,
+        "human_note": change.human_note,
+        "ai_analysis": change.ai_analysis,
+    }
+
+
+def _methodology_payload(item: ArticleReviewMethodologyCandidate) -> dict:
+    return {
+        "id": item.id,
+        "review_id": item.review_id,
+        "review_run_id": item.review_run_id,
+        "title": item.title,
+        "rule": item.rule,
+        "rationale": item.rationale,
+        "example": item.example,
+        "evidence_change_ids": list(item.evidence_change_ids or []),
+        "status": item.status,
+        "confirmed_by": item.confirmed_by,
+        "confirmed_at": _iso(item.confirmed_at),
+        "experience_card_id": item.experience_card_id,
+    }
+
+
+async def _load_review_metadata(
+    db: AsyncSession,
+    review_id: int,
+    *,
+    include_analysis: bool = True,
+) -> Optional[ArticleReview]:
+    columns = [
+        ArticleReview.id,
+        ArticleReview.title,
+        ArticleReview.status,
+        ArticleReview.analysis_task_id,
+        ArticleReview.progress_run_id,
+        ArticleReview.analysis_error,
+        ArticleReview.created_by,
+        ArticleReview.created_at,
+        ArticleReview.updated_at,
+        ArticleReview.before_filename,
+        ArticleReview.before_char_count,
+        ArticleReview.before_truncated,
+        ArticleReview.after_filename,
+        ArticleReview.after_char_count,
+        ArticleReview.after_truncated,
+    ]
+    if include_analysis:
+        columns.extend([ArticleReview.ai_analysis, ArticleReview.promoted_card_ids])
+    return (await db.execute(
+        select(ArticleReview)
+        .where(ArticleReview.id == review_id)
+        .options(load_only(*columns), selectinload(ArticleReview.creator))
+    )).scalar_one_or_none()
+
+
+async def _review_stats_by_id(db: AsyncSession, review_ids: list[int]) -> dict[int, dict]:
+    """一次查询每篇复盘最新 run 的改动计数，避免列表加载大 JSON/全文。"""
+
+    if not review_ids:
+        return {}
+    run_rows = (await db.execute(
+        select(ArticleReviewRun.review_id, ArticleReviewRun.id)
+        .where(ArticleReviewRun.review_id.in_(review_ids))
+        .order_by(ArticleReviewRun.review_id, ArticleReviewRun.run_no.desc(), ArticleReviewRun.id.desc())
+    )).all()
+    latest_run_by_review: dict[int, int] = {}
+    for review_id, run_id in run_rows:
+        latest_run_by_review.setdefault(review_id, run_id)
+    if not latest_run_by_review:
+        return {}
+    rows = (await db.execute(
+        select(
+            ArticleReviewChange.review_id,
+            func.sum(case((ArticleReviewChange.change_type != "unchanged", 1), else_=0)),
+            func.sum(case((ArticleReviewChange.is_major.is_(True), 1), else_=0)),
+            func.sum(case((ArticleReviewChange.change_type == "addition", 1), else_=0)),
+            func.sum(case((ArticleReviewChange.change_type == "deletion", 1), else_=0)),
+        )
+        .where(ArticleReviewChange.review_run_id.in_(list(latest_run_by_review.values())))
+        .group_by(ArticleReviewChange.review_id)
+    )).all()
+    return {
+        review_id: {
+            "total_groups": int(total or 0),
+            "major_group_count": int(major or 0),
+            "added_blocks": int(added or 0),
+            "removed_blocks": int(removed or 0),
+        }
+        for review_id, total, major, added, removed in rows
+    }
+
+
 async def _load_review(db: AsyncSession, review_id: int) -> Optional[ArticleReview]:
     return (await db.execute(
         select(ArticleReview)
@@ -256,15 +429,69 @@ async def _read_review_upload(file: UploadFile) -> tuple[str, bytes, str]:
     return file.filename, safe.data, safe.ext
 
 
+async def _review_upload_size(file: UploadFile) -> int:
+    """读取 SpooledTemporaryFile 的真实大小，不把内容复制到 Python bytes。"""
+
+    def measure() -> int:
+        position = file.file.tell()
+        file.file.seek(0, 2)
+        size = file.file.tell()
+        file.file.seek(position)
+        return size
+
+    return await asyncio.to_thread(measure)
+
+
+def _single_file_too_large(filename: str, actual_bytes: int) -> HTTPException:
+    actual_mb = actual_bytes / 1024 / 1024
+    limit_mb = MAX_REVIEW_UPLOAD_SIZE / 1024 / 1024
+    return HTTPException(
+        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        detail={
+            "code": "review_single_file_too_large",
+            "scope": "single_file",
+            "message": f"单个文件超限：{filename} 实际 {actual_mb:.2f}MB，限制 {limit_mb:.0f}MB",
+            "filename": filename,
+            "actual_bytes": actual_bytes,
+            "limit_bytes": MAX_REVIEW_UPLOAD_SIZE,
+        },
+    )
+
+
+async def _copy_review_upload(file: UploadFile, target: Path) -> None:
+    """分块复制 FastAPI 已落盘/缓冲的上传内容，避免二次构造大 bytes。"""
+
+    def copy() -> None:
+        file.file.seek(0)
+        with target.open("wb") as destination:
+            shutil.copyfileobj(file.file, destination, length=1024 * 1024)
+        file.file.seek(0)
+
+    await asyncio.to_thread(copy)
+
+
 async def _stage_review_uploads(
     before_file: UploadFile,
     after_file: UploadFile,
 ) -> tuple[str, str, str, str]:
     """只做快速校验并把原始文件放入 web/worker 共用的暂存 volume。"""
 
-    before_filename, before_data, before_ext = await _read_review_upload(before_file)
-    after_filename, after_data, after_ext = await _read_review_upload(after_file)
-    files_size = len(before_data) + len(after_data)
+    if not before_file.filename or not after_file.filename:
+        raise HTTPException(status_code=400, detail="上传文件名不能为空")
+    before_ext = Path(before_file.filename).suffix.lower()
+    after_ext = Path(after_file.filename).suffix.lower()
+    if before_ext not in DOCUMENT_EXTS or after_ext not in DOCUMENT_EXTS:
+        raise HTTPException(status_code=400, detail="仅支持 PDF、Word（DOCX）、TXT 和 MD 文件")
+
+    before_size, after_size = await asyncio.gather(
+        _review_upload_size(before_file),
+        _review_upload_size(after_file),
+    )
+    if before_size > MAX_REVIEW_UPLOAD_SIZE:
+        raise _single_file_too_large(before_file.filename, before_size)
+    if after_size > MAX_REVIEW_UPLOAD_SIZE:
+        raise _single_file_too_large(after_file.filename, after_size)
+    files_size = before_size + after_size
     if files_size > MAX_REVIEW_FILES_SIZE:
         actual_mb = files_size / 1024 / 1024
         limit_mb = MAX_REVIEW_FILES_SIZE / 1024 / 1024
@@ -287,13 +514,30 @@ async def _stage_review_uploads(
     try:
         await asyncio.to_thread(stage_dir.mkdir, parents=True, exist_ok=False)
         await asyncio.gather(
-            asyncio.to_thread(before_path.write_bytes, before_data),
-            asyncio.to_thread(after_path.write_bytes, after_data),
+            _copy_review_upload(before_file, before_path),
+            _copy_review_upload(after_file, after_path),
         )
+        await asyncio.gather(
+            asyncio.to_thread(
+                validate_document_path,
+                filename=before_file.filename,
+                path=before_path,
+                max_size=MAX_REVIEW_UPLOAD_SIZE,
+            ),
+            asyncio.to_thread(
+                validate_document_path,
+                filename=after_file.filename,
+                path=after_path,
+                max_size=MAX_REVIEW_UPLOAD_SIZE,
+            ),
+        )
+    except UploadSecurityError as exc:
+        await asyncio.to_thread(shutil.rmtree, stage_dir, True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
         await asyncio.to_thread(shutil.rmtree, stage_dir, True)
         raise
-    return before_filename, str(before_path), after_filename, str(after_path)
+    return before_file.filename, str(before_path), after_file.filename, str(after_path)
 
 
 async def _enqueue_analysis(db: AsyncSession, review: ArticleReview) -> dict:
@@ -601,17 +845,41 @@ async def list_article_reviews(
     rows = (await db.execute(
         select(ArticleReview)
         .where(*filters)
-        .options(selectinload(ArticleReview.creator))
+        .options(
+            load_only(
+                ArticleReview.id,
+                ArticleReview.title,
+                ArticleReview.status,
+                ArticleReview.analysis_task_id,
+                ArticleReview.progress_run_id,
+                ArticleReview.analysis_error,
+                ArticleReview.created_by,
+                ArticleReview.created_at,
+                ArticleReview.updated_at,
+                ArticleReview.before_filename,
+                ArticleReview.before_char_count,
+                ArticleReview.before_truncated,
+                ArticleReview.after_filename,
+                ArticleReview.after_char_count,
+                ArticleReview.after_truncated,
+            ),
+            selectinload(ArticleReview.creator),
+        )
         .order_by(ArticleReview.created_at.desc(), ArticleReview.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )).scalars().all()
+    stats_by_id = await _review_stats_by_id(db, [row.id for row in rows])
     return {
         "code": 200,
         "message": "文章复盘列表获取成功",
         "data": {
             "items": [
-                _review_payload(row, include_groups=False, include_comments=False)
+                _review_metadata_payload(
+                    row,
+                    stats=stats_by_id.get(row.id),
+                    include_analysis=False,
+                )
                 for row in rows
             ],
             "total": total,
@@ -675,6 +943,244 @@ async def delete_article_review(
         "code": 200,
         "message": "文章复盘已删除",
         "data": {"review_id": review_id},
+    }
+
+
+@router.get("/{review_id}/summary", response_model=dict)
+async def get_article_review_summary(
+    review_id: int,
+    preview_size: int = Query(12, ge=1, le=30),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """返回切换记录所需的轻量摘要，不读取全文、全部分段或全部评论。"""
+
+    await _require_review_access(db, current_user)
+    review = await _load_review_metadata(db, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="文章复盘不存在")
+    run = await load_current_run(db, review_id, with_stages=True)
+    changes: list[ArticleReviewChange] = []
+    reorder_events: list[ArticleReviewReorderEvent] = []
+    candidates: list[ArticleReviewMethodologyCandidate] = []
+    stats = {
+        "total_groups": 0,
+        "major_group_count": 0,
+        "added_blocks": 0,
+        "removed_blocks": 0,
+        "before_block_count": 0,
+        "after_block_count": 0,
+    }
+    if run is not None:
+        count_row = (await db.execute(
+            select(
+                func.sum(case((ArticleReviewChange.change_type != "unchanged", 1), else_=0)),
+                func.sum(case((ArticleReviewChange.is_major.is_(True), 1), else_=0)),
+                func.sum(case((ArticleReviewChange.change_type == "addition", 1), else_=0)),
+                func.sum(case((ArticleReviewChange.change_type == "deletion", 1), else_=0)),
+            ).where(ArticleReviewChange.review_run_id == run.id)
+        )).one()
+        stats.update({
+            "total_groups": int(count_row[0] or 0),
+            "major_group_count": int(count_row[1] or 0),
+            "added_blocks": int(count_row[2] or 0),
+            "removed_blocks": int(count_row[3] or 0),
+        })
+        for side, count in (await db.execute(
+            select(ArticleReviewSemanticBlock.side, func.count(ArticleReviewSemanticBlock.id))
+            .where(ArticleReviewSemanticBlock.review_run_id == run.id)
+            .group_by(ArticleReviewSemanticBlock.side)
+        )).all():
+            stats[f"{side}_block_count"] = int(count or 0)
+        changes = list((await db.execute(
+            select(ArticleReviewChange)
+            .where(
+                ArticleReviewChange.review_run_id == run.id,
+                ArticleReviewChange.change_type != "unchanged",
+            )
+            .order_by(
+                ArticleReviewChange.is_major.desc(),
+                case(
+                    (ArticleReviewChange.impact == "high", 0),
+                    (ArticleReviewChange.impact == "medium", 1),
+                    else_=2,
+                ),
+                ArticleReviewChange.ordinal,
+            )
+            .limit(preview_size)
+        )).scalars())
+        reorder_events = list((await db.execute(
+            select(ArticleReviewReorderEvent)
+            .where(ArticleReviewReorderEvent.review_run_id == run.id)
+            .order_by(ArticleReviewReorderEvent.ordinal)
+            .limit(50)
+        )).scalars())
+        candidates = list((await db.execute(
+            select(ArticleReviewMethodologyCandidate)
+            .where(ArticleReviewMethodologyCandidate.review_run_id == run.id)
+            .order_by(ArticleReviewMethodologyCandidate.created_at, ArticleReviewMethodologyCandidate.id)
+            .limit(20)
+        )).scalars())
+
+    comments_count = (await db.execute(
+        select(func.count(ArticleReviewComment.id)).where(
+            ArticleReviewComment.review_id == review_id,
+        )
+    )).scalar_one()
+    review_payload = _review_metadata_payload(review, stats=stats)
+    review_payload["change_groups"] = [_change_group_payload(item) for item in changes]
+    review_payload["major_changes"] = [
+        item for item in review_payload["change_groups"] if item["is_major"]
+    ]
+    review_payload["comments_count"] = int(comments_count or 0)
+    return {
+        "code": 200,
+        "message": "文章复盘摘要获取成功",
+        "data": {
+            "review": review_payload,
+            "run": run_payload(run) if run is not None else None,
+            "blocks": [],
+            "changes": [change_payload(item) for item in changes],
+            "reorder_events": [reorder_payload(item) for item in reorder_events],
+            "methodology_candidates": [_methodology_payload(item) for item in candidates],
+            "experience_sources": [],
+            "change_pagination": {
+                "page": 1,
+                "page_size": preview_size,
+                "total": stats["total_groups"],
+                "has_more": len(changes) < stats["total_groups"],
+            },
+        },
+    }
+
+
+@router.get("/{review_id}/semantic-blocks", response_model=dict)
+async def get_article_review_semantic_blocks(
+    review_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    await _require_review_access(db, current_user)
+    review = await _load_review_metadata(db, review_id, include_analysis=False)
+    if review is None:
+        raise HTTPException(status_code=404, detail="文章复盘不存在")
+    run = await load_current_run(db, review_id, with_stages=False)
+    if run is None:
+        blocks = []
+    else:
+        blocks = list((await db.execute(
+            select(ArticleReviewSemanticBlock)
+            .where(ArticleReviewSemanticBlock.review_run_id == run.id)
+            .order_by(ArticleReviewSemanticBlock.side, ArticleReviewSemanticBlock.ordinal)
+        )).scalars())
+    return {
+        "code": 200,
+        "message": "语义分段获取成功",
+        "data": {"blocks": [block_payload(item) for item in blocks]},
+    }
+
+
+@router.get("/{review_id}/changes", response_model=dict)
+async def list_article_review_changes(
+    review_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(12, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    await _require_review_access(db, current_user)
+    review = await _load_review_metadata(db, review_id, include_analysis=False)
+    if review is None:
+        raise HTTPException(status_code=404, detail="文章复盘不存在")
+    run = await load_current_run(db, review_id, with_stages=False)
+    total = 0
+    changes: list[ArticleReviewChange] = []
+    if run is not None:
+        filters = (
+            ArticleReviewChange.review_run_id == run.id,
+            ArticleReviewChange.change_type != "unchanged",
+        )
+        total = (await db.execute(
+            select(func.count(ArticleReviewChange.id)).where(*filters)
+        )).scalar_one()
+        changes = list((await db.execute(
+            select(ArticleReviewChange)
+            .where(*filters)
+            .order_by(
+                ArticleReviewChange.is_major.desc(),
+                case(
+                    (ArticleReviewChange.impact == "high", 0),
+                    (ArticleReviewChange.impact == "medium", 1),
+                    else_=2,
+                ),
+                ArticleReviewChange.ordinal,
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )).scalars())
+    return {
+        "code": 200,
+        "message": "复盘改动获取成功",
+        "data": {
+            "change_groups": [_change_group_payload(item) for item in changes],
+            "changes": [change_payload(item) for item in changes],
+            "page": page,
+            "page_size": page_size,
+            "total": int(total or 0),
+            "has_more": page * page_size < int(total or 0),
+        },
+    }
+
+
+@router.get("/{review_id}/comments", response_model=dict)
+async def list_article_review_comments(
+    review_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    await _require_review_access(db, current_user)
+    review = await _load_review_metadata(db, review_id, include_analysis=False)
+    if review is None:
+        raise HTTPException(status_code=404, detail="文章复盘不存在")
+    comments = list((await db.execute(
+        select(ArticleReviewComment)
+        .where(ArticleReviewComment.review_id == review_id)
+        .options(selectinload(ArticleReviewComment.author))
+        .order_by(ArticleReviewComment.created_at, ArticleReviewComment.id)
+    )).scalars())
+    return {
+        "code": 200,
+        "message": "复盘评论获取成功",
+        "data": {"comments": [_comment_payload(item) for item in comments]},
+    }
+
+
+@router.get("/{review_id}/source-text", response_model=dict)
+async def get_article_review_source_text(
+    review_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    await _require_review_access(db, current_user)
+    row = (await db.execute(
+        select(
+            ArticleReview.before_text,
+            ArticleReview.after_text,
+            ArticleReview.before_char_count,
+            ArticleReview.after_char_count,
+        ).where(ArticleReview.id == review_id)
+    )).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="文章复盘不存在")
+    return {
+        "code": 200,
+        "message": "复盘原文获取成功",
+        "data": {
+            "before_text": row[0],
+            "after_text": row[1],
+            "before_char_count": row[2],
+            "after_char_count": row[3],
+        },
     }
 
 
@@ -1102,10 +1608,15 @@ async def retry_article_review_stage(
     stage = await update_stage(db, run.run_id, stage_key)
     if stage is None:
         raise HTTPException(status_code=409, detail="当前运行记录缺少目标阶段")
-    if stage and stage.status == "running" and stage.task_id:
+    if (
+        stage
+        and stage.status in {"queued", "running"}
+        and stage.task_id
+        and not is_stage_stale(stage)
+    ):
         return {
             "code": 200,
-            "message": "该阶段已有任务在执行",
+            "message": "该阶段已有任务在排队或执行",
             "data": {"review": _review_payload(review), "task_id": stage.task_id},
         }
     if stage_key == "parse" and not (review.before_file_path and review.after_file_path):
@@ -1227,7 +1738,18 @@ async def retry_article_review_analysis(
         )
         if segmentation_stage is not None and segmentation_stage.status == "awaiting_confirmation":
             raise HTTPException(status_code=409, detail="请先确认或编辑语义分段，再启动 AI 复盘")
-    if review.status in {"processing", "analyzing"} and review.analysis_task_id:
+    active_stage = None
+    if current_run is not None:
+        active_stage = next(
+            (item for item in current_run.stages if item.stage_key == current_run.current_stage),
+            None,
+        )
+    task_is_stale = bool(active_stage and is_stage_stale(active_stage))
+    if (
+        review.status in {"processing", "analyzing"}
+        and review.analysis_task_id
+        and not task_is_stale
+    ):
         return {
             "code": 200,
             "message": "已有 AI 分析任务在执行",

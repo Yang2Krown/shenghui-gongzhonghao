@@ -149,11 +149,11 @@ class Settings(BaseSettings):
     # 文件上传配置
     UPLOAD_DIR: str = "./uploads"
     MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024  # 20MB
-    # 文章复盘一次上传改前/改后两份文件：单文件 20MB，文件内容合计 40MB，
-    # 请求体额外预留 multipart 边界和字段开销。反向代理与前端提示使用同一组约定。
-    ARTICLE_REVIEW_MAX_FILE_SIZE: int = 20 * 1024 * 1024
-    ARTICLE_REVIEW_MAX_FILES_SIZE: int = 40 * 1024 * 1024
-    ARTICLE_REVIEW_MAX_REQUEST_SIZE: int = 45 * 1024 * 1024
+    # 文章复盘允许带图片的 Word：单文件 80MB，两份文件内容合计 160MB，
+    # HTTP 请求额外预留 20MB multipart 开销。路由采用流式落盘，避免整份复制进内存。
+    ARTICLE_REVIEW_MAX_FILE_SIZE: int = 80 * 1024 * 1024
+    ARTICLE_REVIEW_MAX_FILES_SIZE: int = 160 * 1024 * 1024
+    ARTICLE_REVIEW_MAX_REQUEST_SIZE: int = 180 * 1024 * 1024
     
     # 分页配置
     DEFAULT_PAGE_SIZE: int = 20

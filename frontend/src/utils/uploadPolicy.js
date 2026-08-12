@@ -18,13 +18,13 @@ export const UPLOAD_LIMITS = {
   reference: 20,  // POST /creation-tools/upload(创作工具 8 页共用)
   style: 20,      // POST /styles/sources/upload
   cover: 10,      // POST /images/upload(封面)
-  articleReview: 20,
+  articleReview: 80,
 }
 
 export const ARTICLE_REVIEW_UPLOAD_LIMITS = {
   singleMB: UPLOAD_LIMITS.articleReview,
-  filesTotalMB: 40,
-  requestMB: 45,
+  filesTotalMB: 160,
+  requestMB: 180,
 }
 
 const DOC_ACCEPT = DOCUMENT_EXTS.join(',')

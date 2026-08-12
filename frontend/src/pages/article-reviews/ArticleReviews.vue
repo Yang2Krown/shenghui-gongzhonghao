@@ -62,7 +62,7 @@
         </div>
       </aside>
 
-      <main v-if="selectedReview" class="review-detail-panel">
+      <main v-if="selectedReview" v-loading="detailLoading" class="review-detail-panel">
         <header class="detail-head">
           <div>
             <button type="button" class="back-link" @click="clearSelectedReview">← 返回复盘记录</button>
@@ -75,6 +75,7 @@
           </div>
           <div class="detail-actions">
             <el-button v-if="canDeleteSelectedReview" type="danger" plain @click="deleteSelectedReview">删除复盘</el-button>
+            <el-button v-if="canRegenerateSemanticBlocks" plain :loading="analyzing" @click="regenerateSemanticBlocks">重新分段</el-button>
             <el-button v-if="retryableStage" :loading="analyzing" @click="retryStage">
               {{ retryableStageLabel }}
             </el-button>
@@ -117,7 +118,7 @@
             <div v-for="stage in workflowStages" :key="stage.stage_key" class="stage-item" :class="`stage-${stage.status}`">
               <span class="stage-dot">{{ stage.status === 'succeeded' ? '✓' : stage.stage_order }}</span>
               <div><strong>{{ stage.label }}</strong><small>{{ stageMessage(stage) }}</small></div>
-              <el-tag size="small" :type="stageType(stage.status)">{{ stageStatusLabel(stage.status) }}</el-tag>
+              <el-tag size="small" :type="stage.is_stale ? 'danger' : stageType(stage.status)">{{ stage.is_stale ? '任务已失联' : stageStatusLabel(stage.status) }}</el-tag>
             </div>
           </div>
         </section>
@@ -133,7 +134,7 @@
           <div class="semantic-columns">
             <div v-for="side in ['before', 'after']" :key="side" class="semantic-column">
               <div class="semantic-column-head"><strong>{{ side === 'before' ? '改前语义块' : '改后语义块' }}</strong><span>{{ semanticDraft[side].length }} 块</span></div>
-              <div v-for="(block, index) in semanticDraft[side]" :key="block.stable_id || `${side}-${index}`" class="semantic-block">
+              <div v-for="(block, index) in visibleSemanticBlocks(side)" :key="block.stable_id || `${side}-${index}`" class="semantic-block">
                 <div class="semantic-block-head"><span>{{ String(index + 1).padStart(2, '0') }}</span><small>{{ block.source_line_start ? `原文第 ${block.source_line_start}-${block.source_line_end || block.source_line_start} 行` : '人工语义块' }}</small></div>
                 <el-input v-if="semanticEditMode" v-model="block.text" type="textarea" :autosize="{ minRows: 2, maxRows: 8 }" />
                 <p v-else>{{ block.text }}</p>
@@ -142,6 +143,9 @@
                   <el-button text size="small" @click="splitSemanticBlock(side, index)">拆分</el-button>
                 </div>
               </div>
+              <el-button v-if="!semanticEditMode && semanticVisible[side] < semanticDraft[side].length" text class="load-more-button" @click="semanticVisible[side] += 20">
+                再显示 20 块（剩余 {{ semanticDraft[side].length - semanticVisible[side] }} 块）
+              </el-button>
             </div>
           </div>
         </section>
@@ -149,7 +153,7 @@
         <section class="content-section change-section">
           <div class="section-heading">
             <div><span class="eyebrow">01 · SHOW THE CHANGE</span><h3>先看真正改大的地方</h3><p>高影响修改会置顶，人工评论直接挂在对应改动块下。</p></div>
-            <span class="section-count">{{ selectedReview.change_groups?.length || 0 }} 个改动块</span>
+            <span class="section-count">已显示 {{ selectedReview.change_groups?.length || 0 }} / {{ selectedReview.stats?.total_groups || 0 }} 个改动块</span>
           </div>
           <div v-if="selectedReview.status === 'processing'" class="processing-empty">
             <el-empty :image-size="58" description="正在解析文件并识别改动，请稍候" />
@@ -189,6 +193,7 @@
                 </div>
               </div>
             </article>
+            <el-button v-if="changePagination.has_more" class="load-more-button" :loading="changesLoading" plain @click="loadMoreChanges">加载更多改动</el-button>
           </div>
           <el-empty v-else :image-size="58" description="改前稿和改后稿没有检测到文本变化" />
         </section>
@@ -225,9 +230,9 @@
         </section>
 
         <section class="source-section">
-          <details>
+          <details :key="selectedReview.id" @toggle="loadSourceText">
             <summary><span><strong>查看原文全文</strong><small>需要核对上下文时展开</small></span><span>{{ selectedReview.before?.char_count + selectedReview.after?.char_count }} 字</span></summary>
-            <div class="source-columns"><div><b>改前稿</b><pre>{{ selectedReview.before_text || '当前接口未返回全文' }}</pre></div><div><b>改后稿</b><pre>{{ selectedReview.after_text || '当前接口未返回全文' }}</pre></div></div>
+            <div v-loading="sourceLoading" class="source-columns"><div><b>改前稿</b><pre>{{ selectedReview.before_text || (sourceLoading ? '正在读取…' : '暂无正文') }}</pre></div><div><b>改后稿</b><pre>{{ selectedReview.after_text || (sourceLoading ? '正在读取…' : '暂无正文') }}</pre></div></div>
           </details>
         </section>
       </main>
@@ -245,7 +250,7 @@
           <label class="upload-box"><span>改后文章</span><strong>{{ afterFile?.name || '选择 PDF / Word / TXT / MD' }}</strong><input type="file" accept=".pdf,.docx,.txt,.md,.markdown" @change="pickFile('after', $event)" /></label>
         </div>
       </el-form>
-      <p class="dialog-tip">支持文字版 PDF、DOCX、TXT、MD，单个文件不超过 20MB；改前和改后两份文件合计不超过 40MB（请求含 multipart 开销预留 45MB）。上传后会先解析并生成语义分段；扫描件或加密文件需要先转成可复制文本。</p>
+      <p class="dialog-tip">支持文字版 PDF、DOCX、TXT、MD，单个文件不超过 80MB；改前和改后两份文件合计不超过 160MB（请求上限 180MB，已预留 multipart 开销）。上传会流式落盘，带图片的 Word 不会整份常驻 Web 进程内存；扫描件或加密文件需要先转成可复制文本。</p>
       <template #footer><el-button @click="createVisible = false">取消</el-button><el-button type="primary" :loading="creating" @click="submitCreate">创建并分析</el-button></template>
     </el-dialog>
 
@@ -284,7 +289,11 @@ import {
   confirmArticleReviewMethodology,
   createArticleReview,
   deleteArticleReview,
-  getArticleReview,
+  getArticleReviewSemanticBlocks,
+  getArticleReviewSourceText,
+  getArticleReviewSummary,
+  listArticleReviewChanges,
+  listArticleReviewComments,
   listArticleReviews,
   promoteArticleReview,
   retryArticleReviewStage,
@@ -314,8 +323,14 @@ const beforeFile = ref(null)
 const afterFile = ref(null)
 const pollTimer = ref(null)
 const streamAbortController = ref(null)
+const detailAbortController = ref(null)
 const progressReconnectTimer = ref(null)
 const progressState = ref(null)
+const sourceLoading = ref(false)
+const sourceLoaded = ref(false)
+const changesLoading = ref(false)
+const changePagination = reactive({ page: 1, page_size: 12, total: 0, has_more: false })
+const semanticVisible = reactive({ before: 20, after: 20 })
 const semanticDraft = reactive({ before: [], after: [] })
 const filters = reactive({ keyword: '', status: '' })
 const createForm = reactive({ title: '' })
@@ -351,9 +366,20 @@ const hasConfirmedMethodology = computed(() => {
 const currentStage = computed(() => workflow.value.run?.current_stage || null)
 const currentStageLabel = computed(() => workflowStages.value.find((item) => item.stage_key === currentStage.value)?.label || '—')
 const waitingForSemanticConfirmation = computed(() => workflowStages.value.some((item) => item.stage_key === 'semantic_segmentation' && item.status === 'awaiting_confirmation'))
+const canRegenerateSemanticBlocks = computed(() => {
+  const semanticStage = workflowStages.value.find((item) => item.stage_key === 'semantic_segmentation')
+  return Boolean(
+    selectedReview.value?.before?.char_count
+    && selectedReview.value?.after?.char_count
+    && !waitingForSemanticConfirmation.value
+    && !['queued', 'running'].includes(semanticStage?.status),
+  )
+})
 const retryableStage = computed(() => {
   const failed = workflowStages.value.find((item) => item.status === 'failed' || item.status === 'invalidated')
   if (failed) return failed.stage_key
+  const stale = workflowStages.value.find((item) => item.is_stale)
+  if (stale) return stale.stage_key
   if (selectedReview.value?.status === 'reviewing') return 'ai_review'
   return null
 })
@@ -369,9 +395,12 @@ const humanLabel = (value) => ({ important: '人工确认重要', unimportant: '
 const stageLabel = (value) => ({ parse: '解析', semantic_segmentation: '分段', semantic_alignment: '对齐', ai_review: 'AI 分析', methodology: '方法论' }[value] || value)
 const stageStatusLabel = (value) => ({ queued: '排队中', running: '执行中', succeeded: '已完成', awaiting_confirmation: '待确认', blocked: '等待上游', invalidated: '需重算', failed: '失败', waiting: '等待' }[value] || value || '未开始')
 const stageType = (value) => ({ succeeded: 'success', failed: 'danger', running: 'warning', awaiting_confirmation: 'warning', invalidated: 'danger', blocked: 'info' }[value] || 'info')
-const stageMessage = (stage) => stage.message || (stage.status === 'succeeded' ? '已完成' : stage.status === 'blocked' ? '等待上游阶段' : '尚未开始')
+const stageMessage = (stage) => stage.is_stale ? '任务长时间没有心跳，可以从本阶段重新提交' : (stage.message || (stage.status === 'succeeded' ? '已完成' : stage.status === 'blocked' ? '等待上游阶段' : '尚未开始'))
 const candidateStatusLabel = (value) => ({ candidate: '待确认', confirmed: '已确认', rejected: '已驳回', promoted: '已沉淀' }[value] || value)
 const progressMessage = computed(() => progressState.value?.action || (selectedReview.value?.status === 'processing' ? '正在准备解析文件…' : '正在分析改动背后的原因和效果…'))
+const visibleSemanticBlocks = (side) => semanticEditMode.value
+  ? semanticDraft[side]
+  : semanticDraft[side].slice(0, semanticVisible[side])
 
 const syncWorkflowDraft = (value) => {
   const blocks = value || {}
@@ -381,12 +410,57 @@ const syncWorkflowDraft = (value) => {
 
 const applyReviewResponse = (value) => {
   const previous = selectedReview.value
-  const review = value?.review || value
-  if (!review) return
-  if (value?.run) review.workflow = { run: value.run, blocks: value.blocks || [], changes: value.changes || [], reorder_events: value.reorder_events || [], methodology_candidates: value.methodology_candidates || [], experience_sources: value.experience_sources || [] }
-  if (!review.workflow && previous?.id === review.id && previous.workflow) review.workflow = previous.workflow
+  const incoming = value?.review || value
+  if (!incoming) return
+  const sameReview = previous?.id === incoming.id
+  const review = sameReview ? { ...previous, ...incoming } : { ...incoming }
+  const previousWorkflow = sameReview ? (previous?.workflow || {}) : {}
+  const workflowPayload = value && Object.prototype.hasOwnProperty.call(value, 'run')
+    ? value
+    : incoming.workflow
+  if (workflowPayload) {
+    review.workflow = {
+      run: Object.prototype.hasOwnProperty.call(workflowPayload, 'run') ? workflowPayload.run : previousWorkflow.run,
+      blocks: workflowPayload.blocks?.length ? workflowPayload.blocks : (previousWorkflow.blocks || []),
+      changes: Object.prototype.hasOwnProperty.call(workflowPayload, 'changes') ? (workflowPayload.changes || []) : (previousWorkflow.changes || []),
+      reorder_events: Object.prototype.hasOwnProperty.call(workflowPayload, 'reorder_events') ? (workflowPayload.reorder_events || []) : (previousWorkflow.reorder_events || []),
+      methodology_candidates: Object.prototype.hasOwnProperty.call(workflowPayload, 'methodology_candidates') ? (workflowPayload.methodology_candidates || []) : (previousWorkflow.methodology_candidates || []),
+      experience_sources: Object.prototype.hasOwnProperty.call(workflowPayload, 'experience_sources') ? (workflowPayload.experience_sources || []) : (previousWorkflow.experience_sources || []),
+    }
+  } else if (sameReview && previousWorkflow.run) {
+    review.workflow = previousWorkflow
+  }
+  if (sameReview && previous?.comments?.length && !incoming.comments?.length) review.comments = previous.comments
+  if (sameReview && sourceLoaded.value) {
+    review.before_text = previous.before_text
+    review.after_text = previous.after_text
+  }
+  if (value?.change_pagination) Object.assign(changePagination, value.change_pagination)
   selectedReview.value = review
   if (review.workflow) syncWorkflowDraft(review.workflow)
+}
+
+const isCancelledRequest = (error) => error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError' || error?.name === 'AbortError'
+
+const loadReviewArtifacts = async (reviewId, signal) => {
+  const jobs = []
+  if (waitingForSemanticConfirmation.value) {
+    jobs.push(getArticleReviewSemanticBlocks(reviewId, { signal }).then((response) => {
+      if (selectedReview.value?.id !== reviewId) return
+      const blocks = response.data?.blocks || []
+      selectedReview.value.workflow = { ...(selectedReview.value.workflow || {}), blocks }
+      syncWorkflowDraft(selectedReview.value.workflow)
+    }))
+  }
+  if (selectedReview.value?.comments_count) {
+    jobs.push(listArticleReviewComments(reviewId, { signal }).then((response) => {
+      if (selectedReview.value?.id === reviewId) selectedReview.value.comments = response.data?.comments || []
+    }))
+  }
+  const results = await Promise.allSettled(jobs)
+  if (!signal?.aborted && results.some((item) => item.status === 'rejected')) {
+    ElMessage.warning('复盘摘要已加载，部分分段或评论暂时读取失败，可稍后刷新')
+  }
 }
 
 const loadReviews = async ({ selectFirst = true, silent = false } = {}) => {
@@ -411,19 +485,38 @@ const loadReviews = async ({ selectFirst = true, silent = false } = {}) => {
   }
 }
 
-const selectReview = async (id) => {
+const selectReview = async (id, initialReview = null) => {
   stopProgressStream()
   stopPolling()
+  if (detailAbortController.value) detailAbortController.value.abort()
   progressState.value = null
+  sourceLoaded.value = false
+  sourceLoading.value = false
+  semanticEditMode.value = false
+  semanticVisible.before = 20
+  semanticVisible.after = 20
+  Object.assign(changePagination, { page: 1, page_size: 12, total: 0, has_more: false })
+  const listItem = reviews.value.find((item) => item.id === id)
+  if (selectedReview.value?.id !== id) {
+    selectedReview.value = { ...(initialReview || listItem || { id }), workflow: {}, comments: [] }
+  }
   detailLoading.value = true
+  const controller = new AbortController()
+  detailAbortController.value = controller
   try {
-    const response = await getArticleReview(id)
+    const response = await getArticleReviewSummary(id, { signal: controller.signal })
+    if (controller.signal.aborted || selectedReview.value?.id !== id) return
     applyReviewResponse(response.data)
+    await loadReviewArtifacts(id, controller.signal)
+    if (controller.signal.aborted || selectedReview.value?.id !== id) return
     startProgressTracking()
-  } catch {
-    ElMessage.error('加载复盘详情失败')
+  } catch (error) {
+    if (!isCancelledRequest(error)) ElMessage.error('加载复盘详情失败')
   } finally {
-    detailLoading.value = false
+    if (detailAbortController.value === controller) {
+      detailAbortController.value = null
+      detailLoading.value = false
+    }
   }
 }
 
@@ -448,7 +541,12 @@ const stopProgressStream = () => {
 const clearSelectedReview = () => {
   stopProgressStream()
   stopPolling()
+  if (detailAbortController.value) {
+    detailAbortController.value.abort()
+    detailAbortController.value = null
+  }
   progressState.value = null
+  sourceLoaded.value = false
   selectedReview.value = null
 }
 
@@ -488,8 +586,13 @@ const startPolling = () => {
   pollTimer.value = setInterval(async () => {
     if (!selectedReview.value) return
     try {
-      const response = await getArticleReview(selectedReview.value.id)
+      const reviewId = selectedReview.value.id
+      const response = await getArticleReviewSummary(reviewId)
+      if (selectedReview.value?.id !== reviewId) return
       applyReviewResponse(response.data)
+      if (waitingForSemanticConfirmation.value && !semanticBlocks.value.length) {
+        await loadReviewArtifacts(reviewId)
+      }
       if (!['processing', 'analyzing'].includes(selectedReview.value.status)) {
         progressState.value = null
         stopPolling()
@@ -529,9 +632,12 @@ const startProgressTracking = () => {
       }, { signal: controller.signal, lastEventId })
       lastEventId = Number(result?.lastEventId || lastEventId) || lastEventId
       if (controller.signal.aborted || selectedReview.value?.id !== reviewId) return
-      const response = await getArticleReview(reviewId)
+      const response = await getArticleReviewSummary(reviewId)
       if (selectedReview.value?.id !== reviewId) return
       applyReviewResponse(response.data)
+      if (waitingForSemanticConfirmation.value && !semanticBlocks.value.length) {
+        await loadReviewArtifacts(reviewId)
+      }
       progressState.value = null
       if (['processing', 'analyzing'].includes(selectedReview.value.status) && !waitingForSemanticConfirmation.value) startPolling()
       else if (!waitingForSemanticConfirmation.value) await loadReviews()
@@ -593,7 +699,7 @@ const submitCreate = async () => {
     const createdReview = response.data?.review || null
     // POST 已在后端提交记录并投递任务；先进入这个已确认存在的详情，
     // 再静默刷新列表，避免列表请求失败覆盖刚创建的详情状态。
-    if (createdReview?.id) await selectReview(createdReview.id)
+    if (createdReview?.id) await selectReview(createdReview.id, createdReview)
     await loadReviews({ selectFirst: false, silent: true })
   } catch {
     ElMessage.error('创建文章复盘失败，请检查文件后重试')
@@ -607,6 +713,54 @@ const commentsFor = (groupId) => {
   return (selectedReview.value?.comments || []).filter((comment) => (
     comment.change_group_id === groupId || (change && comment.change_id === change.id)
   ))
+}
+
+const loadMoreChanges = async () => {
+  if (!selectedReview.value || !changePagination.has_more || changesLoading.value) return
+  const reviewId = selectedReview.value.id
+  changesLoading.value = true
+  try {
+    const nextPage = changePagination.page + 1
+    const response = await listArticleReviewChanges(reviewId, {
+      page: nextPage,
+      page_size: changePagination.page_size,
+    })
+    if (selectedReview.value?.id !== reviewId) return
+    const data = response.data || {}
+    const existingGroups = new Map((selectedReview.value.change_groups || []).map((item) => [item.id, item]))
+    for (const item of data.change_groups || []) existingGroups.set(item.id, item)
+    selectedReview.value.change_groups = [...existingGroups.values()]
+    const existingChanges = new Map((workflow.value.changes || []).map((item) => [item.id, item]))
+    for (const item of data.changes || []) existingChanges.set(item.id, item)
+    selectedReview.value.workflow = { ...workflow.value, changes: [...existingChanges.values()] }
+    Object.assign(changePagination, {
+      page: data.page || nextPage,
+      page_size: data.page_size || changePagination.page_size,
+      total: data.total || 0,
+      has_more: Boolean(data.has_more),
+    })
+  } catch {
+    ElMessage.error('加载更多改动失败')
+  } finally {
+    changesLoading.value = false
+  }
+}
+
+const loadSourceText = async (event) => {
+  if (!event?.currentTarget?.open || sourceLoaded.value || sourceLoading.value || !selectedReview.value) return
+  const reviewId = selectedReview.value.id
+  sourceLoading.value = true
+  try {
+    const response = await getArticleReviewSourceText(reviewId)
+    if (selectedReview.value?.id !== reviewId) return
+    selectedReview.value.before_text = response.data?.before_text || ''
+    selectedReview.value.after_text = response.data?.after_text || ''
+    sourceLoaded.value = true
+  } catch {
+    ElMessage.error('加载原文失败')
+  } finally {
+    if (selectedReview.value?.id === reviewId) sourceLoading.value = false
+  }
 }
 
 const mergeSemanticBlock = (side, index) => {
@@ -671,7 +825,7 @@ const retryStage = async () => {
   try {
     const response = await retryArticleReviewStage(selectedReview.value.id, retryableStage.value)
     applyReviewResponse(response.data)
-    const refreshed = await getArticleReview(selectedReview.value.id)
+    const refreshed = await getArticleReviewSummary(selectedReview.value.id)
     applyReviewResponse(refreshed.data)
     ElMessage.success('阶段任务已重新提交')
     startProgressTracking()
@@ -684,11 +838,26 @@ const retryStage = async () => {
 
 const regenerateSemanticBlocks = async () => {
   if (!selectedReview.value) return
+  try {
+    await ElMessageBox.confirm(
+      '重新分段会让当前语义对齐、AI 分析和方法论候选失效，评论会保留。确认按新规则重新生成吗？',
+      '重新生成语义分段？',
+      {
+        type: 'warning',
+        confirmButtonText: '重新分段',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
   analyzing.value = true
   try {
     const response = await retryArticleReviewStage(selectedReview.value.id, 'semantic_segmentation')
     applyReviewResponse(response.data)
-    const refreshed = await getArticleReview(selectedReview.value.id)
+    selectedReview.value.workflow = { ...(selectedReview.value.workflow || {}), blocks: [] }
+    syncWorkflowDraft(selectedReview.value.workflow)
+    const refreshed = await getArticleReviewSummary(selectedReview.value.id)
     applyReviewResponse(refreshed.data)
     ElMessage.success('已按新的语义规则重新生成分段')
     startProgressTracking()
@@ -809,6 +978,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   stopProgressStream()
   stopPolling()
+  detailAbortController.value?.abort()
 })
 </script>
 
@@ -846,7 +1016,7 @@ onBeforeUnmount(() => {
 .stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 25px; }
 .stat-card { padding: 16px; border: 1px solid #eee3d2; border-radius: var(--r-md); background: #fbf6ef; }.stat-card span, .stat-card small { display: block; color: var(--ink-3); font-size: 11px; }.stat-card strong { display: block; margin: 6px 0 2px; font-size: 25px; font-weight: 600; }.stat-highlight { border-color: #e9b2a6; background: #fff5f1; }.stat-highlight strong { color: var(--crimson); }
 .content-section { margin-bottom: 24px; padding: 24px; border: 1px solid #e8ddca; border-radius: var(--r-lg); background: #fffdf9; }.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }.section-heading h3 { margin: 6px 0 5px; font-size: 22px; }.section-heading p { margin: 0; color: var(--ink-3); font-size: 12px; line-height: 1.6; }.section-count { color: var(--clay-deep); font-size: 12px; white-space: nowrap; }
-.section-actions { display: flex; gap: 7px; flex-wrap: wrap; }.stage-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }.stage-item { display: flex; align-items: flex-start; gap: 8px; min-height: 75px; padding: 11px; border: 1px solid #eee3d2; border-radius: var(--r-sm); background: #fbf7f0; }.stage-item > div { min-width: 0; flex: 1; }.stage-item strong, .stage-item small { display: block; }.stage-item strong { font-size: 12px; }.stage-item small { margin-top: 5px; color: var(--ink-4); font-size: 10px; line-height: 1.45; }.stage-dot { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 21px; height: 21px; border-radius: 50%; background: #e8ddca; color: var(--ink-3); font-size: 10px; font-weight: 700; }.stage-succeeded .stage-dot { background: #dcebd6; color: #4f7646; }.stage-running .stage-dot, .stage-awaiting_confirmation .stage-dot { background: #f2dfb7; color: #9a6b1b; }.stage-failed .stage-dot, .stage-invalidated .stage-dot { background: #f2d8d3; color: var(--crimson); }
+.section-actions { display: flex; gap: 7px; flex-wrap: wrap; }.load-more-button { align-self: center; margin-top: 4px; }.stage-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }.stage-item { display: flex; align-items: flex-start; gap: 8px; min-height: 75px; padding: 11px; border: 1px solid #eee3d2; border-radius: var(--r-sm); background: #fbf7f0; }.stage-item > div { min-width: 0; flex: 1; }.stage-item strong, .stage-item small { display: block; }.stage-item strong { font-size: 12px; }.stage-item small { margin-top: 5px; color: var(--ink-4); font-size: 10px; line-height: 1.45; }.stage-dot { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 21px; height: 21px; border-radius: 50%; background: #e8ddca; color: var(--ink-3); font-size: 10px; font-weight: 700; }.stage-succeeded .stage-dot { background: #dcebd6; color: #4f7646; }.stage-running .stage-dot, .stage-awaiting_confirmation .stage-dot { background: #f2dfb7; color: #9a6b1b; }.stage-failed .stage-dot, .stage-invalidated .stage-dot { background: #f2d8d3; color: var(--crimson); }
 .semantic-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.semantic-column { min-width: 0; }.semantic-column-head { display: flex; justify-content: space-between; margin-bottom: 8px; color: var(--clay-deep); font-size: 12px; }.semantic-column-head span { color: var(--ink-4); }.semantic-block { margin-bottom: 8px; padding: 11px 12px; border: 1px solid #eee3d2; border-radius: var(--r-sm); background: #fbf7f0; }.semantic-block-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 7px; }.semantic-block-head span { color: var(--clay-deep); font-size: 11px; font-weight: 700; }.semantic-block-head small { color: var(--ink-4); font-size: 10px; }.semantic-block p { margin: 0; color: var(--ink-2); white-space: pre-wrap; font-size: 12px; line-height: 1.7; }.semantic-block-actions { display: flex; gap: 2px; margin-top: 5px; }.change-reason { margin: 0 0 11px; color: var(--ink-3); font-size: 12px; line-height: 1.6; }.change-reason strong { color: var(--clay-deep); }.change-review-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; color: var(--ink-3); font-size: 11px; }.reorder-list { display: flex; flex-direction: column; gap: 8px; }.reorder-item { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid #ead6a9; border-radius: var(--r-sm); background: #fffaf0; }.reorder-item strong { font-size: 13px; }.reorder-item p { margin: 5px 0 0; color: var(--ink-3); font-size: 11px; }.method-actions { display: flex; align-items: center; flex-direction: column; gap: 5px; }
 .change-list { display: flex; flex-direction: column; gap: 13px; }.change-card { padding: 16px; border: 1px solid #e7dfd2; border-radius: var(--r-md); background: #fcfaf6; }.change-card.impact-high { border-color: #edb8ac; background: #fff8f4; }.change-card.impact-medium { border-color: #ead6a9; }.change-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }.change-label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--ink-3); font-size: 12px; }.change-index { color: var(--clay-deep); font-weight: 700; }.change-ratio { color: var(--ink-4); font-size: 11px; }
 .diff-columns { display: grid; grid-template-columns: minmax(0,1fr) 26px minmax(0,1fr); align-items: stretch; gap: 9px; }.diff-block { min-height: 90px; padding: 12px; border-radius: var(--r-sm); }.diff-block span { display: block; margin-bottom: 7px; font-size: 11px; font-weight: 700; }.diff-block p { margin: 0; white-space: pre-wrap; color: var(--ink-2); font-size: 13px; line-height: 1.75; }.diff-block.before { background: #f8e9e6; }.diff-block.before span { color: #a45247; }.diff-block.after { background: #edf5e9; }.diff-block.after span { color: #4f7646; }.diff-arrow { align-self: center; color: var(--ink-4); text-align: center; }
