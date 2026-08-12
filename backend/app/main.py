@@ -82,6 +82,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def enforce_article_review_request_size(request: Request, call_next):
+    """在 FastAPI 解析 multipart 之前拦截过大的文章复盘请求。
+
+    单文件限制由复盘路由再次校验；这里限制整个 HTTP 请求体，给两份 20MB
+    文件预留 multipart 边界和表单字段开销。分块传输没有 Content-Length 时，
+    路由会再按两份文件的实际字节数校验。
+    """
+    review_path = f"{settings.API_V1_STR.rstrip('/')}/reviews"
+    if request.method == "POST" and request.url.path == review_path:
+        raw_length = request.headers.get("content-length")
+        try:
+            content_length = int(raw_length) if raw_length else None
+        except (TypeError, ValueError):
+            content_length = None
+        if content_length is not None and content_length > settings.ARTICLE_REVIEW_MAX_REQUEST_SIZE:
+            actual_mb = content_length / 1024 / 1024
+            limit_mb = settings.ARTICLE_REVIEW_MAX_REQUEST_SIZE / 1024 / 1024
+            detail = {
+                "code": "review_request_too_large",
+                "scope": "request",
+                "message": (
+                    f"本次请求总大小超限：实际 {actual_mb:.2f}MB，"
+                    f"限制 {limit_mb:.0f}MB（含 multipart 开销）"
+                ),
+                "actual_bytes": content_length,
+                "limit_bytes": settings.ARTICLE_REVIEW_MAX_REQUEST_SIZE,
+            }
+            return JSONResponse(
+                status_code=413,
+                content={"code": 413, "message": detail["message"], "detail": detail},
+            )
+    return await call_next(request)
+
 # 添加可信主机中间件
 app.add_middleware(
     TrustedHostMiddleware,

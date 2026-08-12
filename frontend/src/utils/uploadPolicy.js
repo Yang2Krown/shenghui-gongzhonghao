@@ -18,6 +18,13 @@ export const UPLOAD_LIMITS = {
   reference: 20,  // POST /creation-tools/upload(创作工具 8 页共用)
   style: 20,      // POST /styles/sources/upload
   cover: 10,      // POST /images/upload(封面)
+  articleReview: 20,
+}
+
+export const ARTICLE_REVIEW_UPLOAD_LIMITS = {
+  singleMB: UPLOAD_LIMITS.articleReview,
+  filesTotalMB: 40,
+  requestMB: 45,
 }
 
 const DOC_ACCEPT = DOCUMENT_EXTS.join(',')
@@ -65,6 +72,14 @@ export const UPLOAD_POLICIES = {
     imageOnly: true,
     hint: `PNG / JPG / WebP 图片,不超过 ${UPLOAD_LIMITS.cover}MB`,
   },
+  /** 文章复盘改前/改后两份文档；单文件和两文件合计分别校验。 */
+  articleReview: {
+    accept: DOC_ACCEPT,
+    extensions: [...DOCUMENT_EXTS],
+    maxMB: ARTICLE_REVIEW_UPLOAD_LIMITS.singleMB,
+    allowImage: false,
+    hint: `改前和改后文件各不超过 ${ARTICLE_REVIEW_UPLOAD_LIMITS.singleMB}MB，两份文件合计不超过 ${ARTICLE_REVIEW_UPLOAD_LIMITS.filesTotalMB}MB`,
+  },
 }
 
 /**
@@ -91,7 +106,18 @@ export function validateUploadFile(file, policyKey = 'reference') {
   }
 
   if (file.size > policy.maxMB * 1024 * 1024) {
-    return `文件大小不能超过 ${policy.maxMB}MB`
+    const actualMB = (file.size / 1024 / 1024).toFixed(2)
+    return `单个文件超限：实际 ${actualMB}MB，限制 ${policy.maxMB}MB`
+  }
+  return null
+}
+
+export function validateArticleReviewFiles(beforeFile, afterFile) {
+  const files = [beforeFile, afterFile].filter(Boolean)
+  const totalBytes = files.reduce((sum, file) => sum + Number(file.size || 0), 0)
+  const limitBytes = ARTICLE_REVIEW_UPLOAD_LIMITS.filesTotalMB * 1024 * 1024
+  if (totalBytes > limitBytes) {
+    return `本次请求文件总大小超限：实际 ${(totalBytes / 1024 / 1024).toFixed(2)}MB，限制 ${ARTICLE_REVIEW_UPLOAD_LIMITS.filesTotalMB}MB（不含 multipart 开销）`
   }
   return null
 }

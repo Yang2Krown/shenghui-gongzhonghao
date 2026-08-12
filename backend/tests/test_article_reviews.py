@@ -187,6 +187,57 @@ async def test_progress_stream_emits_terminal_snapshot(review_db):
 
 
 @pytest.mark.asyncio
+async def test_review_list_does_not_lazy_load_comments(review_db):
+    """列表只返回摘要，不应因评论关系未请求而触发 MissingGreenlet。"""
+    employee = _user(1)
+    async with review_db() as db:
+        db.add(employee)
+        review = ArticleReview(
+            title="列表懒加载回归",
+            before_filename="before.txt",
+            after_filename="after.txt",
+            before_text="旧稿",
+            after_text="新稿",
+            change_groups=[],
+            status="processing",
+            created_by=employee.id,
+        )
+        db.add(review)
+        await db.commit()
+
+        result = await reviews_api.list_article_reviews(1, 50, None, None, db, employee)
+
+    item = result["data"]["items"][0]
+    assert item["id"] == review.id
+    assert item["comments"] == []
+    assert item["change_groups"] == []
+
+
+@pytest.mark.asyncio
+async def test_review_upload_reports_single_and_total_size_limits(monkeypatch):
+    monkeypatch.setattr(reviews_api, "MAX_REVIEW_UPLOAD_SIZE", 10)
+    monkeypatch.setattr(reviews_api, "MAX_REVIEW_FILES_SIZE", 15)
+
+    accepted = await reviews_api._read_review_upload(_upload("ok.txt", "1234567890"))
+    assert accepted[0] == "ok.txt"
+
+    with pytest.raises(HTTPException) as single_error:
+        await reviews_api._read_review_upload(_upload("large.txt", "12345678901"))
+    assert single_error.value.status_code == 413
+    assert single_error.value.detail["scope"] == "single_file"
+    assert "实际" in single_error.value.detail["message"]
+
+    with pytest.raises(HTTPException) as total_error:
+        await reviews_api._stage_review_uploads(
+            _upload("before.txt", "1234567890"),
+            _upload("after.txt", "1234567890"),
+        )
+    assert total_error.value.status_code == 413
+    assert total_error.value.detail["scope"] == "files_total"
+    assert "本次请求文件总大小" in total_error.value.detail["message"]
+
+
+@pytest.mark.asyncio
 async def test_comment_update_and_promote_keep_review_trace(review_db, monkeypatch):
     employee = _user(1)
     monkeypatch.setattr(reviews_api, "enqueue_embedding", _fake_embedding)

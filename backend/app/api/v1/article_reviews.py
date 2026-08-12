@@ -41,7 +41,8 @@ from app.tasks.article_review_tasks import analyze_article_review_task, prepare_
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-MAX_REVIEW_UPLOAD_SIZE = 20 * 1024 * 1024
+MAX_REVIEW_UPLOAD_SIZE = settings.ARTICLE_REVIEW_MAX_FILE_SIZE
+MAX_REVIEW_FILES_SIZE = settings.ARTICLE_REVIEW_MAX_FILES_SIZE
 
 
 async def _require_review_access(db: AsyncSession, user: User) -> None:
@@ -81,10 +82,20 @@ def _comment_payload(comment: ArticleReviewComment) -> dict:
     }
 
 
-def _review_payload(review: ArticleReview, *, include_groups: bool = True) -> dict:
+def _review_payload(
+    review: ArticleReview,
+    *,
+    include_groups: bool = True,
+    include_comments: bool = True,
+) -> dict:
     groups = list(review.change_groups or [])
     major = [group for group in groups if group.get("is_major")]
     analysis = review.ai_analysis if isinstance(review.ai_analysis, dict) else None
+    comments = (
+        [_comment_payload(comment) for comment in (review.comments or [])]
+        if include_comments
+        else []
+    )
     return {
         "id": review.id,
         "title": review.title,
@@ -127,7 +138,7 @@ def _review_payload(review: ArticleReview, *, include_groups: bool = True) -> di
         "before_text": review.before_text if include_groups else None,
         "after_text": review.after_text if include_groups else None,
         "ai_analysis": analysis,
-        "comments": [_comment_payload(comment) for comment in (review.comments or [])],
+        "comments": comments,
         "promoted_card_ids": list(review.promoted_card_ids or []),
     }
 
@@ -147,6 +158,23 @@ async def _read_review_upload(file: UploadFile) -> tuple[str, bytes, str]:
     if not file.filename:
         raise HTTPException(status_code=400, detail="上传文件名不能为空")
     data = await file.read()
+    if len(data) > MAX_REVIEW_UPLOAD_SIZE:
+        actual_mb = len(data) / 1024 / 1024
+        limit_mb = MAX_REVIEW_UPLOAD_SIZE / 1024 / 1024
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "code": "review_single_file_too_large",
+                "scope": "single_file",
+                "message": (
+                    f"单个文件超限：{file.filename} 实际 {actual_mb:.2f}MB，"
+                    f"限制 {limit_mb:.0f}MB"
+                ),
+                "filename": file.filename,
+                "actual_bytes": len(data),
+                "limit_bytes": MAX_REVIEW_UPLOAD_SIZE,
+            },
+        )
     try:
         safe = validate_document_upload(
             filename=file.filename,
@@ -166,6 +194,23 @@ async def _stage_review_uploads(
 
     before_filename, before_data, before_ext = await _read_review_upload(before_file)
     after_filename, after_data, after_ext = await _read_review_upload(after_file)
+    files_size = len(before_data) + len(after_data)
+    if files_size > MAX_REVIEW_FILES_SIZE:
+        actual_mb = files_size / 1024 / 1024
+        limit_mb = MAX_REVIEW_FILES_SIZE / 1024 / 1024
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "code": "review_files_too_large",
+                "scope": "files_total",
+                "message": (
+                    f"本次请求文件总大小超限：实际 {actual_mb:.2f}MB，"
+                    f"限制 {limit_mb:.0f}MB（改前和改后文件合计）"
+                ),
+                "actual_bytes": files_size,
+                "limit_bytes": MAX_REVIEW_FILES_SIZE,
+            },
+        )
     stage_dir = Path(settings.UPLOAD_DIR).resolve() / "article_reviews" / f"pending-{uuid.uuid4().hex}"
     before_path = stage_dir / f"before{before_ext}"
     after_path = stage_dir / f"after{after_ext}"
@@ -263,7 +308,7 @@ async def _enqueue_prepare(db: AsyncSession, review: ArticleReview) -> dict:
         }
 
 
-@router.post("", response_model=dict)
+@router.post("", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
 async def create_article_review(
     request: Request,
     before_file: UploadFile = File(...),
@@ -437,7 +482,10 @@ async def list_article_reviews(
         "code": 200,
         "message": "文章复盘列表获取成功",
         "data": {
-            "items": [_review_payload(row, include_groups=False) for row in rows],
+            "items": [
+                _review_payload(row, include_groups=False, include_comments=False)
+                for row in rows
+            ],
             "total": total,
             "page": page,
             "page_size": page_size,

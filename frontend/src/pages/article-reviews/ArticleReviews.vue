@@ -216,7 +216,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Loading, Plus, Search, WarningFilled } from '@element-plus/icons-vue'
-import { validateUploadFile } from '@/utils/uploadPolicy'
+import { validateArticleReviewFiles, validateUploadFile } from '@/utils/uploadPolicy'
 import {
   addArticleReviewComment,
   analyzeArticleReview,
@@ -270,7 +270,7 @@ const impactType = (value) => ({ high: 'danger', medium: 'warning', low: 'info' 
 const changeKindLabel = (value) => ({ replace: '替换', insert: '新增', delete: '删除' }[value] || '修改')
 const progressMessage = computed(() => progressState.value?.action || (selectedReview.value?.status === 'processing' ? '正在准备解析文件…' : '正在分析改动背后的原因和效果…'))
 
-const loadReviews = async () => {
+const loadReviews = async ({ selectFirst = true, silent = false } = {}) => {
   listLoading.value = true
   try {
     const response = await listArticleReviews({ page: 1, page_size: 50, keyword: filters.keyword.trim() || undefined, status: filters.status || undefined })
@@ -284,9 +284,9 @@ const loadReviews = async () => {
       stopProgressStream()
       stopPolling()
     }
-    if (!selectedReview.value && reviews.value.length) await selectReview(reviews.value[0].id)
+    if (selectFirst && !selectedReview.value && reviews.value.length) await selectReview(reviews.value[0].id)
   } catch {
-    ElMessage.error('加载文章复盘失败')
+    if (!silent) ElMessage.error('加载文章复盘失败')
   } finally {
     listLoading.value = false
   }
@@ -384,9 +384,17 @@ const startProgressTracking = () => {
 
 const pickFile = (side, event) => {
   const file = event.target.files?.[0] || null
-  const error = validateUploadFile(file, 'document')
+  const error = validateUploadFile(file, 'articleReview')
   if (error) {
     ElMessage.error(error)
+    event.target.value = ''
+    return
+  }
+  const nextBefore = side === 'before' ? file : beforeFile.value
+  const nextAfter = side === 'after' ? file : afterFile.value
+  const pairError = validateArticleReviewFiles(nextBefore, nextAfter)
+  if (pairError) {
+    ElMessage.error(pairError)
     event.target.value = ''
     return
   }
@@ -411,9 +419,11 @@ const submitCreate = async () => {
     ElMessage.success('复盘已创建，正在分析改动')
     createVisible.value = false
     resetCreateForm()
-    selectedReview.value = response.data?.review || null
-    await loadReviews()
-    if (selectedReview.value) startProgressTracking()
+    const createdReview = response.data?.review || null
+    // POST 已在后端提交记录并投递任务；先进入这个已确认存在的详情，
+    // 再静默刷新列表，避免列表请求失败覆盖刚创建的详情状态。
+    if (createdReview?.id) await selectReview(createdReview.id)
+    await loadReviews({ selectFirst: false, silent: true })
   } catch {
     ElMessage.error('创建文章复盘失败，请检查文件后重试')
   } finally {

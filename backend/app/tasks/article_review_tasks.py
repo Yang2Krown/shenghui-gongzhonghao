@@ -49,7 +49,7 @@ async def _parse_saved_file(path: str, filename: str) -> tuple[str, int, bool]:
         safe = validate_document_upload(
             filename=filename,
             data=data,
-            max_size=20 * 1024 * 1024,
+            max_size=settings.ARTICLE_REVIEW_MAX_FILE_SIZE,
         )
     except UploadSecurityError as exc:
         raise ValueError(str(exc)) from exc

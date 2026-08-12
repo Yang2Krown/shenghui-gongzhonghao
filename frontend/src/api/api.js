@@ -142,7 +142,7 @@ api.interceptors.response.use(
     const message = (typeof detail === 'string' ? detail : detail?.message) || error.message || '请求失败'
 
     if (status === 413) {
-      ElMessage.error('文件太大，请压缩后重试（单个文件不超过 20MB）')
+      ElMessage.error(message || '文件太大，请检查单文件和本次请求总大小限制')
     } else if (status === 402) {
       // 积分不足 - 触发全局事件显示充值弹窗
       const creditInfo = typeof detail === 'object' ? detail : {}
