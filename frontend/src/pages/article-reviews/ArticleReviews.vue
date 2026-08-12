@@ -74,20 +74,25 @@
             </div>
           </div>
           <div class="detail-actions">
-            <el-button v-if="selectedReview.status === 'failed' || selectedReview.status === 'reviewing'" :loading="analyzing" @click="retryAnalysis">
-              {{ selectedReview.status === 'failed' ? '重试 AI 分析' : '重新分析' }}
+            <el-button v-if="retryableStage" :loading="analyzing" @click="retryStage">
+              {{ retryableStageLabel }}
             </el-button>
             <el-button v-if="selectedReview.ai_analysis" type="primary" plain @click="openAnalysisEditor">人工修订总结</el-button>
           </div>
         </header>
 
-        <div v-if="selectedReview.status === 'processing'" class="state-banner running">
+        <div v-if="waitingForSemanticConfirmation" class="state-banner waiting">
+          <el-icon><WarningFilled /></el-icon>
+          <div><strong>语义分段已生成，等待团队确认</strong><span>可以先编辑、合并或拆分语义块；确认后才会计算重大修改并启动 AI 复盘。</span></div>
+          <el-button type="primary" size="small" :loading="confirmingBlocks" @click="confirmSemanticBlocks">确认分段并继续</el-button>
+        </div>
+        <div v-else-if="selectedReview.status === 'processing'" class="state-banner running">
           <el-icon class="is-loading"><Loading /></el-icon>
-          <div><strong>{{ progressMessage }}</strong><span>文件正在后台解析和比对，页面会实时更新，不需要一直等待上传请求。</span></div>
+          <div><strong>{{ progressMessage }}</strong><span>当前阶段：{{ stageLabel(progressState?.stage || currentStage) }} · 文件正在后台解析和比对，页面会实时更新，不需要一直等待上传请求。</span></div>
         </div>
         <div v-else-if="selectedReview.status === 'analyzing'" class="state-banner running">
           <el-icon class="is-loading"><Loading /></el-icon>
-          <div><strong>{{ progressMessage }}</strong><span>文本改动已经识别完成，AI 分析在后台运行，页面会实时更新。</span></div>
+          <div><strong>{{ progressMessage }}</strong><span>当前阶段：{{ stageLabel(progressState?.stage || currentStage) }} · 文本改动已经识别完成，AI 分析在后台运行，页面会实时更新。</span></div>
         </div>
         <div v-else-if="selectedReview.status === 'failed'" class="state-banner failed">
           <el-icon><WarningFilled /></el-icon>
@@ -101,6 +106,44 @@
           <div class="stat-card"><span>改后字数</span><strong>{{ selectedReview.after?.char_count || 0 }}</strong><small>{{ selectedReview.after?.truncated ? '已截断' : '完整解析' }}</small></div>
         </section>
 
+        <section v-if="workflowStages.length" class="content-section stage-section">
+          <div class="section-heading">
+            <div><span class="eyebrow">WORKFLOW STATUS</span><h3>复盘阶段</h3><p>每个阶段都保存到本次运行记录，刷新或断线后可以从当前阶段继续。</p></div>
+            <span class="section-count">{{ currentStageLabel }}</span>
+          </div>
+          <div class="stage-list">
+            <div v-for="stage in workflowStages" :key="stage.stage_key" class="stage-item" :class="`stage-${stage.status}`">
+              <span class="stage-dot">{{ stage.status === 'succeeded' ? '✓' : stage.stage_order }}</span>
+              <div><strong>{{ stage.label }}</strong><small>{{ stageMessage(stage) }}</small></div>
+              <el-tag size="small" :type="stageType(stage.status)">{{ stageStatusLabel(stage.status) }}</el-tag>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="semanticBlocks.length" class="content-section semantic-section">
+          <div class="section-heading">
+            <div><span class="eyebrow">00 · CONFIRM THE MEANING</span><h3>语义分段确认</h3><p>短句换行会尽量合并为同一语义块；你可以在对齐前人工修订边界。</p></div>
+            <div class="section-actions">
+              <el-button size="small" plain @click="semanticEditMode = !semanticEditMode">{{ semanticEditMode ? '完成编辑' : '编辑分段' }}</el-button>
+              <el-button size="small" type="primary" :loading="confirmingBlocks" @click="confirmSemanticBlocks">确认并重新对齐</el-button>
+            </div>
+          </div>
+          <div class="semantic-columns">
+            <div v-for="side in ['before', 'after']" :key="side" class="semantic-column">
+              <div class="semantic-column-head"><strong>{{ side === 'before' ? '改前语义块' : '改后语义块' }}</strong><span>{{ semanticDraft[side].length }} 块</span></div>
+              <div v-for="(block, index) in semanticDraft[side]" :key="block.stable_id || `${side}-${index}`" class="semantic-block">
+                <div class="semantic-block-head"><span>{{ String(index + 1).padStart(2, '0') }}</span><small>{{ block.source_line_start ? `原文第 ${block.source_line_start}-${block.source_line_end || block.source_line_start} 行` : '人工语义块' }}</small></div>
+                <el-input v-if="semanticEditMode" v-model="block.text" type="textarea" :autosize="{ minRows: 2, maxRows: 8 }" />
+                <p v-else>{{ block.text }}</p>
+                <div v-if="semanticEditMode" class="semantic-block-actions">
+                  <el-button text size="small" :disabled="index === 0" @click="mergeSemanticBlock(side, index)">合并上一块</el-button>
+                  <el-button text size="small" @click="splitSemanticBlock(side, index)">拆分</el-button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="content-section change-section">
           <div class="section-heading">
             <div><span class="eyebrow">01 · SHOW THE CHANGE</span><h3>先看真正改大的地方</h3><p>高影响修改会置顶，人工评论直接挂在对应改动块下。</p></div>
@@ -112,13 +155,23 @@
           <div v-else-if="orderedGroups.length" class="change-list">
             <article v-for="group in orderedGroups" :key="group.id" class="change-card" :class="`impact-${group.impact}`">
               <div class="change-card-head">
-                <div class="change-label"><span class="change-index">{{ group.id.replace('change-', '') }}</span><el-tag size="small" :type="impactType(group.impact)">{{ impactLabel(group.impact) }}</el-tag><span>{{ changeKindLabel(group.kind) }}</span></div>
+                <div class="change-label"><span class="change-index">{{ group.id.replace('change-', '') }}</span><el-tag size="small" :type="impactType(group.impact)">{{ impactLabel(group.impact) }}</el-tag><span>{{ changeKindLabel(group.kind || group.change_type) }}</span><el-tag v-if="group.human_label" size="small" effect="plain">{{ humanLabel(group.human_label) }}</el-tag></div>
                 <span class="change-ratio">变化度 {{ Math.round((group.change_ratio || 0) * 100) }}%</span>
               </div>
+              <p class="change-reason"><strong>判定依据：</strong>{{ group.significance_reason || '算法识别到语义内容变化' }}</p>
               <div class="diff-columns">
                 <div class="diff-block before"><span>改前</span><p>{{ group.before || '（删除）' }}</p></div>
                 <div class="diff-arrow">→</div>
                 <div class="diff-block after"><span>改后</span><p>{{ group.after || '（新增）' }}</p></div>
+              </div>
+              <div class="change-review-actions">
+                <span>这处判断：</span>
+                <el-button-group>
+                  <el-button size="small" :type="group.human_label === 'important' ? 'primary' : ''" @click="reviewChange(group, 'important')">重要</el-button>
+                  <el-button size="small" :type="group.human_label === 'unimportant' ? 'info' : ''" @click="reviewChange(group, 'unimportant')">不重要</el-button>
+                  <el-button size="small" :type="group.human_label === 'false_positive' ? 'warning' : ''" @click="reviewChange(group, 'false_positive')">误判</el-button>
+                  <el-button size="small" :type="group.human_label === 'needs_review' ? 'danger' : ''" @click="reviewChange(group, 'needs_review')">待确认</el-button>
+                </el-button-group>
               </div>
               <div class="comment-area">
                 <div v-if="commentsFor(group.id).length" class="comment-list">
@@ -138,10 +191,15 @@
           <el-empty v-else :image-size="58" description="改前稿和改后稿没有检测到文本变化" />
         </section>
 
+        <section v-if="reorderEvents.length" class="content-section reorder-section">
+          <div class="section-heading"><div><span class="eyebrow">01B · ORDER MATTERS</span><h3>顺序变化</h3><p>内容本身基本保留，但位置变化可能影响读者理解路径或论证节奏。</p></div><span class="section-count">{{ reorderEvents.length }} 处</span></div>
+          <div class="reorder-list"><article v-for="event in reorderEvents" :key="event.id" class="reorder-item"><el-tag size="small" effect="plain">重排</el-tag><div><strong>{{ event.summary }}</strong><p>改前第 {{ event.before_block_ids?.join('、') || '—' }} 块 → 改后第 {{ event.after_block_ids?.join('、') || '—' }} 块</p></div></article></div>
+        </section>
+
         <section class="content-section analysis-section">
           <div class="section-heading">
             <div><span class="eyebrow">02 · UNDERSTAND WHY</span><h3>AI 差异分析</h3><p>AI 只对真实改动做解释；不确定的原因会保留为“需要人工确认”。</p></div>
-            <el-button v-if="selectedReview.ai_analysis?.methodology_candidates?.length" type="primary" @click="openPromote()">沉淀为方法论</el-button>
+            <el-button v-if="methodologyCandidates.length && hasConfirmedMethodology" type="primary" @click="openPromote()">沉淀为方法论</el-button>
           </div>
           <div v-if="selectedReview.ai_analysis?.summary" class="ai-summary">{{ selectedReview.ai_analysis.summary }}</div>
           <el-empty v-else-if="selectedReview.status === 'reviewing'" :image-size="50" description="AI 没有生成摘要，可以人工修订或直接依据改动沉淀" />
@@ -153,13 +211,13 @@
           </div>
         </section>
 
-        <section v-if="selectedReview.ai_analysis?.methodology_candidates?.length" class="content-section methodology-section">
+        <section v-if="methodologyCandidates.length" class="content-section methodology-section">
           <div class="section-heading"><div><span class="eyebrow">03 · KEEP THE LESSON</span><h3>候选方法论</h3><p>先由 AI 提炼，再由团队评论和修订，确认后才进入经验库。</p></div></div>
           <div class="methodology-list">
-            <article v-for="(item, index) in selectedReview.ai_analysis.methodology_candidates" :key="`${item.title}-${index}`" class="methodology-card">
+            <article v-for="(item, index) in methodologyCandidates" :key="`${item.title}-${index}`" class="methodology-card">
               <div class="method-number">{{ String(index + 1).padStart(2, '0') }}</div>
               <div class="method-body"><h4>{{ item.title }}</h4><p class="rule">{{ item.rule }}</p><div class="method-fields"><div v-if="item.rationale"><span>为什么</span><p>{{ item.rationale }}</p></div><div v-if="item.example"><span>本次例子</span><p>{{ item.example }}</p></div></div><small v-if="item.evidence_group_ids?.length">证据：{{ item.evidence_group_ids.join('、') }}</small></div>
-              <el-button type="primary" plain size="small" @click="openPromote(item)">沉淀</el-button>
+              <div class="method-actions"><el-tag v-if="item.status" size="small" effect="plain">{{ candidateStatusLabel(item.status) }}</el-tag><el-button v-if="item.status !== 'confirmed' && item.status !== 'promoted'" type="primary" plain size="small" @click="confirmMethodology(item, 'confirmed')">确认</el-button><el-button v-if="item.status !== 'rejected' && item.status !== 'promoted'" text type="danger" size="small" @click="confirmMethodology(item, 'rejected')">驳回</el-button><el-button v-if="!item.status || ['confirmed', 'promoted'].includes(item.status)" type="primary" plain size="small" @click="openPromote(item)">沉淀</el-button></div>
             </article>
           </div>
         </section>
@@ -185,7 +243,7 @@
           <label class="upload-box"><span>改后文章</span><strong>{{ afterFile?.name || '选择 PDF / Word / TXT / MD' }}</strong><input type="file" accept=".pdf,.docx,.txt,.md,.markdown" @change="pickFile('after', $event)" /></label>
         </div>
       </el-form>
-      <p class="dialog-tip">支持文字版 PDF、DOCX、TXT、MD，单个文件不超过 20MB。上传后会先识别改动块；扫描件或加密文件需要先转成可复制文本。</p>
+      <p class="dialog-tip">支持文字版 PDF、DOCX、TXT、MD，单个文件不超过 20MB；改前和改后两份文件合计不超过 40MB（请求含 multipart 开销预留 45MB）。上传后会先解析并生成语义分段；扫描件或加密文件需要先转成可复制文本。</p>
       <template #footer><el-button @click="createVisible = false">取消</el-button><el-button type="primary" :loading="creating" @click="submitCreate">创建并分析</el-button></template>
     </el-dialog>
 
@@ -220,11 +278,15 @@ import { validateArticleReviewFiles, validateUploadFile } from '@/utils/uploadPo
 import {
   addArticleReviewComment,
   analyzeArticleReview,
+  confirmArticleReviewMethodology,
   createArticleReview,
   getArticleReview,
   listArticleReviews,
   promoteArticleReview,
+  retryArticleReviewStage,
+  reviewArticleReviewChange,
   streamArticleReview,
+  updateArticleReviewSemanticBlocks,
   updateArticleReviewAnalysis,
 } from '@/api/articleReviews'
 
@@ -235,6 +297,8 @@ const listLoading = ref(false)
 const detailLoading = ref(false)
 const creating = ref(false)
 const analyzing = ref(false)
+const confirmingBlocks = ref(false)
+const semanticEditMode = ref(false)
 const commenting = reactive({})
 const createVisible = ref(false)
 const analysisEditVisible = ref(false)
@@ -245,7 +309,9 @@ const beforeFile = ref(null)
 const afterFile = ref(null)
 const pollTimer = ref(null)
 const streamAbortController = ref(null)
+const progressReconnectTimer = ref(null)
 const progressState = ref(null)
+const semanticDraft = reactive({ before: [], after: [] })
 const filters = reactive({ keyword: '', status: '' })
 const createForm = reactive({ title: '' })
 const commentDrafts = reactive({})
@@ -261,14 +327,58 @@ const statusFilters = [
 ]
 
 const orderedGroups = computed(() => [...(selectedReview.value?.change_groups || [])].sort((left, right) => Number(right.is_major) - Number(left.is_major)))
+const workflow = computed(() => selectedReview.value?.workflow || {})
+const workflowStages = computed(() => workflow.value.run?.stages || [])
+const semanticBlocks = computed(() => workflow.value.blocks || [])
+const reorderEvents = computed(() => workflow.value.reorder_events || [])
+const methodologyCandidates = computed(() => {
+  const persisted = workflow.value.methodology_candidates || []
+  return persisted.length ? persisted : (selectedReview.value?.ai_analysis?.methodology_candidates || [])
+})
+const hasConfirmedMethodology = computed(() => {
+  const persisted = workflow.value.methodology_candidates || []
+  return !persisted.length || persisted.some((item) => ['confirmed', 'promoted'].includes(item.status))
+})
+const currentStage = computed(() => workflow.value.run?.current_stage || null)
+const currentStageLabel = computed(() => workflowStages.value.find((item) => item.stage_key === currentStage.value)?.label || '—')
+const waitingForSemanticConfirmation = computed(() => workflowStages.value.some((item) => item.stage_key === 'semantic_segmentation' && item.status === 'awaiting_confirmation'))
+const retryableStage = computed(() => {
+  const failed = workflowStages.value.find((item) => item.status === 'failed' || item.status === 'invalidated')
+  if (failed) return failed.stage_key
+  if (selectedReview.value?.status === 'reviewing') return 'ai_review'
+  return null
+})
+const retryableStageLabel = computed(() => retryableStage.value === 'ai_review' ? '重新分析' : retryableStage.value ? `重试${stageLabel(retryableStage.value)}` : '')
 
 const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16) : '—'
 const statusLabel = (value) => ({ processing: '解析中', analyzing: '分析中', reviewing: '待复盘', failed: '分析失败' }[value] || value || '未知')
 const statusType = (value) => ({ processing: 'warning', analyzing: 'warning', reviewing: 'success', failed: 'danger' }[value] || 'info')
 const impactLabel = (value) => ({ high: '重点修改', medium: '中等修改', low: '轻微修改' }[value] || '修改')
 const impactType = (value) => ({ high: 'danger', medium: 'warning', low: 'info' }[value] || 'info')
-const changeKindLabel = (value) => ({ replace: '替换', insert: '新增', delete: '删除' }[value] || '修改')
+const changeKindLabel = (value) => ({ replace: '替换', insert: '新增', delete: '删除', rewrite: '整段重写', structural_change: '结构变化', addition: '新增', deletion: '删除', reorder: '顺序调整', minor_edit: '轻微措辞', uncertain: '待确认' }[value] || '修改')
+const humanLabel = (value) => ({ important: '人工确认重要', unimportant: '人工确认不重要', false_positive: '人工标记误判', needs_review: '人工标记待确认' }[value] || value)
+const stageLabel = (value) => ({ parse: '解析', semantic_segmentation: '分段', semantic_alignment: '对齐', ai_review: 'AI 分析', methodology: '方法论' }[value] || value)
+const stageStatusLabel = (value) => ({ queued: '排队中', running: '执行中', succeeded: '已完成', awaiting_confirmation: '待确认', blocked: '等待上游', invalidated: '需重算', failed: '失败', waiting: '等待' }[value] || value || '未开始')
+const stageType = (value) => ({ succeeded: 'success', failed: 'danger', running: 'warning', awaiting_confirmation: 'warning', invalidated: 'danger', blocked: 'info' }[value] || 'info')
+const stageMessage = (stage) => stage.message || (stage.status === 'succeeded' ? '已完成' : stage.status === 'blocked' ? '等待上游阶段' : '尚未开始')
+const candidateStatusLabel = (value) => ({ candidate: '待确认', confirmed: '已确认', rejected: '已驳回', promoted: '已沉淀' }[value] || value)
 const progressMessage = computed(() => progressState.value?.action || (selectedReview.value?.status === 'processing' ? '正在准备解析文件…' : '正在分析改动背后的原因和效果…'))
+
+const syncWorkflowDraft = (value) => {
+  const blocks = value || {}
+  semanticDraft.before = JSON.parse(JSON.stringify((blocks.blocks || []).filter((item) => item.side === 'before')))
+  semanticDraft.after = JSON.parse(JSON.stringify((blocks.blocks || []).filter((item) => item.side === 'after')))
+}
+
+const applyReviewResponse = (value) => {
+  const previous = selectedReview.value
+  const review = value?.review || value
+  if (!review) return
+  if (value?.run) review.workflow = { run: value.run, blocks: value.blocks || [], changes: value.changes || [], reorder_events: value.reorder_events || [], methodology_candidates: value.methodology_candidates || [], experience_sources: value.experience_sources || [] }
+  if (!review.workflow && previous?.id === review.id && previous.workflow) review.workflow = previous.workflow
+  selectedReview.value = review
+  if (review.workflow) syncWorkflowDraft(review.workflow)
+}
 
 const loadReviews = async ({ selectFirst = true, silent = false } = {}) => {
   listLoading.value = true
@@ -299,7 +409,7 @@ const selectReview = async (id) => {
   detailLoading.value = true
   try {
     const response = await getArticleReview(id)
-    selectedReview.value = response.data
+    applyReviewResponse(response.data)
     startProgressTracking()
   } catch {
     ElMessage.error('加载复盘详情失败')
@@ -320,6 +430,10 @@ const stopProgressStream = () => {
     streamAbortController.value.abort()
     streamAbortController.value = null
   }
+  if (progressReconnectTimer.value) {
+    clearTimeout(progressReconnectTimer.value)
+    progressReconnectTimer.value = null
+  }
 }
 
 const clearSelectedReview = () => {
@@ -331,12 +445,12 @@ const clearSelectedReview = () => {
 
 const startPolling = () => {
   stopPolling()
-  if (!['processing', 'analyzing'].includes(selectedReview.value?.status)) return
+  if (!['processing', 'analyzing'].includes(selectedReview.value?.status) || waitingForSemanticConfirmation.value) return
   pollTimer.value = setInterval(async () => {
     if (!selectedReview.value) return
     try {
       const response = await getArticleReview(selectedReview.value.id)
-      selectedReview.value = response.data
+      applyReviewResponse(response.data)
       if (!['processing', 'analyzing'].includes(selectedReview.value.status)) {
         progressState.value = null
         stopPolling()
@@ -361,25 +475,43 @@ const startProgressTracking = () => {
     return
   }
 
-  const controller = new AbortController()
-  streamAbortController.value = controller
-  streamArticleReview(reviewId, (payload) => {
-    if (selectedReview.value?.id === reviewId && payload?.progress) {
-      progressState.value = payload.progress
-    }
-  }, { signal: controller.signal }).then(async () => {
-    if (controller.signal.aborted || selectedReview.value?.id !== reviewId) return
-    const response = await getArticleReview(reviewId)
+  let lastEventId = 0
+  let reconnectCount = 0
+  const connect = async () => {
     if (selectedReview.value?.id !== reviewId) return
-    selectedReview.value = response.data
-    progressState.value = null
-    if (['processing', 'analyzing'].includes(selectedReview.value.status)) startPolling()
-    else await loadReviews()
-  }).catch(() => {
-    if (!controller.signal.aborted && selectedReview.value?.id === reviewId) startPolling()
-  }).finally(() => {
-    if (streamAbortController.value === controller) streamAbortController.value = null
-  })
+    const controller = new AbortController()
+    streamAbortController.value = controller
+    try {
+      const result = await streamArticleReview(reviewId, (payload, eventId) => {
+        lastEventId = Number(eventId || lastEventId) || lastEventId
+        if (selectedReview.value?.id === reviewId && payload?.progress) {
+          progressState.value = payload.progress
+        }
+      }, { signal: controller.signal, lastEventId })
+      lastEventId = Number(result?.lastEventId || lastEventId) || lastEventId
+      if (controller.signal.aborted || selectedReview.value?.id !== reviewId) return
+      const response = await getArticleReview(reviewId)
+      if (selectedReview.value?.id !== reviewId) return
+      applyReviewResponse(response.data)
+      progressState.value = null
+      if (['processing', 'analyzing'].includes(selectedReview.value.status) && !waitingForSemanticConfirmation.value) startPolling()
+      else if (!waitingForSemanticConfirmation.value) await loadReviews()
+    } catch {
+      if (controller.signal.aborted || selectedReview.value?.id !== reviewId) return
+      if (reconnectCount < 3) {
+        reconnectCount += 1
+        progressReconnectTimer.value = setTimeout(() => {
+          progressReconnectTimer.value = null
+          connect()
+        }, Math.min(4_000, 500 * (2 ** (reconnectCount - 1))))
+      } else {
+        startPolling()
+      }
+    } finally {
+      if (streamAbortController.value === controller) streamAbortController.value = null
+    }
+  }
+  connect()
 }
 
 const pickFile = (side, event) => {
@@ -431,14 +563,107 @@ const submitCreate = async () => {
   }
 }
 
-const commentsFor = (groupId) => (selectedReview.value?.comments || []).filter((comment) => comment.change_group_id === groupId)
+const commentsFor = (groupId) => {
+  const change = (workflow.value.changes || []).find((item) => item.stable_id === groupId || item.id === groupId)
+  return (selectedReview.value?.comments || []).filter((comment) => (
+    comment.change_group_id === groupId || (change && comment.change_id === change.id)
+  ))
+}
+
+const mergeSemanticBlock = (side, index) => {
+  if (index <= 0) return
+  const items = semanticDraft[side]
+  items[index - 1].text = `${items[index - 1].text}\n${items[index].text}`.trim()
+  items[index - 1].end_offset = items[index].end_offset || items[index - 1].end_offset
+  items.splice(index, 1)
+}
+
+const splitSemanticBlock = (side, index) => {
+  const items = semanticDraft[side]
+  const current = items[index]
+  const parts = String(current.text || '').split(/(?<=[。！？!?；;])\s*|\n+/).map((item) => item.trim()).filter(Boolean)
+  if (parts.length < 2) {
+    ElMessage.info('这块内容暂时没有明确的句子边界')
+    return
+  }
+  items.splice(index, 1, ...parts.map((text, offset) => ({ ...current, stable_id: `${current.stable_id || side}-${index + offset + 1}`, text, user_edited: true })))
+}
+
+const confirmSemanticBlocks = async () => {
+  if (!selectedReview.value || !semanticDraft.before.length || !semanticDraft.after.length) return
+  confirmingBlocks.value = true
+  try {
+    const blocks = [
+      ...semanticDraft.before.map((item, index) => ({ ...item, side: 'before', ordinal: index + 1 })),
+      ...semanticDraft.after.map((item, index) => ({ ...item, side: 'after', ordinal: index + 1 })),
+    ]
+    const response = await updateArticleReviewSemanticBlocks(selectedReview.value.id, { blocks, lock: true })
+    applyReviewResponse(response.data)
+    semanticEditMode.value = false
+    ElMessage.success('语义块已确认，正在计算语义级差异')
+    startProgressTracking()
+  } catch {
+    ElMessage.error('语义块确认失败，请稍后重试')
+  } finally {
+    confirmingBlocks.value = false
+  }
+}
+
+const reviewChange = async (group, label) => {
+  const change = (workflow.value.changes || []).find((item) => item.stable_id === group.id || item.id === group.id)
+  if (!change) {
+    ElMessage.warning('当前改动还没有保存为可确认的语义变化')
+    return
+  }
+  try {
+    const response = await reviewArticleReviewChange(selectedReview.value.id, change.id, { human_label: label })
+    applyReviewResponse(response.data)
+    const persistedChange = (workflow.value.changes || []).find((item) => item.id === change.id)
+    if (persistedChange) persistedChange.human_label = label
+    ElMessage.success('人工判断已保存')
+  } catch {
+    ElMessage.error('人工判断保存失败')
+  }
+}
+
+const retryStage = async () => {
+  if (!selectedReview.value || !retryableStage.value) return
+  analyzing.value = true
+  try {
+    const response = await retryArticleReviewStage(selectedReview.value.id, retryableStage.value)
+    applyReviewResponse(response.data)
+    const refreshed = await getArticleReview(selectedReview.value.id)
+    applyReviewResponse(refreshed.data)
+    ElMessage.success('阶段任务已重新提交')
+    startProgressTracking()
+  } catch {
+    ElMessage.error('阶段任务提交失败')
+  } finally {
+    analyzing.value = false
+  }
+}
+
+const confirmMethodology = async (candidate, status) => {
+  try {
+    const response = await confirmArticleReviewMethodology(selectedReview.value.id, candidate.id, { status })
+    applyReviewResponse(response.data)
+    ElMessage.success(status === 'confirmed' ? '方法论候选已确认' : '方法论候选已驳回')
+  } catch {
+    ElMessage.error('方法论确认失败')
+  }
+}
 
 const addComment = async (group) => {
   const body = String(commentDrafts[group.id] || '').trim()
   if (!body || !selectedReview.value) return
   commenting[group.id] = true
   try {
-    const response = await addArticleReviewComment(selectedReview.value.id, { change_group_id: group.id, body })
+    const change = (workflow.value.changes || []).find((item) => item.stable_id === group.id || item.id === group.id)
+    const response = await addArticleReviewComment(selectedReview.value.id, {
+      change_group_id: group.id,
+      change_id: change?.id,
+      body,
+    })
     selectedReview.value.comments = [...(selectedReview.value.comments || []), response.data.comment]
     commentDrafts[group.id] = ''
     ElMessage.success('评论已保存')
@@ -454,7 +679,7 @@ const retryAnalysis = async () => {
   analyzing.value = true
   try {
     const response = await analyzeArticleReview(selectedReview.value.id)
-    selectedReview.value = response.data.review
+    applyReviewResponse(response.data)
     ElMessage.success('AI 分析任务已提交')
     startProgressTracking()
   } catch {
@@ -479,7 +704,7 @@ const saveAnalysis = async () => {
       summary: analysisForm.summary.trim() || null,
       methodology_candidates: analysisForm.methodology_candidates.filter((item) => String(item.rule || '').trim()).map((item) => ({ ...item, title: String(item.title || '').trim(), rule: String(item.rule || '').trim() })),
     })
-    selectedReview.value = response.data.review
+    applyReviewResponse(response.data)
     analysisEditVisible.value = false
     ElMessage.success('人工修订已保存')
   } catch {
@@ -510,7 +735,7 @@ const submitPromote = async () => {
       content: promoteForm.content.trim() || null,
       change_group_ids: promoteForm.groupIds,
     })
-    selectedReview.value.promoted_card_ids = [...(selectedReview.value.promoted_card_ids || []), response.data.card.id]
+    selectedReview.value.promoted_card_ids = [...new Set([...(selectedReview.value.promoted_card_ids || []), response.data.card.id])]
     promoteVisible.value = false
     ElMessage.success('已沉淀到经验库')
   } catch {
@@ -561,10 +786,12 @@ onBeforeUnmount(() => {
 .detail-actions { display: flex; flex: 0 0 auto; gap: 8px; }
 .state-banner { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 18px; padding: 13px 15px; border-radius: var(--r-md); }
 .state-banner strong, .state-banner span { display: block; }.state-banner strong { margin-bottom: 3px; font-size: 13px; }.state-banner span { color: var(--ink-3); font-size: 12px; line-height: 1.6; }
-.state-banner.running { background: var(--clay-tint); color: var(--clay-deep); }.state-banner.failed { background: #f8eceb; color: var(--crimson); }
+.state-banner.running { background: var(--clay-tint); color: var(--clay-deep); }.state-banner.waiting { align-items: center; background: #f5f1e7; color: var(--ink-2); }.state-banner.waiting > div { flex: 1; }.state-banner.failed { background: #f8eceb; color: var(--crimson); }
 .stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 25px; }
 .stat-card { padding: 16px; border: 1px solid #eee3d2; border-radius: var(--r-md); background: #fbf6ef; }.stat-card span, .stat-card small { display: block; color: var(--ink-3); font-size: 11px; }.stat-card strong { display: block; margin: 6px 0 2px; font-size: 25px; font-weight: 600; }.stat-highlight { border-color: #e9b2a6; background: #fff5f1; }.stat-highlight strong { color: var(--crimson); }
 .content-section { margin-bottom: 24px; padding: 24px; border: 1px solid #e8ddca; border-radius: var(--r-lg); background: #fffdf9; }.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }.section-heading h3 { margin: 6px 0 5px; font-size: 22px; }.section-heading p { margin: 0; color: var(--ink-3); font-size: 12px; line-height: 1.6; }.section-count { color: var(--clay-deep); font-size: 12px; white-space: nowrap; }
+.section-actions { display: flex; gap: 7px; flex-wrap: wrap; }.stage-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }.stage-item { display: flex; align-items: flex-start; gap: 8px; min-height: 75px; padding: 11px; border: 1px solid #eee3d2; border-radius: var(--r-sm); background: #fbf7f0; }.stage-item > div { min-width: 0; flex: 1; }.stage-item strong, .stage-item small { display: block; }.stage-item strong { font-size: 12px; }.stage-item small { margin-top: 5px; color: var(--ink-4); font-size: 10px; line-height: 1.45; }.stage-dot { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 21px; height: 21px; border-radius: 50%; background: #e8ddca; color: var(--ink-3); font-size: 10px; font-weight: 700; }.stage-succeeded .stage-dot { background: #dcebd6; color: #4f7646; }.stage-running .stage-dot, .stage-awaiting_confirmation .stage-dot { background: #f2dfb7; color: #9a6b1b; }.stage-failed .stage-dot, .stage-invalidated .stage-dot { background: #f2d8d3; color: var(--crimson); }
+.semantic-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.semantic-column { min-width: 0; }.semantic-column-head { display: flex; justify-content: space-between; margin-bottom: 8px; color: var(--clay-deep); font-size: 12px; }.semantic-column-head span { color: var(--ink-4); }.semantic-block { margin-bottom: 8px; padding: 11px 12px; border: 1px solid #eee3d2; border-radius: var(--r-sm); background: #fbf7f0; }.semantic-block-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 7px; }.semantic-block-head span { color: var(--clay-deep); font-size: 11px; font-weight: 700; }.semantic-block-head small { color: var(--ink-4); font-size: 10px; }.semantic-block p { margin: 0; color: var(--ink-2); white-space: pre-wrap; font-size: 12px; line-height: 1.7; }.semantic-block-actions { display: flex; gap: 2px; margin-top: 5px; }.change-reason { margin: 0 0 11px; color: var(--ink-3); font-size: 12px; line-height: 1.6; }.change-reason strong { color: var(--clay-deep); }.change-review-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; color: var(--ink-3); font-size: 11px; }.reorder-list { display: flex; flex-direction: column; gap: 8px; }.reorder-item { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid #ead6a9; border-radius: var(--r-sm); background: #fffaf0; }.reorder-item strong { font-size: 13px; }.reorder-item p { margin: 5px 0 0; color: var(--ink-3); font-size: 11px; }.method-actions { display: flex; align-items: center; flex-direction: column; gap: 5px; }
 .change-list { display: flex; flex-direction: column; gap: 13px; }.change-card { padding: 16px; border: 1px solid #e7dfd2; border-radius: var(--r-md); background: #fcfaf6; }.change-card.impact-high { border-color: #edb8ac; background: #fff8f4; }.change-card.impact-medium { border-color: #ead6a9; }.change-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }.change-label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--ink-3); font-size: 12px; }.change-index { color: var(--clay-deep); font-weight: 700; }.change-ratio { color: var(--ink-4); font-size: 11px; }
 .diff-columns { display: grid; grid-template-columns: minmax(0,1fr) 26px minmax(0,1fr); align-items: stretch; gap: 9px; }.diff-block { min-height: 90px; padding: 12px; border-radius: var(--r-sm); }.diff-block span { display: block; margin-bottom: 7px; font-size: 11px; font-weight: 700; }.diff-block p { margin: 0; white-space: pre-wrap; color: var(--ink-2); font-size: 13px; line-height: 1.75; }.diff-block.before { background: #f8e9e6; }.diff-block.before span { color: #a45247; }.diff-block.after { background: #edf5e9; }.diff-block.after span { color: #4f7646; }.diff-arrow { align-self: center; color: var(--ink-4); text-align: center; }
 .comment-area { margin-top: 12px; }.comment-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 9px; }.comment-item { padding: 9px 11px; border-left: 3px solid var(--clay); border-radius: 0 var(--r-sm) var(--r-sm) 0; background: #f7f1e8; }.comment-item div { display: flex; gap: 8px; align-items: center; }.comment-item strong { font-size: 12px; }.comment-item small { color: var(--ink-4); font-size: 10px; }.comment-item p { margin: 5px 0 0; color: var(--ink-2); font-size: 12px; line-height: 1.6; }
@@ -573,6 +800,6 @@ onBeforeUnmount(() => {
 .source-section { margin-top: 4px; padding: 0 18px 18px; border: 1px solid #e8ddca; border-radius: var(--r-lg); background: #fffdf9; }.source-section summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 2px; cursor: pointer; list-style: none; color: var(--ink-3); font-size: 12px; }.source-section summary::-webkit-details-marker { display: none; }.source-section summary strong, .source-section summary small { display: block; }.source-section summary strong { color: var(--ink-2); font-size: 14px; }.source-section summary small { margin-top: 3px; font-size: 11px; }.source-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.source-columns b { display: block; margin: 0 0 6px; color: var(--clay-deep); font-size: 12px; }.source-columns pre { max-height: 500px; overflow: auto; margin: 0; padding: 14px; border-radius: var(--r-sm); background: var(--ivory); white-space: pre-wrap; color: var(--ink-2); font: 12px/1.8 var(--sans, sans-serif); }
 .empty-detail-panel { display: flex; align-items: center; justify-content: center; min-height: 680px; padding: 40px; text-align: center; }.empty-detail-panel > div { max-width: 430px; }.empty-mark { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; margin-bottom: 14px; border-radius: 50%; background: var(--clay-tint); color: var(--clay-deep); font-size: 25px; }.empty-detail-panel h2 { margin: 0 0 9px; font: 500 26px var(--serif, serif); }.empty-detail-panel p { margin: 0 0 20px; color: var(--ink-3); font-size: 13px; line-height: 1.7; }
 .upload-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.upload-box { position: relative; display: flex; flex-direction: column; gap: 8px; min-height: 105px; padding: 17px; border: 1px dashed #d8c5a9; border-radius: var(--r-md); background: #fbf6ef; cursor: pointer; }.upload-box:hover { border-color: var(--clay); background: var(--clay-tint); }.upload-box span { color: var(--clay-deep); font-size: 11px; font-weight: 700; }.upload-box strong { color: var(--ink-2); font-size: 13px; line-height: 1.5; }.upload-box input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }.dialog-tip, .promote-intro { color: var(--ink-3); font-size: 12px; line-height: 1.65; }.editor-list { display: flex; flex-direction: column; gap: 11px; max-height: 430px; overflow: auto; margin-bottom: 12px; }.editor-item { padding: 13px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--ivory); }.editor-item-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; }.editor-input { margin-bottom: 8px; }.editor-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }.group-checkboxes { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
-@media (max-width: 1050px) { .workspace-grid { grid-template-columns: 270px minmax(0, 1fr); }.review-detail-panel { padding: 24px 20px 34px; }.stats-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 760px) { .reviews-hero, .detail-head { align-items: flex-start; flex-direction: column; }.reviews-hero .el-button, .detail-actions { width: 100%; }.detail-actions .el-button { flex: 1; }.workspace-grid { display: block; }.review-list-panel { margin-bottom: 16px; }.review-list { min-height: auto; max-height: 310px; overflow: auto; }.empty-detail-panel { min-height: 360px; }.diff-columns, .source-columns, .analysis-fields, .method-fields, .upload-pair { grid-template-columns: 1fr; }.diff-arrow { transform: rotate(90deg); }.methodology-card { grid-template-columns: 30px minmax(0, 1fr); }.methodology-card .el-button { grid-column: 2; justify-self: start; }.content-section { padding: 18px 14px; }.section-heading { flex-direction: column; }.section-heading .el-button { width: 100%; }.stats-grid { gap: 7px; }.stat-card { padding: 12px; }.stat-card strong { font-size: 21px; }.editor-two-col { grid-template-columns: 1fr; } }
+@media (max-width: 1050px) { .workspace-grid { grid-template-columns: 270px minmax(0, 1fr); }.review-detail-panel { padding: 24px 20px 34px; }.stats-grid { grid-template-columns: repeat(2, 1fr); }.stage-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .reviews-hero, .detail-head { align-items: flex-start; flex-direction: column; }.reviews-hero .el-button, .detail-actions { width: 100%; }.detail-actions .el-button { flex: 1; }.workspace-grid { display: block; }.review-list-panel { margin-bottom: 16px; }.review-list { min-height: auto; max-height: 310px; overflow: auto; }.empty-detail-panel { min-height: 360px; }.diff-columns, .source-columns, .analysis-fields, .method-fields, .upload-pair, .semantic-columns { grid-template-columns: 1fr; }.diff-arrow { transform: rotate(90deg); }.methodology-card { grid-template-columns: 30px minmax(0, 1fr); }.methodology-card .method-actions { grid-column: 2; align-items: flex-start; flex-direction: row; flex-wrap: wrap; }.content-section { padding: 18px 14px; }.section-heading { flex-direction: column; }.section-heading .el-button { width: 100%; }.stats-grid { gap: 7px; }.stat-card { padding: 12px; }.stat-card strong { font-size: 21px; }.editor-two-col { grid-template-columns: 1fr; }.stage-list { grid-template-columns: 1fr; }.state-banner.waiting { align-items: flex-start; flex-wrap: wrap; }.state-banner.waiting .el-button { margin-left: 29px; } }
 </style>

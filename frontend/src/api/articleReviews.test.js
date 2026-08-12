@@ -14,12 +14,18 @@ vi.mock('@/stores/user', () => ({
 import {
   addArticleReviewComment,
   analyzeArticleReview,
+  confirmArticleReviewMethodology,
   createArticleReview,
   getArticleReview,
+  getArticleReviewWorkflow,
   listArticleReviews,
   promoteArticleReview,
+  retryArticleReviewStage,
+  reviewArticleReviewChange,
   streamArticleReview,
+  updateArticleReviewSemanticBlocks,
   updateArticleReviewAnalysis,
+  updateArticleReviewComment,
 } from './articleReviews'
 
 describe('article reviews API', () => {
@@ -54,6 +60,21 @@ describe('article reviews API', () => {
     expect(config.timeout).toBe(30000)
   })
 
+  it('调用可恢复工作流、语义确认、人工判断和阶段重试接口', () => {
+    getArticleReviewWorkflow(7, { run_id: 'run-7' })
+    updateArticleReviewSemanticBlocks(7, { blocks: [] })
+    reviewArticleReviewChange(7, 3, { human_label: 'important' })
+    retryArticleReviewStage(7, 'semantic_alignment')
+    confirmArticleReviewMethodology(7, 4, { status: 'confirmed' })
+    updateArticleReviewComment(7, 5, { resolved: true, processing_status: 'accepted' })
+    expect(apiFns.get).toHaveBeenCalledWith('/reviews/7/workflow', { run_id: 'run-7' })
+    expect(apiFns.put).toHaveBeenNthCalledWith(1, '/reviews/7/semantic-blocks', { blocks: [] })
+    expect(apiFns.put).toHaveBeenNthCalledWith(2, '/reviews/7/changes/3/review', { human_label: 'important' })
+    expect(apiFns.post).toHaveBeenNthCalledWith(1, '/reviews/7/stages/semantic_alignment/retry')
+    expect(apiFns.post).toHaveBeenNthCalledWith(2, '/reviews/7/methodology/4/confirm', { status: 'confirmed' })
+    expect(apiFns.put).toHaveBeenNthCalledWith(3, '/reviews/7/comments/5', { resolved: true, processing_status: 'accepted' })
+  })
+
   it('解析 SSE 进度帧并携带 Bearer token', async () => {
     const frames = [
       'event: progress\ndata: {"progress":{"current_step":1,"action":"正在解析改前稿…"}}\n\n',
@@ -79,5 +100,30 @@ describe('article reviews API', () => {
     expect(progress).toHaveLength(2)
     expect(progress[0].progress.current_step).toBe(1)
     expect(progress[1].progress.done).toBe(true)
+  })
+
+  it('断线恢复时携带并返回 Last-Event-ID', async () => {
+    const frames = [
+      'id: 6\nevent: progress\ndata: {"progress":{"stage":"semantic_alignment"}}\n\n',
+    ].map((item) => new TextEncoder().encode(item))
+    let index = 0
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => ({
+          read: vi.fn(async () => (index < frames.length
+            ? { done: false, value: frames[index++] }
+            : { done: true, value: undefined })),
+        }),
+      },
+    }))
+    const progress = []
+    const result = await streamArticleReview(7, (payload, eventId) => progress.push({ payload, eventId }), { lastEventId: 5 })
+    expect(fetch).toHaveBeenCalledWith('/api/v1/reviews/7/stream', {
+      headers: { Accept: 'text/event-stream', Authorization: 'Bearer test-token', 'Last-Event-ID': '5' },
+      signal: undefined,
+    })
+    expect(result.lastEventId).toBe(6)
+    expect(progress[0].eventId).toBe(6)
   })
 })
