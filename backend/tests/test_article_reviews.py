@@ -127,6 +127,24 @@ def test_semantic_blocks_merge_short_lines_and_keep_source_offsets():
     assert blocks[0]["stable_id"].startswith("sb-b-")
 
 
+def test_semantic_blocks_do_not_split_one_sentence_per_line_or_keep_version_noise():
+    text = (
+        "1.0\n"
+        "前几天Seedance 2.5上线后，我本来没有抱太多的期待。\n"
+        "毕竟不是一个跳跃式的版本更新。\n"
+        "那几天我还都沉浸在测试H3当中，测了一个又一个案例。\n"
+        "\n"
+        "但是就在我沉浸于H3之中的时候，接连好几个读者反馈。"
+    )
+    blocks = build_semantic_blocks(text, side="before")
+
+    assert all(block["text"] != "1.0" for block in blocks)
+    assert len(blocks) == 2
+    assert blocks[0]["source_line_start"] == 2
+    assert blocks[0]["source_line_end"] == 4
+    assert blocks[0]["raw_block_count"] == 3
+
+
 def test_semantic_diff_distinguishes_minor_rewrite_addition_and_reorder():
     minor = build_change_groups("我们要做的事情。", "我们要做了事情！")
     assert [item["change_type"] for item in minor["groups"]] == ["minor_edit"]

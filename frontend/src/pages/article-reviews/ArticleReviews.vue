@@ -84,6 +84,7 @@
         <div v-if="waitingForSemanticConfirmation" class="state-banner waiting">
           <el-icon><WarningFilled /></el-icon>
           <div><strong>语义分段已生成，等待团队确认</strong><span>可以先编辑、合并或拆分语义块；确认后才会计算重大修改并启动 AI 复盘。</span></div>
+          <el-button size="small" plain :loading="analyzing" @click="regenerateSemanticBlocks">按新规则重新生成</el-button>
           <el-button type="primary" size="small" :loading="confirmingBlocks" @click="confirmSemanticBlocks">确认分段并继续</el-button>
         </div>
         <div v-else-if="selectedReview.status === 'processing'" class="state-banner running">
@@ -101,7 +102,7 @@
 
         <section class="stats-grid">
           <div class="stat-card stat-highlight"><span>重点修改</span><strong>{{ selectedReview.stats?.major_group_count || 0 }}</strong><small>建议优先复盘</small></div>
-          <div class="stat-card"><span>全部改动块</span><strong>{{ selectedReview.stats?.total_groups || 0 }}</strong><small>按段落 / 行聚合</small></div>
+          <div class="stat-card"><span>全部改动块</span><strong>{{ selectedReview.stats?.total_groups || 0 }}</strong><small>按语义块聚合</small></div>
           <div class="stat-card"><span>改前字数</span><strong>{{ selectedReview.before?.char_count || 0 }}</strong><small>{{ selectedReview.before?.truncated ? '已截断' : '完整解析' }}</small></div>
           <div class="stat-card"><span>改后字数</span><strong>{{ selectedReview.after?.char_count || 0 }}</strong><small>{{ selectedReview.after?.truncated ? '已截断' : '完整解析' }}</small></div>
         </section>
@@ -122,7 +123,7 @@
 
         <section v-if="semanticBlocks.length" class="content-section semantic-section">
           <div class="section-heading">
-            <div><span class="eyebrow">00 · CONFIRM THE MEANING</span><h3>语义分段确认</h3><p>短句换行会尽量合并为同一语义块；你可以在对齐前人工修订边界。</p></div>
+            <div><span class="eyebrow">00 · CONFIRM THE MEANING</span><h3>语义分段确认</h3><p>一句一行不会直接变成一个语义块，系统会按上下文、句子边界和结构标记先合并；你可以在对齐前人工修订边界。</p></div>
             <div class="section-actions">
               <el-button size="small" plain @click="semanticEditMode = !semanticEditMode">{{ semanticEditMode ? '完成编辑' : '编辑分段' }}</el-button>
               <el-button size="small" type="primary" :loading="confirmingBlocks" @click="confirmSemanticBlocks">确认并重新对齐</el-button>
@@ -638,6 +639,23 @@ const retryStage = async () => {
     startProgressTracking()
   } catch {
     ElMessage.error('阶段任务提交失败')
+  } finally {
+    analyzing.value = false
+  }
+}
+
+const regenerateSemanticBlocks = async () => {
+  if (!selectedReview.value) return
+  analyzing.value = true
+  try {
+    const response = await retryArticleReviewStage(selectedReview.value.id, 'semantic_segmentation')
+    applyReviewResponse(response.data)
+    const refreshed = await getArticleReview(selectedReview.value.id)
+    applyReviewResponse(refreshed.data)
+    ElMessage.success('已按新的语义规则重新生成分段')
+    startProgressTracking()
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || '重新生成语义分段失败')
   } finally {
     analyzing.value = false
   }

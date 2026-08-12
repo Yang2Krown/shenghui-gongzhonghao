@@ -39,6 +39,35 @@ def normalize_review_text(text: str) -> str:
     return value.strip()
 
 
+def _is_extraction_noise_line(text: str) -> bool:
+    """识别 Word/PDF 提取时常见的独立版本号、页码行。"""
+
+    value = re.sub(r"\s+", "", text or "")
+    if not value:
+        return False
+    # 文章正文里出现的 2.0 等数字通常会嵌在句子中；这里只过滤整行的版本号。
+    if re.fullmatch(r"(?:v|ver|version)?\d+(?:\.\d+){1,3}", value, re.IGNORECASE):
+        return True
+    if re.fullmatch(r"(?:第)?\d+(?:/|／)\d+(?:页)?", value, re.IGNORECASE):
+        return True
+    if re.fullmatch(r"(?:page|页)\d+(?:/\d+)?", value, re.IGNORECASE):
+        return True
+    return False
+
+
+def _mask_extraction_noise_lines(source: str) -> str:
+    """屏蔽独立提取噪声并保留字符长度/换行，确保偏移和原文行号仍可回溯。"""
+
+    masked: list[str] = []
+    for line in source.splitlines(keepends=True):
+        content = line.rstrip("\n")
+        if _is_extraction_noise_line(content):
+            masked.append(re.sub(r"[^\n]", " ", line))
+        else:
+            masked.append(line)
+    return "".join(masked)
+
+
 def normalize_semantic_text(text: str) -> str:
     """为语义匹配生成规范化投影，不修改界面展示的原文。"""
 
@@ -54,10 +83,11 @@ def _is_heading(text: str) -> bool:
     value = re.sub(r"\s+", "", text or "")
     if not value or len(value) > 36:
         return False
+    if _is_extraction_noise_line(value):
+        return False
     return bool(
-        value.startswith(("#", "一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、", "九、", "十、"))
-        or re.match(r"^(\d+[.)、]|[（(]\d+[）)])", value)
-        or (len(value) <= 18 and not re.search(r"[。！？；]$", value))
+        value.startswith("#")
+        or re.match(r"^(?:[一二三四五六七八九十]+[、.：:]|\d+[.)、](?!\d)|[（(]\d+[）)])", value)
     )
 
 
@@ -101,23 +131,8 @@ def _is_structure_marker(text: str) -> bool:
 
 
 def _has_line_level_signal(source: str) -> bool:
-    """判断是否需要把同一视觉段落的短句拆开进行跨稿对齐。
+    """兼容旧调用方，但不再根据单行长度推断语义边界。"""
 
-    普通公众号短句换行默认合并；一旦出现编号结构或明显较长的插入/论证行，
-    两侧统一采用行级语义单元，避免新增内容被包在整段里而无法识别。
-    """
-
-    units = _line_units(source)
-    grouped: dict[int, list[dict]] = {}
-    for unit in units:
-        grouped.setdefault(unit["paragraph"], []).append(unit)
-    for paragraph_units in grouped.values():
-        if len(paragraph_units) > 1 and any(
-            _is_structure_marker(_display_segment(source, item["start"], item["end"]))
-            or len(_display_segment(source, item["start"], item["end"])) >= 20
-            for item in paragraph_units
-        ):
-            return True
     return False
 
 
@@ -179,6 +194,19 @@ def _split_long_unit(source: str, unit: dict) -> list[dict]:
     return fragments or [unit]
 
 
+def _merge_line_units(units: list[dict]) -> dict:
+    """把连续视觉行合成一个待语义切分的候选单元。"""
+
+    return {
+        "start": units[0]["start"],
+        "end": units[-1]["end"],
+        "line_start": units[0]["line_start"],
+        "line_end": units[-1]["line_end"],
+        "raw_count": sum(item.get("raw_count", 1) for item in units),
+        "paragraph": units[0].get("paragraph"),
+    }
+
+
 def build_semantic_blocks(
     text: str,
     *,
@@ -189,7 +217,9 @@ def build_semantic_blocks(
 
     # 只统一换行，不做首尾 strip；这样 start_offset/end_offset 仍然对应
     # 提取文本中的原始字符位置，前端可以准确回溯到原文上下文。
-    source = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    source = _mask_extraction_noise_lines(
+        (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    )
     if not source:
         return []
     raw_units = _line_units(source)
@@ -203,22 +233,25 @@ def build_semantic_blocks(
             _display_segment(source, item["start"], item["end"])
             for item in paragraph_units
         ]
-        split_paragraph = split_short_lines or any(
-            _is_structure_marker(value) or _is_heading(value) for value in values
-        )
-        if not split_paragraph and len(paragraph_units) > 1:
-            merged_unit = {
-                "start": paragraph_units[0]["start"],
-                "end": paragraph_units[-1]["end"],
-                "line_start": paragraph_units[0]["line_start"],
-                "line_end": paragraph_units[-1]["line_end"],
-                "raw_count": len(paragraph_units),
-                "paragraph": paragraph_units[0]["paragraph"],
-            }
-            semantic_units.extend(_split_long_unit(source, merged_unit))
-        else:
+        if split_short_lines:
             for unit in paragraph_units:
                 semantic_units.extend(_split_long_unit(source, unit))
+            continue
+
+        # 公众号正文经常“一句一行”。只有明确的标题/结构标记才形成边界，
+        # 普通换行全部先合并，再按句子和长度切成语义块。
+        partitions: list[list[dict]] = []
+        current: list[dict] = []
+        for unit, value in zip(paragraph_units, values):
+            is_boundary = _is_structure_marker(value) or _is_heading(value)
+            if is_boundary and current:
+                partitions.append(current)
+                current = []
+            current.append(unit)
+        if current:
+            partitions.append(current)
+        for partition in partitions:
+            semantic_units.extend(_split_long_unit(source, _merge_line_units(partition)))
 
     # 只有明显的语义/结构边界才拆开，避免把每个公众号短句换行误判成独立段落。
     merged: list[dict] = []
@@ -338,16 +371,13 @@ def build_change_groups(
     """以语义块为基本单位做对齐，保留低价值修改并单独识别顺序变化。"""
 
     if semantic_blocks is None:
-        split_short_lines = _has_line_level_signal(before_text) or _has_line_level_signal(after_text)
         before_blocks = build_semantic_blocks(
             before_text,
             side="before",
-            split_short_lines=split_short_lines,
         )
         after_blocks = build_semantic_blocks(
             after_text,
             side="after",
-            split_short_lines=split_short_lines,
         )
     else:
         before_blocks = list(semantic_blocks.get("before") or [])
