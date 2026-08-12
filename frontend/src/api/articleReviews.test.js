@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiFns = vi.hoisted(() => ({
+  del: vi.fn(),
   get: vi.fn(),
   post: vi.fn(),
   put: vi.fn(),
@@ -16,6 +17,7 @@ import {
   analyzeArticleReview,
   confirmArticleReviewMethodology,
   createArticleReview,
+  deleteArticleReview,
   getArticleReview,
   getArticleReviewWorkflow,
   listArticleReviews,
@@ -35,12 +37,14 @@ describe('article reviews API', () => {
   it('调用文章复盘列表、详情和任务接口', () => {
     listArticleReviews({ page: 2, status: 'reviewing' })
     getArticleReview(7)
+    deleteArticleReview(7)
     analyzeArticleReview(7)
     addArticleReviewComment(7, { change_group_id: 'change-001', body: '保留这个改法' })
     updateArticleReviewAnalysis(7, { summary: '人工确认' })
     promoteArticleReview(7, { change_group_ids: ['change-001'] })
     expect(apiFns.get).toHaveBeenNthCalledWith(1, '/reviews', { page: 2, status: 'reviewing' })
     expect(apiFns.get).toHaveBeenNthCalledWith(2, '/reviews/7')
+    expect(apiFns.del).toHaveBeenCalledWith('/reviews/7')
     expect(apiFns.post).toHaveBeenNthCalledWith(1, '/reviews/7/analyze')
     expect(apiFns.post).toHaveBeenNthCalledWith(2, '/reviews/7/comments', { change_group_id: 'change-001', body: '保留这个改法' })
     expect(apiFns.put).toHaveBeenCalledWith('/reviews/7/analysis', { summary: '人工确认' })

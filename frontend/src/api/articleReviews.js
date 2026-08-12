@@ -1,8 +1,10 @@
-import { get, post, put } from './api'
+import { del, get, post, put } from './api'
 
 export const listArticleReviews = (params = {}) => get('/reviews', params)
 
 export const getArticleReview = (id) => get(`/reviews/${id}`)
+
+export const deleteArticleReview = (id) => del(`/reviews/${id}`)
 
 export const getArticleReviewWorkflow = (id, params = {}) => get(`/reviews/${id}/workflow`, params)
 

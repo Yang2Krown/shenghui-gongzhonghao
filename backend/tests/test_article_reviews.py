@@ -473,6 +473,135 @@ async def test_review_list_does_not_lazy_load_comments(review_db):
 
 
 @pytest.mark.asyncio
+async def test_review_delete_requires_owner_and_cleans_workflow_entities(review_db):
+    employee = _user(1)
+    other_employee = _user(2)
+    async with review_db() as db:
+        db.add_all([employee, other_employee])
+        review = ArticleReview(
+            title="待删除复盘",
+            before_filename="before.txt",
+            after_filename="after.txt",
+            before_text="旧稿",
+            after_text="新稿",
+            change_groups=[],
+            status="processing",
+            progress_run_id="delete-review-run",
+            created_by=employee.id,
+        )
+        db.add(review)
+        await db.commit()
+        await db.refresh(review)
+        run = await create_run_with_stages(
+            db,
+            review,
+            run_id="delete-review-run",
+            created_by=employee.id,
+        )
+        block = ArticleReviewSemanticBlock(
+            review_id=review.id,
+            review_run_id=run.id,
+            stable_id="sb-b-delete-01",
+            side="before",
+            ordinal=1,
+            text="旧稿",
+            normalized_text="旧稿",
+        )
+        db.add(block)
+        db.add(ArticleReviewChange(
+            review_id=review.id,
+            review_run_id=run.id,
+            stable_id="change-delete-01",
+            ordinal=1,
+            change_type="rewrite",
+            before_block_ids=[block.stable_id],
+            after_block_ids=[],
+            before_text="旧稿",
+            after_text="新稿",
+        ))
+        db.add(ArticleReviewReorderEvent(
+            review_id=review.id,
+            review_run_id=run.id,
+            stable_id="reorder-delete-01",
+            ordinal=1,
+            before_block_ids=[block.stable_id],
+            after_block_ids=[],
+        ))
+        db.add(ArticleReviewMethodologyCandidate(
+            review_id=review.id,
+            review_run_id=run.id,
+            title="删除测试方法",
+            rule="删除前清理所有运行产物",
+            evidence_change_ids=["change-delete-01"],
+        ))
+        db.add(ArticleReviewComment(
+            review_id=review.id,
+            change_group_id="change-delete-01",
+            body="删除测试评论",
+            author_id=employee.id,
+        ))
+        await db.commit()
+        review_id = review.id
+
+        with pytest.raises(HTTPException) as permission_error:
+            await reviews_api.delete_article_review(review_id, db, other_employee)
+        assert permission_error.value.status_code == 403
+
+        result = await reviews_api.delete_article_review(review_id, db, employee)
+        assert result["data"] == {"review_id": review_id}
+        assert await db.get(ArticleReview, review_id) is None
+        assert not (await db.execute(select(ArticleReviewRun).where(ArticleReviewRun.review_id == review_id))).scalars().all()
+        assert not (await db.execute(select(ArticleReviewSemanticBlock).where(ArticleReviewSemanticBlock.review_id == review_id))).scalars().all()
+        assert not (await db.execute(select(ArticleReviewChange).where(ArticleReviewChange.review_id == review_id))).scalars().all()
+        assert not (await db.execute(select(ArticleReviewReorderEvent).where(ArticleReviewReorderEvent.review_id == review_id))).scalars().all()
+        assert not (await db.execute(select(ArticleReviewMethodologyCandidate).where(ArticleReviewMethodologyCandidate.review_id == review_id))).scalars().all()
+        assert not (await db.execute(select(ArticleReviewComment).where(ArticleReviewComment.review_id == review_id))).scalars().all()
+
+
+@pytest.mark.asyncio
+async def test_review_delete_keeps_source_trace_for_promoted_experience(review_db):
+    employee = _user(1)
+    async with review_db() as db:
+        db.add(employee)
+        card = ExperienceCard(
+            title="已沉淀经验",
+            content="保留来源",
+            source_type="review_feedback",
+            created_by=employee.id,
+        )
+        db.add(card)
+        await db.flush()
+        review = ArticleReview(
+            title="已沉淀复盘",
+            before_filename="before.txt",
+            after_filename="after.txt",
+            before_text="旧稿",
+            after_text="新稿",
+            change_groups=[],
+            status="reviewing",
+            promoted_card_ids=[card.id],
+            created_by=employee.id,
+        )
+        db.add(review)
+        await db.flush()
+        source = ArticleReviewExperienceSource(
+            experience_card_id=card.id,
+            review_id=review.id,
+            comment_ids=[],
+            confirmed_conclusion="保留来源追溯",
+            confirmed_by=employee.id,
+        )
+        db.add(source)
+        await db.commit()
+
+        with pytest.raises(HTTPException) as error:
+            await reviews_api.delete_article_review(review.id, db, employee)
+        assert error.value.status_code == 409
+        assert error.value.detail["code"] == "review_has_experience_sources"
+        assert await db.get(ArticleReview, review.id) is not None
+
+
+@pytest.mark.asyncio
 async def test_review_upload_reports_single_and_total_size_limits(monkeypatch):
     monkeypatch.setattr(reviews_api, "MAX_REVIEW_UPLOAD_SIZE", 10)
     monkeypatch.setattr(reviews_api, "MAX_REVIEW_FILES_SIZE", 15)

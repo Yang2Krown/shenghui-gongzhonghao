@@ -33,6 +33,7 @@ from app.models.article_review import (
     ArticleReviewReorderEvent,
     ArticleReviewRun,
     ArticleReviewSemanticBlock,
+    ArticleReviewStage,
 )
 from app.models.content_version import ExperienceCard
 from app.models.user import User
@@ -189,6 +190,38 @@ async def _load_review(db: AsyncSession, review_id: int) -> Optional[ArticleRevi
             selectinload(ArticleReview.comments).selectinload(ArticleReviewComment.author),
         )
     )).scalar_one_or_none()
+
+
+async def _cleanup_review_uploads(review: ArticleReview) -> None:
+    """删除复盘仍在解析中的暂存文件，只允许触及 uploads/article_reviews。"""
+
+    root = (Path(settings.UPLOAD_DIR).resolve() / "article_reviews").resolve()
+    pending_dirs: set[Path] = set()
+    for raw_path in (review.before_file_path, review.after_file_path):
+        if not raw_path:
+            continue
+        try:
+            path = Path(raw_path).resolve()
+        except OSError:
+            logger.warning("文章复盘暂存文件路径无法解析 review_id=%s path=%s", review.id, raw_path)
+            continue
+        if root not in path.parents:
+            logger.warning("跳过删除越界的文章复盘文件 review_id=%s path=%s", review.id, raw_path)
+            continue
+        if path.parent.parent == root and path.parent.name.startswith("pending-"):
+            pending_dirs.add(path.parent)
+        try:
+            if path.is_file():
+                await asyncio.to_thread(path.unlink)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.warning("文章复盘暂存文件删除失败 review_id=%s path=%s", review.id, raw_path, exc_info=True)
+    for directory in pending_dirs:
+        try:
+            await asyncio.to_thread(shutil.rmtree, directory, True)
+        except OSError:
+            logger.warning("文章复盘暂存目录删除失败 review_id=%s path=%s", review.id, directory, exc_info=True)
 
 
 async def _read_review_upload(file: UploadFile) -> tuple[str, bytes, str]:
@@ -586,6 +619,62 @@ async def list_article_reviews(
             "page_size": page_size,
             "total_pages": (total + page_size - 1) // page_size,
         },
+    }
+
+
+@router.delete("/{review_id}", response_model=dict)
+async def delete_article_review(
+    review_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """删除复盘及其运行产物；已沉淀经验的复盘保留以维护来源追溯。"""
+
+    await _require_review_access(db, current_user)
+    review = await _load_review(db, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="文章复盘不存在")
+    if review.created_by != current_user.id and not is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="只有复盘创建者或管理员可以删除记录")
+
+    source_count = (await db.execute(
+        select(func.count(ArticleReviewExperienceSource.id)).where(
+            ArticleReviewExperienceSource.review_id == review.id,
+        )
+    )).scalar_one()
+    if source_count or review.promoted_card_ids:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "review_has_experience_sources",
+                "message": "该复盘已经沉淀到经验库，为保留来源追溯不能删除",
+            },
+        )
+
+    run_ids = list((await db.execute(
+        select(ArticleReviewRun.id).where(ArticleReviewRun.review_id == review.id)
+    )).scalars())
+    # 先删带有具体 change/block/run 外键的记录，再删运行和复盘本体；
+    # 不依赖异步 ORM 懒加载，也让 SQLite 测试和 PostgreSQL 级联行为一致。
+    await db.execute(delete(ArticleReviewComment).where(ArticleReviewComment.review_id == review.id))
+    await db.execute(delete(ArticleReviewMethodologyCandidate).where(ArticleReviewMethodologyCandidate.review_id == review.id))
+    await db.execute(delete(ArticleReviewExperienceSource).where(ArticleReviewExperienceSource.review_id == review.id))
+    await db.execute(delete(ArticleReviewChange).where(ArticleReviewChange.review_id == review.id))
+    await db.execute(delete(ArticleReviewReorderEvent).where(ArticleReviewReorderEvent.review_id == review.id))
+    await db.execute(delete(ArticleReviewSemanticBlock).where(ArticleReviewSemanticBlock.review_id == review.id))
+    if run_ids:
+        await db.execute(delete(ArticleReviewStage).where(ArticleReviewStage.review_run_id.in_(run_ids)))
+        await db.execute(delete(ArticleReviewRun).where(ArticleReviewRun.id.in_(run_ids)))
+    await db.execute(delete(ArticleReview).where(ArticleReview.id == review.id))
+    await db.commit()
+
+    if review.progress_run_id:
+        progress_store.cleanup(review.progress_run_id)
+    await _cleanup_review_uploads(review)
+    return {
+        "code": 200,
+        "message": "文章复盘已删除",
+        "data": {"review_id": review_id},
     }
 
 

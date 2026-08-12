@@ -74,6 +74,7 @@
             </div>
           </div>
           <div class="detail-actions">
+            <el-button v-if="canDeleteSelectedReview" type="danger" plain @click="deleteSelectedReview">删除复盘</el-button>
             <el-button v-if="retryableStage" :loading="analyzing" @click="retryStage">
               {{ retryableStageLabel }}
             </el-button>
@@ -273,14 +274,16 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading, Plus, Search, WarningFilled } from '@element-plus/icons-vue'
+import { useUserStore } from '@/stores/user'
 import { validateArticleReviewFiles, validateUploadFile } from '@/utils/uploadPolicy'
 import {
   addArticleReviewComment,
   analyzeArticleReview,
   confirmArticleReviewMethodology,
   createArticleReview,
+  deleteArticleReview,
   getArticleReview,
   listArticleReviews,
   promoteArticleReview,
@@ -292,6 +295,7 @@ import {
 } from '@/api/articleReviews'
 
 const route = useRoute()
+const userStore = useUserStore()
 const reviews = ref([])
 const selectedReview = ref(null)
 const listLoading = ref(false)
@@ -328,6 +332,10 @@ const statusFilters = [
 ]
 
 const orderedGroups = computed(() => [...(selectedReview.value?.change_groups || [])].sort((left, right) => Number(right.is_major) - Number(left.is_major)))
+const canDeleteSelectedReview = computed(() => {
+  const review = selectedReview.value
+  return Boolean(review && (userStore.isAdmin || review.created_by === userStore.user?.id))
+})
 const workflow = computed(() => selectedReview.value?.workflow || {})
 const workflowStages = computed(() => workflow.value.run?.stages || [])
 const semanticBlocks = computed(() => workflow.value.blocks || [])
@@ -442,6 +450,36 @@ const clearSelectedReview = () => {
   stopPolling()
   progressState.value = null
   selectedReview.value = null
+}
+
+const deleteSelectedReview = async () => {
+  if (!selectedReview.value) return
+  const reviewId = selectedReview.value.id
+  try {
+    await ElMessageBox.confirm(
+      '删除后会同时清理这次复盘的评论、语义块、差异和运行记录，且无法恢复。已沉淀到经验库的复盘不能删除。',
+      '确认删除文章复盘？',
+      {
+        type: 'warning',
+        confirmButtonText: '删除复盘',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
+  detailLoading.value = true
+  try {
+    await deleteArticleReview(reviewId)
+    clearSelectedReview()
+    await loadReviews({ selectFirst: false })
+    ElMessage.success('文章复盘已删除')
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail?.message || error?.response?.data?.detail || '删除文章复盘失败')
+  } finally {
+    detailLoading.value = false
+  }
 }
 
 const startPolling = () => {
