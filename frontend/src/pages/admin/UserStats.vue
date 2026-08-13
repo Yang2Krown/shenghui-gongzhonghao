@@ -157,6 +157,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { getUserStats } from '@/api/admin'
+import { formatDateTimeMinute } from '@/utils/dateTime'
 
 const loading = ref(false)
 const data = ref({ summary: {}, daily: [], top_cost_users: [], low_balance_users: [], recent_payments: [] })
@@ -317,7 +318,7 @@ function formatMoney(value) {
 
 function fmtDate(value) {
   if (!value) return '-'
-  return new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16)
+  return formatDateTimeMinute(value, '-')
 }
 
 onMounted(load)

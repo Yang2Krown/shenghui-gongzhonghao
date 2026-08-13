@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Iterable, Optional
@@ -257,3 +258,74 @@ async def load_experience_cards(
     sliced = matched[start:start + page_size]
     mode = "semantic" if query_vector is not None else "keyword_fallback"
     return [(row, similarity, method) for row, similarity, method, _ in sliced], total, mode, query_vector is not None
+
+
+async def match_experience_cards(
+    db: AsyncSession,
+    query_text: str,
+    *,
+    page_size: int = 8,
+) -> tuple[list[tuple[ExperienceCard, Optional[float], str]], str, bool]:
+    """为初稿诊断召回已确认经验。
+
+    经验库列表的搜索适合用户输入一个关键词；初稿诊断输入的是一整篇文章，
+    不能把全文当成一个关键词做包含判断。因此这里同时使用向量相似度和
+    轻量关键词命中，并在 embedding 不可用时仍能稳定召回。
+    """
+
+    rows = (await db.execute(
+        select(ExperienceCard)
+        .where(ExperienceCard.status == "confirmed")
+        .options(
+            selectinload(ExperienceCard.creator),
+            selectinload(ExperienceCard.creation),
+            selectinload(ExperienceCard.suggestion),
+        )
+        .order_by(ExperienceCard.created_at.desc(), ExperienceCard.id.desc())
+    )).scalars().all()
+    query = (query_text or "").strip()
+    if not query or not rows:
+        return [], "recent", False
+
+    query_vector = None
+    try:
+        query_vector = await embedding_service.embed(query[:4_000])
+    except Exception as exc:
+        logger.info("初稿诊断经验召回 embedding 不可用，降级关键词：%s", exc)
+
+    tokens = re.findall(r"[\u4e00-\u9fff]{2,8}|[A-Za-z0-9][A-Za-z0-9_-]{2,}", query.casefold())
+    # 长文本中的重复词不应让关键词得分无限增大；保留去重后的前 30 个词。
+    tokens = list(dict.fromkeys(tokens))[:30]
+    matched: list[tuple[ExperienceCard, Optional[float], str, int]] = []
+    for row in rows:
+        haystack = " ".join(
+            value or ""
+            for value in (row.title, row.content, row.category)
+        ).casefold()
+        keyword_hits = sum(1 for token in tokens if token in haystack)
+        similarity = cosine_similarity(query_vector, row.embedding) if query_vector and row.embedding else None
+        semantic_match = similarity is not None and similarity >= 0.15
+        if not keyword_hits and not semantic_match:
+            continue
+        if semantic_match and keyword_hits:
+            method = "semantic+keyword"
+        elif semantic_match:
+            method = "semantic"
+        else:
+            method = "keyword_fallback"
+        matched.append((row, similarity, method, keyword_hits))
+
+    matched.sort(
+        key=lambda item: (
+            item[1] if item[1] is not None else 0.0,
+            item[3],
+            item[0].created_at or datetime.min,
+            item[0].id,
+        ),
+        reverse=True,
+    )
+    mode = "semantic" if query_vector is not None else "keyword_fallback"
+    return [
+        (row, similarity, method)
+        for row, similarity, method, _keyword_hits in matched[:page_size]
+    ], mode, query_vector is not None

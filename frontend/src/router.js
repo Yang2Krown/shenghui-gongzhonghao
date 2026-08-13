@@ -174,6 +174,12 @@ const routes = [
         component: () => import('@/pages/article-reviews/ArticleReviews.vue'),
         meta: { title: '文章复盘', requiresTeam: true }
       },
+      {
+        path: 'draft-diagnosis',
+        name: 'DraftDiagnosis',
+        component: () => import('@/pages/draft-diagnosis/DraftDiagnosis.vue'),
+        meta: { title: '初稿诊断', requiresTeam: true }
+      },
       // ⚠️ 临时：公众号抓取测试页（feature 验证后整段删除）
       {
         path: 'tools/gzh-test',

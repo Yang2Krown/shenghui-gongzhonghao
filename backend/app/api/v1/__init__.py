@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate, wechat_draft, content_continuation, content_polish, wechat_accounts, credits, credit_purchase, practical, feishu_brief, images, commercial, admin, announcements, _test_gzh_fetch, courses, xhs, xhs_agent, team, meetings, content_versions, experience, article_reviews
+from app.api.v1 import auth, topics, creation, users, ai, styles, topic_candidates, topic_clusters, outlines, content_generation, title_generation, title_munger, standalone_title, wechat_to_xhs, generation_records, image_proxy, xhs_publish, xhs_debug, creation_tools, progress, content_transform, content_imitate, wechat_draft, content_continuation, content_polish, wechat_accounts, credits, credit_purchase, practical, feishu_brief, images, commercial, admin, announcements, _test_gzh_fetch, courses, xhs, xhs_agent, team, meetings, content_versions, experience, article_reviews, draft_diagnoses
 
 api_router = APIRouter()
 
@@ -19,6 +19,7 @@ api_router.include_router(meetings.router, prefix="/meetings", tags=["会议建�
 api_router.include_router(content_versions.router, prefix="/creations", tags=["文章版本"])
 api_router.include_router(experience.router, prefix="/experience", tags=["经验库"])
 api_router.include_router(article_reviews.router, prefix="/reviews", tags=["文章复盘"])
+api_router.include_router(draft_diagnoses.router, prefix="/draft-diagnoses", tags=["初稿诊断"])
 
 # 通用进度轮询
 api_router.include_router(

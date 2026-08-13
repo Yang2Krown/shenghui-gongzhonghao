@@ -138,6 +138,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { get } from '@/api/api'
+import { formatDateTimeMinute } from '@/utils/dateTime'
 
 const loading = ref(false)
 const articlesLoading = ref(false)
@@ -216,7 +217,7 @@ async function openAccount(acc) {
 function fmtDate(s) {
   if (!s) return '—'
   try {
-    return new Date(s).toLocaleString('zh-CN', { hour12: false }).slice(0, 16)
+    return formatDateTimeMinute(s)
   } catch {
     return s
   }

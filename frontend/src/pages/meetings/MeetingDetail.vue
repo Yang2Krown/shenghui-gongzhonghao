@@ -112,7 +112,7 @@
     </template>
     <el-empty v-else description="会议不存在或无权访问" />
 
-    <el-dialog v-model="editVisible" title="编辑会议方法论沉淀" width="900px" align-center destroy-on-close>
+    <el-dialog v-model="editVisible" title="编辑会议方法论沉淀" width="900px" align-center destroy-on-close :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="restoreDialogScroll">
       <el-tabs v-model="editorTab" class="editor-tabs">
         <el-tab-pane label="摘要" name="summary">
           <el-input v-model="editorForm.summary" type="textarea" :autosize="{ minRows: 5, maxRows: 12 }" maxlength="4000" show-word-limit placeholder="用 1-3 句话说明这次会议最重要的结论" />
@@ -153,9 +153,12 @@ import { ElMessage } from 'element-plus'
 import { Loading, WarningFilled } from '@element-plus/icons-vue'
 import { createMeetingExperienceDrafts, extractMeeting, getMeeting, updateMeetingSynthesis } from '@/api/meetings'
 import { meetingStatusLabel, meetingStatusType } from './meetingUi'
+import { formatDateTimeMinute } from '@/utils/dateTime'
+import { useDialogScrollPosition } from '@/utils/dialogScrollPosition'
 
 const route = useRoute()
 const router = useRouter()
+const { rememberDialogScroll, restoreDialogScroll } = useDialogScrollPosition()
 const meeting = ref(null)
 const loading = ref(true)
 const retrying = ref(false)
@@ -172,7 +175,7 @@ const editorForm = reactive({
   checklist: [],
 })
 
-const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16) : '—'
+const formatDate = formatDateTimeMinute
 const trim = (value) => String(value || '').trim()
 const valueOrNull = (value) => trim(value) || null
 

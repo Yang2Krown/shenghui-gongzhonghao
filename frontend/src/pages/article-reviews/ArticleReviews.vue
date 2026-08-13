@@ -66,7 +66,23 @@
         <header class="detail-head">
           <div>
             <button type="button" class="back-link" @click="clearSelectedReview">← 返回复盘记录</button>
-            <h2>{{ selectedReview.title }}</h2>
+            <h2
+              v-if="!titleEditing"
+              class="editable-review-title"
+              title="点击编辑复盘标题"
+              @click="startTitleEditing"
+            >{{ selectedReview.title }}</h2>
+            <el-input
+              v-else
+              ref="reviewTitleInput"
+              v-model="titleDraft"
+              class="review-title-input"
+              maxlength="200"
+              aria-label="复盘标题"
+              @blur="saveReviewTitle"
+              @keyup.enter="saveReviewTitle"
+              @keyup.esc="cancelTitleEditing"
+            />
             <div class="detail-meta">
               <span>{{ selectedReview.before?.filename }} → {{ selectedReview.after?.filename }}</span>
               <span>创建于 {{ formatDate(selectedReview.created_at) }}</span>
@@ -244,7 +260,6 @@
         <section v-if="activeStageKey === 'ai_review'" class="content-section analysis-section">
           <div class="section-heading">
             <div><span class="eyebrow">02 · UNDERSTAND WHY</span><h3>AI 差异分析</h3><p>AI 只对真实改动做解释；不确定的原因会保留为“需要人工确认”。</p></div>
-            <el-button v-if="methodologyCandidates.length && hasConfirmedMethodology" type="primary" @click="openPromote()">沉淀为方法论</el-button>
           </div>
           <div v-if="selectedReview.ai_analysis?.summary" class="ai-summary">{{ selectedReview.ai_analysis.summary }}</div>
           <el-empty v-else-if="selectedReview.status === 'reviewing'" :image-size="50" description="AI 没有生成摘要，可以人工修订或直接依据改动沉淀" />
@@ -257,12 +272,12 @@
         </section>
 
         <section v-if="activeStageKey === 'methodology'" class="content-section methodology-section">
-          <div class="section-heading"><div><span class="eyebrow">03 · KEEP THE LESSON</span><h3>候选方法论</h3><p>先由 AI 提炼，再由团队评论和修订，确认后才进入经验库。</p></div></div>
+          <div class="section-heading"><div><span class="eyebrow">03 · KEEP THE LESSON</span><h3>候选方法论</h3><p>逐条判断，点击“确认并沉淀”后立即进入经验库；不需要先把全部候选确认完。</p></div></div>
           <div v-if="methodologyCandidates.length" class="methodology-list">
             <article v-for="(item, index) in methodologyCandidates" :key="`${item.title}-${index}`" class="methodology-card">
               <div class="method-number">{{ String(index + 1).padStart(2, '0') }}</div>
-              <div class="method-body"><h4>{{ item.title }}</h4><p class="rule">{{ item.rule }}</p><div class="method-fields"><div v-if="item.rationale"><span>为什么</span><p>{{ item.rationale }}</p></div><div v-if="item.example"><span>本次例子</span><p>{{ item.example }}</p></div></div><small v-if="item.evidence_group_ids?.length">证据：{{ item.evidence_group_ids.join('、') }}</small></div>
-              <div class="method-actions"><el-tag v-if="item.status" size="small" effect="plain">{{ candidateStatusLabel(item.status) }}</el-tag><el-button v-if="item.status !== 'confirmed' && item.status !== 'promoted'" type="primary" plain size="small" @click="confirmMethodology(item, 'confirmed')">确认</el-button><el-button v-if="item.status !== 'rejected' && item.status !== 'promoted'" text type="danger" size="small" @click="confirmMethodology(item, 'rejected')">驳回</el-button><el-button v-if="!item.status || ['confirmed', 'promoted'].includes(item.status)" type="primary" plain size="small" @click="openPromote(item)">沉淀</el-button></div>
+              <div class="method-body"><h4>{{ item.title }}</h4><p class="rule">{{ item.rule }}</p><div class="method-fields"><div v-if="item.rationale"><span>为什么</span><p>{{ item.rationale }}</p></div><div v-if="item.example"><span>本次例子</span><p>{{ item.example }}</p></div></div><small v-if="(item.evidence_group_ids || item.evidence_change_ids)?.length">证据：{{ (item.evidence_group_ids || item.evidence_change_ids).join('、') }}</small></div>
+              <div class="method-actions"><el-tag v-if="item.status" size="small" effect="plain">{{ candidateStatusLabel(item.status) }}</el-tag><el-button v-if="item.status !== 'rejected' && item.status !== 'promoted'" type="primary" plain size="small" :loading="promotingCandidateId === item.id" @click="confirmAndPromote(item)">确认并沉淀</el-button><el-button v-if="item.id && item.status !== 'rejected' && item.status !== 'promoted'" text type="danger" size="small" @click="rejectMethodology(item)">驳回</el-button></div>
             </article>
           </div>
           <el-empty v-else :image-size="58" description="方法论候选尚未生成" />
@@ -281,7 +296,7 @@
       </main>
     </div>
 
-    <el-dialog v-model="createVisible" title="新建文章复盘" width="620px" align-center destroy-on-close>
+    <el-dialog v-model="createVisible" title="新建文章复盘" width="620px" align-center destroy-on-close :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="restoreDialogScroll">
       <el-form label-position="top">
         <el-form-item label="复盘主题（可选）"><el-input v-model="createForm.title" maxlength="200" placeholder="例如：春季活动文章 · 开头重写复盘" /></el-form-item>
         <div class="upload-pair">
@@ -293,7 +308,7 @@
       <template #footer><el-button @click="createVisible = false">取消</el-button><el-button type="primary" :loading="creating" @click="submitCreate">创建并分析</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="analysisEditVisible" title="人工修订 AI 复盘" width="820px" align-center destroy-on-close>
+    <el-dialog v-model="analysisEditVisible" title="人工修订 AI 复盘" width="820px" align-center destroy-on-close :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="restoreDialogScroll">
       <el-form label-position="top">
         <el-form-item label="复盘摘要"><el-input v-model="analysisForm.summary" type="textarea" :autosize="{ minRows: 4, maxRows: 9 }" maxlength="4000" show-word-limit /></el-form-item>
         <div class="editor-list"><div v-for="(item, index) in analysisForm.methodology_candidates" :key="index" class="editor-item"><div class="editor-item-head"><strong>方法论 {{ index + 1 }}</strong><el-button text type="danger" @click="analysisForm.methodology_candidates.splice(index, 1)">删除</el-button></div><el-input v-model="item.title" class="editor-input" placeholder="方法论名称" /><el-input v-model="item.rule" class="editor-input" type="textarea" :rows="2" placeholder="可复用的判断规则" /><div class="editor-two-col"><el-input v-model="item.rationale" type="textarea" :rows="2" placeholder="为什么" /><el-input v-model="item.example" type="textarea" :rows="2" placeholder="本次例子" /></div></div></div>
@@ -302,26 +317,18 @@
       <template #footer><el-button @click="analysisEditVisible = false">取消</el-button><el-button type="primary" :loading="savingAnalysis" @click="saveAnalysis">保存人工修订</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="promoteVisible" title="沉淀到经验库" width="680px" align-center destroy-on-close>
-      <p class="promote-intro">这一步会把当前复盘中的改动证据、AI 总结和人工评论保存成一张可检索的经验卡片。</p>
-      <el-form label-position="top">
-        <el-form-item label="经验标题"><el-input v-model="promoteForm.title" maxlength="200" /></el-form-item>
-        <el-form-item label="分类"><el-input v-model="promoteForm.category" maxlength="50" placeholder="例如：开头、文章结构、表达与呈现" /></el-form-item>
-        <el-form-item label="关联重点改动"><el-checkbox-group v-model="promoteForm.groupIds" class="group-checkboxes"><el-checkbox v-for="group in selectedReview?.change_groups || []" :key="group.id" :label="group.id">{{ group.id }} · {{ impactLabel(group.impact) }}</el-checkbox></el-checkbox-group></el-form-item>
-        <el-form-item label="人工确认后的经验正文（可选）"><el-input v-model="promoteForm.content" type="textarea" :autosize="{ minRows: 6, maxRows: 14 }" maxlength="50000" placeholder="留空则由系统自动整理 AI 总结、改动证据和评论" /></el-form-item>
-      </el-form>
-      <template #footer><el-button @click="promoteVisible = false">取消</el-button><el-button type="primary" :loading="promoting" @click="submitPromote">确认沉淀</el-button></template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading, Plus, Search, WarningFilled } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { focusArticleReviewDiff } from '@/utils/articleReviewDiffFocus'
+import { formatDateTimeMinute } from '@/utils/dateTime'
+import { useDialogScrollPosition } from '@/utils/dialogScrollPosition'
 import { validateArticleReviewFiles, validateUploadFile } from '@/utils/uploadPolicy'
 import {
   addArticleReviewComment,
@@ -341,10 +348,12 @@ import {
   streamArticleReview,
   updateArticleReviewSemanticBlocks,
   updateArticleReviewAnalysis,
+  updateArticleReviewTitle,
 } from '@/api/articleReviews'
 
 const route = useRoute()
 const userStore = useUserStore()
+const { rememberDialogScroll, restoreDialogScroll } = useDialogScrollPosition()
 const reviews = ref([])
 const selectedReview = ref(null)
 const listLoading = ref(false)
@@ -357,8 +366,12 @@ const commenting = reactive({})
 const createVisible = ref(false)
 const analysisEditVisible = ref(false)
 const savingAnalysis = ref(false)
-const promoteVisible = ref(false)
-const promoting = ref(false)
+const titleEditing = ref(false)
+const titleSaving = ref(false)
+const titleDraft = ref('')
+const titleEditOriginal = ref('')
+const reviewTitleInput = ref(null)
+const promotingCandidateId = ref(null)
 const beforeFile = ref(null)
 const afterFile = ref(null)
 const pollTimer = ref(null)
@@ -380,7 +393,6 @@ const filters = reactive({ keyword: '', status: '' })
 const createForm = reactive({ title: '' })
 const commentDrafts = reactive({})
 const analysisForm = reactive({ summary: '', methodology_candidates: [] })
-const promoteForm = reactive({ title: '', category: '文章复盘', content: '', groupIds: [] })
 
 const statusFilters = [
   { value: '', label: '全部' },
@@ -423,10 +435,6 @@ const methodologyCandidates = computed(() => {
   const persisted = workflow.value.methodology_candidates || []
   return persisted.length ? persisted : (selectedReview.value?.ai_analysis?.methodology_candidates || [])
 })
-const hasConfirmedMethodology = computed(() => {
-  const persisted = workflow.value.methodology_candidates || []
-  return !persisted.length || persisted.some((item) => ['confirmed', 'promoted'].includes(item.status))
-})
 const currentStage = computed(() => workflow.value.run?.current_stage || null)
 const currentStageLabel = computed(() => workflowStages.value.find((item) => item.stage_key === currentStage.value)?.label || '—')
 const suggestedStageKey = computed(() => currentStage.value || defaultStageKey(workflowStages.value))
@@ -452,7 +460,7 @@ const retryableStage = computed(() => {
 })
 const retryableStageLabel = computed(() => retryableStage.value === 'ai_review' ? '重新分析' : retryableStage.value ? `重试${stageLabel(retryableStage.value)}` : '')
 
-const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16) : '—'
+const formatDate = formatDateTimeMinute
 const statusLabel = (value) => ({ processing: '解析中', analyzing: '分析中', reviewing: '待复盘', failed: '分析失败' }[value] || value || '未知')
 const statusType = (value) => ({ processing: 'warning', analyzing: 'warning', reviewing: 'success', failed: 'danger' }[value] || 'info')
 const impactLabel = (value) => ({ high: '重点修改', medium: '中等修改', low: '轻微修改' }[value] || '修改')
@@ -487,6 +495,11 @@ const syncWorkflowDraft = (value) => {
   const blocks = value || {}
   semanticDraft.before = JSON.parse(JSON.stringify((blocks.blocks || []).filter((item) => item.side === 'before')))
   semanticDraft.after = JSON.parse(JSON.stringify((blocks.blocks || []).filter((item) => item.side === 'after')))
+}
+
+const syncReviewTitle = (reviewId, title) => {
+  const listItem = reviews.value.find((item) => item.id === reviewId)
+  if (listItem) listItem.title = title
 }
 
 const applyReviewResponse = (value) => {
@@ -524,6 +537,55 @@ const applyReviewResponse = (value) => {
     activeChangeIndex.value = Math.max(0, orderedGroups.value.length - 1)
   }
   if (review.workflow) syncWorkflowDraft(review.workflow)
+}
+
+const startTitleEditing = async () => {
+  if (!selectedReview.value || titleSaving.value) return
+  titleEditOriginal.value = selectedReview.value.title || ''
+  titleDraft.value = titleEditOriginal.value
+  titleEditing.value = true
+  await nextTick()
+  reviewTitleInput.value?.focus?.()
+  reviewTitleInput.value?.select?.()
+}
+
+const cancelTitleEditing = () => {
+  if (titleSaving.value) return
+  titleDraft.value = titleEditOriginal.value
+  titleEditing.value = false
+}
+
+const saveReviewTitle = async () => {
+  if (!titleEditing.value || titleSaving.value || !selectedReview.value) return
+  const reviewId = selectedReview.value.id
+  const nextTitle = titleDraft.value.trim()
+  if (!nextTitle) {
+    ElMessage.warning('标题不能为空')
+    await nextTick()
+    reviewTitleInput.value?.focus?.()
+    return
+  }
+  if (nextTitle === titleEditOriginal.value.trim()) {
+    titleEditing.value = false
+    return
+  }
+
+  titleSaving.value = true
+  try {
+    const response = await updateArticleReviewTitle(reviewId, { title: nextTitle })
+    syncReviewTitle(reviewId, nextTitle)
+    if (selectedReview.value?.id === reviewId) applyReviewResponse(response.data)
+    titleEditOriginal.value = nextTitle
+    titleDraft.value = nextTitle
+    titleEditing.value = false
+    ElMessage.success('标题已保存')
+  } catch {
+    ElMessage.error('标题保存失败，请稍后重试')
+    await nextTick()
+    reviewTitleInput.value?.focus?.()
+  } finally {
+    titleSaving.value = false
+  }
 }
 
 const isCancelledRequest = (error) => error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError' || error?.name === 'AbortError'
@@ -575,6 +637,9 @@ const selectReview = async (id, initialReview = null) => {
   stopProgressStream()
   stopPolling()
   if (detailAbortController.value) detailAbortController.value.abort()
+  titleEditing.value = false
+  titleDraft.value = ''
+  titleEditOriginal.value = ''
   progressState.value = null
   sourceLoaded.value = false
   sourceLoading.value = false
@@ -641,6 +706,9 @@ const clearSelectedReview = () => {
   activeStageManuallySelected.value = false
   activeChangeIndex.value = 0
   expandedChangeKey.value = ''
+  titleEditing.value = false
+  titleDraft.value = ''
+  titleEditOriginal.value = ''
   selectedReview.value = null
 }
 
@@ -655,6 +723,7 @@ const deleteSelectedReview = async () => {
         type: 'warning',
         confirmButtonText: '删除复盘',
         cancelButtonText: '取消',
+        lockScroll: false,
       },
     )
   } catch {
@@ -968,6 +1037,7 @@ const regenerateSemanticBlocks = async () => {
         type: 'warning',
         confirmButtonText: '重新分段',
         cancelButtonText: '取消',
+        lockScroll: false,
       },
     )
   } catch {
@@ -990,13 +1060,44 @@ const regenerateSemanticBlocks = async () => {
   }
 }
 
-const confirmMethodology = async (candidate, status) => {
+const rejectMethodology = async (candidate) => {
   try {
-    const response = await confirmArticleReviewMethodology(selectedReview.value.id, candidate.id, { status })
+    const response = await confirmArticleReviewMethodology(selectedReview.value.id, candidate.id, { status: 'rejected' })
     applyReviewResponse(response.data)
-    ElMessage.success(status === 'confirmed' ? '方法论候选已确认' : '方法论候选已驳回')
+    ElMessage.success('方法论候选已驳回')
   } catch {
-    ElMessage.error('方法论确认失败')
+    ElMessage.error('方法论驳回失败')
+  }
+}
+
+const confirmAndPromote = async (candidate) => {
+  if (!selectedReview.value || promotingCandidateId.value) return
+  const content = [
+    candidate.title || '未命名方法',
+    candidate.rule || '',
+    `为什么：${candidate.rationale || '未说明'}`,
+    `本次例子：${candidate.example || '未说明'}`,
+  ].join('\n\n').trim()
+  promotingCandidateId.value = candidate.id || `legacy-${candidate.title}`
+  try {
+    const response = await promoteArticleReview(selectedReview.value.id, {
+      methodology_candidate_id: candidate.id || null,
+      title: candidate.title || null,
+      category: '文章复盘',
+      content,
+      change_group_ids: candidate.evidence_group_ids || candidate.evidence_change_ids || [],
+    })
+    const card = response.data?.card
+    candidate.status = 'promoted'
+    if (card?.id) {
+      candidate.experience_card_id = card.id
+      selectedReview.value.promoted_card_ids = [...new Set([...(selectedReview.value.promoted_card_ids || []), card.id])]
+    }
+    ElMessage.success('已确认并沉淀到经验库')
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || '确认并沉淀失败')
+  } finally {
+    promotingCandidateId.value = null
   }
 }
 
@@ -1061,37 +1162,6 @@ const saveAnalysis = async () => {
   }
 }
 
-const openPromote = (candidate = null) => {
-  const groupIds = candidate?.evidence_group_ids?.length
-    ? candidate.evidence_group_ids
-    : (selectedReview.value?.change_groups || []).filter((group) => group.is_major).map((group) => group.id)
-  promoteForm.title = candidate?.title || ''
-  promoteForm.category = '文章复盘'
-  promoteForm.content = candidate ? `${candidate.title || '方法论'}\n\n${candidate.rule || ''}\n\n为什么：${candidate.rationale || '未说明'}\n\n本次例子：${candidate.example || '未说明'}` : ''
-  promoteForm.groupIds = [...groupIds]
-  promoteVisible.value = true
-}
-
-const submitPromote = async () => {
-  if (!selectedReview.value) return
-  promoting.value = true
-  try {
-    const response = await promoteArticleReview(selectedReview.value.id, {
-      title: promoteForm.title.trim() || null,
-      category: promoteForm.category.trim() || null,
-      content: promoteForm.content.trim() || null,
-      change_group_ids: promoteForm.groupIds,
-    })
-    selectedReview.value.promoted_card_ids = [...new Set([...(selectedReview.value.promoted_card_ids || []), response.data.card.id])]
-    promoteVisible.value = false
-    ElMessage.success('已沉淀到经验库')
-  } catch {
-    ElMessage.error('经验沉淀失败')
-  } finally {
-    promoting.value = false
-  }
-}
-
 onMounted(async () => {
   await loadReviews()
   const reviewId = Number(route.query.review_id)
@@ -1129,6 +1199,10 @@ onBeforeUnmount(() => {
 .review-detail-panel { padding: 28px 30px 40px; }
 .detail-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; margin-bottom: 22px; }
 .detail-head h2 { margin: 14px 0 10px; font: 500 28px/1.3 var(--serif, serif); }
+.editable-review-title { width: fit-content; max-width: 100%; padding: 2px 7px; border-radius: var(--r-sm); cursor: text; transition: background .2s ease, color .2s ease; }
+.editable-review-title:hover { background: var(--clay-tint); color: var(--clay-deep); }
+.review-title-input { width: min(620px, 100%); margin: 14px 0 10px; }
+.review-title-input :deep(.el-input__wrapper) { min-height: 42px; padding: 3px 12px; border-radius: var(--r-sm); box-shadow: 0 0 0 1px var(--clay) inset; }
 .back-link { border: 0; padding: 0; background: none; color: var(--ink-3); cursor: pointer; font-size: 12px; }
 .detail-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; color: var(--ink-3); font-size: 12px; }
 .detail-actions { display: flex; flex: 0 0 auto; gap: 8px; }

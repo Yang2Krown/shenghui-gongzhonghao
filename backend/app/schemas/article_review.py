@@ -19,6 +19,17 @@ class ArticleReviewCommentCreate(BaseModel):
         return value or None
 
 
+class ArticleReviewTitleUpdate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+    @validator("title")
+    def strip_title(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("标题不能为空")
+        return value
+
+
 class ArticleReviewCommentUpdate(BaseModel):
     body: Optional[str] = Field(None, min_length=1, max_length=5_000)
     resolved: Optional[bool] = None
@@ -48,6 +59,7 @@ class ArticleReviewAnalysisUpdate(BaseModel):
 
 
 class ArticleReviewPromote(BaseModel):
+    methodology_candidate_id: Optional[int] = Field(None, ge=1)
     title: Optional[str] = Field(None, max_length=200)
     content: Optional[str] = Field(None, max_length=50_000)
     category: Optional[str] = Field(None, max_length=50)

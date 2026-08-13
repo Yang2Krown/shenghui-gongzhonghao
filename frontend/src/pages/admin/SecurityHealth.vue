@@ -190,6 +190,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getSecurityHealth } from '@/api/admin'
+import { formatDateTimeMinute } from '@/utils/dateTime'
 
 const HANDLED_KEY = 'gzh-security-health-handled-v1'
 
@@ -357,7 +358,7 @@ function loadHandled() {
 function fmtDate(value) {
   if (!value) return '—'
   try {
-    return new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16)
+    return formatDateTimeMinute(value, '-')
   } catch {
     return value
   }

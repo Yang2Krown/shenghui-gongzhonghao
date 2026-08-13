@@ -85,6 +85,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { getSourceHealth } from '@/api/admin'
+import { formatDateTimeMinute } from '@/utils/dateTime'
 
 const loading = ref(false)
 const data = ref({ summary: {}, by_type: [], items: [] })
@@ -108,7 +109,7 @@ async function load() {
 
 function fmtDate(value) {
   if (!value) return '-'
-  return new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16)
+  return formatDateTimeMinute(value, '-')
 }
 
 function togglePanel(key) {

@@ -50,6 +50,7 @@ from app.schemas.article_review import (
     ArticleReviewMethodologyConfirm,
     ArticleReviewPromote,
     ArticleReviewSemanticBlocksUpdate,
+    ArticleReviewTitleUpdate,
 )
 from app.services.article_review_service import (
     ArticleReviewAnalysisError,
@@ -943,6 +944,30 @@ async def delete_article_review(
         "code": 200,
         "message": "文章复盘已删除",
         "data": {"review_id": review_id},
+    }
+
+
+@router.put("/{review_id}/title", response_model=dict)
+async def update_article_review_title(
+    review_id: int,
+    title_in: ArticleReviewTitleUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """更新复盘标题；团队协作成员均可修改，且不会影响已完成的分析产物。"""
+
+    await _require_review_access(db, current_user)
+    review = await _load_review_metadata(db, review_id, include_analysis=False)
+    if review is None:
+        raise HTTPException(status_code=404, detail="文章复盘不存在")
+
+    review.title = title_in.title
+    await db.commit()
+    await db.refresh(review)
+    return {
+        "code": 200,
+        "message": "文章复盘标题已更新",
+        "data": {"review": _review_metadata_payload(review, include_analysis=False)},
     }
 
 
@@ -1840,27 +1865,53 @@ async def promote_article_review_methodology(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    """把人工确认后的复盘结果沉淀到现有经验库。"""
+    """将单条方法论候选确认并沉淀到现有经验库。"""
 
     await _require_review_access(db, current_user)
     review = await _load_review(db, review_id)
     if review is None:
         raise HTTPException(status_code=404, detail="文章复盘不存在")
+    selected_candidate = None
+    if promote_in.methodology_candidate_id:
+        selected_candidate = (await db.execute(
+            select(ArticleReviewMethodologyCandidate).where(
+                ArticleReviewMethodologyCandidate.id == promote_in.methodology_candidate_id,
+                ArticleReviewMethodologyCandidate.review_id == review_id,
+            )
+        )).scalar_one_or_none()
+        if selected_candidate is None:
+            raise HTTPException(status_code=404, detail="方法论候选不存在")
+        if selected_candidate.status == "rejected":
+            raise HTTPException(status_code=409, detail="已驳回的方法论候选不能沉淀")
     available_ids = {group.get("id") for group in (review.change_groups or [])}
-    selected_ids = promote_in.change_group_ids or [
-        group.get("id") for group in (review.change_groups or []) if group.get("is_major")
-    ]
+    selected_ids = promote_in.change_group_ids or (
+        list(selected_candidate.evidence_change_ids or [])
+        if selected_candidate is not None
+        else [group.get("id") for group in (review.change_groups or []) if group.get("is_major")]
+    )
     invalid_ids = [group_id for group_id in selected_ids if group_id not in available_ids]
     if invalid_ids:
         raise HTTPException(status_code=400, detail="沉淀的改动块不存在")
     analysis = review.ai_analysis if isinstance(review.ai_analysis, dict) else {}
     candidates = analysis.get("methodology_candidates") or []
-    default_title = (candidates[0].get("title") if candidates and isinstance(candidates[0], dict) else None)
+    default_title = (
+        selected_candidate.title
+        if selected_candidate is not None
+        else (candidates[0].get("title") if candidates and isinstance(candidates[0], dict) else None)
+    )
+    candidate_content = None
+    if selected_candidate is not None:
+        candidate_content = "\n\n".join([
+            selected_candidate.title or "未命名方法",
+            selected_candidate.rule or "",
+            f"为什么：{selected_candidate.rationale or '未说明'}",
+            f"本次例子：{selected_candidate.example or '未说明'}",
+        ]).strip()
     card_title = promote_in.title or default_title or f"{review.title} · 修改方法论"
     content = build_review_experience_content(
         review,
         group_ids=selected_ids,
-        custom_content=promote_in.content,
+        custom_content=promote_in.content or candidate_content,
     )
     if not content:
         raise HTTPException(status_code=400, detail="没有可沉淀的复盘内容")
@@ -1874,6 +1925,7 @@ async def promote_article_review_methodology(
             pair = existing.version_pair if isinstance(existing.version_pair, dict) else {}
             if (
                 pair.get("review_id") == review.id
+                and pair.get("methodology_candidate_id") == (selected_candidate.id if selected_candidate else None)
                 and sorted(pair.get("change_group_ids") or []) == selected_key
                 and (not promote_in.title or existing.title == card_title)
                 and (not promote_in.content or existing.content == content)
@@ -1907,16 +1959,6 @@ async def promote_article_review_methodology(
                 ArticleReviewMethodologyCandidate.review_run_id == run.id,
             )
         )).scalars().all()
-        # 经验正文会同时保留候选方法论和它们的证据，因此只要本次运行
-        # 生成过候选，就必须逐条人工确认；驳回也不能被误当成已确认。
-        if candidate_rows and any(
-            candidate.status not in {"confirmed", "promoted"}
-            for candidate in candidate_rows
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="请先人工确认所有方法论候选，再沉淀到经验库",
-            )
     card = await create_experience_card(
         db,
         title=card_title,
@@ -1926,6 +1968,7 @@ async def promote_article_review_methodology(
         creation_id=None,
         version_pair={
             "review_id": review.id,
+            "methodology_candidate_id": selected_candidate.id if selected_candidate is not None else None,
             "change_group_ids": selected_ids,
             "before_filename": review.before_filename,
             "after_filename": review.after_filename,
@@ -1988,10 +2031,16 @@ async def promote_article_review_methodology(
                 confirmed_by=current_user.id,
                 confirmed_at=utcnow(),
             ))
-    for candidate in candidate_rows:
-        if set(candidate.evidence_change_ids or []) & set(selected_ids):
-            candidate.status = "promoted"
-            candidate.experience_card_id = card.id
+    if selected_candidate is not None:
+        selected_candidate.status = "promoted"
+        selected_candidate.confirmed_by = current_user.id
+        selected_candidate.confirmed_at = selected_candidate.confirmed_at or utcnow()
+        selected_candidate.experience_card_id = card.id
+    else:
+        for candidate in candidate_rows:
+            if set(candidate.evidence_change_ids or []) & set(selected_ids):
+                candidate.status = "promoted"
+                candidate.experience_card_id = card.id
     embedding = await enqueue_embedding(card, db)
     review.promoted_card_ids = list(dict.fromkeys([*(review.promoted_card_ids or []), card.id]))
     await db.commit()
@@ -2008,6 +2057,7 @@ async def promote_article_review_methodology(
             ),
             "embedding": embedding,
             "review_id": review.id,
+            "methodology_candidate_id": selected_candidate.id if selected_candidate is not None else None,
             "change_group_ids": selected_ids,
         },
     }

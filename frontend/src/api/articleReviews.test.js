@@ -33,6 +33,7 @@ import {
   updateArticleReviewSemanticBlocks,
   updateArticleReviewAnalysis,
   updateArticleReviewComment,
+  updateArticleReviewTitle,
 } from './articleReviews'
 
 describe('article reviews API', () => {
@@ -54,6 +55,11 @@ describe('article reviews API', () => {
     expect(apiFns.post).toHaveBeenNthCalledWith(2, '/reviews/7/comments', { change_group_id: 'change-001', body: '保留这个改法' })
     expect(apiFns.put).toHaveBeenCalledWith('/reviews/7/analysis', { summary: '人工确认' })
     expect(apiFns.post).toHaveBeenNthCalledWith(3, '/reviews/7/promote', { change_group_ids: ['change-001'] })
+  })
+
+  it('更新文章复盘标题', () => {
+    updateArticleReviewTitle(7, { title: '终稿 · 已确认' })
+    expect(apiFns.put).toHaveBeenCalledWith('/reviews/7/title', { title: '终稿 · 已确认' })
   })
 
   it('上传改前稿和改后稿，并带上标题', () => {

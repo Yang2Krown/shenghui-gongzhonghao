@@ -16,6 +16,8 @@ export const getArticleReviewSourceText = (id, config = {}) => get(`/reviews/${i
 
 export const deleteArticleReview = (id) => del(`/reviews/${id}`)
 
+export const updateArticleReviewTitle = (id, data) => put(`/reviews/${id}/title`, data)
+
 export const getArticleReviewWorkflow = (id, params = {}) => get(`/reviews/${id}/workflow`, params)
 
 export const createArticleReview = (beforeFile, afterFile, title = '') => {

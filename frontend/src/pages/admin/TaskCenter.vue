@@ -99,6 +99,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getTaskCenterOverview, getTaskCenterTasks, retryTaskCenter } from '@/api/admin'
+import { formatDateTimeMinute } from '@/utils/dateTime'
 
 const overview = ref({ counts: {}, queues: [], workers: [] })
 const tasks = ref([])
@@ -160,7 +161,7 @@ const statusLabel = (value) => ({ waiting: '等待中', running: '执行中', re
 const statusType = (value) => ({ waiting: 'info', running: 'warning', retrying: 'warning', success: 'success', failed: 'danger', dead_letter: 'danger' }[value] || 'info')
 const categoryLabel = (value) => ({ scraping: '抓取', ai: 'AI', publish: '发布', default: '系统' }[value] || value || '系统')
 const queueLabel = (value) => ({ scraping: '抓取队列', ai: 'AI 队列', publish: '发布队列', default: '系统队列' }[value] || value)
-const fmtDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16) : '—'
+const fmtDate = (value) => formatDateTimeMinute(value)
 
 const startRefresh = () => {
   if (!refreshTimer && !document.hidden) {

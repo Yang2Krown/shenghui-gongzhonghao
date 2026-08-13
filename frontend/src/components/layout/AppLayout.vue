@@ -336,6 +336,7 @@ const navItems = [
       { id: 'team-members', label: '团队管理' },
       { id: 'meetings', label: '会议方法论' },
       { id: 'article-reviews', label: '文章复盘' },
+      { id: 'draft-diagnosis', label: '初稿诊断' },
       { id: 'experience', label: '经验库' },
     ],
   },
@@ -411,6 +412,7 @@ const activeRoute = computed(() => {
   if (path.startsWith('/team')) return 'team-members'
   if (path.startsWith('/meetings')) return 'meetings'
   if (path.startsWith('/article-reviews')) return 'article-reviews'
+  if (path.startsWith('/draft-diagnosis')) return 'draft-diagnosis'
   if (path.startsWith('/experience')) return 'experience'
   if (path.startsWith('/admin/source-health')) return 'admin-source-health'
   if (path.startsWith('/admin/xhs-monitoring')) return 'admin-xhs-monitoring'
@@ -483,6 +485,7 @@ const routeMap = {
   'team-members': '/team',
   'meetings': '/meetings',
   'article-reviews': '/article-reviews',
+  'draft-diagnosis': '/draft-diagnosis',
   'experience': '/experience',
   'creation': '/creation',
   'admin-dashboard': '/admin',

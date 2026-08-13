@@ -34,6 +34,7 @@ from app.models.article_member import ArticleMember
 from app.models.meeting import Meeting, MeetingSuggestion, MeetingSynthesis
 from app.models.meeting_methodology import MeetingMethodologyCluster, MeetingMethodologySource
 from app.models.content_version import ContentVersion, ExperienceCard
+from app.models.draft_diagnosis import DraftDiagnosis
 from app.models.article_review import (
     ArticleReview,
     ArticleReviewComment,
@@ -116,6 +117,7 @@ __all__ = [
     "MeetingMethodologySource",
     "ContentVersion",
     "ExperienceCard",
+    "DraftDiagnosis",
     "ArticleReview",
     "ArticleReviewComment",
     "ArticleReviewRun",

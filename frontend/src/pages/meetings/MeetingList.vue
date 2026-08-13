@@ -170,7 +170,7 @@
       </transition>
     </teleport>
 
-    <el-dialog v-model="createVisible" title="新建会议" width="620px" align-center destroy-on-close>
+    <el-dialog v-model="createVisible" title="新建会议" width="620px" align-center destroy-on-close :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="restoreDialogScroll">
       <el-form :model="form" label-position="top">
         <el-form-item label="会议主题" required>
           <el-input v-model="form.title" maxlength="200" show-word-limit placeholder="例如：内容组周会 · Seedance 2.5 评测复盘" />
@@ -205,8 +205,11 @@ import { ElMessage } from 'element-plus'
 import { ArrowRight, Plus, Search } from '@element-plus/icons-vue'
 import { createMeeting, getMeetingSummary, listMeetings } from '@/api/meetings'
 import { meetingStatusLabel, meetingStatusType } from './meetingUi'
+import { formatDateTimeMinute } from '@/utils/dateTime'
+import { useDialogScrollPosition } from '@/utils/dialogScrollPosition'
 
 const router = useRouter()
+const { rememberDialogScroll, restoreDialogScroll } = useDialogScrollPosition()
 const meetings = ref([])
 const loading = ref(false)
 const creating = ref(false)
@@ -225,7 +228,7 @@ let refreshTimer = null
 
 const form = reactive({ title: '', meeting_at: '', raw_text: '' })
 
-const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16) : '—'
+const formatDate = formatDateTimeMinute
 const shorten = (value) => {
   const text = String(value || '').replace(/\s+/g, ' ').trim()
   return text.length > 96 ? `${text.slice(0, 96)}…` : text

@@ -88,7 +88,7 @@
       </div>
     </section>
 
-    <el-dialog v-model="saveDialogVisible" title="保存文章版本" width="560px" align-center destroy-on-close>
+    <el-dialog v-model="saveDialogVisible" title="保存文章版本" width="560px" align-center destroy-on-close :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="restoreDialogScroll">
       <el-form :model="saveForm" label-position="top">
         <el-form-item label="版本类型" required>
           <el-select v-model="saveForm.version_type" style="width: 100%">
@@ -122,7 +122,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="detailVisible" title="版本内容" width="820px" align-center destroy-on-close>
+    <el-dialog v-model="detailVisible" title="版本内容" width="820px" align-center destroy-on-close :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="restoreDialogScroll">
       <div v-if="detailVersion" class="version-detail">
         <div class="detail-summary">
           <strong>v{{ detailVersion.version_no }} · {{ versionTypeLabel(detailVersion.version_type) }}</strong>
@@ -133,7 +133,7 @@
       </div>
     </el-dialog>
 
-    <el-dialog v-model="diffVisible" title="版本对比" width="980px" align-center destroy-on-close>
+    <el-dialog v-model="diffVisible" title="版本对比" width="980px" align-center destroy-on-close :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="restoreDialogScroll">
       <div v-if="diffData" class="diff-dialog">
         <div class="diff-header">
           <div>
@@ -172,9 +172,12 @@ import {
   summarizeContentVersions,
 } from '@/api/contentVersions'
 import { getCreationById } from '@/api/creation'
+import { formatDateTimeMinute } from '@/utils/dateTime'
+import { useDialogScrollPosition } from '@/utils/dialogScrollPosition'
 
 const route = useRoute()
 const router = useRouter()
+const { rememberDialogScroll, restoreDialogScroll } = useDialogScrollPosition()
 const creationTitle = ref('')
 const versions = ref([])
 const suggestions = ref([])
@@ -210,7 +213,7 @@ const versionTypes = [
 
 const versionTypeLabel = (value) => versionTypes.find((item) => item.value === value)?.label || value || '手动保存'
 const summaryStatusLabel = (value) => ({ queued: '摘要排队中', running: '摘要生成中', succeeded: '语义摘要已完成', failed: '摘要失败' }[value] || value)
-const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16) : '—'
+const formatDate = formatDateTimeMinute
 const shorten = (value, length = 70) => {
   const text = String(value || '').replace(/\s+/g, ' ').trim()
   return text.length > length ? `${text.slice(0, length)}…` : text

@@ -31,6 +31,7 @@ from app.schemas.article_review import (
     ArticleReviewCommentCreate,
     ArticleReviewCommentUpdate,
     ArticleReviewPromote,
+    ArticleReviewTitleUpdate,
 )
 from app.services.article_review_service import (
     ArticleReviewAnalysisError,
@@ -1031,6 +1032,126 @@ async def test_comment_update_and_promote_keep_review_trace(review_db, monkeypat
         assert len(sources) == 1
         assert sources[0].comment_ids == [comment["data"]["comment"]["id"]]
         assert review.id in (await db.get(ArticleReview, review.id)).promoted_card_ids
+
+
+@pytest.mark.asyncio
+async def test_promote_one_methodology_candidate_without_confirming_all(review_db, monkeypatch):
+    employee = _user(1)
+    monkeypatch.setattr(reviews_api, "enqueue_embedding", _fake_embedding)
+    async with review_db() as db:
+        db.add(employee)
+        review = ArticleReview(
+            title="逐条沉淀复盘",
+            before_filename="before.txt",
+            after_filename="after.txt",
+            before_text="旧",
+            after_text="新",
+            before_char_count=1,
+            after_char_count=1,
+            change_groups=[{
+                "id": "change-001",
+                "impact": "high",
+                "is_major": True,
+                "before": "旧",
+                "after": "新",
+            }],
+            ai_analysis={"summary": "保留具体结果"},
+            status="reviewing",
+            created_by=employee.id,
+        )
+        db.add(review)
+        await db.flush()
+        run = ArticleReviewRun(
+            review_id=review.id,
+            run_id="review-run-direct-promote",
+            run_no=1,
+            status="succeeded",
+            current_stage="methodology",
+            created_by=employee.id,
+        )
+        db.add(run)
+        await db.flush()
+        first = ArticleReviewMethodologyCandidate(
+            review_id=review.id,
+            review_run_id=run.id,
+            title="保留具体结果",
+            rule="抽象判断必须落到具体结果",
+            rationale="读者更容易理解",
+            example="把形容词改成可验证的变化",
+            evidence_change_ids=["change-001"],
+            status="candidate",
+        )
+        second = ArticleReviewMethodologyCandidate(
+            review_id=review.id,
+            review_run_id=run.id,
+            title="另一个候选",
+            rule="不要同时塞入多个结论",
+            evidence_change_ids=["change-001"],
+            status="candidate",
+        )
+        db.add_all([first, second])
+        await db.commit()
+        await db.refresh(first)
+        await db.refresh(second)
+
+        result = await reviews_api.promote_article_review_methodology(
+            review.id,
+            ArticleReviewPromote(
+                methodology_candidate_id=first.id,
+                title=first.title,
+                content="保留具体结果\n\n抽象判断必须落到具体结果",
+                change_group_ids=["change-001"],
+            ),
+            db,
+            employee,
+        )
+
+        assert result["data"]["methodology_candidate_id"] == first.id
+        stored_first = await db.get(ArticleReviewMethodologyCandidate, first.id)
+        stored_second = await db.get(ArticleReviewMethodologyCandidate, second.id)
+        assert stored_first.status == "promoted"
+        assert stored_second.status == "candidate"
+
+
+@pytest.mark.asyncio
+async def test_review_team_member_can_update_title(review_db):
+    employee = _user(1)
+    other_employee = _user(2)
+    async with review_db() as db:
+        db.add_all([employee, other_employee])
+        review = ArticleReview(
+            title="终稿",
+            before_filename="before.txt",
+            after_filename="after.txt",
+            before_text="旧",
+            after_text="新",
+            before_char_count=1,
+            after_char_count=1,
+            change_groups=[],
+            ai_analysis={"status": "succeeded"},
+            status="reviewing",
+            created_by=employee.id,
+        )
+        db.add(review)
+        await db.commit()
+        await db.refresh(review)
+
+        updated = await reviews_api.update_article_review_title(
+            review.id,
+            ArticleReviewTitleUpdate(title="  终稿 · 已确认  "),
+            db,
+            employee,
+        )
+        assert updated["data"]["review"]["title"] == "终稿 · 已确认"
+        assert (await db.get(ArticleReview, review.id)).title == "终稿 · 已确认"
+
+        updated_again = await reviews_api.update_article_review_title(
+            review.id,
+            ArticleReviewTitleUpdate(title="其他标题"),
+            db,
+            other_employee,
+        )
+        assert updated_again["data"]["review"]["title"] == "其他标题"
 
 
 @pytest.mark.asyncio

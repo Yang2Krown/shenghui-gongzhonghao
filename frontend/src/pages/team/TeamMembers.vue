@@ -93,7 +93,7 @@
     </div>
 
     <!-- 添加员工（管理员直接赋予角色） -->
-    <el-dialog v-model="addVisible" title="添加员工" width="560px" align-center class="team-dialog">
+    <el-dialog v-model="addVisible" title="添加员工" width="560px" align-center class="team-dialog" :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="restoreDialogScroll">
       <p class="dialog-tip">搜索用户并直接赋予「员工」角色，无需邀请码；员工自动获得全部产品权限。</p>
       <div class="candidate-search">
         <el-input
@@ -135,7 +135,7 @@
     </el-dialog>
 
     <!-- 编辑员工档案 -->
-    <el-dialog v-model="editVisible" title="编辑员工档案" width="480px" align-center class="team-dialog">
+    <el-dialog v-model="editVisible" title="编辑员工档案" width="480px" align-center class="team-dialog" :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="restoreDialogScroll">
       <el-form :model="editForm" label-position="top">
         <el-form-item label="部门">
           <el-input v-model="editForm.department" placeholder="如：内容组 / 商务组 / 技术组" />
@@ -174,8 +174,10 @@ import {
   updateMemberRole,
   updateTeamMember
 } from '@/api/team'
+import { useDialogScrollPosition } from '@/utils/dialogScrollPosition'
 
 const userStore = useUserStore()
+const { rememberDialogScroll, restoreDialogScroll } = useDialogScrollPosition()
 
 const members = ref([])
 const loading = ref(false)
@@ -257,7 +259,7 @@ const removeEmployee = async (row) => {
     await ElMessageBox.confirm(
       `移除后 ${row.full_name || row.username} 将失去员工身份（产品权限回到个人已开通状态），确定继续？`,
       '移除员工',
-      { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' }
+      { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消', lockScroll: false }
     )
   } catch {
     return

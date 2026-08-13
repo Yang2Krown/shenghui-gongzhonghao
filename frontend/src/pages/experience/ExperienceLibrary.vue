@@ -77,7 +77,7 @@
       <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.pageSize" layout="total, prev, pager, next" :total="total" @current-change="loadCards" />
     </div>
 
-    <el-dialog v-model="createVisible" title="新增经验" width="700px" align-center destroy-on-close>
+    <el-dialog v-model="createVisible" title="新增经验" width="700px" align-center destroy-on-close :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="restoreDialogScroll">
       <div class="upload-intro">
         <div><strong>支持上传 PDF / Word</strong><span>上传内容会先保存到“待确认”，你可以改标题、正文和分类，再确认进入正式经验库。</span></div>
         <input ref="fileInput" type="file" accept=".pdf,.docx,.txt,.md,.markdown" hidden @change="handleFileChange">
@@ -92,7 +92,7 @@
       <template #footer><el-button @click="createVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveCard">{{ form.uploaded ? '保存到待确认' : '保存正式经验' }}</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="detailVisible" width="780px" align-center destroy-on-close class="experience-detail-dialog">
+    <el-dialog v-model="detailVisible" width="780px" align-center destroy-on-close class="experience-detail-dialog" :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="restoreDialogScroll">
       <template #header>
         <div class="detail-dialog-head">
           <div>
@@ -147,8 +147,11 @@ import {
   updateExperienceCard,
 } from '@/api/experience'
 import { renderExperienceMarkdown } from '@/utils/experienceMarkdown'
+import { formatDateTimeMinute } from '@/utils/dateTime'
+import { useDialogScrollPosition } from '@/utils/dialogScrollPosition'
 
 const router = useRouter()
+const { rememberDialogScroll, restoreDialogScroll } = useDialogScrollPosition()
 const cards = ref([])
 const total = ref(0)
 const loading = ref(false)
@@ -181,7 +184,7 @@ const sourceTypes = [
 const sourceTypeLabel = (value) => ({ meeting_methodology: '会议方法论', meeting_diff: '文章版本', review_feedback: '文章复盘', uploaded: '上传材料', manual: '手动新增' }[value] || value || '经验')
 const matchMethodLabel = (value) => ({ semantic: '语义命中', 'semantic+keyword': '语义 + 关键词', keyword_fallback: '关键词降级' }[value] || value)
 const embeddingStatusLabel = (value) => ({ waiting: '确认后生成 Embedding', pending: 'Embedding 生成中', ready: '已向量化', failed: 'Embedding 不可用' }[value] || '待处理')
-const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16) : '—'
+const formatDate = formatDateTimeMinute
 
 const loadCards = async () => {
   loading.value = true

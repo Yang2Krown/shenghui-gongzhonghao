@@ -190,6 +190,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getAiCosts, updateLlmPricing } from '@/api/admin'
+import { formatDateTimeMinute } from '@/utils/dateTime'
 
 const loading = ref(false)
 const savingPricingId = ref(null)
@@ -373,7 +374,7 @@ function formatMoney(value) {
 
 function fmtDate(value) {
   if (!value) return '-'
-  return new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16)
+  return formatDateTimeMinute(value, '-')
 }
 
 onMounted(load)

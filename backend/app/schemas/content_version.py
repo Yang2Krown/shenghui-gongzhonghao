@@ -89,7 +89,7 @@ class ExperienceCardDraftCreate(BaseModel):
     @validator("source_type")
     def validate_draft_source_type(cls, value: str) -> str:
         value = value.strip().lower()
-        if value not in {"meeting_methodology", "uploaded", "manual"}:
+        if value not in {"meeting_methodology", "review_feedback", "uploaded", "manual"}:
             raise ValueError("待确认经验来源类型不合法")
         return value
 

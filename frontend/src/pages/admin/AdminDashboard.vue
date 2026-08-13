@@ -484,6 +484,7 @@ import {
   updateMonitoringAlert,
 } from '@/api/admin'
 import { useUserStore } from '@/stores/user'
+import { formatDateTimeMinute } from '@/utils/dateTime'
 
 const userStore = useUserStore()
 const router = useRouter()
@@ -955,7 +956,7 @@ function goAlertTarget(key) {
 function fmtDate(value) {
   if (!value) return '—'
   try {
-    return new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16)
+    return formatDateTimeMinute(value, '-')
   } catch {
     return value
   }
