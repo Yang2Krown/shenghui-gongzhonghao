@@ -12,7 +12,14 @@ VERSION_TYPES = {
     "final",
     "manual",
 }
-EXPERIENCE_SOURCE_TYPES = {"meeting_diff", "review_feedback", "manual"}
+EXPERIENCE_SOURCE_TYPES = {
+    "meeting_methodology",
+    "meeting_diff",
+    "review_feedback",
+    "uploaded",
+    "manual",
+}
+EXPERIENCE_STATUSES = {"pending", "confirmed", "rejected"}
 
 
 class ContentVersionCreate(BaseModel):
@@ -45,6 +52,7 @@ class ExperienceCardCreate(BaseModel):
     source_type: str = Field("manual", max_length=20)
     creation_id: Optional[int] = Field(None, ge=1)
     version_pair: Optional[Dict[str, Any]] = None
+    source_meta: Optional[Dict[str, Any]] = None
     suggestion_id: Optional[int] = Field(None, ge=1)
 
     @validator("title", "content", "category")
@@ -60,6 +68,43 @@ class ExperienceCardCreate(BaseModel):
         if value not in EXPERIENCE_SOURCE_TYPES:
             raise ValueError("经验来源类型不合法")
         return value
+
+
+class ExperienceCardDraftCreate(BaseModel):
+    """待确认经验只允许由受控的上传/会议入口创建。"""
+
+    title: str = Field(..., min_length=1, max_length=200)
+    content: str = Field(..., min_length=1, max_length=50000)
+    category: Optional[str] = Field(None, max_length=50)
+    source_type: str = Field(..., max_length=20)
+    source_meta: Optional[Dict[str, Any]] = None
+
+    @validator("title", "content", "category")
+    def strip_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @validator("source_type")
+    def validate_draft_source_type(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"meeting_methodology", "uploaded", "manual"}:
+            raise ValueError("待确认经验来源类型不合法")
+        return value
+
+
+class ExperienceCardUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
+    content: Optional[str] = Field(None, min_length=1, max_length=50000)
+    category: Optional[str] = Field(None, max_length=50)
+
+    @validator("title", "content", "category")
+    def strip_update_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
 
 class ExperienceCardListResponse(BaseModel):

@@ -112,18 +112,45 @@
         <section v-if="workflowStages.length" class="content-section stage-section">
           <div class="section-heading">
             <div><span class="eyebrow">WORKFLOW STATUS</span><h3>复盘阶段</h3><p>每个阶段都保存到本次运行记录，刷新或断线后可以从当前阶段继续。</p></div>
-            <span class="section-count">{{ currentStageLabel }}</span>
+            <div class="stage-heading-meta">
+              <span class="section-count">正在查看：{{ activeStageLabel }} · 当前运行：{{ currentStageLabel }}</span>
+              <el-button v-if="!isFollowingCurrentStage" text type="primary" size="small" @click="followCurrentStage">回到当前阶段</el-button>
+            </div>
           </div>
           <div class="stage-list">
-            <div v-for="stage in workflowStages" :key="stage.stage_key" class="stage-item" :class="`stage-${stage.status}`">
+            <button
+              v-for="stage in workflowStages"
+              :key="stage.stage_key"
+              type="button"
+              class="stage-item"
+              :class="[`stage-${stage.status}`, { 'is-active': activeStageKey === stage.stage_key }]"
+              :aria-current="activeStageKey === stage.stage_key ? 'step' : undefined"
+              @click="selectStage(stage)"
+            >
               <span class="stage-dot">{{ stage.status === 'succeeded' ? '✓' : stage.stage_order }}</span>
               <div><strong>{{ stage.label }}</strong><small>{{ stageMessage(stage) }}</small></div>
               <el-tag size="small" :type="stage.is_stale ? 'danger' : stageType(stage.status)">{{ stage.is_stale ? '任务已失联' : stageStatusLabel(stage.status) }}</el-tag>
-            </div>
+            </button>
           </div>
         </section>
 
-        <section v-if="semanticBlocks.length" class="content-section semantic-section">
+        <section v-if="activeStageKey === 'parse'" class="content-section stage-content-section parse-section">
+          <div class="section-heading">
+            <div><span class="eyebrow">00 · READ THE MATERIAL</span><h3>文件解析</h3><p>先确认两份文章都被完整读取，再进入语义分段和差异识别。</p></div>
+            <span class="section-count">{{ selectedReview.status === 'processing' ? '正在解析' : '解析结果' }}</span>
+          </div>
+          <div class="file-summary-grid">
+            <article v-for="side in ['before', 'after']" :key="side" class="file-summary-card">
+              <span>{{ side === 'before' ? '改前文章' : '改后文章' }}</span>
+              <strong>{{ selectedReview[side]?.filename || '文件信息加载中' }}</strong>
+              <small>{{ selectedReview[side]?.char_count || 0 }} 字 · {{ selectedReview[side]?.truncated ? '内容已截断' : '完整解析' }}</small>
+            </article>
+          </div>
+          <div v-if="selectedReview.status === 'processing'" class="processing-empty"><el-empty :image-size="58" description="正在解析文件，请稍候" /></div>
+          <div v-else class="stage-complete-note"><span class="stage-complete-mark">✓</span><div><strong>文件解析已完成</strong><p>可以点击上方“语义分段”查看系统整理后的内容边界。</p></div></div>
+        </section>
+
+        <section v-if="activeStageKey === 'semantic_segmentation'" class="content-section semantic-section">
           <div class="section-heading">
             <div><span class="eyebrow">00 · CONFIRM THE MEANING</span><h3>语义分段确认</h3><p>一句一行不会直接变成一个语义块，系统会按上下文、句子边界和结构标记先合并；你可以在对齐前人工修订边界。</p></div>
             <div class="section-actions">
@@ -131,7 +158,7 @@
               <el-button size="small" type="primary" :loading="confirmingBlocks" @click="confirmSemanticBlocks">确认并重新对齐</el-button>
             </div>
           </div>
-          <div class="semantic-columns">
+          <div v-if="semanticBlocks.length" class="semantic-columns">
             <div v-for="side in ['before', 'after']" :key="side" class="semantic-column">
               <div class="semantic-column-head"><strong>{{ side === 'before' ? '改前语义块' : '改后语义块' }}</strong><span>{{ semanticDraft[side].length }} 块</span></div>
               <div v-for="(block, index) in visibleSemanticBlocks(side)" :key="block.stable_id || `${side}-${index}`" class="semantic-block">
@@ -148,9 +175,10 @@
               </el-button>
             </div>
           </div>
+          <el-empty v-if="!semanticBlocks.length" :image-size="58" description="语义分段尚未生成" />
         </section>
 
-        <section class="content-section change-section">
+        <section v-if="activeStageKey === 'semantic_alignment'" class="content-section change-section">
           <div class="section-heading">
             <div><span class="eyebrow">01 · SHOW THE CHANGE</span><h3>先看真正改大的地方</h3><p>高影响修改会置顶，人工评论直接挂在对应改动块下。</p></div>
             <span class="section-count">单卡查看 · 共 {{ totalChangeCount }} 处</span>
@@ -208,12 +236,12 @@
           <el-empty v-else :image-size="58" description="改前稿和改后稿没有检测到文本变化" />
         </section>
 
-        <section v-if="reorderEvents.length" class="content-section reorder-section">
+        <section v-if="activeStageKey === 'semantic_alignment' && reorderEvents.length" class="content-section reorder-section">
           <div class="section-heading"><div><span class="eyebrow">01B · ORDER MATTERS</span><h3>顺序变化</h3><p>内容本身基本保留，但位置变化可能影响读者理解路径或论证节奏。</p></div><span class="section-count">{{ reorderEvents.length }} 处</span></div>
           <div class="reorder-list"><article v-for="event in reorderEvents" :key="event.id" class="reorder-item"><el-tag size="small" effect="plain">重排</el-tag><div><strong>{{ event.summary }}</strong><p>改前第 {{ event.before_block_ids?.join('、') || '—' }} 块 → 改后第 {{ event.after_block_ids?.join('、') || '—' }} 块</p></div></article></div>
         </section>
 
-        <section class="content-section analysis-section">
+        <section v-if="activeStageKey === 'ai_review'" class="content-section analysis-section">
           <div class="section-heading">
             <div><span class="eyebrow">02 · UNDERSTAND WHY</span><h3>AI 差异分析</h3><p>AI 只对真实改动做解释；不确定的原因会保留为“需要人工确认”。</p></div>
             <el-button v-if="methodologyCandidates.length && hasConfirmedMethodology" type="primary" @click="openPromote()">沉淀为方法论</el-button>
@@ -228,15 +256,16 @@
           </div>
         </section>
 
-        <section v-if="methodologyCandidates.length" class="content-section methodology-section">
+        <section v-if="activeStageKey === 'methodology'" class="content-section methodology-section">
           <div class="section-heading"><div><span class="eyebrow">03 · KEEP THE LESSON</span><h3>候选方法论</h3><p>先由 AI 提炼，再由团队评论和修订，确认后才进入经验库。</p></div></div>
-          <div class="methodology-list">
+          <div v-if="methodologyCandidates.length" class="methodology-list">
             <article v-for="(item, index) in methodologyCandidates" :key="`${item.title}-${index}`" class="methodology-card">
               <div class="method-number">{{ String(index + 1).padStart(2, '0') }}</div>
               <div class="method-body"><h4>{{ item.title }}</h4><p class="rule">{{ item.rule }}</p><div class="method-fields"><div v-if="item.rationale"><span>为什么</span><p>{{ item.rationale }}</p></div><div v-if="item.example"><span>本次例子</span><p>{{ item.example }}</p></div></div><small v-if="item.evidence_group_ids?.length">证据：{{ item.evidence_group_ids.join('、') }}</small></div>
               <div class="method-actions"><el-tag v-if="item.status" size="small" effect="plain">{{ candidateStatusLabel(item.status) }}</el-tag><el-button v-if="item.status !== 'confirmed' && item.status !== 'promoted'" type="primary" plain size="small" @click="confirmMethodology(item, 'confirmed')">确认</el-button><el-button v-if="item.status !== 'rejected' && item.status !== 'promoted'" text type="danger" size="small" @click="confirmMethodology(item, 'rejected')">驳回</el-button><el-button v-if="!item.status || ['confirmed', 'promoted'].includes(item.status)" type="primary" plain size="small" @click="openPromote(item)">沉淀</el-button></div>
             </article>
           </div>
+          <el-empty v-else :image-size="58" description="方法论候选尚未生成" />
         </section>
 
         <section class="source-section">
@@ -342,6 +371,8 @@ const sourceLoaded = ref(false)
 const changesLoading = ref(false)
 const activeChangeIndex = ref(0)
 const expandedChangeKey = ref('')
+const activeStageKey = ref('')
+const activeStageManuallySelected = ref(false)
 const changePagination = reactive({ page: 1, page_size: 12, total: 0, has_more: false })
 const semanticVisible = reactive({ before: 20, after: 20 })
 const semanticDraft = reactive({ before: [], after: [] })
@@ -381,6 +412,11 @@ const canDeleteSelectedReview = computed(() => {
 })
 const workflow = computed(() => selectedReview.value?.workflow || {})
 const workflowStages = computed(() => workflow.value.run?.stages || [])
+const defaultStageKey = (stages) => {
+  const actionable = stages.find((stage) => ['running', 'awaiting_confirmation', 'failed', 'invalidated'].includes(stage.status))
+  if (actionable) return actionable.stage_key
+  return [...stages].sort((left, right) => Number(right.stage_order || 0) - Number(left.stage_order || 0)).find((stage) => stage.status === 'succeeded')?.stage_key || stages[0]?.stage_key || ''
+}
 const semanticBlocks = computed(() => workflow.value.blocks || [])
 const reorderEvents = computed(() => workflow.value.reorder_events || [])
 const methodologyCandidates = computed(() => {
@@ -393,6 +429,9 @@ const hasConfirmedMethodology = computed(() => {
 })
 const currentStage = computed(() => workflow.value.run?.current_stage || null)
 const currentStageLabel = computed(() => workflowStages.value.find((item) => item.stage_key === currentStage.value)?.label || '—')
+const suggestedStageKey = computed(() => currentStage.value || defaultStageKey(workflowStages.value))
+const activeStageLabel = computed(() => workflowStages.value.find((item) => item.stage_key === activeStageKey.value)?.label || '当前阶段')
+const isFollowingCurrentStage = computed(() => !activeStageManuallySelected.value || activeStageKey.value === suggestedStageKey.value)
 const waitingForSemanticConfirmation = computed(() => workflowStages.value.some((item) => item.stage_key === 'semantic_segmentation' && item.status === 'awaiting_confirmation'))
 const canRegenerateSemanticBlocks = computed(() => {
   const semanticStage = workflowStages.value.find((item) => item.stage_key === 'semantic_segmentation')
@@ -430,6 +469,20 @@ const visibleSemanticBlocks = (side) => semanticEditMode.value
   ? semanticDraft[side]
   : semanticDraft[side].slice(0, semanticVisible[side])
 
+const syncActiveStage = () => {
+  if (suggestedStageKey.value && (!activeStageManuallySelected.value || !activeStageKey.value)) activeStageKey.value = suggestedStageKey.value
+}
+
+const selectStage = (stage) => {
+  activeStageKey.value = stage.stage_key
+  activeStageManuallySelected.value = stage.stage_key !== suggestedStageKey.value
+}
+
+const followCurrentStage = () => {
+  activeStageManuallySelected.value = false
+  syncActiveStage()
+}
+
 const syncWorkflowDraft = (value) => {
   const blocks = value || {}
   semanticDraft.before = JSON.parse(JSON.stringify((blocks.blocks || []).filter((item) => item.side === 'before')))
@@ -465,6 +518,7 @@ const applyReviewResponse = (value) => {
   }
   if (value?.change_pagination) Object.assign(changePagination, value.change_pagination)
   selectedReview.value = review
+  syncActiveStage()
   if (!sameReview) activeChangeIndex.value = 0
   else if (activeChangeIndex.value >= orderedGroups.value.length) {
     activeChangeIndex.value = Math.max(0, orderedGroups.value.length - 1)
@@ -525,6 +579,8 @@ const selectReview = async (id, initialReview = null) => {
   sourceLoaded.value = false
   sourceLoading.value = false
   semanticEditMode.value = false
+  activeStageKey.value = ''
+  activeStageManuallySelected.value = false
   semanticVisible.before = 20
   semanticVisible.after = 20
   activeChangeIndex.value = 0
@@ -581,6 +637,8 @@ const clearSelectedReview = () => {
   }
   progressState.value = null
   sourceLoaded.value = false
+  activeStageKey.value = ''
+  activeStageManuallySelected.value = false
   activeChangeIndex.value = 0
   expandedChangeKey.value = ''
   selectedReview.value = null
@@ -1090,6 +1148,22 @@ onBeforeUnmount(() => {
 .source-section { margin-top: 4px; padding: 0 18px 18px; border: 1px solid #e8ddca; border-radius: var(--r-lg); background: #fffdf9; }.source-section summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 2px; cursor: pointer; list-style: none; color: var(--ink-3); font-size: 12px; }.source-section summary::-webkit-details-marker { display: none; }.source-section summary strong, .source-section summary small { display: block; }.source-section summary strong { color: var(--ink-2); font-size: 14px; }.source-section summary small { margin-top: 3px; font-size: 11px; }.source-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.source-columns b { display: block; margin: 0 0 6px; color: var(--clay-deep); font-size: 12px; }.source-columns pre { max-height: 500px; overflow: auto; margin: 0; padding: 14px; border-radius: var(--r-sm); background: var(--ivory); white-space: pre-wrap; color: var(--ink-2); font: 12px/1.8 var(--sans, sans-serif); }
 .empty-detail-panel { display: flex; align-items: center; justify-content: center; min-height: 680px; padding: 40px; text-align: center; }.empty-detail-panel > div { max-width: 430px; }.empty-mark { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; margin-bottom: 14px; border-radius: 50%; background: var(--clay-tint); color: var(--clay-deep); font-size: 25px; }.empty-detail-panel h2 { margin: 0 0 9px; font: 500 26px var(--serif, serif); }.empty-detail-panel p { margin: 0 0 20px; color: var(--ink-3); font-size: 13px; line-height: 1.7; }
 .upload-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.upload-box { position: relative; display: flex; flex-direction: column; gap: 8px; min-height: 105px; padding: 17px; border: 1px dashed #d8c5a9; border-radius: var(--r-md); background: #fbf6ef; cursor: pointer; }.upload-box:hover { border-color: var(--clay); background: var(--clay-tint); }.upload-box span { color: var(--clay-deep); font-size: 11px; font-weight: 700; }.upload-box strong { color: var(--ink-2); font-size: 13px; line-height: 1.5; }.upload-box input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }.dialog-tip, .promote-intro { color: var(--ink-3); font-size: 12px; line-height: 1.65; }.editor-list { display: flex; flex-direction: column; gap: 11px; max-height: 430px; overflow: auto; margin-bottom: 12px; }.editor-item { padding: 13px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--ivory); }.editor-item-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; }.editor-input { margin-bottom: 8px; }.editor-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }.group-checkboxes { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.stage-heading-meta { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.stage-item { width: 100%; margin: 0; color: var(--ink); text-align: left; font: inherit; cursor: pointer; transition: border-color .2s ease, background .2s ease, box-shadow .2s ease, transform .2s ease; }
+.stage-item:hover, .stage-item:focus-visible { border-color: var(--clay-soft); background: #fffaf2; outline: none; box-shadow: 0 5px 14px rgba(72,57,43,.08); transform: translateY(-1px); }
+.stage-item.is-active { border-color: var(--clay); background: #fff5e9; box-shadow: inset 0 0 0 1px rgba(170,93,67,.16), 0 5px 14px rgba(72,57,43,.08); }
+.stage-item.stage-blocked { opacity: .72; }
+.stage-item.stage-failed, .stage-item.stage-invalidated { border-color: #e8c4bd; }
+.stage-item .el-tag { flex: 0 0 auto; }
+.stage-content-section { min-height: 260px; }
+.file-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.file-summary-card { display: flex; min-width: 0; flex-direction: column; gap: 7px; padding: 15px; border: 1px solid #eee3d2; border-radius: var(--r-md); background: #fbf7f0; }
+.file-summary-card > span { color: var(--clay-deep); font-size: 11px; font-weight: 700; }
+.file-summary-card strong { overflow: hidden; color: var(--ink-2); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.file-summary-card small { color: var(--ink-4); font-size: 11px; }
+.stage-complete-note { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 12px 14px; border-radius: var(--r-md); background: #f1f7ed; color: var(--ink-2); }
+.stage-complete-note p { margin: 4px 0 0; color: var(--ink-3); font-size: 12px; line-height: 1.6; }
+.stage-complete-mark { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #dcebd6; color: #4f7646; font-size: 12px; font-weight: 700; }
 @media (max-width: 1050px) { .workspace-grid { grid-template-columns: 270px minmax(0, 1fr); }.review-detail-panel { padding: 24px 20px 34px; }.stats-grid { grid-template-columns: repeat(2, 1fr); }.stage-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 760px) { .reviews-hero, .detail-head { align-items: flex-start; flex-direction: column; }.reviews-hero .el-button, .detail-actions { width: 100%; }.detail-actions .el-button { flex: 1; }.workspace-grid { display: block; }.review-list-panel { margin-bottom: 16px; }.review-list { min-height: auto; max-height: 310px; overflow: auto; }.empty-detail-panel { min-height: 360px; }.diff-columns, .source-columns, .analysis-fields, .method-fields, .upload-pair, .semantic-columns { grid-template-columns: 1fr; }.diff-block p { max-height: 320px; }.diff-arrow { transform: rotate(90deg); }.diff-focus-note { align-items: flex-start; flex-direction: column; }.change-review-actions { align-items: flex-start; }.change-review-buttons { flex: 1; }.change-carousel-nav { grid-template-columns: 1fr auto 1fr; gap: 7px; }.change-carousel-position small { display: none; }.comment-compose { grid-template-columns: 1fr; }.comment-submit { width: 100%; }.methodology-card { grid-template-columns: 30px minmax(0, 1fr); }.methodology-card .method-actions { grid-column: 2; align-items: flex-start; flex-direction: row; flex-wrap: wrap; }.content-section { padding: 18px 14px; }.section-heading { flex-direction: column; }.section-heading .el-button { width: 100%; }.stats-grid { gap: 7px; }.stat-card { padding: 12px; }.stat-card strong { font-size: 21px; }.editor-two-col { grid-template-columns: 1fr; }.stage-list { grid-template-columns: 1fr; }.state-banner.waiting { align-items: flex-start; flex-wrap: wrap; }.state-banner.waiting .el-button { margin-left: 29px; } }
+@media (max-width: 760px) { .reviews-hero, .detail-head { align-items: flex-start; flex-direction: column; }.reviews-hero .el-button, .detail-actions { width: 100%; }.detail-actions .el-button { flex: 1; }.workspace-grid { display: block; }.review-list-panel { margin-bottom: 16px; }.review-list { min-height: auto; max-height: 310px; overflow: auto; }.empty-detail-panel { min-height: 360px; }.diff-columns, .source-columns, .analysis-fields, .method-fields, .upload-pair, .semantic-columns, .file-summary-grid { grid-template-columns: 1fr; }.diff-block p { max-height: 320px; }.diff-arrow { transform: rotate(90deg); }.diff-focus-note { align-items: flex-start; flex-direction: column; }.change-review-actions { align-items: flex-start; }.change-review-buttons { flex: 1; }.change-carousel-nav { grid-template-columns: 1fr auto 1fr; gap: 7px; }.change-carousel-position small { display: none; }.comment-compose { grid-template-columns: 1fr; }.comment-submit { width: 100%; }.methodology-card { grid-template-columns: 30px minmax(0, 1fr); }.methodology-card .method-actions { grid-column: 2; align-items: flex-start; flex-direction: row; flex-wrap: wrap; }.content-section { padding: 18px 14px; }.section-heading { flex-direction: column; }.section-heading .el-button { width: 100%; }.stats-grid { gap: 7px; }.stat-card { padding: 12px; }.stat-card strong { font-size: 21px; }.editor-two-col { grid-template-columns: 1fr; }.stage-list { grid-template-columns: 1fr; }.state-banner.waiting { align-items: flex-start; flex-wrap: wrap; }.state-banner.waiting .el-button { margin-left: 29px; } }
 </style>

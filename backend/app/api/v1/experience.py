@@ -19,7 +19,13 @@ from app.models.content_version import ExperienceCard
 from app.models.creation import ContentCreation
 from app.models.meeting import MeetingSuggestion
 from app.models.user import User
-from app.schemas.content_version import ExperienceCardCreate
+from app.schemas.content_version import (
+    EXPERIENCE_SOURCE_TYPES,
+    EXPERIENCE_STATUSES,
+    ExperienceCardCreate,
+    ExperienceCardDraftCreate,
+    ExperienceCardUpdate,
+)
 from app.services.experience_service import (
     build_card_payload,
     create_experience_card,
@@ -81,6 +87,38 @@ async def _load_optional_suggestion(
     return suggestion
 
 
+async def _load_card(
+    db: AsyncSession,
+    card_id: int,
+) -> Optional[ExperienceCard]:
+    return (await db.execute(
+        select(ExperienceCard)
+        .where(ExperienceCard.id == card_id)
+        .options(
+            selectinload(ExperienceCard.creator),
+            selectinload(ExperienceCard.creation),
+            selectinload(ExperienceCard.suggestion),
+        )
+    )).scalar_one_or_none()
+
+
+async def _card_payload_for_user(
+    db: AsyncSession,
+    current_user: User,
+    card: ExperienceCard,
+) -> dict:
+    source_accessible = None
+    if card.creation is not None:
+        source_accessible = await can_access_creation(db, current_user, card.creation)
+    return build_card_payload(
+        card,
+        source_creation=card.creation,
+        creator=card.creator,
+        suggestion=card.suggestion,
+        source_accessible=source_accessible,
+    )
+
+
 @router.get("", response_model=dict)
 async def list_experience_cards(
     q: Optional[str] = Query(None, max_length=200),
@@ -89,14 +127,32 @@ async def list_experience_cards(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    source_type: Optional[str] = Query(None, max_length=20),
+    card_status: str = Query("confirmed", alias="status", max_length=20),
 ) -> Any:
     await _require_experience_access(db, current_user)
+    # 这些参数在单元测试中也会直接调用路由函数；FastAPI 的 Query 默认
+    # 对象需要在这种调用方式下还原成业务默认值。
+    if not isinstance(source_type, (str, type(None))):
+        source_type = None
+    if not isinstance(card_status, str):
+        card_status = "confirmed"
+    if source_type and len(source_type) > 20:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="经验来源类型过长")
+    if len(card_status) > 20:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="经验状态过长")
+    if card_status not in EXPERIENCE_STATUSES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="经验状态不合法")
+    if source_type and source_type not in EXPERIENCE_SOURCE_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="经验来源类型不合法")
     rows, total, search_mode, embedding_available = await load_experience_cards(
         db,
         q=q,
         category=category,
         page=page,
         page_size=page_size,
+        source_type=source_type,
+        status=card_status,
     )
     items = []
     for card, similarity, match_method in rows:
@@ -124,6 +180,8 @@ async def list_experience_cards(
             "total_pages": (total + page_size - 1) // page_size,
             "search_mode": search_mode,
             "embedding_available": embedding_available,
+            "status": card_status,
+            "source_type": source_type,
         },
     }
 
@@ -152,35 +210,145 @@ async def create_manual_experience(
         source_type="manual",
         creation_id=experience_in.creation_id,
         version_pair=experience_in.version_pair,
+        source_meta=experience_in.source_meta,
         suggestion_id=experience_in.suggestion_id,
         created_by=current_user.id,
+        status="confirmed",
     )
     embedding_result = await enqueue_embedding(card, db)
-    card = (await db.execute(
-        select(ExperienceCard)
-        .where(ExperienceCard.id == card.id)
-        .options(
-            selectinload(ExperienceCard.creator),
-            selectinload(ExperienceCard.creation),
-            selectinload(ExperienceCard.suggestion),
-        )
-    )).scalar_one()
+    card = await _load_card(db, card.id)
+    assert card is not None
     return {
         "code": 200,
         "message": "经验卡片已保存",
         "data": {
-            "card": build_card_payload(
-                card,
-                source_creation=card.creation,
-                creator=card.creator,
-                suggestion=card.suggestion,
-                source_accessible=(
-                    await can_access_creation(db, current_user, card.creation)
-                    if card.creation else None
-                ),
-            ),
+            "card": await _card_payload_for_user(db, current_user, card),
             "embedding": embedding_result,
         },
+    }
+
+
+@router.post("/drafts", response_model=dict)
+async def create_experience_draft(
+    draft_in: ExperienceCardDraftCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """保存上传或会议提炼出的待确认经验，不直接进入正式经验库。"""
+
+    await _require_experience_access(db, current_user)
+    card = await create_experience_card(
+        db,
+        title=draft_in.title,
+        content=draft_in.content,
+        category=draft_in.category,
+        source_type=draft_in.source_type,
+        source_meta=draft_in.source_meta,
+        created_by=current_user.id,
+        status="pending",
+    )
+    loaded = await _load_card(db, card.id)
+    assert loaded is not None
+    return {
+        "code": 200,
+        "message": "经验已进入待确认",
+        "data": {"card": await _card_payload_for_user(db, current_user, loaded)},
+    }
+
+
+@router.get("/{card_id}", response_model=dict)
+async def get_experience_card(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    await _require_experience_access(db, current_user)
+    card = await _load_card(db, card_id)
+    if card is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="经验卡片不存在")
+    return {
+        "code": 200,
+        "message": "经验卡片获取成功",
+        "data": {"card": await _card_payload_for_user(db, current_user, card)},
+    }
+
+
+@router.patch("/{card_id}", response_model=dict)
+async def update_experience_card(
+    card_id: int,
+    update_in: ExperienceCardUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    await _require_experience_access(db, current_user)
+    card = await _load_card(db, card_id)
+    if card is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="经验卡片不存在")
+    if card.status != "pending":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="只有待确认经验可以修改")
+    changes = update_in.model_dump(exclude_unset=True)
+    for field, value in changes.items():
+        setattr(card, field, value)
+    if "content" in changes:
+        card.embedding = None
+        card.embedding_status = "waiting"
+        card.embedding_error = None
+        card.embedding_task_id = None
+    await db.commit()
+    loaded = await _load_card(db, card.id)
+    assert loaded is not None
+    return {
+        "code": 200,
+        "message": "待确认经验已更新",
+        "data": {"card": await _card_payload_for_user(db, current_user, loaded)},
+    }
+
+
+@router.post("/{card_id}/confirm", response_model=dict)
+async def confirm_experience_card(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    await _require_experience_access(db, current_user)
+    card = await _load_card(db, card_id)
+    if card is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="经验卡片不存在")
+    if card.status != "pending":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前经验不在待确认状态")
+    card.status = "confirmed"
+    await db.commit()
+    embedding_result = await enqueue_embedding(card, db)
+    loaded = await _load_card(db, card.id)
+    assert loaded is not None
+    return {
+        "code": 200,
+        "message": "经验已确认并进入正式经验库",
+        "data": {
+            "card": await _card_payload_for_user(db, current_user, loaded),
+            "embedding": embedding_result,
+        },
+    }
+
+
+@router.post("/{card_id}/reject", response_model=dict)
+async def reject_experience_card(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    await _require_experience_access(db, current_user)
+    card = await _load_card(db, card_id)
+    if card is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="经验卡片不存在")
+    if card.status != "pending":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="只有待确认经验可以退回")
+    card.status = "rejected"
+    await db.commit()
+    return {
+        "code": 200,
+        "message": "经验已退回",
+        "data": {"card_id": card.id, "status": card.status},
     }
 
 

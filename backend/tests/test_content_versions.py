@@ -18,7 +18,11 @@ from app.models.creation import ContentCreation
 from app.models.employee_profile import EmployeeProfile
 from app.models.meeting import Meeting, MeetingSuggestion
 from app.models.user import User
-from app.schemas.content_version import ContentVersionCreate
+from app.schemas.content_version import (
+    ContentVersionCreate,
+    ExperienceCardDraftCreate,
+    ExperienceCardUpdate,
+)
 from app.services.content_snapshot import build_content_snapshot
 from app.services.content_version_service import (
     VersionDiffSummaryError,
@@ -237,6 +241,57 @@ async def test_experience_library_blocks_normal_user_and_keyword_fallback(versio
         result = await experience_api.list_experience_cards("案例", None, 1, 20, db, employee)
         assert result["data"]["search_mode"] == "keyword_fallback"
         assert result["data"]["items"][0]["match_method"] == "keyword_fallback"
+
+
+@pytest.mark.asyncio
+async def test_experience_draft_stays_hidden_until_confirmed(version_db, monkeypatch):
+    async def fake_enqueue(card, db):
+        return {"status": "queued", "task_id": "experience-test"}
+
+    monkeypatch.setattr(experience_api, "enqueue_embedding", fake_enqueue)
+    async with version_db() as db:
+        employee = _user(2, "employee")
+        db.add(employee)
+        await db.commit()
+        draft = await experience_api.create_experience_draft(
+            ExperienceCardDraftCreate(
+                title="先写清楚冲突",
+                content="文章开头先让读者看见具体冲突，再进入解释。",
+                category="开头",
+                source_type="uploaded",
+                source_meta={"filename": "会议方法论.docx"},
+            ),
+            db,
+            employee,
+        )
+        card_id = draft["data"]["card"]["id"]
+        assert draft["data"]["card"]["status"] == "pending"
+
+        formal_list = await experience_api.list_experience_cards(None, None, 1, 20, db, employee)
+        pending_list = await experience_api.list_experience_cards(
+            None,
+            None,
+            1,
+            20,
+            db,
+            employee,
+            card_status="pending",
+        )
+        assert formal_list["data"]["total"] == 0
+        assert pending_list["data"]["total"] == 1
+
+        updated = await experience_api.update_experience_card(
+            card_id,
+            ExperienceCardUpdate(content="先写具体冲突，再给出案例和判断。"),
+            db,
+            employee,
+        )
+        assert updated["data"]["card"]["content"].startswith("先写具体冲突")
+        confirmed = await experience_api.confirm_experience_card(card_id, db, employee)
+        assert confirmed["data"]["card"]["status"] == "confirmed"
+
+        formal_list = await experience_api.list_experience_cards(None, None, 1, 20, db, employee)
+        assert formal_list["data"]["total"] == 1
 
 
 @pytest.mark.asyncio

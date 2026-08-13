@@ -13,6 +13,9 @@
           </div>
         </div>
         <div class="detail-actions">
+          <el-button v-if="synthesis?.methodology?.length" type="primary" plain :loading="creatingExperienceDrafts" @click="addToExperienceDrafts">
+            加入经验库待确认
+          </el-button>
           <el-button v-if="meeting.status === 'failed' || meeting.status === 'ready'" type="warning" :loading="retrying" @click="retryExtraction">
             {{ meeting.status === 'failed' ? '重试整理' : '重新整理' }}
           </el-button>
@@ -148,7 +151,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Loading, WarningFilled } from '@element-plus/icons-vue'
-import { extractMeeting, getMeeting, updateMeetingSynthesis } from '@/api/meetings'
+import { createMeetingExperienceDrafts, extractMeeting, getMeeting, updateMeetingSynthesis } from '@/api/meetings'
 import { meetingStatusLabel, meetingStatusType } from './meetingUi'
 
 const route = useRoute()
@@ -156,6 +159,7 @@ const router = useRouter()
 const meeting = ref(null)
 const loading = ref(true)
 const retrying = ref(false)
+const creatingExperienceDrafts = ref(false)
 const saving = ref(false)
 const editVisible = ref(false)
 const editorTab = ref('summary')
@@ -209,6 +213,19 @@ const retryExtraction = async () => {
     startPolling()
   } finally {
     retrying.value = false
+  }
+}
+
+const addToExperienceDrafts = async () => {
+  creatingExperienceDrafts.value = true
+  try {
+    const response = await createMeetingExperienceDrafts(route.params.id)
+    const data = response.data || {}
+    ElMessage.success(`已加入待确认区：${data.created_count || 0} 条新经验`)
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || '加入经验库失败')
+  } finally {
+    creatingExperienceDrafts.value = false
   }
 }
 

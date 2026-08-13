@@ -4,12 +4,20 @@
       <div>
         <div class="eyebrow">TEAM MEMORY · PHASE 1C</div>
         <h1>经验库</h1>
-        <p>把真实的文章修改、会议建议和复盘反馈留成可检索的经验。来源版本始终保留，语义检索不可用时自动降级为关键词匹配。</p>
+        <p>把会议方法论、文章复盘和实际修改整理成团队以后可以直接复用的判断。原始材料先进入待确认，确认后才成为正式经验。</p>
       </div>
       <el-button type="primary" size="large" @click="openCreateDialog">
         <el-icon><Plus /></el-icon> 新增经验
       </el-button>
     </header>
+
+    <section class="library-tabs">
+      <el-button-group>
+        <el-button :type="filters.status === 'confirmed' ? 'primary' : 'default'" @click="switchStatus('confirmed')">正式经验</el-button>
+        <el-button :type="filters.status === 'pending' ? 'primary' : 'default'" @click="switchStatus('pending')">待确认</el-button>
+      </el-button-group>
+      <span class="tab-note">{{ filters.status === 'pending' ? '这里是刚处理出的候选，确认后才会进入正式经验库。' : '这里只展示已经确认、可以被团队复用的经验。' }}</span>
+    </section>
 
     <section class="search-card">
       <el-input v-model="filters.q" clearable class="search-input" placeholder="搜索经验标题、正文或分类" @keyup.enter="loadCards">
@@ -17,6 +25,9 @@
       </el-input>
       <el-select v-model="filters.category" clearable filterable allow-create placeholder="分类" class="category-select" @change="loadCards">
         <el-option v-for="category in categories" :key="category" :label="category" :value="category" />
+      </el-select>
+      <el-select v-model="filters.source_type" clearable placeholder="来源" class="source-select" @change="loadCards">
+        <el-option v-for="source in sourceTypes" :key="source.value" :label="source.label" :value="source.value" />
       </el-select>
       <el-button type="primary" :loading="loading" @click="loadCards">搜索</el-button>
       <el-button @click="resetFilters">重置</el-button>
@@ -30,25 +41,36 @@
     </div>
 
     <section v-loading="loading" class="card-list">
-      <article v-for="card in cards" :key="card.id" class="experience-card">
+      <article v-for="card in cards" :key="card.id" class="experience-card" tabindex="0" @click="openDetail(card)" @keyup.enter="openDetail(card)">
         <div class="card-head">
           <div>
-            <div class="card-kicker"><el-tag size="small" effect="plain">{{ sourceTypeLabel(card.source_type) }}</el-tag><span v-if="card.category">{{ card.category }}</span><span v-if="card.match_method && searchMode !== 'recent'">{{ matchMethodLabel(card.match_method) }}</span></div>
+            <div class="card-kicker">
+              <el-tag size="small" effect="plain">{{ sourceTypeLabel(card.source_type) }}</el-tag>
+              <el-tag v-if="card.status === 'pending'" size="small" type="warning">待确认</el-tag>
+              <span v-if="card.category">{{ card.category }}</span>
+              <span v-if="card.match_method && searchMode !== 'recent'">{{ matchMethodLabel(card.match_method) }}</span>
+            </div>
             <h2>{{ card.title }}</h2>
           </div>
           <span class="card-date">{{ formatDate(card.created_at) }}</span>
         </div>
         <p class="card-content">{{ card.content }}</p>
+        <div v-if="card.source_meta?.meeting_title || card.source_meta?.filename" class="source-context">
+          来源：{{ card.source_meta.meeting_title || card.source_meta.filename }}
+        </div>
         <div class="card-foot">
           <span class="creator">{{ card.created_by_user?.full_name || card.created_by_user?.username || '团队成员' }}</span>
           <span v-if="card.similarity !== null && card.similarity !== undefined" class="similarity">相似度 {{ Math.round(card.similarity * 100) }}%</span>
           <span class="embedding-state" :class="`embedding-${card.embedding_status}`">{{ embeddingStatusLabel(card.embedding_status) }}</span>
-          <el-button v-if="card.source_type === 'review_feedback' && card.version_pair?.review_id" text type="primary" size="small" @click="openReviewSource(card)">查看文章复盘 <el-icon><ArrowRight /></el-icon></el-button>
-          <el-button v-else-if="card.creation_id && card.version_pair && card.source_accessible" text type="primary" size="small" @click="openSource(card)">查看来源版本 <el-icon><ArrowRight /></el-icon></el-button>
+          <el-button text type="primary" size="small" @click.stop="openDetail(card)">查看完整经验 <el-icon><ArrowRight /></el-icon></el-button>
+          <el-button v-if="card.status === 'pending'" text type="success" size="small" @click.stop="confirmCard(card)">确认沉淀</el-button>
+          <el-button v-if="card.source_type === 'review_feedback' && card.version_pair?.review_id" text type="primary" size="small" @click.stop="openReviewSource(card)">查看文章复盘 <el-icon><ArrowRight /></el-icon></el-button>
+          <el-button v-else-if="card.source_type === 'meeting_methodology' && card.source_meta?.meeting_id" text type="primary" size="small" @click.stop="openMeetingSource(card)">查看会议 <el-icon><ArrowRight /></el-icon></el-button>
+          <el-button v-else-if="card.creation_id && card.version_pair && card.source_accessible" text type="primary" size="small" @click.stop="openSource(card)">查看来源版本 <el-icon><ArrowRight /></el-icon></el-button>
           <span v-else-if="card.creation_id && card.version_pair" class="source-locked">来源文章当前不可访问</span>
         </div>
       </article>
-      <el-empty v-if="!loading && !cards.length" :image-size="70" description="还没有匹配的经验，先新增一条或上传一份 PDF/Word 吧" />
+      <el-empty v-if="!loading && !cards.length" :image-size="70" :description="filters.status === 'pending' ? '还没有待确认经验，先从会议或文章复盘里生成一条吧' : '还没有正式经验，先新增一条或上传一份 PDF/Word 吧'" />
     </section>
 
     <div class="pagination-wrap">
@@ -57,7 +79,7 @@
 
     <el-dialog v-model="createVisible" title="新增经验" width="700px" align-center destroy-on-close>
       <div class="upload-intro">
-        <div><strong>支持上传 PDF / Word</strong><span>文件只用于解析文字，解析后先填入下面表单，确认后才会保存经验卡片。</span></div>
+        <div><strong>支持上传 PDF / Word</strong><span>上传内容会先保存到“待确认”，你可以改标题、正文和分类，再确认进入正式经验库。</span></div>
         <input ref="fileInput" type="file" accept=".pdf,.docx,.txt,.md,.markdown" hidden @change="handleFileChange">
         <el-button plain :loading="uploading" @click="fileInput?.click()"><el-icon><Upload /></el-icon> 上传并解析</el-button>
       </div>
@@ -67,17 +89,64 @@
         <el-form-item label="经验正文" required><el-input v-model="form.content" type="textarea" :rows="12" maxlength="50000" show-word-limit placeholder="写下可复用的判断、做法和依据；也可以先上传文件解析" /></el-form-item>
         <el-form-item label="分类"><el-input v-model="form.category" maxlength="50" placeholder="例如：开头、结构、案例、表达" /></el-form-item>
       </el-form>
-      <template #footer><el-button @click="createVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveCard">保存经验</el-button></template>
+      <template #footer><el-button @click="createVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveCard">{{ form.uploaded ? '保存到待确认' : '保存正式经验' }}</el-button></template>
+    </el-dialog>
+
+    <el-dialog v-model="detailVisible" width="780px" align-center destroy-on-close class="experience-detail-dialog">
+      <template #header>
+        <div class="detail-dialog-head">
+          <div>
+            <div class="card-kicker"><el-tag v-if="detailCard" size="small" effect="plain">{{ sourceTypeLabel(detailCard.source_type) }}</el-tag><el-tag v-if="detailCard?.status === 'pending'" size="small" type="warning">待确认</el-tag><span v-if="detailCard?.category">{{ detailCard.category }}</span></div>
+            <h2>{{ detailCard?.title || '经验详情' }}</h2>
+          </div>
+          <el-button v-if="detailCard?.status === 'pending' && !detailEditing" text type="primary" @click="startDetailEdit">编辑</el-button>
+        </div>
+      </template>
+      <div v-if="detailLoading" class="detail-loading"><el-icon class="is-loading"><Loading /></el-icon>正在加载完整经验…</div>
+      <template v-else-if="detailCard">
+        <div v-if="detailEditing" class="detail-edit-form">
+          <el-form label-position="top">
+            <el-form-item label="经验标题"><el-input v-model="detailForm.title" maxlength="200" show-word-limit /></el-form-item>
+            <el-form-item label="经验正文"><el-input v-model="detailForm.content" type="textarea" :rows="14" maxlength="50000" show-word-limit /></el-form-item>
+            <el-form-item label="分类"><el-input v-model="detailForm.category" maxlength="50" /></el-form-item>
+          </el-form>
+        </div>
+        <div v-else class="detail-content">
+          <div class="detail-body markdown-body" v-html="renderExperienceMarkdown(detailCard.content)"></div>
+          <div v-if="detailCard.source_meta?.meeting_title || detailCard.source_meta?.filename" class="detail-source"><strong>来源</strong><span>{{ detailCard.source_meta.meeting_title || detailCard.source_meta.filename }}</span></div>
+          <div v-if="detailCard.source_type === 'review_feedback' && detailCard.version_pair?.before_filename" class="detail-source"><strong>复盘文件</strong><span>{{ detailCard.version_pair.before_filename }} → {{ detailCard.version_pair.after_filename }}</span></div>
+          <div class="detail-meta-row"><span>创建于 {{ formatDate(detailCard.created_at) }}</span><span>{{ detailCard.created_by_user?.full_name || detailCard.created_by_user?.username || '团队成员' }}</span><span>{{ embeddingStatusLabel(detailCard.embedding_status) }}</span></div>
+        </div>
+      </template>
+      <template #footer>
+        <template v-if="detailEditing">
+          <el-button @click="detailEditing = false">取消</el-button><el-button type="primary" :loading="detailSaving" @click="saveDetail">保存修改</el-button>
+        </template>
+        <template v-else-if="detailCard?.status === 'pending'">
+          <el-button type="danger" plain :loading="detailSaving" @click="rejectCard(detailCard)">退回</el-button><el-button type="primary" :loading="detailSaving" @click="confirmCard(detailCard)">确认沉淀</el-button>
+        </template>
+        <el-button v-else @click="detailVisible = false">关闭</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, Plus, Search, Upload } from '@element-plus/icons-vue'
-import { createExperienceCard, listExperienceCards, parseExperienceUpload } from '@/api/experience'
+import { ArrowRight, Loading, Plus, Search, Upload } from '@element-plus/icons-vue'
+import {
+  confirmExperienceCard,
+  createExperienceCard,
+  createExperienceDraft,
+  getExperienceCard,
+  listExperienceCards,
+  parseExperienceUpload,
+  rejectExperienceCard,
+  updateExperienceCard,
+} from '@/api/experience'
+import { renderExperienceMarkdown } from '@/utils/experienceMarkdown'
 
 const router = useRouter()
 const cards = ref([])
@@ -91,19 +160,33 @@ const fileInput = ref(null)
 const uploadMessage = ref('')
 const uploadFailed = ref(false)
 const categories = ref([])
-const filters = reactive({ q: '', category: '' })
+const filters = reactive({ q: '', category: '', source_type: '', status: 'confirmed' })
 const pagination = reactive({ page: 1, pageSize: 12 })
-const form = reactive({ title: '', content: '', category: '' })
+const form = reactive({ title: '', content: '', category: '', uploaded: false, source_meta: null })
+const detailVisible = ref(false)
+const detailLoading = ref(false)
+const detailSaving = ref(false)
+const detailEditing = ref(false)
+const detailCard = ref(null)
+const detailForm = reactive({ title: '', content: '', category: '' })
 
-const sourceTypeLabel = (value) => ({ meeting_diff: '文章版本', review_feedback: '文章复盘', manual: '手动新增' }[value] || value || '经验')
+const sourceTypes = [
+  { value: 'meeting_methodology', label: '会议方法论' },
+  { value: 'review_feedback', label: '文章复盘' },
+  { value: 'meeting_diff', label: '文章版本' },
+  { value: 'uploaded', label: '上传材料' },
+  { value: 'manual', label: '手动新增' },
+]
+
+const sourceTypeLabel = (value) => ({ meeting_methodology: '会议方法论', meeting_diff: '文章版本', review_feedback: '文章复盘', uploaded: '上传材料', manual: '手动新增' }[value] || value || '经验')
 const matchMethodLabel = (value) => ({ semantic: '语义命中', 'semantic+keyword': '语义 + 关键词', keyword_fallback: '关键词降级' }[value] || value)
-const embeddingStatusLabel = (value) => ({ pending: 'Embedding 生成中', ready: '已向量化', failed: 'Embedding 不可用' }[value] || '待处理')
+const embeddingStatusLabel = (value) => ({ waiting: '确认后生成 Embedding', pending: 'Embedding 生成中', ready: '已向量化', failed: 'Embedding 不可用' }[value] || '待处理')
 const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }).slice(0, 16) : '—'
 
 const loadCards = async () => {
   loading.value = true
   try {
-    const response = await listExperienceCards({ q: filters.q || undefined, category: filters.category || undefined, page: pagination.page, page_size: pagination.pageSize })
+    const response = await listExperienceCards({ q: filters.q || undefined, category: filters.category || undefined, source_type: filters.source_type || undefined, status: filters.status, page: pagination.page, page_size: pagination.pageSize })
     const data = response.data || {}
     cards.value = data.items || []
     total.value = data.total || 0
@@ -117,15 +200,22 @@ const loadCards = async () => {
   }
 }
 
+const switchStatus = (value) => {
+  filters.status = value
+  pagination.page = 1
+  loadCards()
+}
+
 const resetFilters = () => {
   filters.q = ''
   filters.category = ''
+  filters.source_type = ''
   pagination.page = 1
   loadCards()
 }
 
 const openCreateDialog = () => {
-  Object.assign(form, { title: '', content: '', category: '' })
+  Object.assign(form, { title: '', content: '', category: '', uploaded: false, source_meta: null })
   uploadMessage.value = ''
   uploadFailed.value = false
   createVisible.value = true
@@ -142,6 +232,8 @@ const handleFileChange = async (event) => {
     const response = await parseExperienceUpload(file)
     const data = response.data || {}
     form.content = data.text || ''
+    form.uploaded = true
+    form.source_meta = { filename: data.filename || file.name, parse_mode: data.parse_mode || 'pdf_or_docx' }
     if (!form.title) form.title = file.name.replace(/\.(pdf|docx|txt|md|markdown)$/i, '')
     uploadMessage.value = data.truncated ? `解析成功，内容超过上限，已截取前 ${data.char_count} 字。` : `解析成功，共 ${data.char_count} 字；请检查后再保存。`
   } catch (error) {
@@ -159,8 +251,15 @@ const saveCard = async () => {
   }
   saving.value = true
   try {
-    await createExperienceCard({ title: form.title.trim(), content: form.content.trim(), category: form.category.trim() || null, source_type: 'manual' })
-    ElMessage.success('经验卡片已保存，Embedding 将在后台生成')
+    if (form.uploaded) {
+      await createExperienceDraft({ title: form.title.trim(), content: form.content.trim(), category: form.category.trim() || null, source_type: 'uploaded', source_meta: form.source_meta })
+      ElMessage.success('材料已进入待确认，确认后会出现在正式经验库')
+      filters.status = 'pending'
+    } else {
+      await createExperienceCard({ title: form.title.trim(), content: form.content.trim(), category: form.category.trim() || null, source_type: 'manual' })
+      ElMessage.success('经验卡片已保存，Embedding 将在后台生成')
+      filters.status = 'confirmed'
+    }
     createVisible.value = false
     pagination.page = 1
     await loadCards()
@@ -168,6 +267,90 @@ const saveCard = async () => {
     ElMessage.error(error?.response?.data?.detail || '经验保存失败')
   } finally {
     saving.value = false
+  }
+}
+
+const openDetail = async (card) => {
+  detailCard.value = card
+  detailForm.title = card.title || ''
+  detailForm.content = card.content || ''
+  detailForm.category = card.category || ''
+  detailEditing.value = false
+  detailVisible.value = true
+  detailLoading.value = true
+  try {
+    const response = await getExperienceCard(card.id)
+    const loaded = response.data?.card || response.data || null
+    if (loaded) {
+      detailCard.value = loaded
+      detailForm.title = loaded.title || ''
+      detailForm.content = loaded.content || ''
+      detailForm.category = loaded.category || ''
+    }
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || '经验详情加载失败')
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+const startDetailEdit = () => {
+  detailEditing.value = true
+}
+
+const saveDetail = async () => {
+  if (!detailCard.value || !detailForm.title.trim() || !detailForm.content.trim()) {
+    ElMessage.warning('标题和正文不能为空')
+    return
+  }
+  detailSaving.value = true
+  try {
+    const response = await updateExperienceCard(detailCard.value.id, {
+      title: detailForm.title.trim(),
+      content: detailForm.content.trim(),
+      category: detailForm.category.trim() || null,
+    })
+    detailCard.value = response.data?.card || detailCard.value
+    detailEditing.value = false
+    ElMessage.success('待确认经验已更新')
+    await loadCards()
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || '经验更新失败')
+  } finally {
+    detailSaving.value = false
+  }
+}
+
+const confirmCard = async (card) => {
+  detailSaving.value = true
+  try {
+    const response = await confirmExperienceCard(card.id)
+    const confirmed = response.data?.card || null
+    ElMessage.success('经验已确认并进入正式经验库')
+    if (detailCard.value?.id === card.id) {
+      detailCard.value = confirmed || { ...detailCard.value, status: 'confirmed' }
+      detailEditing.value = false
+    }
+    filters.status = 'pending'
+    await loadCards()
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || '经验确认失败')
+  } finally {
+    detailSaving.value = false
+  }
+}
+
+const rejectCard = async (card) => {
+  detailSaving.value = true
+  try {
+    await rejectExperienceCard(card.id)
+    ElMessage.success('经验已退回')
+    detailVisible.value = false
+    await loadCards()
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || '经验退回失败')
+  } finally {
+    detailSaving.value = false
   }
 }
 
@@ -179,12 +362,39 @@ const openReviewSource = (card) => {
   router.push({ path: '/article-reviews', query: { review_id: card.version_pair.review_id } })
 }
 
+const openMeetingSource = (card) => {
+  if (card.source_meta?.meeting_id) router.push(`/meetings/${card.source_meta.meeting_id}`)
+}
+
 onMounted(loadCards)
 </script>
 
 <style scoped>
 .experience-page { max-width: 1120px; margin: 0 auto; padding-bottom: 56px; color: var(--ink); }
 .experience-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }.eyebrow { color: var(--clay-deep); font-size: 11px; font-weight: 700; letter-spacing: .14em; }.experience-hero h1 { margin: 8px 0; font: 500 34px/1.3 var(--serif, serif); }.experience-hero p { max-width: 720px; margin: 0; color: var(--ink-3); font-size: 13px; line-height: 1.75; }
-.search-card { display: flex; gap: 10px; align-items: center; padding: 16px 18px; margin-bottom: 17px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--paper); }.search-input { max-width: 560px; }.category-select { width: 180px; }.result-note { display: flex; gap: 18px; flex-wrap: wrap; margin: 0 2px 12px; color: var(--ink-3); font-size: 12px; }.card-list { min-height: 300px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; padding: 0; background: transparent; }.experience-card { display: flex; min-height: 245px; flex-direction: column; padding: 20px; border: 1px solid #eadfcd; border-radius: var(--r-lg); background: #fffdf9; box-shadow: 0 8px 24px rgba(72,57,43,.05); }.card-head { display: flex; justify-content: space-between; gap: 12px; }.card-kicker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--ink-3); font-size: 11px; }.experience-card h2 { margin: 10px 0 0; font-size: 19px; line-height: 1.45; }.card-date { flex-shrink: 0; color: var(--ink-4); font-size: 11px; }.card-content { flex: 1; display: -webkit-box; overflow: hidden; margin: 15px 0; color: var(--ink-2); font-size: 13px; line-height: 1.75; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 7; }.card-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 11px; }.similarity { color: var(--clay-deep); }.embedding-ready { color: var(--leaf-deep); }.embedding-failed { color: var(--crimson); }.embedding-pending { color: var(--clay-deep); }.source-locked { color: var(--ink-4); }.pagination-wrap { display: flex; justify-content: flex-end; margin-top: 22px; }.upload-intro { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 13px 15px; margin-bottom: 18px; border: 1px dashed var(--clay-soft); border-radius: var(--r-md); background: #fff9f0; }.upload-intro strong, .upload-intro span { display: block; }.upload-intro strong { color: var(--clay-deep); font-size: 13px; }.upload-intro span { margin-top: 4px; color: var(--ink-3); font-size: 12px; line-height: 1.5; }.upload-message { margin: -6px 0 16px; color: var(--leaf-deep); font-size: 12px; }.upload-message.is-error { color: var(--crimson); }
-@media (max-width: 800px) { .experience-hero, .search-card { align-items: stretch; flex-direction: column; }.search-input, .category-select { width: 100%; max-width: none; }.card-list { grid-template-columns: 1fr; }.upload-intro { align-items: stretch; flex-direction: column; } }
+.library-tabs { display: flex; align-items: center; gap: 15px; margin-bottom: 13px; }.tab-note { color: var(--ink-3); font-size: 12px; line-height: 1.5; }.search-card { display: flex; gap: 10px; align-items: center; padding: 16px 18px; margin-bottom: 17px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--paper); }.search-input { max-width: 460px; }.category-select, .source-select { width: 170px; }.result-note { display: flex; gap: 18px; flex-wrap: wrap; margin: 0 2px 12px; color: var(--ink-3); font-size: 12px; }.card-list { min-height: 300px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; padding: 0; background: transparent; }.experience-card { display: flex; min-height: 245px; flex-direction: column; padding: 20px; border: 1px solid #eadfcd; border-radius: var(--r-lg); background: #fffdf9; box-shadow: 0 8px 24px rgba(72,57,43,.05); cursor: pointer; transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease; }.experience-card:hover, .experience-card:focus-visible { border-color: var(--clay-soft); box-shadow: 0 12px 28px rgba(72,57,43,.1); outline: none; transform: translateY(-1px); }.card-head { display: flex; justify-content: space-between; gap: 12px; }.card-kicker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--ink-3); font-size: 11px; }.experience-card h2 { margin: 10px 0 0; font-size: 19px; line-height: 1.45; }.card-date { flex-shrink: 0; color: var(--ink-4); font-size: 11px; }.card-content { flex: 1; display: -webkit-box; overflow: hidden; margin: 15px 0 8px; color: var(--ink-2); font-size: 13px; line-height: 1.75; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 7; }.source-context { overflow: hidden; color: var(--clay-deep); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.card-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 11px; }.similarity { color: var(--clay-deep); }.embedding-ready { color: var(--leaf-deep); }.embedding-failed { color: var(--crimson); }.embedding-pending { color: var(--clay-deep); }.embedding-waiting { color: var(--ink-3); }.source-locked { color: var(--ink-4); }.pagination-wrap { display: flex; justify-content: flex-end; margin-top: 22px; }.upload-intro { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 13px 15px; margin-bottom: 18px; border: 1px dashed var(--clay-soft); border-radius: var(--r-md); background: #fff9f0; }.upload-intro strong, .upload-intro span { display: block; }.upload-intro strong { color: var(--clay-deep); font-size: 13px; }.upload-intro span { margin-top: 4px; color: var(--ink-3); font-size: 12px; line-height: 1.5; }.upload-message { margin: -6px 0 16px; color: var(--leaf-deep); font-size: 12px; }.upload-message.is-error { color: var(--crimson); }.detail-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-right: 16px; }.detail-dialog-head h2 { margin: 9px 0 0; color: var(--ink); font: 500 24px/1.4 var(--serif, serif); }.detail-loading { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 220px; color: var(--ink-3); }.detail-body { margin: 0; color: var(--ink); font-size: 15px; line-height: 1.9; white-space: pre-wrap; }.detail-source { display: flex; gap: 12px; margin-top: 20px; padding: 12px 14px; border-radius: var(--r-md); background: var(--ivory); color: var(--ink-2); font-size: 12px; line-height: 1.6; }.detail-source strong { flex: 0 0 auto; color: var(--clay-deep); }.detail-meta-row { display: flex; gap: 15px; flex-wrap: wrap; margin-top: 18px; color: var(--ink-3); font-size: 11px; }.detail-edit-form { padding: 2px 0 10px; }
+.markdown-body { white-space: normal; }
+.markdown-body :deep(h1), .markdown-body :deep(h2), .markdown-body :deep(h3), .markdown-body :deep(h4) { margin: 22px 0 9px; color: var(--ink); font-family: var(--serif, serif); line-height: 1.4; }
+.markdown-body :deep(h1) { font-size: 24px; }
+.markdown-body :deep(h2) { font-size: 21px; }
+.markdown-body :deep(h3) { font-size: 18px; }
+.markdown-body :deep(h4) { font-size: 16px; }
+.markdown-body :deep(p) { margin: 0 0 13px; }
+.markdown-body :deep(p:last-child) { margin-bottom: 0; }
+.markdown-body :deep(ul), .markdown-body :deep(ol) { margin: 0 0 14px; padding-left: 24px; }
+.markdown-body :deep(li) { margin: 5px 0; }
+.markdown-body :deep(blockquote) { padding: 8px 14px; margin: 14px 0; border-left: 3px solid var(--clay-soft); border-radius: 0 var(--r-sm) var(--r-sm) 0; background: #fff9f0; color: var(--ink-2); }
+.markdown-body :deep(blockquote p) { margin-bottom: 0; }
+.markdown-body :deep(strong) { color: var(--ink-2); font-weight: 750; }
+.markdown-body :deep(em) { color: var(--clay-deep); }
+.markdown-body :deep(code) { padding: 2px 5px; border-radius: 4px; background: #f4ede3; color: var(--crimson); font-family: var(--mono, monospace); font-size: .9em; }
+.markdown-body :deep(pre) { overflow-x: auto; padding: 13px 15px; margin: 14px 0; border-radius: var(--r-md); background: #2e2a27; color: #fff8ef; line-height: 1.65; }
+.markdown-body :deep(pre code) { padding: 0; background: transparent; color: inherit; }
+.markdown-body :deep(a) { color: var(--clay-deep); text-decoration: underline; text-underline-offset: 3px; }
+.markdown-body :deep(img) { display: block; max-width: 100%; height: auto; margin: 14px 0; border-radius: var(--r-md); }
+.markdown-body :deep(hr) { margin: 18px 0; border: 0; border-top: 1px solid var(--line); }
+.markdown-body :deep(table) { display: block; overflow-x: auto; width: 100%; margin: 14px 0; border-collapse: collapse; }
+.markdown-body :deep(th), .markdown-body :deep(td) { min-width: 100px; padding: 8px 10px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.markdown-body :deep(th) { background: #fff9f0; color: var(--ink-2); }
+@media (max-width: 800px) { .experience-hero, .library-tabs, .search-card { align-items: stretch; flex-direction: column; }.search-input, .category-select, .source-select { width: 100%; max-width: none; }.card-list { grid-template-columns: 1fr; }.upload-intro { align-items: stretch; flex-direction: column; }.tab-note { max-width: 100%; } }
 </style>

@@ -9,6 +9,7 @@ const apiFns = vi.hoisted(() => ({
 vi.mock('./api', () => apiFns)
 
 import {
+  createMeetingExperienceDrafts,
   createMeeting,
   extractMeeting,
   getMeeting,
@@ -39,11 +40,13 @@ describe('meetings API', () => {
     updateMeetingSynthesis(7, { summary: '方法论摘要' })
     updateMeetingSuggestion(9, { status: 'adopted' })
     linkMeetingSuggestion(9, 12)
+    createMeetingExperienceDrafts(7)
     expect(apiFns.post).toHaveBeenNthCalledWith(1, '/meetings', { title: '周会' })
     expect(apiFns.get).toHaveBeenCalledWith('/meetings/7')
     expect(apiFns.post).toHaveBeenNthCalledWith(2, '/meetings/7/extract')
     expect(apiFns.put).toHaveBeenNthCalledWith(1, '/meetings/7/synthesis', { summary: '方法论摘要' })
     expect(apiFns.put).toHaveBeenCalledWith('/meetings/suggestions/9', { status: 'adopted' })
     expect(apiFns.post).toHaveBeenNthCalledWith(3, '/meetings/suggestions/9/link', { creation_id: 12 })
+    expect(apiFns.post).toHaveBeenNthCalledWith(4, '/meetings/7/experience-drafts')
   })
 })

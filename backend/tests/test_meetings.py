@@ -20,6 +20,7 @@ from app.api.v1.meetings import (
     update_meeting_suggestion,
 )
 from app.models.article_member import ArticleMember
+from app.models.content_version import ExperienceCard
 from app.models.creation import ContentCreation
 from app.models.meeting import Meeting, MeetingSuggestion, MeetingSynthesis
 from app.models.meeting_methodology import MeetingMethodologyCluster, MeetingMethodologySource
@@ -74,6 +75,7 @@ async def meeting_db():
                     MeetingSynthesis.__table__,
                     MeetingMethodologyCluster.__table__,
                     MeetingMethodologySource.__table__,
+                    ExperienceCard.__table__,
                     MeetingSuggestion.__table__,
                     ArticleMember.__table__,
                 ],
@@ -210,6 +212,42 @@ async def test_methodology_dedup_is_idempotent_for_same_meeting(meeting_db):
         assert await db.scalar(select(MeetingMethodologyCluster.source_count)) == 1
         assert await db.scalar(select(MeetingMethodologySource.meeting_id)) == 72
         assert len((await db.scalars(select(MeetingMethodologySource))).all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_meeting_methodology_can_be_sent_to_experience_pending_queue(meeting_db):
+    async with meeting_db() as db:
+        employee = _user(2, "employee")
+        meeting = Meeting(
+            id=90,
+            title="文章开头复盘",
+            meeting_at=datetime(2026, 8, 12, 10),
+            raw_text="会议原文",
+            status="ready",
+            source_kind="pasted_text",
+            created_by=2,
+            synthesis=MeetingSynthesis(
+                summary="先把冲突写具体。",
+                methodology=[{
+                    "title": "先写冲突",
+                    "rule": "开头先让读者看见具体冲突。",
+                    "rationale": "抽象观点无法建立阅读动机。",
+                    "example": "先写一个真实场景，再解释原因。",
+                    "evidence": "本次会议对比了两个版本。",
+                }],
+            ),
+        )
+        db.add_all([employee, meeting])
+        await db.commit()
+
+        first = await meetings_api.create_meeting_experience_drafts(90, db, employee)
+        assert first["data"]["created_count"] == 1
+        assert first["data"]["cards"][0]["status"] == "pending"
+        assert first["data"]["cards"][0]["source_meta"]["meeting_id"] == 90
+
+        second = await meetings_api.create_meeting_experience_drafts(90, db, employee)
+        assert second["data"]["created_count"] == 0
+        assert await db.scalar(select(ExperienceCard.id).where(ExperienceCard.source_type == "meeting_methodology")) is not None
 
 
 @pytest.mark.asyncio

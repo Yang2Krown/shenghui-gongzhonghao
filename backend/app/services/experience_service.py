@@ -63,8 +63,10 @@ def build_card_payload(
         "content": card.content,
         "category": card.category,
         "source_type": card.source_type,
+        "status": card.status,
         "creation_id": card.creation_id,
         "version_pair": card.version_pair,
+        "source_meta": card.source_meta,
         "suggestion_id": card.suggestion_id,
         "created_by": card.created_by,
         "created_by_user": (
@@ -112,7 +114,9 @@ async def create_experience_card(
     category: Optional[str] = None,
     creation_id: Optional[int] = None,
     version_pair: Optional[dict] = None,
+    source_meta: Optional[dict] = None,
     suggestion_id: Optional[int] = None,
+    status: str = "confirmed",
 ) -> ExperienceCard:
     card = ExperienceCard(
         title=title.strip(),
@@ -122,8 +126,10 @@ async def create_experience_card(
         category=category.strip() if category else None,
         creation_id=creation_id,
         version_pair=version_pair,
+        source_meta=source_meta,
         suggestion_id=suggestion_id,
-        embedding_status="pending",
+        status=status,
+        embedding_status="waiting" if status == "pending" else "pending",
     )
     db.add(card)
     await db.commit()
@@ -137,6 +143,7 @@ async def enqueue_embedding(card: ExperienceCard, db: AsyncSession) -> dict:
     from app.tasks.experience_tasks import generate_experience_embedding_task
 
     task_id = str(uuid.uuid4())
+    card.embedding_status = "pending"
     try:
         generate_experience_embedding_task.apply_async(
             args=[card.id],
@@ -166,12 +173,18 @@ async def load_experience_cards(
     category: Optional[str],
     page: int,
     page_size: int,
+    source_type: Optional[str] = None,
+    status: str = "confirmed",
 ) -> tuple[list[tuple[ExperienceCard, Optional[float], str]], int, str, bool]:
     """返回按检索排序后的卡片、总数、搜索模式和 embedding 可用性。"""
 
     filters = []
+    if status and status.strip():
+        filters.append(ExperienceCard.status == status.strip())
     if category and category.strip():
         filters.append(ExperienceCard.category == category.strip())
+    if source_type and source_type.strip():
+        filters.append(ExperienceCard.source_type == source_type.strip())
 
     query_text = (q or "").strip()
     if not query_text:

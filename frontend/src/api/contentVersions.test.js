@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const apiFns = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
+  put: vi.fn(),
 }))
 
 vi.mock('./api', () => apiFns)
@@ -14,7 +15,14 @@ import {
   saveContentVersion,
   summarizeContentVersions,
 } from './contentVersions'
-import { parseExperienceUpload } from './experience'
+import {
+  confirmExperienceCard,
+  createExperienceDraft,
+  getExperienceCard,
+  parseExperienceUpload,
+  rejectExperienceCard,
+  updateExperienceCard,
+} from './experience'
 
 describe('content versions and experience API', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -46,5 +54,17 @@ describe('content versions and experience API', () => {
     const [, body, config] = apiFns.post.mock.calls[0]
     expect(body).toBeInstanceOf(FormData)
     expect(config.headers['Content-Type']).toBe('multipart/form-data')
+  })
+
+  it('调用经验待确认、详情和确认接口', () => {
+    createExperienceDraft({ title: '标题', content: '正文', source_type: 'uploaded' })
+    getExperienceCard(8)
+    updateExperienceCard(8, { content: '修订后' })
+    confirmExperienceCard(8)
+    rejectExperienceCard(9)
+
+    expect(apiFns.post).toHaveBeenLastCalledWith('/experience/9/reject')
+    expect(apiFns.get).toHaveBeenLastCalledWith('/experience/8')
+    expect(apiFns.put).toHaveBeenCalledWith('/experience/8', { content: '修订后' })
   })
 })

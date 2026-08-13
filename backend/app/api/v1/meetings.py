@@ -14,6 +14,7 @@ from app.core.progress import progress_store
 from app.core.security import get_current_user
 from app.core.timezone import utcnow
 from app.db.session import get_db
+from app.models.content_version import ExperienceCard
 from app.models.creation import ContentCreation
 from app.models.meeting import Meeting, MeetingSuggestion, MeetingSynthesis
 from app.models.meeting_methodology import MeetingMethodologyCluster, MeetingMethodologySource
@@ -35,6 +36,7 @@ from app.services.meeting_methodology_dedup import (
     prune_orphan_methodology_clusters,
     sync_methodology_clusters,
 )
+from app.services.experience_service import build_card_payload, create_experience_card
 from app.services.team_service import (
     can_access_creation,
     can_access_team_collaboration,
@@ -639,6 +641,93 @@ async def update_meeting_synthesis(
         "data": {
             **(response_data or {}),
             "dedup": dedup_stats,
+        },
+    }
+
+
+@router.post("/{meeting_id}/experience-drafts", response_model=dict)
+async def create_meeting_experience_drafts(
+    meeting_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """把本次会议已整理的方法论复制到经验库待确认区。"""
+
+    await _require_meeting_access(db, current_user)
+    meeting = await _get_meeting(db, meeting_id, with_suggestions=False)
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="会议不存在")
+    methodology = (meeting.synthesis.methodology if meeting.synthesis else None) or []
+    if not methodology:
+        raise HTTPException(status_code=400, detail="本次会议还没有可沉淀的方法论")
+
+    existing_cards = (await db.execute(
+        select(ExperienceCard)
+        .where(ExperienceCard.source_type == "meeting_methodology")
+        .options(selectinload(ExperienceCard.creator))
+    )).scalars().all()
+    existing_by_key = {}
+    for card in existing_cards:
+        meta = card.source_meta if isinstance(card.source_meta, dict) else {}
+        if meta.get("meeting_id") == meeting.id and meta.get("methodology_index") is not None:
+            existing_by_key[int(meta["methodology_index"])] = card
+
+    cards = []
+    created_count = 0
+    for index, item in enumerate(methodology):
+        if not isinstance(item, dict):
+            continue
+        rule = str(item.get("rule") or "").strip()
+        if not rule:
+            continue
+        existing = existing_by_key.get(index)
+        if existing is None or existing.status == "rejected":
+            sections = [f"判断规则：{rule}"]
+            if item.get("rationale"):
+                sections.append(f"为什么：{str(item['rationale']).strip()}")
+            if item.get("example"):
+                sections.append(f"例子 / 场景：{str(item['example']).strip()}")
+            if item.get("evidence"):
+                sections.append(f"会议依据：{str(item['evidence']).strip()}")
+            existing = await create_experience_card(
+                db,
+                title=(str(item.get("title") or "").strip() or f"{meeting.title} · 方法论 {index + 1}")[:200],
+                content="\n\n".join(sections),
+                category="会议方法论",
+                source_type="meeting_methodology",
+                source_meta={
+                    "meeting_id": meeting.id,
+                    "meeting_title": meeting.title,
+                    "meeting_at": _iso(meeting.meeting_at),
+                    "methodology_index": index,
+                },
+                created_by=current_user.id,
+                status="pending",
+            )
+            created_count += 1
+        cards.append(existing)
+
+    if not cards:
+        raise HTTPException(status_code=400, detail="本次会议没有可沉淀的方法论")
+    loaded_cards = (await db.execute(
+        select(ExperienceCard)
+        .where(ExperienceCard.id.in_([card.id for card in cards]))
+        .options(selectinload(ExperienceCard.creator))
+    )).scalars().all()
+    loaded_by_id = {card.id: card for card in loaded_cards}
+    return {
+        "code": 200,
+        "message": "会议方法论已加入待确认区",
+        "data": {
+            "created_count": created_count,
+            "total_count": len(cards),
+            "cards": [
+                build_card_payload(
+                    loaded_by_id[card.id],
+                    creator=loaded_by_id[card.id].creator,
+                )
+                for card in cards
+            ],
         },
     }
 

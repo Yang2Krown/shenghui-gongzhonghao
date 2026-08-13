@@ -95,7 +95,14 @@ class ExperienceCard(BaseModel):
     source_type = Column(
         String(20),
         nullable=False,
-        comment="meeting_diff / review_feedback / manual",
+        comment="meeting_methodology / meeting_diff / review_feedback / uploaded / manual",
+    )
+    status = Column(
+        String(20),
+        nullable=False,
+        default="confirmed",
+        comment="pending / confirmed / rejected",
+        index=True,
     )
     creation_id = Column(
         ForeignKey("content_creations.id", ondelete="SET NULL"),
@@ -103,6 +110,7 @@ class ExperienceCard(BaseModel):
         index=True,
     )
     version_pair = Column(JSONField, nullable=True)
+    source_meta = Column(JSONField, nullable=True)
     suggestion_id = Column(
         ForeignKey("meeting_suggestions.id", ondelete="SET NULL"),
         nullable=True,
@@ -116,7 +124,7 @@ class ExperienceCard(BaseModel):
         String(20),
         nullable=False,
         default="pending",
-        comment="pending / ready / failed",
+        comment="waiting / pending / ready / failed",
     )
     embedding_error = Column(Text, nullable=True)
     embedding_task_id = Column(String(100), nullable=True)

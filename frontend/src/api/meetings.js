@@ -12,6 +12,8 @@ export const extractMeeting = (id) => post(`/meetings/${id}/extract`)
 
 export const updateMeetingSynthesis = (id, data) => put(`/meetings/${id}/synthesis`, data)
 
+export const createMeetingExperienceDrafts = (id) => post(`/meetings/${id}/experience-drafts`)
+
 export const updateMeetingSuggestion = (id, data) => put(`/meetings/suggestions/${id}`, data)
 
 export const linkMeetingSuggestion = (id, creationId) => post(`/meetings/suggestions/${id}/link`, { creation_id: creationId })
