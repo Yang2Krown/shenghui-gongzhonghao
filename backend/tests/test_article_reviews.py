@@ -34,10 +34,12 @@ from app.schemas.article_review import (
 )
 from app.services.article_review_service import (
     ArticleReviewAnalysisError,
+    analyze_article_review,
     build_change_groups,
     build_semantic_blocks,
     normalize_article_review_analysis,
 )
+from app.services.llm.llm_client import ChatResult
 from app.services.article_review_workflow import (
     create_run_with_stages,
     is_stage_stale,
@@ -366,6 +368,73 @@ def test_analysis_normalization_requires_real_change_id():
     assert normalized["methodology_candidates"][0]["evidence_group_ids"] == ["change-001"]
     with pytest.raises(ArticleReviewAnalysisError):
         normalize_article_review_analysis({"open_questions": []})
+
+
+@pytest.mark.asyncio
+async def test_article_review_analysis_retries_with_larger_budget_after_truncation():
+    calls = []
+
+    class FakeClient:
+        default_model = "deepseek-v4-flash"
+
+        async def chat(self, messages, **kwargs):
+            calls.append({"messages": messages, **kwargs})
+            if len(calls) == 1:
+                return ChatResult(
+                    text="思考尚未完成",
+                    usage={"completion_tokens": 32_000},
+                    model=self.default_model,
+                    finish_reason="length",
+                )
+            return ChatResult(
+                text='{"summary":"强化开头","key_changes":[],"methodology_candidates":[],"open_questions":[]}',
+                parsed={
+                    "summary": "强化开头",
+                    "key_changes": [],
+                    "methodology_candidates": [],
+                    "open_questions": [],
+                },
+                usage={"completion_tokens": 4},
+                model=self.default_model,
+                finish_reason="stop",
+            )
+
+    result = await analyze_article_review(
+        title="预算重试测试",
+        change_groups=[{
+            "id": "change-001",
+            "is_major": True,
+            "before": "旧开头",
+            "after": "新开头",
+        }],
+        llm_client=FakeClient(),
+    )
+
+    assert [call["max_tokens"] for call in calls] == [32_000, 64_000]
+    assert all(call["json_mode"] is True for call in calls)
+    assert result["summary"] == "强化开头"
+    assert result["retry_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_article_review_analysis_reports_truncation_after_retry():
+    class AlwaysTruncatedClient:
+        default_model = "deepseek-v4-flash"
+
+        async def chat(self, messages, **kwargs):
+            return ChatResult(
+                text="仍未输出完成的 JSON",
+                usage={"completion_tokens": kwargs["max_tokens"]},
+                model=self.default_model,
+                finish_reason="length",
+            )
+
+    with pytest.raises(ArticleReviewAnalysisError, match="32K 和 64K"):
+        await analyze_article_review(
+            title="截断提示测试",
+            change_groups=[{"id": "change-001", "is_major": True, "before": "旧", "after": "新"}],
+            llm_client=AlwaysTruncatedClient(),
+        )
 
 
 @pytest.mark.asyncio

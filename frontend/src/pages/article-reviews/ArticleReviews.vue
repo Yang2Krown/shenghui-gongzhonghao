@@ -153,47 +153,58 @@
         <section class="content-section change-section">
           <div class="section-heading">
             <div><span class="eyebrow">01 · SHOW THE CHANGE</span><h3>先看真正改大的地方</h3><p>高影响修改会置顶，人工评论直接挂在对应改动块下。</p></div>
-            <span class="section-count">已显示 {{ selectedReview.change_groups?.length || 0 }} / {{ selectedReview.stats?.total_groups || 0 }} 个改动块</span>
+            <span class="section-count">单卡查看 · 共 {{ totalChangeCount }} 处</span>
           </div>
           <div v-if="selectedReview.status === 'processing'" class="processing-empty">
             <el-empty :image-size="58" description="正在解析文件并识别改动，请稍候" />
           </div>
-          <div v-else-if="orderedGroups.length" class="change-list">
-            <article v-for="group in orderedGroups" :key="group.id" class="change-card" :class="`impact-${group.impact}`">
+          <div v-else-if="activeChange" class="change-carousel">
+            <article :key="activeChange.id" class="change-card" :class="`impact-${activeChange.impact}`" aria-live="polite">
               <div class="change-card-head">
-                <div class="change-label"><span class="change-index">{{ group.id.replace('change-', '') }}</span><el-tag size="small" :type="impactType(group.impact)">{{ impactLabel(group.impact) }}</el-tag><span>{{ changeKindLabel(group.kind || group.change_type) }}</span><el-tag v-if="group.human_label" size="small" effect="plain">{{ humanLabel(group.human_label) }}</el-tag></div>
-                <span class="change-ratio">变化度 {{ Math.round((group.change_ratio || 0) * 100) }}%</span>
+                <div class="change-label"><span class="change-index">{{ activeChange.id.replace('change-', '') }}</span><el-tag size="small" :type="impactType(activeChange.impact)">{{ impactLabel(activeChange.impact) }}</el-tag><span>{{ changeKindLabel(activeChange.kind || activeChange.change_type) }}</span><el-tag v-if="activeChange.human_label" size="small" effect="plain">{{ humanLabel(activeChange.human_label) }}</el-tag></div>
+                <span class="change-ratio">变化度 {{ Math.round((activeChange.change_ratio || 0) * 100) }}%</span>
               </div>
-              <p class="change-reason"><strong>判定依据：</strong>{{ group.significance_reason || '算法识别到语义内容变化' }}</p>
+              <p class="change-reason"><strong>判定依据：</strong>{{ activeChange.significance_reason || '算法识别到语义内容变化' }}</p>
+              <div v-if="activeChangeDiff.hasOmitted" class="diff-focus-note">
+                <span>已折叠 {{ activeChangeDiff.omittedUnits }} 句基本未变或仅有轻微措辞差异的内容</span>
+                <el-button text size="small" @click="toggleActiveChangeDiff">{{ activeChangeDiffExpanded ? '只看实际变化' : '查看完整语义块' }}</el-button>
+              </div>
               <div class="diff-columns">
-                <div class="diff-block before"><span>改前</span><p>{{ group.before || '（删除）' }}</p></div>
+                <div class="diff-block before"><span>改前</span><p>{{ activeChangeBeforeText || '（删除）' }}</p></div>
                 <div class="diff-arrow">→</div>
-                <div class="diff-block after"><span>改后</span><p>{{ group.after || '（新增）' }}</p></div>
+                <div class="diff-block after"><span>改后</span><p>{{ activeChangeAfterText || '（新增）' }}</p></div>
               </div>
               <div class="change-review-actions">
                 <span>这处判断：</span>
                 <el-button-group>
-                  <el-button size="small" :type="group.human_label === 'important' ? 'primary' : ''" @click="reviewChange(group, 'important')">重要</el-button>
-                  <el-button size="small" :type="group.human_label === 'unimportant' ? 'info' : ''" @click="reviewChange(group, 'unimportant')">不重要</el-button>
-                  <el-button size="small" :type="group.human_label === 'false_positive' ? 'warning' : ''" @click="reviewChange(group, 'false_positive')">误判</el-button>
-                  <el-button size="small" :type="group.human_label === 'needs_review' ? 'danger' : ''" @click="reviewChange(group, 'needs_review')">待确认</el-button>
+                  <el-button size="small" :type="activeChange.human_label === 'important' ? 'primary' : ''" @click="reviewChange(activeChange, 'important')">重要</el-button>
+                  <el-button size="small" :type="activeChange.human_label === 'unimportant' ? 'info' : ''" @click="reviewChange(activeChange, 'unimportant')">不重要</el-button>
+                  <el-button size="small" :type="activeChange.human_label === 'false_positive' ? 'warning' : ''" @click="reviewChange(activeChange, 'false_positive')">误判</el-button>
+                  <el-button size="small" :type="activeChange.human_label === 'needs_review' ? 'danger' : ''" @click="reviewChange(activeChange, 'needs_review')">待确认</el-button>
                 </el-button-group>
               </div>
               <div class="comment-area">
-                <div v-if="commentsFor(group.id).length" class="comment-list">
-                  <div v-for="comment in commentsFor(group.id)" :key="comment.id" class="comment-item">
+                <div v-if="commentsFor(activeChange.id).length" class="comment-list">
+                  <div v-for="comment in commentsFor(activeChange.id)" :key="comment.id" class="comment-item">
                     <div><strong>{{ comment.author?.full_name || comment.author?.username || '团队成员' }}</strong><small>{{ formatDate(comment.created_at) }}</small></div>
                     <p>{{ comment.body }}</p>
                   </div>
                 </div>
                 <div class="comment-compose">
-                  <el-input v-model="commentDrafts[group.id]" maxlength="5000" placeholder="写下你对这个修改的判断、疑问或可复用经验" @keyup.ctrl.enter="addComment(group)">
-                    <template #append><el-button :loading="commenting[group.id]" @click="addComment(group)">评论</el-button></template>
+                  <el-input v-model="commentDrafts[activeChange.id]" maxlength="5000" placeholder="写下你对这个修改的判断、疑问或可复用经验" @keyup.ctrl.enter="addComment(activeChange)">
+                    <template #append><el-button :loading="commenting[activeChange.id]" @click="addComment(activeChange)">评论</el-button></template>
                   </el-input>
                 </div>
               </div>
             </article>
-            <el-button v-if="changePagination.has_more" class="load-more-button" :loading="changesLoading" plain @click="loadMoreChanges">加载更多改动</el-button>
+            <div class="change-carousel-nav change-carousel-nav-bottom" aria-label="切换重大修改">
+              <el-button plain :disabled="!canGoPreviousChange" @click="showPreviousChange">← 上一处</el-button>
+              <div class="change-carousel-position">
+                <strong>{{ activeChangeIndex + 1 }}</strong><span>/ {{ totalChangeCount }}</span>
+                <small v-if="changePagination.has_more">已加载 {{ orderedGroups.length }} 处</small>
+              </div>
+              <el-button type="primary" :disabled="!canGoNextChange" :loading="changesLoading" @click="showNextChange">下一处 →</el-button>
+            </div>
           </div>
           <el-empty v-else :image-size="58" description="改前稿和改后稿没有检测到文本变化" />
         </section>
@@ -282,6 +293,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading, Plus, Search, WarningFilled } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { focusArticleReviewDiff } from '@/utils/articleReviewDiffFocus'
 import { validateArticleReviewFiles, validateUploadFile } from '@/utils/uploadPolicy'
 import {
   addArticleReviewComment,
@@ -329,6 +341,8 @@ const progressState = ref(null)
 const sourceLoading = ref(false)
 const sourceLoaded = ref(false)
 const changesLoading = ref(false)
+const activeChangeIndex = ref(0)
+const expandedChangeKey = ref('')
 const changePagination = reactive({ page: 1, page_size: 12, total: 0, has_more: false })
 const semanticVisible = reactive({ before: 20, after: 20 })
 const semanticDraft = reactive({ before: [], after: [] })
@@ -347,6 +361,21 @@ const statusFilters = [
 ]
 
 const orderedGroups = computed(() => [...(selectedReview.value?.change_groups || [])].sort((left, right) => Number(right.is_major) - Number(left.is_major)))
+const activeChange = computed(() => orderedGroups.value[activeChangeIndex.value] || null)
+const activeChangeKey = computed(() => activeChange.value ? `${selectedReview.value?.id}:${activeChange.value.id}` : '')
+const activeChangeDiff = computed(() => focusArticleReviewDiff(activeChange.value?.before, activeChange.value?.after))
+const activeChangeDiffExpanded = computed(() => expandedChangeKey.value === activeChangeKey.value)
+const activeChangeBeforeText = computed(() => activeChangeDiffExpanded.value ? activeChangeDiff.value.fullBefore : activeChangeDiff.value.before)
+const activeChangeAfterText = computed(() => activeChangeDiffExpanded.value ? activeChangeDiff.value.fullAfter : activeChangeDiff.value.after)
+const totalChangeCount = computed(() => Math.max(
+  Number(selectedReview.value?.stats?.total_groups || 0),
+  Number(changePagination.total || 0),
+  orderedGroups.value.length,
+))
+const canGoPreviousChange = computed(() => activeChangeIndex.value > 0)
+const canGoNextChange = computed(() => (
+  activeChangeIndex.value < orderedGroups.value.length - 1 || changePagination.has_more
+))
 const canDeleteSelectedReview = computed(() => {
   const review = selectedReview.value
   return Boolean(review && (userStore.isAdmin || review.created_by === userStore.user?.id))
@@ -437,6 +466,10 @@ const applyReviewResponse = (value) => {
   }
   if (value?.change_pagination) Object.assign(changePagination, value.change_pagination)
   selectedReview.value = review
+  if (!sameReview) activeChangeIndex.value = 0
+  else if (activeChangeIndex.value >= orderedGroups.value.length) {
+    activeChangeIndex.value = Math.max(0, orderedGroups.value.length - 1)
+  }
   if (review.workflow) syncWorkflowDraft(review.workflow)
 }
 
@@ -495,6 +528,8 @@ const selectReview = async (id, initialReview = null) => {
   semanticEditMode.value = false
   semanticVisible.before = 20
   semanticVisible.after = 20
+  activeChangeIndex.value = 0
+  expandedChangeKey.value = ''
   Object.assign(changePagination, { page: 1, page_size: 12, total: 0, has_more: false })
   const listItem = reviews.value.find((item) => item.id === id)
   if (selectedReview.value?.id !== id) {
@@ -547,6 +582,8 @@ const clearSelectedReview = () => {
   }
   progressState.value = null
   sourceLoaded.value = false
+  activeChangeIndex.value = 0
+  expandedChangeKey.value = ''
   selectedReview.value = null
 }
 
@@ -716,7 +753,7 @@ const commentsFor = (groupId) => {
 }
 
 const loadMoreChanges = async () => {
-  if (!selectedReview.value || !changePagination.has_more || changesLoading.value) return
+  if (!selectedReview.value || !changePagination.has_more || changesLoading.value) return false
   const reviewId = selectedReview.value.id
   changesLoading.value = true
   try {
@@ -725,7 +762,7 @@ const loadMoreChanges = async () => {
       page: nextPage,
       page_size: changePagination.page_size,
     })
-    if (selectedReview.value?.id !== reviewId) return
+    if (selectedReview.value?.id !== reviewId) return false
     const data = response.data || {}
     const existingGroups = new Map((selectedReview.value.change_groups || []).map((item) => [item.id, item]))
     for (const item of data.change_groups || []) existingGroups.set(item.id, item)
@@ -739,11 +776,39 @@ const loadMoreChanges = async () => {
       total: data.total || 0,
       has_more: Boolean(data.has_more),
     })
+    return true
   } catch {
     ElMessage.error('加载更多改动失败')
+    return false
   } finally {
     changesLoading.value = false
   }
+}
+
+const showPreviousChange = () => {
+  if (activeChangeIndex.value > 0) {
+    expandedChangeKey.value = ''
+    activeChangeIndex.value -= 1
+  }
+}
+
+const showNextChange = async () => {
+  if (activeChangeIndex.value < orderedGroups.value.length - 1) {
+    expandedChangeKey.value = ''
+    activeChangeIndex.value += 1
+    return
+  }
+  if (!changePagination.has_more || changesLoading.value) return
+  const previousLength = orderedGroups.value.length
+  const loaded = await loadMoreChanges()
+  if (loaded && orderedGroups.value.length > previousLength) {
+    expandedChangeKey.value = ''
+    activeChangeIndex.value += 1
+  }
+}
+
+const toggleActiveChangeDiff = () => {
+  expandedChangeKey.value = activeChangeDiffExpanded.value ? '' : activeChangeKey.value
 }
 
 const loadSourceText = async (event) => {
@@ -1017,9 +1082,9 @@ onBeforeUnmount(() => {
 .stat-card { padding: 16px; border: 1px solid #eee3d2; border-radius: var(--r-md); background: #fbf6ef; }.stat-card span, .stat-card small { display: block; color: var(--ink-3); font-size: 11px; }.stat-card strong { display: block; margin: 6px 0 2px; font-size: 25px; font-weight: 600; }.stat-highlight { border-color: #e9b2a6; background: #fff5f1; }.stat-highlight strong { color: var(--crimson); }
 .content-section { margin-bottom: 24px; padding: 24px; border: 1px solid #e8ddca; border-radius: var(--r-lg); background: #fffdf9; }.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }.section-heading h3 { margin: 6px 0 5px; font-size: 22px; }.section-heading p { margin: 0; color: var(--ink-3); font-size: 12px; line-height: 1.6; }.section-count { color: var(--clay-deep); font-size: 12px; white-space: nowrap; }
 .section-actions { display: flex; gap: 7px; flex-wrap: wrap; }.load-more-button { align-self: center; margin-top: 4px; }.stage-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }.stage-item { display: flex; align-items: flex-start; gap: 8px; min-height: 75px; padding: 11px; border: 1px solid #eee3d2; border-radius: var(--r-sm); background: #fbf7f0; }.stage-item > div { min-width: 0; flex: 1; }.stage-item strong, .stage-item small { display: block; }.stage-item strong { font-size: 12px; }.stage-item small { margin-top: 5px; color: var(--ink-4); font-size: 10px; line-height: 1.45; }.stage-dot { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 21px; height: 21px; border-radius: 50%; background: #e8ddca; color: var(--ink-3); font-size: 10px; font-weight: 700; }.stage-succeeded .stage-dot { background: #dcebd6; color: #4f7646; }.stage-running .stage-dot, .stage-awaiting_confirmation .stage-dot { background: #f2dfb7; color: #9a6b1b; }.stage-failed .stage-dot, .stage-invalidated .stage-dot { background: #f2d8d3; color: var(--crimson); }
-.semantic-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.semantic-column { min-width: 0; }.semantic-column-head { display: flex; justify-content: space-between; margin-bottom: 8px; color: var(--clay-deep); font-size: 12px; }.semantic-column-head span { color: var(--ink-4); }.semantic-block { margin-bottom: 8px; padding: 11px 12px; border: 1px solid #eee3d2; border-radius: var(--r-sm); background: #fbf7f0; }.semantic-block-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 7px; }.semantic-block-head span { color: var(--clay-deep); font-size: 11px; font-weight: 700; }.semantic-block-head small { color: var(--ink-4); font-size: 10px; }.semantic-block p { margin: 0; color: var(--ink-2); white-space: pre-wrap; font-size: 12px; line-height: 1.7; }.semantic-block-actions { display: flex; gap: 2px; margin-top: 5px; }.change-reason { margin: 0 0 11px; color: var(--ink-3); font-size: 12px; line-height: 1.6; }.change-reason strong { color: var(--clay-deep); }.change-review-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; color: var(--ink-3); font-size: 11px; }.reorder-list { display: flex; flex-direction: column; gap: 8px; }.reorder-item { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid #ead6a9; border-radius: var(--r-sm); background: #fffaf0; }.reorder-item strong { font-size: 13px; }.reorder-item p { margin: 5px 0 0; color: var(--ink-3); font-size: 11px; }.method-actions { display: flex; align-items: center; flex-direction: column; gap: 5px; }
-.change-list { display: flex; flex-direction: column; gap: 13px; }.change-card { padding: 16px; border: 1px solid #e7dfd2; border-radius: var(--r-md); background: #fcfaf6; }.change-card.impact-high { border-color: #edb8ac; background: #fff8f4; }.change-card.impact-medium { border-color: #ead6a9; }.change-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }.change-label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--ink-3); font-size: 12px; }.change-index { color: var(--clay-deep); font-weight: 700; }.change-ratio { color: var(--ink-4); font-size: 11px; }
-.diff-columns { display: grid; grid-template-columns: minmax(0,1fr) 26px minmax(0,1fr); align-items: stretch; gap: 9px; }.diff-block { min-height: 90px; padding: 12px; border-radius: var(--r-sm); }.diff-block span { display: block; margin-bottom: 7px; font-size: 11px; font-weight: 700; }.diff-block p { margin: 0; white-space: pre-wrap; color: var(--ink-2); font-size: 13px; line-height: 1.75; }.diff-block.before { background: #f8e9e6; }.diff-block.before span { color: #a45247; }.diff-block.after { background: #edf5e9; }.diff-block.after span { color: #4f7646; }.diff-arrow { align-self: center; color: var(--ink-4); text-align: center; }
+.semantic-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.semantic-column { min-width: 0; }.semantic-column-head { display: flex; justify-content: space-between; margin-bottom: 8px; color: var(--clay-deep); font-size: 12px; }.semantic-column-head span { color: var(--ink-4); }.semantic-block { margin-bottom: 8px; padding: 11px 12px; border: 1px solid #eee3d2; border-radius: var(--r-sm); background: #fbf7f0; }.semantic-block-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 7px; }.semantic-block-head span { color: var(--clay-deep); font-size: 11px; font-weight: 700; }.semantic-block-head small { color: var(--ink-4); font-size: 10px; }.semantic-block p { margin: 0; color: var(--ink-2); white-space: pre-wrap; font-size: 12px; line-height: 1.7; }.semantic-block-actions { display: flex; gap: 2px; margin-top: 5px; }.change-reason { margin: 0 0 11px; color: var(--ink-3); font-size: 12px; line-height: 1.6; }.change-reason strong { color: var(--clay-deep); }.diff-focus-note { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: -2px 0 11px; padding: 8px 10px; border-radius: var(--r-sm); background: #f4efe7; color: var(--ink-3); font-size: 11px; }.diff-focus-note .el-button { flex: 0 0 auto; margin: 0; }.change-review-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; color: var(--ink-3); font-size: 11px; }.reorder-list { display: flex; flex-direction: column; gap: 8px; }.reorder-item { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid #ead6a9; border-radius: var(--r-sm); background: #fffaf0; }.reorder-item strong { font-size: 13px; }.reorder-item p { margin: 5px 0 0; color: var(--ink-3); font-size: 11px; }.method-actions { display: flex; align-items: center; flex-direction: column; gap: 5px; }
+.change-carousel { display: flex; flex-direction: column; gap: 13px; }.change-carousel-nav { display: grid; grid-template-columns: minmax(96px, auto) 1fr minmax(96px, auto); align-items: center; gap: 12px; }.change-carousel-nav .el-button { width: 100%; margin: 0; }.change-carousel-position { display: flex; align-items: baseline; justify-content: center; gap: 5px; color: var(--ink-4); }.change-carousel-position strong { color: var(--clay-deep); font-size: 20px; }.change-carousel-position span { font-size: 12px; }.change-carousel-position small { margin-left: 8px; font-size: 10px; }.change-carousel-nav-bottom { padding-top: 2px; }.change-card { padding: 16px; border: 1px solid #e7dfd2; border-radius: var(--r-md); background: #fcfaf6; }.change-card.impact-high { border-color: #edb8ac; background: #fff8f4; }.change-card.impact-medium { border-color: #ead6a9; }.change-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }.change-label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--ink-3); font-size: 12px; }.change-index { color: var(--clay-deep); font-weight: 700; }.change-ratio { color: var(--ink-4); font-size: 11px; }
+.diff-columns { display: grid; grid-template-columns: minmax(0,1fr) 26px minmax(0,1fr); align-items: stretch; gap: 9px; }.diff-block { min-width: 0; min-height: 90px; padding: 12px; border-radius: var(--r-sm); }.diff-block span { display: block; margin-bottom: 7px; font-size: 11px; font-weight: 700; }.diff-block p { max-height: 460px; overflow-y: auto; margin: 0; padding-right: 6px; scrollbar-gutter: stable; white-space: pre-wrap; color: var(--ink-2); font-size: 13px; line-height: 1.75; }.diff-block.before { background: #f8e9e6; }.diff-block.before span { color: #a45247; }.diff-block.after { background: #edf5e9; }.diff-block.after span { color: #4f7646; }.diff-arrow { align-self: center; color: var(--ink-4); text-align: center; }
 .comment-area { margin-top: 12px; }.comment-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 9px; }.comment-item { padding: 9px 11px; border-left: 3px solid var(--clay); border-radius: 0 var(--r-sm) var(--r-sm) 0; background: #f7f1e8; }.comment-item div { display: flex; gap: 8px; align-items: center; }.comment-item strong { font-size: 12px; }.comment-item small { color: var(--ink-4); font-size: 10px; }.comment-item p { margin: 5px 0 0; color: var(--ink-2); font-size: 12px; line-height: 1.6; }
 .ai-summary { margin-bottom: 15px; padding: 16px 18px; border-left: 4px solid var(--clay); border-radius: 0 var(--r-md) var(--r-md) 0; background: var(--clay-tint); color: var(--ink); font-size: 16px; line-height: 1.8; }.analysis-change-list { display: flex; flex-direction: column; gap: 10px; }.analysis-change-item { padding: 14px; border: 1px solid #eee3d2; border-radius: var(--r-md); background: #fbf7f0; }.analysis-change-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }.analysis-change-title strong { font-size: 14px; }.analysis-change-title span { margin-left: auto; color: var(--ink-4); font-size: 11px; }.analysis-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 12px; }.analysis-fields > div, .method-fields > div { padding: 10px 12px; border-radius: var(--r-sm); background: #fffdf9; }.analysis-fields span, .method-fields span { display: block; margin-bottom: 4px; color: var(--clay-deep); font-size: 11px; font-weight: 700; }.analysis-fields p, .method-fields p { margin: 0; color: var(--ink-2); font-size: 12px; line-height: 1.65; }
 .methodology-list { display: flex; flex-direction: column; gap: 10px; }.methodology-card { display: grid; grid-template-columns: 35px minmax(0, 1fr) auto; gap: 13px; align-items: start; padding: 16px; border: 1px solid #e8ddca; border-radius: var(--r-md); background: #faf5ed; }.method-number { color: var(--clay-deep); font-size: 13px; font-weight: 700; }.method-body h4 { margin: 0 0 7px; font-size: 16px; }.method-body .rule { margin: 0; color: var(--ink); font-size: 13px; line-height: 1.7; }.method-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 11px; }.method-body small { display: block; margin-top: 10px; color: var(--ink-4); font-size: 10px; }
@@ -1027,5 +1092,5 @@ onBeforeUnmount(() => {
 .empty-detail-panel { display: flex; align-items: center; justify-content: center; min-height: 680px; padding: 40px; text-align: center; }.empty-detail-panel > div { max-width: 430px; }.empty-mark { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; margin-bottom: 14px; border-radius: 50%; background: var(--clay-tint); color: var(--clay-deep); font-size: 25px; }.empty-detail-panel h2 { margin: 0 0 9px; font: 500 26px var(--serif, serif); }.empty-detail-panel p { margin: 0 0 20px; color: var(--ink-3); font-size: 13px; line-height: 1.7; }
 .upload-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.upload-box { position: relative; display: flex; flex-direction: column; gap: 8px; min-height: 105px; padding: 17px; border: 1px dashed #d8c5a9; border-radius: var(--r-md); background: #fbf6ef; cursor: pointer; }.upload-box:hover { border-color: var(--clay); background: var(--clay-tint); }.upload-box span { color: var(--clay-deep); font-size: 11px; font-weight: 700; }.upload-box strong { color: var(--ink-2); font-size: 13px; line-height: 1.5; }.upload-box input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }.dialog-tip, .promote-intro { color: var(--ink-3); font-size: 12px; line-height: 1.65; }.editor-list { display: flex; flex-direction: column; gap: 11px; max-height: 430px; overflow: auto; margin-bottom: 12px; }.editor-item { padding: 13px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--ivory); }.editor-item-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; }.editor-input { margin-bottom: 8px; }.editor-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }.group-checkboxes { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 @media (max-width: 1050px) { .workspace-grid { grid-template-columns: 270px minmax(0, 1fr); }.review-detail-panel { padding: 24px 20px 34px; }.stats-grid { grid-template-columns: repeat(2, 1fr); }.stage-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 760px) { .reviews-hero, .detail-head { align-items: flex-start; flex-direction: column; }.reviews-hero .el-button, .detail-actions { width: 100%; }.detail-actions .el-button { flex: 1; }.workspace-grid { display: block; }.review-list-panel { margin-bottom: 16px; }.review-list { min-height: auto; max-height: 310px; overflow: auto; }.empty-detail-panel { min-height: 360px; }.diff-columns, .source-columns, .analysis-fields, .method-fields, .upload-pair, .semantic-columns { grid-template-columns: 1fr; }.diff-arrow { transform: rotate(90deg); }.methodology-card { grid-template-columns: 30px minmax(0, 1fr); }.methodology-card .method-actions { grid-column: 2; align-items: flex-start; flex-direction: row; flex-wrap: wrap; }.content-section { padding: 18px 14px; }.section-heading { flex-direction: column; }.section-heading .el-button { width: 100%; }.stats-grid { gap: 7px; }.stat-card { padding: 12px; }.stat-card strong { font-size: 21px; }.editor-two-col { grid-template-columns: 1fr; }.stage-list { grid-template-columns: 1fr; }.state-banner.waiting { align-items: flex-start; flex-wrap: wrap; }.state-banner.waiting .el-button { margin-left: 29px; } }
+@media (max-width: 760px) { .reviews-hero, .detail-head { align-items: flex-start; flex-direction: column; }.reviews-hero .el-button, .detail-actions { width: 100%; }.detail-actions .el-button { flex: 1; }.workspace-grid { display: block; }.review-list-panel { margin-bottom: 16px; }.review-list { min-height: auto; max-height: 310px; overflow: auto; }.empty-detail-panel { min-height: 360px; }.diff-columns, .source-columns, .analysis-fields, .method-fields, .upload-pair, .semantic-columns { grid-template-columns: 1fr; }.diff-block p { max-height: 320px; }.diff-arrow { transform: rotate(90deg); }.diff-focus-note { align-items: flex-start; flex-direction: column; }.change-carousel-nav { grid-template-columns: 1fr auto 1fr; gap: 7px; }.change-carousel-position small { display: none; }.methodology-card { grid-template-columns: 30px minmax(0, 1fr); }.methodology-card .method-actions { grid-column: 2; align-items: flex-start; flex-direction: row; flex-wrap: wrap; }.content-section { padding: 18px 14px; }.section-heading { flex-direction: column; }.section-heading .el-button { width: 100%; }.stats-grid { gap: 7px; }.stat-card { padding: 12px; }.stat-card strong { font-size: 21px; }.editor-two-col { grid-template-columns: 1fr; }.stage-list { grid-template-columns: 1fr; }.state-banner.waiting { align-items: flex-start; flex-wrap: wrap; }.state-banner.waiting .el-button { margin-left: 29px; } }
 </style>

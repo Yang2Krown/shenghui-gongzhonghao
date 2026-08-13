@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 MAX_GROUP_TEXT = 8_000
 MAX_ANALYSIS_GROUPS = 40
+ANALYSIS_INITIAL_MAX_TOKENS = 32_000
+ANALYSIS_RETRY_MAX_TOKENS = 64_000
+ANALYSIS_TRUNCATION_REASONS = {"length", "max_tokens"}
 SEMANTIC_MAX_BLOCK_CHARS = 720
 SEMANTIC_MERGE_TARGET_CHARS = 220
 SEMANTIC_SPLIT_TARGET_CHARS = 360
@@ -697,27 +700,48 @@ async def analyze_article_review(
         "human_comments": comments or [],
     }
     client = llm_client or get_llm_client()
+    messages = [
+        ChatMessage(role="system", content=_SYSTEM_PROMPT),
+        ChatMessage(
+            role="user",
+            content=json.dumps(context, ensure_ascii=False),
+        ),
+    ]
+    retry_count = 0
     try:
         result = await client.chat(
-            [
-                ChatMessage(role="system", content=_SYSTEM_PROMPT),
-                ChatMessage(
-                    role="user",
-                    content=json.dumps(context, ensure_ascii=False),
-                ),
-            ],
+            messages,
             temperature=0.2,
-            max_tokens=6_000,
+            max_tokens=ANALYSIS_INITIAL_MAX_TOKENS,
             json_mode=True,
         )
+        if result.finish_reason in ANALYSIS_TRUNCATION_REASONS:
+            retry_count = 1
+            logger.warning(
+                "文章复盘 AI 输出达到 token 上限，扩大预算重试 initial=%s retry=%s model=%s",
+                ANALYSIS_INITIAL_MAX_TOKENS,
+                ANALYSIS_RETRY_MAX_TOKENS,
+                result.model or getattr(client, "default_model", None),
+            )
+            result = await client.chat(
+                messages,
+                temperature=0.2,
+                max_tokens=ANALYSIS_RETRY_MAX_TOKENS,
+                json_mode=True,
+            )
     except Exception as exc:
         raise ArticleReviewAnalysisError(str(exc)[:1_000]) from exc
 
     raw_output = result.text or ""
     payload = result.parsed if isinstance(result.parsed, dict) else parse_json_loose(raw_output)
     if not isinstance(payload, dict):
+        if result.finish_reason in ANALYSIS_TRUNCATION_REASONS:
+            raise ArticleReviewAnalysisError(
+                "LLM 输出达到 token 上限，已尝试 32K 和 64K 预算仍未完成 JSON，请压缩文章改动块后重试",
+                raw_output=raw_output,
+            )
         raise ArticleReviewAnalysisError("LLM 输出无法解析为文章复盘 JSON", raw_output=raw_output)
-    parse_status = "repaired" if result.finish_reason in {"length", "max_tokens"} else "parsed"
+    parse_status = "repaired" if result.finish_reason in ANALYSIS_TRUNCATION_REASONS else "parsed"
     analysis = normalize_article_review_analysis(
         payload,
         raw_output=raw_output,
@@ -728,6 +752,7 @@ async def analyze_article_review(
             "model": result.model,
             "usage": result.usage,
             "finish_reason": result.finish_reason,
+            "retry_count": retry_count,
         }
     )
     return analysis
