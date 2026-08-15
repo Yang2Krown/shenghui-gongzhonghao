@@ -12,7 +12,7 @@
       </div>
     </header>
 
-    <div class="diagnosis-grid">
+    <div class="diagnosis-grid" :class="{ 'is-empty': !loading && !diagnosis }">
       <aside class="input-card">
         <div class="card-heading">
           <div><span class="eyebrow">01 · BRING A DRAFT</span><h2>放入初稿</h2></div>
@@ -504,14 +504,14 @@ const submitDiagnosis = async () => {
   loading.value = true
   savedFindings.value = []
   try {
-    const data = inputMode.value === 'file'
+    const res = inputMode.value === 'file'
       ? await createUploadedDraftDiagnosis({ file: selectedFile.value, title: form.title, brief_context: briefContextForSubmit() })
       : await createPastedDraftDiagnosis({
         title: form.title.trim() || null,
         content: form.content,
         brief_context: briefContextForSubmit(),
       })
-    diagnosis.value = data.diagnosis
+    diagnosis.value = unwrap(res).diagnosis
     await loadHistory()
     ElMessage.success('初稿诊断完成')
   } catch (error) {
@@ -531,8 +531,8 @@ const briefContextForSubmit = () => {
 
 const loadHistory = async () => {
   try {
-    const data = await listDraftDiagnoses({ page: 1, page_size: 12 })
-    history.value = data.items || []
+    const res = await listDraftDiagnoses({ page: 1, page_size: 12 })
+    history.value = unwrap(res).items || []
   } catch {
     // 历史记录加载失败不影响提交诊断。
   }
@@ -541,9 +541,10 @@ const loadHistory = async () => {
 const openHistory = async (id) => {
   if (diagnosis.value?.id === id) return
   try {
-    const data = await getDraftDiagnosis(id)
-    diagnosis.value = data.diagnosis
-    setStructuredBrief(data.diagnosis.brief_context)
+    const res = await getDraftDiagnosis(id)
+    const historyDiagnosis = unwrap(res).diagnosis
+    diagnosis.value = historyDiagnosis
+    setStructuredBrief(historyDiagnosis.brief_context)
     savedFindings.value = []
   } catch {
     ElMessage.error('诊断记录加载失败')
@@ -588,7 +589,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.diagnosis-page { max-width: 1440px; margin: 0 auto; color: var(--ink); }
+.diagnosis-page { width: 100%; max-width: 1440px; margin: 0 auto; color: var(--ink); }
 .diagnosis-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 32px; padding: 12px 0 30px; border-bottom: 1px solid var(--line); }
 .eyebrow { display: block; color: var(--clay-deep); font: 700 10px/1.2 'Fraunces', ui-serif, Georgia, serif; letter-spacing: .16em; }
 .diagnosis-hero h1 { margin: 10px 0 8px; font: 700 clamp(32px, 4vw, 50px)/1.05 'Noto Serif SC', 'Songti SC', serif; letter-spacing: -.04em; }
@@ -598,8 +599,8 @@ onUnmounted(() => {
 .hero-note strong, .hero-note small { display: block; }
 .hero-note strong { font-size: 13px; }
 .hero-note small { margin-top: 4px; color: var(--ink-4); font-size: 11px; line-height: 1.5; }
-.diagnosis-grid { display: grid; grid-template-columns: minmax(320px, 390px) minmax(0, 1fr); gap: 20px; align-items: start; margin-top: 22px; }
-.input-card, .result-card, .history-section { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--paper); box-shadow: 0 10px 30px rgba(93, 67, 47, .05); }
+.diagnosis-grid { display: grid; grid-template-columns: minmax(0, 390px) minmax(0, 1fr); gap: 20px; align-items: start; margin-top: 22px; }
+.input-card, .result-card, .history-section { box-sizing: border-box; min-width: 0; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--paper); box-shadow: 0 10px 30px rgba(93, 67, 47, .05); }
 .input-card { position: sticky; top: 80px; padding: 22px; }
 .card-heading, .result-heading, .section-title, .issue-head, .history-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .card-heading h2, .result-heading h2, .section-title h2 { margin: 7px 0 0; font: 700 23px/1.2 'Noto Serif SC', 'Songti SC', serif; letter-spacing: -.02em; }
@@ -610,13 +611,15 @@ onUnmounted(() => {
 .input-card :deep(.el-form-item__label) { padding-bottom: 5px; color: var(--ink-2); font-size: 12px; }
 .input-card :deep(.el-textarea__inner), .input-card :deep(.el-input__wrapper) { border-color: #e9dfd2; background: #fffdf9; box-shadow: none; }
 .input-card :deep(.el-textarea__inner):focus, .input-card :deep(.el-input__wrapper.is-focus) { border-color: var(--clay); box-shadow: 0 0 0 1px var(--clay-soft); }
-.draft-upload :deep(.el-upload-dragger) { width: 100%; min-height: 170px; padding: 26px 14px; border-color: #e9dfd2; background: #fffdf9; }
+.draft-upload { display: block; width: 100%; }
+.draft-upload :deep(.el-upload) { width: 100%; }
+.draft-upload :deep(.el-upload-dragger) { box-sizing: border-box; width: 100%; min-height: 170px; padding: 26px 14px; border-color: #e9dfd2; background: #fffdf9; }
 .draft-upload :deep(.el-upload-dragger:hover) { border-color: var(--clay); }
 .upload-icon { margin-bottom: 9px; color: var(--clay); font-size: 30px; }
 .draft-upload .el-upload__text { color: var(--ink-3); font-size: 12px; line-height: 1.7; }
 .draft-upload .el-upload__text em { color: var(--clay-deep); font-style: normal; }
 .draft-upload small { display: block; margin-top: 6px; color: var(--ink-4); font-size: 10px; }
-.selected-file { display: flex; align-items: center; gap: 7px; margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--ivory); color: var(--ink-2); font-size: 12px; }
+.selected-file { display: flex; align-items: center; gap: 7px; width: fit-content; max-width: 100%; margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--ivory); color: var(--ink-2); font-size: 12px; }
 .selected-file span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .selected-file button { border: 0; background: transparent; color: var(--clay-deep); cursor: pointer; font-size: 11px; }
 .context-heading { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 11px; color: var(--ink-2); font-size: 12px; font-weight: 600; }
@@ -665,9 +668,10 @@ onUnmounted(() => {
 .issue-list { display: flex; flex-direction: column; gap: 10px; }.issue-item { padding: 15px; border: 1px solid #eadfd3; border-left: 3px solid #d4b07b; border-radius: var(--r-md); background: #fffdf9; }.issue-item.severity-high { border-left-color: #bd6a57; }.issue-item.severity-low { border-left-color: #a7a29a; }.issue-head > div { display: flex; align-items: center; gap: 8px; min-width: 0; }.issue-head strong { font-size: 14px; }.issue-problem { margin: 10px 0; color: var(--ink); font-size: 13px; line-height: 1.7; }.issue-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.issue-fields > div { padding: 10px; border-radius: 8px; background: var(--ivory); }.issue-fields span, .issue-methods > span { color: var(--ink-4); font-size: 10px; }.issue-fields p { margin: 5px 0 0; color: var(--ink-2); font-size: 11px; line-height: 1.65; }.issue-methods { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }.issue-methods > span { margin-right: 2px; }
 .plan-list { display: flex; flex-direction: column; gap: 8px; }.plan-item { display: flex; gap: 11px; align-items: flex-start; padding: 11px 12px; border-radius: var(--r-md); background: #f8f5ee; }.plan-number { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--clay-tint); color: var(--clay-deep); font: 700 12px/1 'Fraunces', ui-serif, Georgia, serif; flex-shrink: 0; }.plan-item strong { font-size: 13px; }.plan-item p { margin: 4px 0 0; color: var(--ink-3); font-size: 11px; line-height: 1.6; }
 .questions-note { display: flex; gap: 9px; margin-top: 22px; padding: 12px 14px; border-radius: var(--r-md); background: #fff7e7; color: #8b6c35; }.questions-note > .el-icon { margin-top: 2px; }.questions-note strong { font-size: 12px; }.questions-note p { margin: 5px 0 0; font-size: 11px; line-height: 1.6; }
-.loading-card, .empty-result { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }.loading-orbit { display: grid; place-items: center; width: 58px; height: 58px; margin-bottom: 18px; border-radius: 50%; background: var(--clay-tint); color: var(--clay-deep); font-size: 23px; }.loading-card h2, .empty-result h2 { margin: 0; font: 700 25px/1.3 'Noto Serif SC', 'Songti SC', serif; }.loading-card p, .empty-result p { max-width: 430px; margin: 10px 0 0; color: var(--ink-3); font-size: 13px; line-height: 1.8; }.empty-mark { margin-bottom: 18px; color: var(--clay); font: 400 60px/1 'Fraunces', ui-serif, Georgia, serif; }.empty-result .eyebrow { margin-bottom: 9px; }.empty-flow { display: flex; align-items: center; gap: 11px; margin-top: 27px; color: var(--ink-3); font-size: 12px; }.empty-flow .el-icon { color: var(--clay); }
+.loading-card, .empty-result { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }.loading-card { height: 640px; }.loading-orbit { display: grid; place-items: center; width: 58px; height: 58px; margin-bottom: 18px; border-radius: 50%; background: var(--clay-tint); color: var(--clay-deep); font-size: 23px; }.loading-card h2, .empty-result h2 { margin: 0; font: 700 25px/1.3 'Noto Serif SC', 'Songti SC', serif; }.loading-card p, .empty-result p { max-width: 430px; margin: 10px 0 0; color: var(--ink-3); font-size: 13px; line-height: 1.8; }.empty-mark { margin-bottom: 18px; color: var(--clay); font: 400 60px/1 'Fraunces', ui-serif, Georgia, serif; }.empty-result .eyebrow { margin-bottom: 9px; }.empty-flow { display: flex; align-items: center; gap: 11px; margin-top: 27px; color: var(--ink-3); font-size: 12px; }.empty-flow .el-icon { color: var(--clay); }
 .history-section { margin-top: 20px; padding: 22px; }.history-section h2 { font-size: 21px; }.history-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }.history-item { display: flex; justify-content: space-between; gap: 10px; min-width: 0; padding: 13px; border: 1px solid #e9dfd2; border-radius: var(--r-md); background: #fffdf9; color: var(--ink); cursor: pointer; text-align: left; transition: all .15s; }.history-item:hover, .history-item.active { border-color: var(--clay-soft); background: #fff8ef; }.history-item strong, .history-item span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.history-item strong { max-width: 180px; font-size: 13px; }.history-item span, .history-meta small { margin-top: 6px; color: var(--ink-4); font-size: 10px; }.history-meta { flex-direction: column; align-items: flex-end; gap: 3px; }
-@media (max-width: 1100px) { .diagnosis-grid { grid-template-columns: 330px minmax(0, 1fr); }.method-chip-list, .history-list { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 820px) { .diagnosis-hero { align-items: flex-start; flex-direction: column; }.hero-note { max-width: none; width: 100%; }.diagnosis-grid { display: block; }.input-card { position: static; margin-bottom: 16px; }.result-card { min-height: 520px; padding: 20px 16px; }.strength-list, .issue-fields, .method-chip-list, .history-list { grid-template-columns: 1fr; }.history-section { padding: 18px 14px; }.history-item strong { max-width: 220px; } }
+@media (max-width: 1100px) { .diagnosis-grid { grid-template-columns: minmax(0, 330px) minmax(0, 1fr); gap: 16px; }.method-chip-list, .history-list { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 821px) { .diagnosis-grid.is-empty { align-items: stretch; }.diagnosis-grid.is-empty .result-column { display: flex; }.diagnosis-grid.is-empty .empty-result { width: 100%; min-height: 0; flex: 1; } }
+@media (max-width: 820px) { .diagnosis-hero { align-items: flex-start; flex-direction: column; }.hero-note { max-width: none; width: 100%; }.diagnosis-grid { display: block; }.input-card { position: static; margin-bottom: 16px; }.result-card { min-height: 520px; padding: 20px 16px; }.loading-card { height: 520px; }.strength-list, .issue-fields, .method-chip-list, .history-list { grid-template-columns: 1fr; }.history-section { padding: 18px 14px; }.history-item strong { max-width: 220px; } }
 @media (max-width: 500px) { .diagnosis-hero h1 { font-size: 34px; }.result-heading { align-items: flex-start; flex-direction: column; }.result-heading .el-button { width: 100%; }.assessment-strip { grid-template-columns: 82px minmax(0, 1fr); gap: 11px; }.issue-head { align-items: flex-start; flex-direction: column; }.issue-head .el-button { padding-left: 0; }.empty-flow { gap: 6px; font-size: 11px; } }
 </style>

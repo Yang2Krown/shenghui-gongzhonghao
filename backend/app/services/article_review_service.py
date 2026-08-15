@@ -44,7 +44,7 @@ def normalize_review_text(text: str) -> str:
 
 
 def _is_extraction_noise_line(text: str) -> bool:
-    """识别 Word/PDF 提取时常见的独立版本号、页码行。"""
+    """识别 Word/PDF 提取时常见的独立版本号、页码行、图片占位行。"""
 
     value = re.sub(r"\s+", "", text or "")
     if not value:
@@ -55,6 +55,19 @@ def _is_extraction_noise_line(text: str) -> bool:
     if re.fullmatch(r"(?:第)?\d+(?:/|／)\d+(?:页)?", value, re.IGNORECASE):
         return True
     if re.fullmatch(r"(?:page|页)\d+(?:/\d+)?", value, re.IGNORECASE):
+        return True
+    # 图片本身不提取；但图片占位/图注行会在段落间制造“伪边界”，导致语义块被拆开。
+    if re.fullmatch(
+        r"(?:"
+        r"\[?图片\]?|【图片】|\(图片\)|（图片）|"
+        r"(?:image|figure|fig\.?\s*\d*)|"
+        r"图\d{1,2}(?:[-–—]\d{1,2})?|"
+        r"图[:：].{0,20}|"
+        r"插图|配图|示意图|截图|流程图|架构图"
+        r")",
+        value,
+        re.IGNORECASE,
+    ):
         return True
     return False
 
@@ -70,6 +83,167 @@ def _mask_extraction_noise_lines(source: str) -> str:
         else:
             masked.append(line)
     return "".join(masked)
+
+
+
+# 公众号初稿常见稿头字段；这些行本身没有复盘价值，应在语义分段前跳过。
+_FRONT_MATTER_LABEL_RE = re.compile(
+    r"^(?:"
+    r"发布时间|发布日期|封面|标题|作者|摘要|导语|备注|正文|全文|"
+    r"文档类型|稿件类型|稿件状态|状态|栏目|来源|编辑|责编|运营"
+    r")\s*[:：]"
+)
+_FRONT_MATTER_META_RE = re.compile(
+    r"^(?:"
+    r"作者\s*[|｜].+|"
+    r"(?:中科闻歌|磐石ScienceOne|ScienceOne).{0,60}(?:初稿|终稿|定稿|推文)|"
+    r".{0,60}(?:公众号推文|公众号文章).{0,30}(?:初稿|终稿|定稿)|"
+    r".{0,60}(?:公众号).{0,30}(?:初稿|终稿|定稿)|"
+    r"原文第\s*\d+\s*[-–—~至到]\s*\d+\s*行"
+    r")$"
+)
+_BODY_MARKER_RE = re.compile(r"^(?:正文|全文)\s*[:：]\s*(.*)$")
+
+
+def _is_front_matter_line(text: str) -> bool:
+    """识别初稿文件开头常见的元信息行。"""
+
+    value = re.sub(r"\s+", " ", (text or "").strip())
+    if not value:
+        return True
+    if _is_extraction_noise_line(value):
+        return True
+    compact = re.sub(r"\s+", "", value)
+    if compact in {"中科闻歌", "磐石ScienceOne", "ScienceOne"}:
+        return True
+    if _FRONT_MATTER_LABEL_RE.match(value):
+        return True
+    if _FRONT_MATTER_META_RE.match(value):
+        return True
+    # “作者|路人甲TM” 这类
+    if re.match(r"^作者\s*[|｜]", value):
+        return True
+    # 纯标题备选列表：编号标题，常出现在稿头
+    if re.match(r"^\d{1,2}[.、．)]\s*\S", value) and len(value) <= 80:
+        return True
+    # UI 复制残留：02 / 原文第 9-9 行
+    if re.fullmatch(r"\d{1,3}", compact):
+        return True
+    if re.match(r"^原文第\s*\d+", value):
+        return True
+    if value in {"标题：", "标题:", "封面：", "封面:", "正文：", "正文:", "全文：", "全文:"}:
+        return True
+    return False
+
+
+def _looks_like_body_start(text: str) -> bool:
+    """启发式判断是否已经进入正文。"""
+
+    value = re.sub(r"\s+", " ", (text or "").strip())
+    if not value:
+        return False
+    if _is_front_matter_line(value):
+        return False
+    if _BODY_MARKER_RE.match(value):
+        return False
+    # 以完整叙述句开始，更像正文
+    if len(value) >= 12 and re.search(r"[。！？!?…]$", value):
+        return True
+    # 较长叙述段落，且不是“标题：xxx”字段
+    if len(value) >= 20 and "：" not in value[:10] and ":" not in value[:10]:
+        return True
+    return False
+
+
+def _find_body_start_offset(source: str) -> int:
+    """定位正文起点，跳过稿头元信息与标题备选列表。
+
+    只影响语义块生成范围；原文字符串本身不改写，前端“查看原文全文”
+    仍可看到完整内容。若无法可靠识别稿头，则返回 0（全文参与分段）。
+
+    优先识别显式“正文：/全文：”标记；没有标记时，才用稿头元信息 + 叙述句启发式。
+    """
+
+    if not source:
+        return 0
+    lines = list(re.finditer(r"[^\n]*(?:\n|$)", source))
+    if not lines:
+        return 0
+
+    # 1) 优先找显式正文标记（只在前 80 行内搜索，避免误伤正文里的“正文：”引用）
+    for index, match in enumerate(lines[:80]):
+        raw = match.group(0)
+        if not raw and match.start() == len(source):
+            continue
+        stripped = raw.rstrip("\n").strip()
+        marker = _BODY_MARKER_RE.match(stripped)
+        if not marker:
+            continue
+        inline = (marker.group(1) or "").strip()
+        if inline and not _is_front_matter_line(inline):
+            # “正文：事情是这样的……” 同行正文
+            # 计算 inline 在 raw 中的起点（忽略左侧空白）
+            left_ws = len(raw) - len(raw.lstrip(" \t"))
+            marker_text = stripped
+            inline_in_stripped = marker_text.rfind(inline)
+            if inline_in_stripped >= 0:
+                return match.start() + left_ws + inline_in_stripped
+            return match.start() + left_ws
+        # 标记单独成行：取后续第一个非空、非元信息行
+        for j in range(index + 1, len(lines)):
+            nxt_raw = lines[j].group(0)
+            nxt = nxt_raw.rstrip("\n").strip()
+            if not nxt:
+                continue
+            if _is_front_matter_line(nxt):
+                continue
+            return lines[j].start()
+        return match.end()
+
+    # 2) 没有显式标记时：要求开头有足够元信息，再落到第一段叙述正文
+    meta_hits = 0
+    scanned = 0
+    first_body_index = None
+    for index, match in enumerate(lines[:80]):
+        raw = match.group(0)
+        if not raw and match.start() == len(source):
+            continue
+        stripped = raw.rstrip("\n").strip()
+        if not stripped:
+            scanned += 1
+            continue
+        if _is_front_matter_line(stripped):
+            meta_hits += 1
+            scanned += 1
+            continue
+        if _looks_like_body_start(stripped):
+            first_body_index = index
+            break
+        # 短标题行（无句号）仍可能是稿头标题，继续当元信息
+        if len(stripped) <= 40 and not re.search(r"[。！？!?]", stripped):
+            meta_hits += 1
+            scanned += 1
+            continue
+        scanned += 1
+        if scanned >= 40:
+            break
+
+    if first_body_index is not None and meta_hits >= 3:
+        return lines[first_body_index].start()
+    return 0
+
+
+def _slice_semantic_source(source: str) -> tuple[str, int]:
+    """返回用于语义分段的正文切片，以及它在原文中的起始偏移。"""
+
+    start = _find_body_start_offset(source)
+    if start <= 0:
+        return source, 0
+    # 若截断后正文过短，说明识别不可靠，回退全文
+    body = source[start:]
+    if len(re.sub(r"\s+", "", body)) < 40:
+        return source, 0
+    return body, start
 
 
 def normalize_semantic_text(text: str) -> str:
@@ -128,8 +302,10 @@ def _line_units(source: str) -> list[dict]:
 def _is_structure_marker(text: str) -> bool:
     value = re.sub(r"\s+", "", text or "")
     return bool(re.match(
-        r"^(?:第.{1,8}[章节部分]|[一二三四五六七八九十]+[、.：:]|"
-        r"(?:背景|问题|方法|案例|结论|总结|第一步|第二步|第三步)[：:])",
+        r"^(?:第.{0,8}[章节部分步]|[一二三四五六七八九十百]+[、.：:]|"
+        r"\d{1,2}[、.．](?!\d)|"
+        r"(?:背景|问题|方法|案例|结论|总结|"
+        r"第?[一二三四五六七八九十\d]+步)[：:,，]?)",
         value,
     ))
 
@@ -143,6 +319,40 @@ def _is_topic_transition(text: str) -> bool:
         r"换句话说|回到|最后|总的来说|总结一下|先说结论|再来看)",
         value,
     ))
+
+
+def _is_continuation_line(text: str, previous_text: str = "") -> bool:
+    """判断当前行是否更像上一段的续写，而不是新语义块。
+
+    公众号稿常见：图/截图插在两段之间，后面用“这个/那个/上述…”承接前文。
+    图片本身不提取，但会在中间留下空档；若按空档或长度硬切，会把续写拆成独立块。
+    """
+
+    value = re.sub(r"\s+", "", text or "")
+    if not value:
+        return False
+    if _is_structure_marker(value) or _is_heading(value):
+        return False
+    # 明确的指代承接（避免“这是第1句…”这类普通叙述被误判）
+    if re.match(
+        r"^(?:这个|那个|这些|那些|这份|这项|这套|上述|如上|正如|于是|因此|所以|"
+        r"接着|随后|然后|紧接着|为此|对此)",
+        value,
+    ):
+        return True
+    # “它给出了…” 这类主语承接，仅在较短起句时生效
+    if re.match(r"^(?:它|他|她)(?:还|就|又|也)?(?:给出|提供|列|写|说|指出|总结)", value):
+        return True
+    # 上一句已完整结束，当前句用“主假设/这个结果/这份方案”继续展开
+    prev = re.sub(r"\s+", "", previous_text or "")
+    if prev and re.search(r"[。！？!?…]$", prev):
+        if re.match(r"^(?:主假设|假设|方案|结果|结论|问题|方法|数据|模型)", value):
+            return True
+        # 当前句直接复用上一句刚出现的核心名词
+        for token in ("主假设", "假设", "方案", "结果", "结论", "问题"):
+            if token in prev[-40:] and value.startswith(token):
+                return True
+    return False
 
 
 def _has_line_level_signal(source: str) -> bool:
@@ -234,9 +444,14 @@ def build_semantic_blocks(
 
     # 只统一换行，不做首尾 strip；这样 start_offset/end_offset 仍然对应
     # 提取文本中的原始字符位置，前端可以准确回溯到原文上下文。
-    source = _mask_extraction_noise_lines(normalize_review_text(text))
-    if not source:
+    full_source = _mask_extraction_noise_lines(normalize_review_text(text))
+    if not full_source:
         return []
+    # 语义分段只对比正文：跳过“中科闻歌 / 公众号推文-初稿 / 标题备选 / 正文：”等稿头。
+    # 偏移仍映射回 full_source，保证 source_line_* 与原文行号一致。
+    source, body_offset = _slice_semantic_source(full_source)
+    if not source.strip():
+        source, body_offset = full_source, 0
     raw_units = _line_units(source)
     semantic_units: list[dict] = []
     if split_short_lines:
@@ -249,27 +464,39 @@ def build_semantic_blocks(
         partitions: list[list[dict]] = []
         current: list[dict] = []
         current_chars = 0
+        previous_value = ""
         for unit in raw_units:
             value = _display_segment(source, unit["start"], unit["end"])
             normalized_length = len(normalize_semantic_text(value))
+            continues_previous = bool(current) and _is_continuation_line(value, previous_value)
             is_boundary = (
-                _is_structure_marker(value)
-                or _is_heading(value)
-                or (
-                    current_chars >= SEMANTIC_TRANSITION_MIN_CHARS
-                    and _is_topic_transition(value)
+                not continues_previous
+                and (
+                    _is_structure_marker(value)
+                    or _is_heading(value)
+                    or (
+                        current_chars >= SEMANTIC_TRANSITION_MIN_CHARS
+                        and _is_topic_transition(value)
+                    )
                 )
             )
             if is_boundary and current:
                 partitions.append(current)
                 current = []
                 current_chars = 0
-            current.append(unit)
-            current_chars += normalized_length
-            if current_chars >= SEMANTIC_MAX_BLOCK_CHARS:
+            # 长度阈值只在“非续写”处生效，避免图片后的承接句被硬切成新块。
+            if (
+                current
+                and not continues_previous
+                and current_chars >= SEMANTIC_MAX_BLOCK_CHARS
+                and not _is_structure_marker(value)
+            ):
                 partitions.append(current)
                 current = []
                 current_chars = 0
+            current.append(unit)
+            current_chars += normalized_length
+            previous_value = value
         if current:
             partitions.append(current)
         for partition in partitions:
@@ -285,15 +512,25 @@ def build_semantic_blocks(
         if merged:
             previous = merged[-1]
             previous_match = normalize_semantic_text(previous["text"])
-            if (
+            current_match = normalize_semantic_text(current["text"])
+            continues_previous = _is_continuation_line(current["text"], previous["text"])
+            can_merge = (
                 not split_short_lines
-                and len(previous_match) < SEMANTIC_MERGE_TARGET_CHARS
                 and not _is_heading(previous["text"])
                 and not _is_heading(current["text"])
                 and not _is_structure_marker(current["text"])
-                and len(previous_match) + len(normalize_semantic_text(current["text"])) <= SEMANTIC_MAX_BLOCK_CHARS
                 and previous["end"] <= current["start"]
-            ):
+                and (
+                    continues_previous
+                    or len(previous_match) < SEMANTIC_MERGE_TARGET_CHARS
+                )
+                and (
+                    # 续写允许略超目标长度，但仍设硬上限，避免无限吞并
+                    len(previous_match) + len(current_match)
+                    <= (SEMANTIC_MAX_BLOCK_CHARS + 180 if continues_previous else SEMANTIC_MAX_BLOCK_CHARS)
+                )
+            )
+            if can_merge:
                 previous["end"] = current["end"]
                 previous["line_end"] = current["line_end"]
                 previous["raw_count"] += current["raw_count"]
@@ -308,6 +545,11 @@ def build_semantic_blocks(
         digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
         occurrences[digest] = occurrences.get(digest, 0) + 1
         stable_id = f"sb-{side[:1]}-{digest}-{occurrences[digest]:02d}"
+        absolute_start = unit["start"] + body_offset
+        absolute_end = unit["end"] + body_offset
+        # 行号基于完整原文（含稿头），方便用户对照“查看原文全文”。
+        line_start = full_source.count('\n', 0, absolute_start) + 1
+        line_end = full_source.count('\n', 0, max(absolute_start, absolute_end - 1)) + 1
         blocks.append({
             "id": stable_id,
             "stable_id": stable_id,
@@ -315,10 +557,10 @@ def build_semantic_blocks(
             "ordinal": ordinal,
             "text": unit["text"],
             "normalized_text": normalized,
-            "start_offset": unit["start"],
-            "end_offset": unit["end"],
-            "source_line_start": unit["line_start"],
-            "source_line_end": unit["line_end"],
+            "start_offset": absolute_start,
+            "end_offset": absolute_end,
+            "source_line_start": line_start,
+            "source_line_end": line_end,
             "raw_block_count": unit["raw_count"],
             "user_edited": False,
             "locked": False,

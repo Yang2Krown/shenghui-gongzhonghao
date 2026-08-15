@@ -26,6 +26,23 @@ SUPPORTED_EXTS = TEXT_EXTS | PDF_EXTS | DOCX_EXTS | IMAGE_EXTS
 
 _EXTRACTION_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+")
 _PRESERVED_CJK_PUNCTUATION = frozenset("，。；：！？、（）【】《》“”‘’—…")
+_SENTENCE_END_RE = re.compile(r"(?:[\u3002\uff01\uff1f!?\u2026]+|[.!?\u2026][\u201c\u201d\u2018\u2019\'\"\u300d\u300f\u3011\uff09)]*)$")
+_SOFT_BREAK_LABEL_RE = re.compile(
+    r"^(?:发布时间|封面|标题|作者|摘要|导语|备注|正文|全文|文档类型|稿件类型)\s*[:：]"
+)
+_SOFT_BREAK_STRUCTURE_RE = re.compile(
+    r"^(?:"
+    r"[#＃]{1,6}\s*\S|"
+    r"[一二三四五六七八九十]+[、.：:]|"
+    r"\d{1,2}[.)、．](?!\d)|"
+    r"[（(]\d+[）)]|"
+    r"第.{1,8}[章节部分]"
+    r")"
+)
+_VERSION_NOISE_RE = re.compile(
+    r"^(?:v|ver|version)?\d+(?:\.\d+){1,3}$",
+    re.IGNORECASE,
+)
 
 
 class UnsupportedFileType(Exception):
@@ -50,6 +67,160 @@ def _normalize_compatibility_text(text: str) -> str:
     return "".join(pieces)
 
 
+def _is_cjk_char(char: str) -> bool:
+    if not char:
+        return False
+    code = ord(char)
+    return (
+        0x4E00 <= code <= 0x9FFF
+        or 0x3400 <= code <= 0x4DBF
+        or 0xF900 <= code <= 0xFAFF
+        or char in "“”‘’（）【】《》「」『』、"
+    )
+
+
+def _line_join_glue(left: str, right: str) -> str:
+    """把 PDF 软换行两侧粘回一句，并在中英文边界补空格。"""
+
+    if not left:
+        return right
+    if not right:
+        return left
+    left_ch = left[-1]
+    right_ch = right[0]
+    if left_ch.isspace() or right_ch.isspace():
+        return left + right
+    if _is_cjk_char(left_ch) and _is_cjk_char(right_ch):
+        return left + right
+    if right_ch in "，。！？、；：,.!?;:)]｝》」』”’":
+        return left + right
+    if left_ch in "（([【《「『“‘":
+        return left + right
+    if (left_ch.isalnum() or _is_cjk_char(left_ch)) and (
+        right_ch.isalnum() or _is_cjk_char(right_ch)
+    ):
+        return left + " " + right
+    return left + right
+
+
+def _line_looks_incomplete(text: str) -> bool:
+    """上一行是否像句中被截断，而不是独立标题/完整短句。"""
+
+    value = (text or "").strip()
+    if not value:
+        return False
+    if re.search(r"[，、；,;]$", value):
+        return True
+    # 单字/双字中文碎片：发 / 布 / 明 天
+    if len(value) <= 2 and re.fullmatch(r"[\u4e00-\u9fff]+", value):
+        return True
+    # “检索 2024” 这类中英混排以数字结尾，下一行常是“年以来…”
+    if re.search(r"[\u4e00-\u9fff].*\d{2,4}$", value):
+        return True
+    # 常见未完成谓语/介词：三、我用 / 我直接把 / 继续核对
+    if re.search(
+        r"(?:用|把|将|被|让|从|在|对|向|为|给|与|和|及|或|而|并|"
+        r"以及|包括|通过|关于|由于|因为|所以|但是|如果|虽然|"
+        r"继续|开始|进行|核对|检索|整理|说明|看到|发现|告诉|交给)$",
+        value,
+    ):
+        return True
+    # “题目、发” 这类顿号后只剩半个词
+    if re.search(r"[、，,][\u4e00-\u9fffA-Za-z0-9]{1,2}$", value):
+        return True
+    return False
+
+
+def _looks_like_independent_title(text: str) -> bool:
+    """短品牌行/产品名/独立小标题，不应和邻行硬拼。"""
+
+    value = (text or "").strip()
+    if not value or len(value) > 22:
+        return False
+    if _line_looks_incomplete(value):
+        return False
+    if re.search(r"[，。！？；,:：]", value):
+        return False
+    # 纯英文产品名：latent VLA / ScienceOne / PPT
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9._/-]*(?:[ -][A-Za-z][A-Za-z0-9._/-]*)*", value):
+        return True
+    # 中文品牌/稿头短行：中科闻歌、公众号推文-初稿
+    if len(value) <= 16 and not re.search(
+        r"[跑走做写看说问找给把用将让被从在对]",
+        value,
+    ):
+        return True
+    # 编号标题备选
+    if re.match(r"^\d{1,2}[.)、．]", value):
+        return True
+    return False
+
+
+def _should_reflow_soft_break(previous: str, current: str) -> bool:
+    """判断单换行是否只是 PDF 视觉折行，而不是段落/结构边界。"""
+
+    prev = (previous or "").strip()
+    curr = (current or "").strip()
+    if not prev or not curr:
+        return False
+    if _VERSION_NOISE_RE.fullmatch(re.sub(r"\s+", "", prev)):
+        return False
+    if _VERSION_NOISE_RE.fullmatch(re.sub(r"\s+", "", curr)):
+        return False
+    if _SENTENCE_END_RE.search(prev):
+        return False
+    if _SOFT_BREAK_LABEL_RE.match(prev) or _SOFT_BREAK_LABEL_RE.match(curr):
+        return False
+    if re.search(r"[:：]$", prev) and len(re.sub(r"\s+", "", prev)) <= 16:
+        return False
+    # 下一行是新章节/列表时保留换行
+    if _SOFT_BREAK_STRUCTURE_RE.match(curr):
+        return False
+    # 上一行是完整小标题（如“第一步，检索文献”）时保留；
+    # 但“三、我用 / 三、我用 latent VLA”这种标题写到一半应继续合并。
+    if _SOFT_BREAK_STRUCTURE_RE.match(prev) and not _line_looks_incomplete(prev):
+        # 结构编号后的内容若以英文/数字收尾，下一行又是中文叙述，仍是折行。
+        if re.search(r"[A-Za-z0-9]$", prev) and re.match(r"^[\u4e00-\u9fff]", curr):
+            return True
+        return False
+    # 上一行以逗号/顿号等收尾，几乎一定是折行。
+    if re.search(r"[，、；,;]$", prev):
+        return True
+    # 两侧都像独立短标题/品牌行时不合并，避免稿头被拼成一行。
+    if _looks_like_independent_title(prev) and _looks_like_independent_title(curr):
+        return False
+    # 默认：未结束的上一行 + 以中英文开头的下一行 = PDF 软换行
+    if re.search(r"[\u4e00-\u9fffA-Za-z0-9]$", prev) and re.search(
+        r"^[\u4e00-\u9fffA-Za-z0-9]",
+        curr,
+    ):
+        return True
+    return False
+
+
+def _reflow_soft_line_breaks(text: str) -> str:
+    """合并 PDF 提取时的句内软换行，保留空行作为段落边界。"""
+
+    if not text or "\n" not in text:
+        return text
+    lines = text.split("\n")
+    merged: list[str] = []
+    for line in lines:
+        if not merged:
+            merged.append(line)
+            continue
+        previous = merged[-1]
+        # 空行始终保留，作为真实段落边界。
+        if not previous.strip() or not line.strip():
+            merged.append(line)
+            continue
+        if _should_reflow_soft_break(previous, line):
+            merged[-1] = _line_join_glue(previous.rstrip(), line.lstrip())
+            continue
+        merged.append(line)
+    return "\n".join(merged)
+
+
 def normalize_extracted_text(text: str) -> str:
     """清理 PDF/Word 提取噪声，同时保留可读的行结构。
 
@@ -57,6 +228,9 @@ def normalize_extracted_text(text: str) -> str:
     正文，也不是可靠的语义边界。先转成换行后，版本号等独立噪声才能被后续
     规则识别。NFKC 还会把 PDF 中常见的兼容汉字/全角字符归一化，但不会
     改写中文正文中的逗号、冒号等展示标点。
+
+    另外，PDF 常把同一句拆成多行（甚至把“明天”拆成“明\\n天”）。这里只
+    合并单换行上的软折行，双换行仍视为段落边界。
     """
 
     value = _normalize_compatibility_text(text or "")
@@ -66,6 +240,8 @@ def normalize_extracted_text(text: str) -> str:
     value = value.replace("\u00a0", " ").replace("\u3000", " ")
     value = re.sub(r"[^\S\n]+", " ", value)
     value = re.sub(r" *\n *", "\n", value)
+    value = re.sub(r"\n{3,}", "\n\n", value)
+    value = _reflow_soft_line_breaks(value)
     value = re.sub(r"\n{3,}", "\n\n", value)
     return value.strip()
 

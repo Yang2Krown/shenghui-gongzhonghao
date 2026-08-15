@@ -164,6 +164,65 @@ def test_semantic_blocks_merge_pdf_control_noise_and_blank_line_sentences():
     assert any(block["source_line_end"] > block["source_line_start"] for block in blocks)
 
 
+def test_semantic_blocks_keep_post_image_continuation_with_previous_step():
+    pad = "我把研究边界、可验证性和后续实验成本都反复核对了一遍，避免后面因为方向选错而整段返工。"
+    text = (
+        "第三步，找到一个可以验证的研究问题\n\n"
+        "仅仅做完综述还不算完，为了避免导师对我的后续研究方向发出灵魂拷问，"
+        f"我还要让磐石给我列出有哪些是值得做的。{pad * 4}\n\n"
+        f"我接着让它从研究地图里的研究缺口出发，生成 3 个可以用实验验证的假设，再从中选出主假设。{pad * 4}\n\n"
+        f"它给出了 3 个假设，每个假设都附有文献依据、变量、最小验证方法和失败风险。{pad * 2}\n\n"
+        "我看了看它给出的主假设，质量确实很高。\n\n"
+        "[图片]\n\n"
+        "这个主假设聚焦一个很具体的问题：动作标注比较少时，加入任务语义约束的离散 latent action 视频预训练，"
+        "能不能改善长时序任务和跨对象、跨指令泛化。\n"
+        "我立马就有了下一篇论文的思路，恨不得现在开写。\n\n"
+        "第四步，把假设拆成实验方案\n\n"
+        "假设定下来后，我继续让 ScienceOne 根据这个假设设计验证方案，看看需要怎么做实验，才能判断它到底成不成立。\n\n"
+        "它把需要比较的模型、数据和评价指标列了出来，后面就可以按这份方案逐步验证。"
+    )
+
+    blocks = build_semantic_blocks(text, side="before")
+    joined = [block["text"] for block in blocks]
+
+    continuation_block = next(block for block in blocks if "这个主假设聚焦" in block["text"])
+    assert "质量确实很高" in continuation_block["text"]
+    assert "第四步" not in continuation_block["text"]
+    assert any(block["text"].lstrip().startswith("第四步") for block in blocks)
+    assert all("[图片]" not in block["text"] for block in blocks)
+    assert len(blocks) >= 2
+    assert any("第三步" in text for text in joined)
+
+
+def test_semantic_blocks_skip_wechat_draft_front_matter():
+    text = (
+        "中科闻歌\n"
+        "磐石ScienceOne\n"
+        "公众号推文-初稿\n\n"
+        "组会前夜，我让磐石跑通了科研全流程\n\n"
+        "作者|路人甲TM\n\n"
+        "发布时间：7/18\n\n"
+        "封面：\n\n"
+        "标题：\n\n"
+        "1.被arXiv按在地上摩擦之后，我找到了一个AI科研搭子\n\n"
+        "2.实测中科院团队新出的AI科研神器：从查文献到出PPT，一个对话搞定\n\n"
+        "正文：\n\n"
+        "事情是这样的。组会前一晚，导师突然问我：最近 latent VLA 这个方向有没有新论文？"
+        "能不能快速整理一份综述，明天做个 PPT 讲一下？"
+    )
+
+    blocks = build_semantic_blocks(text, side="before")
+    joined = "\n".join(block["text"] for block in blocks)
+
+    assert blocks
+    assert "中科闻歌" not in joined
+    assert "发布时间" not in joined
+    assert "被arXiv" not in joined
+    assert joined.startswith("事情是这样的。")
+    # 行号仍映射到完整原文，方便对照“查看原文全文”
+    assert blocks[0]["source_line_start"] > 10
+
+
 def test_semantic_diff_distinguishes_minor_rewrite_addition_and_reorder():
     minor = build_change_groups("我们要做的事情。", "我们要做了事情！")
     assert [item["change_type"] for item in minor["groups"]] == ["minor_edit"]

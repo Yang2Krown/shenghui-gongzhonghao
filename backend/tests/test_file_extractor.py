@@ -95,6 +95,55 @@ def test_normalize_extracted_text_preserves_chinese_punctuation():
     assert normalize_extracted_text(source) == source
 
 
+def test_normalize_extracted_text_reflows_pdf_soft_line_breaks():
+    source = (
+        "事情是这样的。\n\n"
+        "组会前一晚，导师突然问我：最近\n"
+        "latent\n"
+        "VLA\n"
+        "这个方向有没有新论文？能不能快速整理一份综述，明\n"
+        "天做个\n"
+        "PPT\n"
+        "讲一下？"
+    )
+
+    text = normalize_extracted_text(source)
+
+    assert "事情是这样的。\n\n组会前一晚" in text
+    assert "最近 latent VLA 这个方向" in text
+    assert "明天做个 PPT 讲一下？" in text
+
+
+def test_normalize_extracted_text_reflows_mid_sentence_and_heading_breaks():
+    source = (
+        "三、我用\n"
+        "latent VLA\n"
+        "跑了一遍科研全流程\n\n"
+        "第一步，检索文献\n\n"
+        "我直接把 latent VLA\n"
+        "这个方向交给磐石，让它检索 2024\n"
+        "年以来的代表工作，并继续核对论文题目、发\n"
+        "布时间、代码、数据集和原始来源。"
+    )
+
+    text = normalize_extracted_text(source)
+
+    assert "三、我用 latent VLA 跑了一遍科研全流程" in text
+    assert "第一步，检索文献" in text
+    assert (
+        "我直接把 latent VLA 这个方向交给磐石，让它检索 2024 年以来的代表工作，"
+        "并继续核对论文题目、发布时间、代码、数据集和原始来源。"
+    ) in text
+    assert "全流程\n\n第一步" in text
+    assert "检索文献\n\n我直接把" in text
+
+
+def test_normalize_extracted_text_keeps_short_brand_header_lines():
+    source = "中科闻歌\n磐石ScienceOne\n公众号推文-初稿"
+
+    assert normalize_extracted_text(source) == source
+
+
 async def test_old_doc_raises_unsupported():
     with pytest.raises(UnsupportedFileType):
         await extract_text(filename="old.doc", data=b"\xd0\xcf\x11\xe0 fake doc")
