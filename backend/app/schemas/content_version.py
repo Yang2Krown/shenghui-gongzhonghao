@@ -19,7 +19,7 @@ EXPERIENCE_SOURCE_TYPES = {
     "uploaded",
     "manual",
 }
-EXPERIENCE_STATUSES = {"pending", "confirmed", "rejected"}
+EXPERIENCE_STATUSES = {"pending", "confirmed", "rejected", "merged"}
 
 
 class ContentVersionCreate(BaseModel):
@@ -115,3 +115,34 @@ class ExperienceCardListResponse(BaseModel):
     total_pages: int
     search_mode: str
     embedding_available: bool
+
+
+class ExperienceMergePreviewRequest(BaseModel):
+    """请求 LLM 生成多条经验的智能合并草稿。"""
+
+    source_ids: List[int] = Field(..., min_length=2, max_length=10)
+
+    @validator("source_ids")
+    def dedupe_source_ids(cls, value: List[int]) -> List[int]:
+        return list(dict.fromkeys(int(item) for item in value))
+
+
+class ExperienceMergeConfirmRequest(BaseModel):
+    """确认合并：保留一条正式经验，其余标记为已合并。"""
+
+    source_ids: List[int] = Field(..., min_length=2, max_length=10)
+    surviving_id: Optional[int] = Field(None, ge=1)
+    title: str = Field(..., min_length=1, max_length=200)
+    content: str = Field(..., min_length=1, max_length=50000)
+    category: Optional[str] = Field(None, max_length=50)
+
+    @validator("source_ids")
+    def dedupe_source_ids(cls, value: List[int]) -> List[int]:
+        return list(dict.fromkeys(int(item) for item in value))
+
+    @validator("title", "content", "category")
+    def strip_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None

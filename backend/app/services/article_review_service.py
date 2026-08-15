@@ -87,18 +87,20 @@ def _mask_extraction_noise_lines(source: str) -> str:
 
 
 # 公众号初稿常见稿头字段；这些行本身没有复盘价值，应在语义分段前跳过。
+# 注意：只扫描文件开头一小段，避免把正文里的标题/字段误删。
+_FRONT_MATTER_MAX_SCAN_LINES = 100
 _FRONT_MATTER_LABEL_RE = re.compile(
     r"^(?:"
     r"发布时间|发布日期|封面|标题|作者|摘要|导语|备注|正文|全文|"
-    r"文档类型|稿件类型|稿件状态|状态|栏目|来源|编辑|责编|运营"
+    r"文档类型|稿件类型|稿件状态|状态|栏目|来源|编辑|责编|运营|来源链接"
     r")\s*[:：]"
 )
 _FRONT_MATTER_META_RE = re.compile(
     r"^(?:"
     r"作者\s*[|｜].+|"
-    r"(?:中科闻歌|磐石ScienceOne|ScienceOne).{0,60}(?:初稿|终稿|定稿|推文)|"
-    r".{0,60}(?:公众号推文|公众号文章).{0,30}(?:初稿|终稿|定稿)|"
-    r".{0,60}(?:公众号).{0,30}(?:初稿|终稿|定稿)|"
+    r"(?:中科闻歌|磐石ScienceOne|ScienceOne).{0,80}(?:初稿|终稿|定稿|推文)|"
+    r".{0,80}(?:公众号推文|公众号文章).{0,40}(?:初稿|终稿|定稿)|"
+    r".{0,80}(?:公众号).{0,40}(?:初稿|终稿|定稿)|"
     r"原文第\s*\d+\s*[-–—~至到]\s*\d+\s*行"
     r")$"
 )
@@ -124,33 +126,32 @@ def _is_front_matter_line(text: str) -> bool:
     if re.match(r"^作者\s*[|｜]", value):
         return True
     # 纯标题备选列表：编号标题，常出现在稿头
-    if re.match(r"^\d{1,2}[.、．)]\s*\S", value) and len(value) <= 80:
+    if re.match(r"^\d{1,2}[.、．)]\s*\S", value) and len(value) <= 100:
         return True
     # UI 复制残留：02 / 原文第 9-9 行
     if re.fullmatch(r"\d{1,3}", compact):
         return True
     if re.match(r"^原文第\s*\d+", value):
         return True
-    if value in {"标题：", "标题:", "封面：", "封面:", "正文：", "正文:", "全文：", "全文:"}:
+    # 稿头里的文章标题行（无句号等）先当元信息，避免标题在正文标记前被误当正文。
+    if len(value) <= 60 and not re.search(r"[。！？!?]", value):
         return True
     return False
 
 
-def _looks_like_body_start(text: str) -> bool:
-    """启发式判断是否已经进入正文。"""
+def _looks_like_body_paragraph(text: str) -> bool:
+    """启发式判断一行/段是否已经像正文。"""
 
     value = re.sub(r"\s+", " ", (text or "").strip())
     if not value:
         return False
-    if _is_front_matter_line(value):
-        return False
     if _BODY_MARKER_RE.match(value):
         return False
-    # 以完整叙述句开始，更像正文
-    if len(value) >= 12 and re.search(r"[。！？!?…]$", value):
+    if _is_front_matter_line(value):
+        return False
+    if len(value) >= 24:
         return True
-    # 较长叙述段落，且不是“标题：xxx”字段
-    if len(value) >= 20 and "：" not in value[:10] and ":" not in value[:10]:
+    if len(value) >= 12 and re.search(r"[。！？!?…]$", value):
         return True
     return False
 
@@ -159,9 +160,8 @@ def _find_body_start_offset(source: str) -> int:
     """定位正文起点，跳过稿头元信息与标题备选列表。
 
     只影响语义块生成范围；原文字符串本身不改写，前端“查看原文全文”
-    仍可看到完整内容。若无法可靠识别稿头，则返回 0（全文参与分段）。
-
-    优先识别显式“正文：/全文：”标记；没有标记时，才用稿头元信息 + 叙述句启发式。
+    仍可看到完整内容。策略是保守的：只扫描文件开头，且优先识别显式
+    “正文：/全文：”，否则要求前面出现足够多的稿头元信息后才截断。
     """
 
     if not source:
@@ -170,8 +170,8 @@ def _find_body_start_offset(source: str) -> int:
     if not lines:
         return 0
 
-    # 1) 优先找显式正文标记（只在前 80 行内搜索，避免误伤正文里的“正文：”引用）
-    for index, match in enumerate(lines[:80]):
+    # 1) 优先找显式正文/全文标记。允许前后空行和标题行残留。
+    for index, match in enumerate(lines[:_FRONT_MATTER_MAX_SCAN_LINES]):
         raw = match.group(0)
         if not raw and match.start() == len(source):
             continue
@@ -181,15 +181,8 @@ def _find_body_start_offset(source: str) -> int:
             continue
         inline = (marker.group(1) or "").strip()
         if inline and not _is_front_matter_line(inline):
-            # “正文：事情是这样的……” 同行正文
-            # 计算 inline 在 raw 中的起点（忽略左侧空白）
             left_ws = len(raw) - len(raw.lstrip(" \t"))
-            marker_text = stripped
-            inline_in_stripped = marker_text.rfind(inline)
-            if inline_in_stripped >= 0:
-                return match.start() + left_ws + inline_in_stripped
-            return match.start() + left_ws
-        # 标记单独成行：取后续第一个非空、非元信息行
+            return match.start() + left_ws + stripped.find(inline)
         for j in range(index + 1, len(lines)):
             nxt_raw = lines[j].group(0)
             nxt = nxt_raw.rstrip("\n").strip()
@@ -200,35 +193,42 @@ def _find_body_start_offset(source: str) -> int:
             return lines[j].start()
         return match.end()
 
-    # 2) 没有显式标记时：要求开头有足够元信息，再落到第一段叙述正文
-    meta_hits = 0
-    scanned = 0
+    # 2) 没有显式标记时，只在“确实看到稿头强信号”后才截断。
+    #    否则文章本来就从“第三步…”这类正文标题开始，不应被误删。
+    strong_meta = 0
+    weak_meta = 0
     first_body_index = None
-    for index, match in enumerate(lines[:80]):
+    for index, match in enumerate(lines[:_FRONT_MATTER_MAX_SCAN_LINES]):
         raw = match.group(0)
         if not raw and match.start() == len(source):
             continue
         stripped = raw.rstrip("\n").strip()
         if not stripped:
-            scanned += 1
+            continue
+        compact = re.sub(r"\s+", "", stripped)
+        is_strong = bool(
+            _FRONT_MATTER_LABEL_RE.match(stripped)
+            or _FRONT_MATTER_META_RE.match(stripped)
+            or compact in {"中科闻歌", "磐石ScienceOne", "ScienceOne"}
+            or re.match(r"^作者\s*[|｜]", stripped)
+            or re.match(r"^原文第\s*\d+", stripped)
+        )
+        if is_strong:
+            strong_meta += 1
+            weak_meta += 1
             continue
         if _is_front_matter_line(stripped):
-            meta_hits += 1
-            scanned += 1
+            weak_meta += 1
             continue
-        if _looks_like_body_start(stripped):
+        if _looks_like_body_paragraph(stripped) and strong_meta >= 2 and weak_meta >= 3:
             first_body_index = index
             break
-        # 短标题行（无句号）仍可能是稿头标题，继续当元信息
-        if len(stripped) <= 40 and not re.search(r"[。！？!?]", stripped):
-            meta_hits += 1
-            scanned += 1
-            continue
-        scanned += 1
-        if scanned >= 40:
-            break
+        # 遇到正文却还没有足够稿头强信号，说明这份稿子本来没有稿头，直接保留全文。
+        if _looks_like_body_paragraph(stripped):
+            return 0
+        weak_meta += 1
 
-    if first_body_index is not None and meta_hits >= 3:
+    if first_body_index is not None:
         return lines[first_body_index].start()
     return 0
 
@@ -239,11 +239,11 @@ def _slice_semantic_source(source: str) -> tuple[str, int]:
     start = _find_body_start_offset(source)
     if start <= 0:
         return source, 0
-    # 若截断后正文过短，说明识别不可靠，回退全文
     body = source[start:]
     if len(re.sub(r"\s+", "", body)) < 40:
         return source, 0
     return body, start
+
 
 
 def normalize_semantic_text(text: str) -> str:

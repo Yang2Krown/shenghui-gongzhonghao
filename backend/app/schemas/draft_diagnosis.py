@@ -26,6 +26,19 @@ class DraftDiagnosisCreate(BaseModel):
         return value or None
 
 
+class DraftDiagnosisTitleUpdate(BaseModel):
+    """更新初稿诊断标题。"""
+
+    title: str = Field(..., min_length=1, max_length=200)
+
+    @validator("title")
+    def strip_title(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("标题不能为空")
+        return value
+
+
 class DraftDiagnosisExperienceDraftCreate(BaseModel):
     """把某条诊断发现送入待确认经验，不直接进入正式经验库。"""
 

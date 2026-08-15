@@ -6,9 +6,14 @@
         <h1>经验库</h1>
         <p>把会议方法论、文章复盘和实际修改整理成团队以后可以直接复用的判断。原始材料先进入待确认，确认后才成为正式经验。</p>
       </div>
-      <el-button type="primary" size="large" @click="openCreateDialog">
-        <el-icon><Plus /></el-icon> 新增经验
-      </el-button>
+      <div class="hero-actions">
+        <el-button size="large" :loading="overlapLoading" @click="scanOverlaps">
+          <el-icon><Connection /></el-icon> 查找重合
+        </el-button>
+        <el-button type="primary" size="large" @click="openCreateDialog">
+          <el-icon><Plus /></el-icon> 新增经验
+        </el-button>
+      </div>
     </header>
 
     <section class="library-tabs">
@@ -92,7 +97,7 @@
       <template #footer><el-button @click="createVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveCard">{{ form.uploaded ? '保存到待确认' : '保存正式经验' }}</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="detailVisible" width="780px" align-center destroy-on-close class="experience-detail-dialog" :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="restoreDialogScroll">
+    <el-dialog v-model="detailVisible" width="780px" align-center destroy-on-close class="experience-detail-dialog" :lock-scroll="false" @open="rememberDialogScroll" @opened="restoreDialogScroll" @closed="onDetailClosed">
       <template #header>
         <div class="detail-dialog-head">
           <div>
@@ -117,6 +122,23 @@
           <div v-if="detailCard.source_type === 'review_feedback' && detailCard.version_pair?.before_filename" class="detail-source"><strong>复盘文件</strong><span>{{ detailCard.version_pair.before_filename }} → {{ detailCard.version_pair.after_filename }}</span></div>
           <div class="detail-meta-row"><span>创建于 {{ formatDate(detailCard.created_at) }}</span><span>{{ detailCard.created_by_user?.full_name || detailCard.created_by_user?.username || '团队成员' }}</span><span>{{ embeddingStatusLabel(detailCard.embedding_status) }}</span></div>
         </div>
+        <div v-if="detailCard.status === 'confirmed'" class="similar-section">
+          <div class="similar-head">
+            <strong>相似经验</strong>
+            <span v-if="!similarLoading">{{ similarCards.length ? '可勾选合并' : '没有发现高度相似的经验' }}</span>
+          </div>
+          <div v-if="similarLoading" class="similar-loading"><el-icon class="is-loading"><Loading /></el-icon> 正在查找相似经验…</div>
+          <div v-else-if="similarCards.length" class="similar-list">
+            <div v-for="similar in similarCards" :key="similar.id" class="similar-item">
+              <div class="similar-item-main">
+                <strong>{{ similar.title }}</strong>
+                <span class="similarity-tag">相似度 {{ Math.round((similar.similarity || 0) * 100) }}%</span>
+                <p>{{ similar.content }}</p>
+              </div>
+              <el-button text type="primary" size="small" @click="mergeWithSimilar(similar)">合并</el-button>
+            </div>
+          </div>
+        </div>
       </template>
       <template #footer>
         <template v-if="detailEditing">
@@ -128,22 +150,79 @@
         <el-button v-else @click="detailVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="overlapVisible" title="查找重合经验" width="860px" align-center destroy-on-close class="overlap-dialog" :lock-scroll="false">
+      <div v-loading="overlapLoading" class="overlap-body">
+        <p class="overlap-hint">按语义相似度扫描正式经验，把重合度高的归为一组。这里只做提示，不会自动合并或删除。</p>
+        <el-empty v-if="!overlapLoading && !overlapGroups.length" :image-size="60" description="没有发现明显重合的经验" />
+        <div v-for="(group, gIndex) in overlapGroups" :key="gIndex" class="overlap-group">
+          <div class="overlap-group-head">
+            <strong>重合组 {{ gIndex + 1 }}</strong>
+            <span class="similarity-tag">{{ Math.round(group.max_similarity * 100) }}% 最高相似度</span>
+            <el-button type="primary" plain size="small" @click="openMergeDialog(group.cards.map((c) => c.id))">合并这组</el-button>
+          </div>
+          <div class="overlap-card-list">
+            <div v-for="card in group.cards" :key="card.id" class="overlap-card">
+              <strong>{{ card.title }}</strong>
+              <span v-if="card.category">{{ card.category }}</span>
+              <p>{{ card.content_preview }}<template v-if="card.content && card.content.length > 120">…</template></p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="overlapVisible = false">关闭</el-button>
+        <el-button type="primary" :loading="overlapLoading" @click="scanOverlaps">重新扫描</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="mergeVisible" title="合并经验" width="860px" align-center destroy-on-close class="merge-dialog" :lock-scroll="false">
+      <div v-if="mergePreviewing" class="merge-loading"><el-icon class="is-loading" :size="22"><Loading /></el-icon><span>正在生成智能合并稿…</span></div>
+      <template v-else>
+        <p class="merge-hint">以下 {{ mergeSources.length }} 条经验将合并为一条正式经验，合并后原记录会标记为「已合并」并从正式库隐藏，不会被删除。</p>
+        <div class="merge-sources">
+          <div v-for="(card, index) in mergeSources" :key="card.id" class="merge-source">
+            <span class="merge-source-index">{{ index + 1 }}</span>
+            <div class="merge-source-body">
+              <strong>{{ card.title }}</strong>
+              <span v-if="card.category">{{ card.category }} · {{ sourceTypeLabel(card.source_type) }}</span>
+              <p>{{ card.content }}</p>
+            </div>
+          </div>
+        </div>
+        <el-divider content-position="left">合并后的经验（可编辑）</el-divider>
+        <el-form label-position="top">
+          <el-form-item label="经验标题" required><el-input v-model="mergeForm.title" maxlength="200" show-word-limit /></el-form-item>
+          <el-form-item label="分类"><el-input v-model="mergeForm.category" maxlength="50" placeholder="例如：开头、结构、案例" /></el-form-item>
+          <el-form-item label="经验正文" required><el-input v-model="mergeForm.content" type="textarea" :rows="10" maxlength="50000" show-word-limit /></el-form-item>
+        </el-form>
+      </template>
+      <template #footer>
+        <el-button @click="mergeVisible = false">取消</el-button>
+        <el-button :loading="mergePreviewing" @click="generateMergePreview">重新生成</el-button>
+        <el-button type="primary" :loading="mergeSaving" :disabled="mergePreviewing || !mergeSources.length" @click="confirmMerge">确认合并</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { nextTick, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { ArrowRight, Loading, Plus, Search, Upload } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowRight, Connection, Loading, Plus, Search, Upload } from '@element-plus/icons-vue'
 import {
   confirmExperienceCard,
+  confirmExperienceMerge,
   createExperienceCard,
   createExperienceDraft,
   getExperienceCard,
+  getSimilarExperiences,
   listExperienceCards,
   parseExperienceUpload,
+  previewExperienceMerge,
   rejectExperienceCard,
+  scanExperienceOverlaps,
   updateExperienceCard,
 } from '@/api/experience'
 import { renderExperienceMarkdown } from '@/utils/experienceMarkdown'
@@ -172,6 +251,16 @@ const detailSaving = ref(false)
 const detailEditing = ref(false)
 const detailCard = ref(null)
 const detailForm = reactive({ title: '', content: '', category: '' })
+const similarCards = ref([])
+const similarLoading = ref(false)
+const overlapVisible = ref(false)
+const overlapLoading = ref(false)
+const overlapGroups = ref([])
+const mergeVisible = ref(false)
+const mergePreviewing = ref(false)
+const mergeSaving = ref(false)
+const mergeSources = ref([])
+const mergeForm = reactive({ title: '', content: '', category: '' })
 
 const sourceTypes = [
   { value: 'meeting_methodology', label: '会议方法论' },
@@ -281,8 +370,12 @@ const openDetail = async (card) => {
   detailEditing.value = false
   detailVisible.value = true
   detailLoading.value = true
+  similarCards.value = []
   try {
-    const response = await getExperienceCard(card.id)
+    const [response] = await Promise.all([
+      getExperienceCard(card.id),
+      card.status === 'confirmed' ? loadSimilarCards(card.id) : Promise.resolve(),
+    ])
     const loaded = response.data?.card || response.data || null
     if (loaded) {
       detailCard.value = loaded
@@ -295,6 +388,11 @@ const openDetail = async (card) => {
   } finally {
     detailLoading.value = false
   }
+}
+
+const onDetailClosed = () => {
+  similarCards.value = []
+  restoreDialogScroll()
 }
 
 const startDetailEdit = () => {
@@ -369,6 +467,114 @@ const openMeetingSource = (card) => {
   if (card.source_meta?.meeting_id) router.push(`/meetings/${card.source_meta.meeting_id}`)
 }
 
+const loadSimilarCards = async (cardId) => {
+  similarLoading.value = true
+  similarCards.value = []
+  try {
+    const response = await getSimilarExperiences(cardId)
+    similarCards.value = response.data?.items || []
+  } catch (error) {
+    similarCards.value = []
+  } finally {
+    similarLoading.value = false
+  }
+}
+
+const scanOverlaps = async () => {
+  overlapVisible.value = true
+  overlapLoading.value = true
+  overlapGroups.value = []
+  try {
+    const response = await scanExperienceOverlaps()
+    overlapGroups.value = response.data?.groups || []
+    if (!overlapGroups.value.length) ElMessage.info('没有发现明显重合的正式经验')
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || '重合扫描失败，请稍后重试')
+  } finally {
+    overlapLoading.value = false
+  }
+}
+
+const openMergeDialog = async (sourceIds) => {
+  const ids = [...new Set(sourceIds.filter(Boolean))]
+  if (ids.length < 2) {
+    ElMessage.warning('请至少选择两条经验再合并')
+    return
+  }
+  mergeVisible.value = true
+  mergeSources.value = []
+  Object.assign(mergeForm, { title: '', content: '', category: '' })
+  overlapVisible.value = false
+  try {
+    const responses = await Promise.all(ids.map((id) => getExperienceCard(id)))
+    mergeSources.value = responses.map((res) => res.data?.card).filter(Boolean)
+    if (!mergeSources.value.length) {
+      ElMessage.error('经验加载失败')
+      mergeVisible.value = false
+      return
+    }
+    await generateMergePreview()
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || '经验加载失败')
+    mergeVisible.value = false
+  }
+}
+
+const generateMergePreview = async () => {
+  if (!mergeSources.value.length || mergePreviewing.value) return
+  mergePreviewing.value = true
+  try {
+    const response = await previewExperienceMerge(mergeSources.value.map((card) => card.id))
+    const preview = response.data || {}
+    mergeForm.title = preview.title || mergeForm.title
+    mergeForm.content = preview.content || mergeForm.content
+    mergeForm.category = preview.category || mergeForm.category
+    if (!mergeForm.category) {
+      const categories = mergeSources.value.map((card) => card.category).filter(Boolean)
+      mergeForm.category = categories[0] || ''
+    }
+    ElMessage.success('已生成智能合并稿，请检查后确认')
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || '智能合并生成失败，可手动编辑')
+    if (!mergeForm.title) mergeForm.title = mergeSources.value[0]?.title || ''
+    if (!mergeForm.content) {
+      mergeForm.content = mergeSources.value.map((card, i) => `【经验 ${i + 1}】${card.title}\n${card.content}`).join('\n\n---\n\n')
+    }
+  } finally {
+    mergePreviewing.value = false
+  }
+}
+
+const confirmMerge = async () => {
+  if (!mergeForm.title.trim() || !mergeForm.content.trim()) {
+    ElMessage.warning('标题和正文不能为空')
+    return
+  }
+  mergeSaving.value = true
+  try {
+    await confirmExperienceMerge({
+      source_ids: mergeSources.value.map((card) => card.id),
+      title: mergeForm.title.trim(),
+      content: mergeForm.content.trim(),
+      category: mergeForm.category.trim() || null,
+    })
+    ElMessage.success('经验已合并，其余来源已标记为已合并')
+    mergeVisible.value = false
+    detailVisible.value = false
+    pagination.page = 1
+    await loadCards()
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || '合并失败，请稍后重试')
+  } finally {
+    mergeSaving.value = false
+  }
+}
+
+const mergeWithSimilar = (card) => {
+  if (!detailCard.value) return
+  openMergeDialog([detailCard.value.id, card.id])
+}
+
 onMounted(loadCards)
 </script>
 
@@ -399,5 +605,25 @@ onMounted(loadCards)
 .markdown-body :deep(table) { display: block; overflow-x: auto; width: 100%; margin: 14px 0; border-collapse: collapse; }
 .markdown-body :deep(th), .markdown-body :deep(td) { min-width: 100px; padding: 8px 10px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 .markdown-body :deep(th) { background: #fff9f0; color: var(--ink-2); }
-@media (max-width: 800px) { .experience-hero, .library-tabs, .search-card { align-items: stretch; flex-direction: column; }.search-input, .category-select, .source-select { width: 100%; max-width: none; }.card-list { grid-template-columns: 1fr; }.upload-intro { align-items: stretch; flex-direction: column; }.tab-note { max-width: 100%; } }
+.hero-actions { display: flex; gap: 10px; flex-shrink: 0; }
+.similar-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.similar-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }.similar-head strong { font-size: 14px; }.similar-head span { color: var(--ink-4); font-size: 11px; }
+.similar-loading { display: flex; align-items: center; gap: 8px; padding: 12px; color: var(--ink-3); font-size: 12px; }
+.similar-list { display: flex; flex-direction: column; gap: 8px; }
+.similar-item { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border: 1px solid #eadfcd; border-radius: var(--r-md); background: #fffdf9; }
+.similar-item-main { min-width: 0; flex: 1; }.similar-item-main strong { display: block; font-size: 13px; }.similar-item-main p { display: -webkit-box; overflow: hidden; margin: 5px 0 0; color: var(--ink-3); font-size: 11px; line-height: 1.6; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.similarity-tag { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--clay-tint); color: var(--clay-deep); font-size: 10px; vertical-align: middle; }
+.overlap-body { min-height: 220px; max-height: 62vh; overflow-y: auto; padding-right: 4px; }
+.overlap-hint { margin: 0 0 16px; color: var(--ink-3); font-size: 12px; line-height: 1.7; }
+.overlap-group { padding: 14px; margin-bottom: 14px; border: 1px solid #eadfcd; border-radius: var(--r-md); background: #fffdf9; }
+.overlap-group-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }.overlap-group-head strong { font-size: 14px; }
+.overlap-card-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 9px; }
+.overlap-card { padding: 11px; border: 1px dashed #e3d5c2; border-radius: 8px; background: #fff; }.overlap-card strong { display: block; font-size: 13px; }.overlap-card span { display: block; margin-top: 3px; color: var(--ink-4); font-size: 10px; }.overlap-card p { display: -webkit-box; overflow: hidden; margin: 7px 0 0; color: var(--ink-3); font-size: 11px; line-height: 1.6; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.merge-hint { margin: 0 0 16px; color: var(--ink-3); font-size: 12px; line-height: 1.7; }
+.merge-sources { display: flex; flex-direction: column; gap: 10px; max-height: 260px; overflow-y: auto; margin-bottom: 4px; }
+.merge-source { display: flex; gap: 10px; padding: 10px 12px; border: 1px solid #eadfcd; border-radius: var(--r-md); background: #fffdf9; }
+.merge-source-index { display: grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; background: var(--clay); color: #fff; font-size: 11px; font-weight: 700; }
+.merge-source-body { min-width: 0; }.merge-source-body strong { display: block; font-size: 13px; }.merge-source-body span { display: block; margin-top: 2px; color: var(--ink-4); font-size: 10px; }.merge-source-body p { display: -webkit-box; overflow: hidden; margin: 6px 0 0; color: var(--ink-3); font-size: 11px; line-height: 1.6; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.merge-loading { display: flex; flex-direction: column; align-items: center; gap: 12px; min-height: 260px; justify-content: center; color: var(--ink-3); font-size: 13px; }
+@media (max-width: 800px) { .experience-hero, .library-tabs, .search-card { align-items: stretch; flex-direction: column; }.search-input, .category-select, .source-select { width: 100%; max-width: none; }.card-list { grid-template-columns: 1fr; }.upload-intro { align-items: stretch; flex-direction: column; }.tab-note { max-width: 100%; } .hero-actions { width: 100%; }.hero-actions .el-button { flex: 1; } }
 </style>

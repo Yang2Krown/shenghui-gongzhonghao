@@ -24,7 +24,16 @@ from app.schemas.content_version import (
     EXPERIENCE_STATUSES,
     ExperienceCardCreate,
     ExperienceCardDraftCreate,
+    ExperienceMergeConfirmRequest,
+    ExperienceMergePreviewRequest,
     ExperienceCardUpdate,
+)
+from app.services.experience_merge_service import (
+    ExperienceMergeError,
+    find_overlapping_cards,
+    find_similar_cards,
+    merge_experiences,
+    preview_merge_experiences,
 )
 from app.services.experience_service import (
     build_card_payload,
@@ -252,6 +261,84 @@ async def create_experience_draft(
     return {
         "code": 200,
         "message": "经验已进入待确认",
+        "data": {"card": await _card_payload_for_user(db, current_user, loaded)},
+    }
+
+
+@router.post("/overlaps", response_model=dict)
+async def scan_experience_overlaps(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """扫描正式经验中语义重合的分组。"""
+
+    await _require_experience_access(db, current_user)
+    groups = await find_overlapping_cards(db)
+    return {
+        "code": 200,
+        "message": "重合经验扫描完成",
+        "data": {"groups": groups, "group_count": len(groups)},
+    }
+
+
+@router.get("/{card_id}/similar", response_model=dict)
+async def list_similar_experiences(
+    card_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """返回与指定经验语义相近的正式经验。"""
+
+    await _require_experience_access(db, current_user)
+    items = await find_similar_cards(db, card_id)
+    return {
+        "code": 200,
+        "message": "相似经验获取成功",
+        "data": {"items": items},
+    }
+
+
+@router.post("/merge/preview", response_model=dict)
+async def preview_experience_merge(
+    merge_in: ExperienceMergePreviewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """用 LLM 生成多条重合经验的合并草稿，不写库。"""
+
+    await _require_experience_access(db, current_user)
+    try:
+        preview = await preview_merge_experiences(db, merge_in.source_ids)
+    except ExperienceMergeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"code": 200, "message": "合并草稿已生成", "data": preview}
+
+
+@router.post("/merge", response_model=dict)
+async def confirm_experience_merge(
+    merge_in: ExperienceMergeConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """确认合并：保留一条正式经验，其余来源标记为已合并。"""
+
+    await _require_experience_access(db, current_user)
+    try:
+        survivor = await merge_experiences(
+            db,
+            merge_in.source_ids,
+            surviving_id=merge_in.surviving_id,
+            title=merge_in.title,
+            content=merge_in.content,
+            category=merge_in.category,
+        )
+    except ExperienceMergeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    loaded = await _load_card(db, survivor.id)
+    assert loaded is not None
+    return {
+        "code": 200,
+        "message": "经验已合并",
         "data": {"card": await _card_payload_for_user(db, current_user, loaded)},
     }
 

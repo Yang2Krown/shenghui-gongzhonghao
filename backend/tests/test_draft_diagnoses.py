@@ -8,9 +8,14 @@ from app.api.v1 import draft_diagnoses as diagnosis_api
 from app.models.content_version import ExperienceCard
 from app.models.creation import ContentCreation
 from app.models.draft_diagnosis import DraftDiagnosis
+from app.models.employee_profile import EmployeeProfile
 from app.models.meeting import Meeting, MeetingSuggestion
 from app.models.user import User
-from app.schemas.draft_diagnosis import DraftDiagnosisCreate, DraftDiagnosisExperienceDraftCreate
+from app.schemas.draft_diagnosis import (
+    DraftDiagnosisCreate,
+    DraftDiagnosisExperienceDraftCreate,
+    DraftDiagnosisTitleUpdate,
+)
 from app.services.draft_diagnosis_service import normalize_draft_diagnosis_analysis
 
 
@@ -40,6 +45,7 @@ async def diagnosis_db():
                     MeetingSuggestion.__table__,
                     ExperienceCard.__table__,
                     DraftDiagnosis.__table__,
+                    EmployeeProfile.__table__,
                 ],
             )
         )
@@ -150,3 +156,102 @@ async def test_draft_diagnosis_reuses_confirmed_cards_and_can_create_pending_exp
         saved = (await db.scalars(select(ExperienceCard).where(ExperienceCard.status == "pending"))).one()
         assert saved.source_type == "review_feedback"
         assert saved.source_meta["diagnosis_id"] == diagnosis["id"]
+
+
+async def _seed_diagnosis(db, user, title: str = "原始标题") -> int:
+    async def fake_match(*args, **kwargs):
+        return [], "keyword_fallback", False
+
+    async def fake_diagnose(*args, **kwargs):
+        return {
+            "summary": "诊断总结",
+            "overall_score": 70,
+            "issues": [],
+            "strengths": [],
+            "improvement_plan": [],
+            "questions": [],
+            "overall_assessment": None,
+            "referenced_experience_ids": [],
+        }
+
+    original_match = diagnosis_api.match_experience_cards
+    original_diagnose = diagnosis_api.diagnose_draft
+    diagnosis_api.match_experience_cards = fake_match
+    diagnosis_api.diagnose_draft = fake_diagnose
+    try:
+        result = await diagnosis_api.create_pasted_draft_diagnosis(
+            DraftDiagnosisCreate(title=title, content="这是一篇初稿正文。"),
+            db,
+            user,
+        )
+        return result["data"]["diagnosis"]["id"]
+    finally:
+        diagnosis_api.match_experience_cards = original_match
+        diagnosis_api.diagnose_draft = original_diagnose
+
+
+@pytest.mark.asyncio
+async def test_update_draft_diagnosis_title_by_owner(diagnosis_db):
+    async with diagnosis_db() as db:
+        employee = _user(1)
+        db.add(employee)
+        await db.commit()
+        diagnosis_id = await _seed_diagnosis(db, employee)
+
+        updated = await diagnosis_api.update_draft_diagnosis_title(
+            diagnosis_id,
+            DraftDiagnosisTitleUpdate(title="  新的诊断标题  "),
+            db,
+            employee,
+        )
+        assert updated["data"]["diagnosis"]["title"] == "新的诊断标题"
+
+        stored = (await db.scalars(
+            select(DraftDiagnosis).where(DraftDiagnosis.id == diagnosis_id)
+        )).one()
+        assert stored.title == "新的诊断标题"
+
+
+@pytest.mark.asyncio
+async def test_non_owner_cannot_update_or_delete_diagnosis(diagnosis_db):
+    async with diagnosis_db() as db:
+        owner = _user(1)
+        other = _user(2, role="employee")
+        other_profile = EmployeeProfile(user_id=2, department="编辑部", position="作者", status="active")
+        db.add_all([owner, other, other_profile])
+        await db.commit()
+        diagnosis_id = await _seed_diagnosis(db, owner)
+
+        with pytest.raises(Exception) as exc_info:
+            await diagnosis_api.update_draft_diagnosis_title(
+                diagnosis_id,
+                DraftDiagnosisTitleUpdate(title="不允许的标题"),
+                db,
+                other,
+            )
+        assert getattr(exc_info.value, "status_code", None) == 404
+
+        with pytest.raises(Exception) as exc_info:
+            await diagnosis_api.delete_draft_diagnosis(diagnosis_id, db, other)
+        assert getattr(exc_info.value, "status_code", None) == 404
+
+        # 记录仍然存在。
+        assert (await db.scalars(
+            select(DraftDiagnosis).where(DraftDiagnosis.id == diagnosis_id)
+        )).one()
+
+
+@pytest.mark.asyncio
+async def test_delete_draft_diagnosis_by_owner(diagnosis_db):
+    async with diagnosis_db() as db:
+        employee = _user(1)
+        db.add(employee)
+        await db.commit()
+        diagnosis_id = await _seed_diagnosis(db, employee)
+
+        deleted = await diagnosis_api.delete_draft_diagnosis(diagnosis_id, db, employee)
+        assert deleted["data"]["diagnosis_id"] == diagnosis_id
+
+        assert (await db.scalars(
+            select(DraftDiagnosis).where(DraftDiagnosis.id == diagnosis_id)
+        )).first() is None

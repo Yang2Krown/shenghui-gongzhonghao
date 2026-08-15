@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
+from app.core.product_access import is_admin_user
 from app.core.rate_limit import enforce_rate_limit, rule_from_setting, user_actor
 from app.core.security import get_current_user
 from app.core.upload_security import UploadSecurityError, validate_document_upload
@@ -23,6 +24,7 @@ from app.models.user import User
 from app.schemas.draft_diagnosis import (
     DraftDiagnosisCreate,
     DraftDiagnosisExperienceDraftCreate,
+    DraftDiagnosisTitleUpdate,
     MAX_DRAFT_DIAGNOSIS_CHARS,
 )
 from app.services.draft_diagnosis_service import (
@@ -443,6 +445,58 @@ async def get_draft_diagnosis(
                 matched_cards=matched_cards,
             )
         },
+    }
+
+
+def _can_manage_diagnosis(diagnosis: DraftDiagnosis, user: User) -> bool:
+    """只有诊断创建者或管理员可以修改标题 / 删除记录。"""
+
+    return bool(diagnosis.created_by == user.id or is_admin_user(user))
+
+
+@router.put("/{diagnosis_id}/title", response_model=dict)
+async def update_draft_diagnosis_title(
+    diagnosis_id: int,
+    title_in: DraftDiagnosisTitleUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """更新初稿诊断标题，不影响已完成的分析产物。"""
+
+    await _require_diagnosis_access(db, current_user)
+    diagnosis = await _load_diagnosis(db, diagnosis_id)
+    if diagnosis is None or not _can_manage_diagnosis(diagnosis, current_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="初稿诊断不存在")
+
+    diagnosis.title = title_in.title
+    await db.commit()
+    await db.refresh(diagnosis)
+    return {
+        "code": 200,
+        "message": "初稿诊断标题已更新",
+        "data": {"diagnosis": _diagnosis_payload(diagnosis, include_content=False)},
+    }
+
+
+@router.delete("/{diagnosis_id}", response_model=dict)
+async def delete_draft_diagnosis(
+    diagnosis_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """删除初稿诊断记录；通过 source_meta 引用它的经验卡片不受影响。"""
+
+    await _require_diagnosis_access(db, current_user)
+    diagnosis = await _load_diagnosis(db, diagnosis_id)
+    if diagnosis is None or not _can_manage_diagnosis(diagnosis, current_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="初稿诊断不存在")
+
+    await db.delete(diagnosis)
+    await db.commit()
+    return {
+        "code": 200,
+        "message": "初稿诊断已删除",
+        "data": {"diagnosis_id": diagnosis_id},
     }
 
 

@@ -22,3 +22,13 @@ export const parseExperienceUpload = (file) => {
     timeout: 60000,
   })
 }
+
+export const scanExperienceOverlaps = () => post('/experience/overlaps', {}, { timeout: 120000 })
+
+export const getSimilarExperiences = (id) => get(`/experience/${id}/similar`)
+
+export const previewExperienceMerge = (sourceIds) =>
+  post('/experience/merge/preview', { source_ids: sourceIds }, { timeout: 120000 })
+
+export const confirmExperienceMerge = (data) =>
+  post('/experience/merge', data, { timeout: 120000 })

@@ -1,4 +1,4 @@
-import { get, post } from './api'
+import { del, get, post, put } from './api'
 
 export const listDraftDiagnoses = (params = {}) => get('/draft-diagnoses', params)
 
@@ -23,3 +23,7 @@ export const createUploadedDraftDiagnosis = ({ file, title, goal, audience, chan
 }
 
 export const createDraftDiagnosisExperience = (id, data) => post(`/draft-diagnoses/${id}/experience-drafts`, data)
+
+export const updateDraftDiagnosisTitle = (id, title) => put(`/draft-diagnoses/${id}/title`, { title })
+
+export const deleteDraftDiagnosis = (id) => del(`/draft-diagnoses/${id}`)

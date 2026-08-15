@@ -215,25 +215,70 @@
     <section v-if="history.length" class="history-section">
       <div class="section-title"><div><span class="eyebrow">RECENT DIAGNOSES</span><h2>最近的初稿诊断</h2></div><span class="section-count">保留诊断记录，方便回看</span></div>
       <div class="history-list">
-        <button v-for="item in history" :key="item.id" type="button" class="history-item" :class="{ active: diagnosis?.id === item.id }" @click="openHistory(item.id)">
-          <div><strong>{{ item.title }}</strong><span>{{ item.content_char_count }} 字 · {{ sourceLabel(item.source_type) }}</span></div><div class="history-meta"><el-tag size="small" :type="item.status === 'completed' ? 'success' : 'warning'">{{ item.status === 'completed' ? '已完成' : '处理中' }}</el-tag><small>{{ formatDate(item.created_at) }}</small></div>
-        </button>
+        <div
+          v-for="item in history"
+          :key="item.id"
+          class="history-item"
+          :class="{ active: diagnosis?.id === item.id, 'is-editing': editingTitleId === item.id }"
+          @click="openHistory(item.id)"
+        >
+          <div class="history-item-main">
+            <el-input
+              v-if="editingTitleId === item.id"
+              v-model="titleDraft"
+              class="history-item-title-input"
+              size="small"
+              maxlength="200"
+              :disabled="titleSavingId === item.id"
+              @click.stop
+              @blur="saveHistoryTitle(item)"
+              @keyup.enter="saveHistoryTitle(item)"
+              @keyup.esc="cancelTitleEditing"
+            />
+            <strong v-else class="history-item-title" title="点击查看诊断">{{ item.title }}</strong>
+            <span>{{ item.content_char_count }} 字 · {{ sourceLabel(item.source_type) }}</span>
+          </div>
+          <div class="history-meta">
+            <div class="history-meta-top">
+              <el-tag size="small" :type="item.status === 'completed' ? 'success' : 'warning'">{{ item.status === 'completed' ? '已完成' : '处理中' }}</el-tag>
+              <div class="history-actions">
+                <button
+                  type="button"
+                  class="history-action"
+                  title="修改标题"
+                  :disabled="editingTitleId === item.id || deletingId === item.id"
+                  @click.stop="startTitleEditing(item)"
+                ><el-icon :size="13"><EditPen /></el-icon></button>
+                <button
+                  type="button"
+                  class="history-action history-action-danger"
+                  title="删除诊断"
+                  :disabled="editingTitleId !== null || deletingId !== null"
+                  @click.stop="confirmDeleteHistory(item)"
+                ><el-icon v-if="deletingId !== item.id" :size="13"><Delete /></el-icon><el-icon v-else class="is-loading" :size="13"><Loading /></el-icon></button>
+              </div>
+            </div>
+            <small>{{ formatDate(item.created_at) }}</small>
+          </div>
+        </div>
       </div>
     </section>
   </div>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { ArrowRight, CircleCheck, Delete, Document, Lightning, Link, Loading, Plus, Upload, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
+import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowRight, CircleCheck, Delete, Document, EditPen, Lightning, Link, Loading, Plus, Upload, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
 import { feishuBriefSummarize, feishuBriefUpload } from '@/api/feishu'
 import {
   createDraftDiagnosisExperience,
   createPastedDraftDiagnosis,
   createUploadedDraftDiagnosis,
+  deleteDraftDiagnosis,
   getDraftDiagnosis,
   listDraftDiagnoses,
+  updateDraftDiagnosisTitle,
 } from '@/api/draftDiagnoses'
 import BriefStructuredCard from '@/components/creation/BriefStructuredCard.vue'
 import { renderExperienceMarkdown } from '@/utils/experienceMarkdown'
@@ -246,6 +291,10 @@ const selectedFile = ref(null)
 const diagnosis = ref(null)
 const history = ref([])
 const savedFindings = ref([])
+const editingTitleId = ref(null)
+const titleDraft = ref('')
+const titleSavingId = ref(null)
+const deletingId = ref(null)
 const form = reactive({ title: '', content: '' })
 
 const briefSourceKinds = [
@@ -539,6 +588,7 @@ const loadHistory = async () => {
 }
 
 const openHistory = async (id) => {
+  if (editingTitleId.value !== null) return
   if (diagnosis.value?.id === id) return
   try {
     const res = await getDraftDiagnosis(id)
@@ -548,6 +598,78 @@ const openHistory = async (id) => {
     savedFindings.value = []
   } catch {
     ElMessage.error('诊断记录加载失败')
+  }
+}
+
+const startTitleEditing = async (item) => {
+  if (titleSavingId.value !== null) return
+  editingTitleId.value = item.id
+  titleDraft.value = item.title || ''
+  await nextTick()
+  const input = document.querySelector('.history-item-title-input input')
+  input?.focus?.()
+  input?.select?.()
+}
+
+const cancelTitleEditing = () => {
+  if (titleSavingId.value !== null) return
+  editingTitleId.value = null
+  titleDraft.value = ''
+}
+
+const saveHistoryTitle = async (item) => {
+  if (editingTitleId.value !== item.id || titleSavingId.value !== null) return
+  const nextTitle = titleDraft.value.trim()
+  if (!nextTitle) {
+    ElMessage.warning('标题不能为空')
+    return
+  }
+  if (nextTitle === (item.title || '').trim()) {
+    cancelTitleEditing()
+    return
+  }
+  titleSavingId.value = item.id
+  try {
+    const res = await updateDraftDiagnosisTitle(item.id, nextTitle)
+    const updated = unwrap(res).diagnosis
+    item.title = updated?.title || nextTitle
+    if (diagnosis.value?.id === item.id) diagnosis.value.title = item.title
+    editingTitleId.value = null
+    titleDraft.value = ''
+    ElMessage.success('标题已保存')
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '标题保存失败，请稍后重试')
+  } finally {
+    titleSavingId.value = null
+  }
+}
+
+const confirmDeleteHistory = async (item) => {
+  if (deletingId.value !== null) return
+  try {
+    await ElMessageBox.confirm(
+      '删除后这次诊断的记录将无法恢复，但已经沉淀到经验库的发现不受影响。',
+      '确认删除初稿诊断？',
+      {
+        type: 'warning',
+        confirmButtonText: '删除诊断',
+        cancelButtonText: '取消',
+        lockScroll: false,
+      },
+    )
+  } catch {
+    return
+  }
+  deletingId.value = item.id
+  try {
+    await deleteDraftDiagnosis(item.id)
+    history.value = history.value.filter((entry) => entry.id !== item.id)
+    if (diagnosis.value?.id === item.id) resetResult()
+    ElMessage.success('初稿诊断已删除')
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '删除初稿诊断失败，请稍后重试')
+  } finally {
+    deletingId.value = null
   }
 }
 
@@ -669,7 +791,7 @@ onUnmounted(() => {
 .plan-list { display: flex; flex-direction: column; gap: 8px; }.plan-item { display: flex; gap: 11px; align-items: flex-start; padding: 11px 12px; border-radius: var(--r-md); background: #f8f5ee; }.plan-number { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--clay-tint); color: var(--clay-deep); font: 700 12px/1 'Fraunces', ui-serif, Georgia, serif; flex-shrink: 0; }.plan-item strong { font-size: 13px; }.plan-item p { margin: 4px 0 0; color: var(--ink-3); font-size: 11px; line-height: 1.6; }
 .questions-note { display: flex; gap: 9px; margin-top: 22px; padding: 12px 14px; border-radius: var(--r-md); background: #fff7e7; color: #8b6c35; }.questions-note > .el-icon { margin-top: 2px; }.questions-note strong { font-size: 12px; }.questions-note p { margin: 5px 0 0; font-size: 11px; line-height: 1.6; }
 .loading-card, .empty-result { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }.loading-card { height: 640px; }.loading-orbit { display: grid; place-items: center; width: 58px; height: 58px; margin-bottom: 18px; border-radius: 50%; background: var(--clay-tint); color: var(--clay-deep); font-size: 23px; }.loading-card h2, .empty-result h2 { margin: 0; font: 700 25px/1.3 'Noto Serif SC', 'Songti SC', serif; }.loading-card p, .empty-result p { max-width: 430px; margin: 10px 0 0; color: var(--ink-3); font-size: 13px; line-height: 1.8; }.empty-mark { margin-bottom: 18px; color: var(--clay); font: 400 60px/1 'Fraunces', ui-serif, Georgia, serif; }.empty-result .eyebrow { margin-bottom: 9px; }.empty-flow { display: flex; align-items: center; gap: 11px; margin-top: 27px; color: var(--ink-3); font-size: 12px; }.empty-flow .el-icon { color: var(--clay); }
-.history-section { margin-top: 20px; padding: 22px; }.history-section h2 { font-size: 21px; }.history-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }.history-item { display: flex; justify-content: space-between; gap: 10px; min-width: 0; padding: 13px; border: 1px solid #e9dfd2; border-radius: var(--r-md); background: #fffdf9; color: var(--ink); cursor: pointer; text-align: left; transition: all .15s; }.history-item:hover, .history-item.active { border-color: var(--clay-soft); background: #fff8ef; }.history-item strong, .history-item span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.history-item strong { max-width: 180px; font-size: 13px; }.history-item span, .history-meta small { margin-top: 6px; color: var(--ink-4); font-size: 10px; }.history-meta { flex-direction: column; align-items: flex-end; gap: 3px; }
+.history-section { margin-top: 20px; padding: 22px; }.history-section h2 { font-size: 21px; }.history-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }.history-item { display: flex; justify-content: space-between; gap: 10px; min-width: 0; padding: 13px; border: 1px solid #e9dfd2; border-radius: var(--r-md); background: #fffdf9; color: var(--ink); cursor: pointer; text-align: left; transition: all .15s; }.history-item:hover, .history-item.active { border-color: var(--clay-soft); background: #fff8ef; }.history-item-main { min-width: 0; flex: 1; }.history-item-title, .history-item-main > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.history-item-title { max-width: 100%; font-size: 13px; }.history-item-main > span { margin-top: 6px; color: var(--ink-4); font-size: 10px; }.history-item-title-input { max-width: 100%; margin-bottom: 2px; }.history-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex-shrink: 0; }.history-meta-top { display: flex; align-items: center; gap: 6px; }.history-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity .15s; }.history-item:hover .history-actions, .history-item.is-editing .history-actions { opacity: 1; }.history-action { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-4); cursor: pointer; transition: all .15s; }.history-action:hover:not(:disabled) { background: var(--ivory); color: var(--clay-deep); }.history-action-danger:hover:not(:disabled) { background: #fff1ed; color: #b4513f; }.history-action:disabled { cursor: default; opacity: .45; }.history-meta small { margin-top: 0; color: var(--ink-4); font-size: 10px; }
 @media (max-width: 1100px) { .diagnosis-grid { grid-template-columns: minmax(0, 330px) minmax(0, 1fr); gap: 16px; }.method-chip-list, .history-list { grid-template-columns: 1fr 1fr; } }
 @media (min-width: 821px) { .diagnosis-grid.is-empty { align-items: stretch; }.diagnosis-grid.is-empty .result-column { display: flex; }.diagnosis-grid.is-empty .empty-result { width: 100%; min-height: 0; flex: 1; } }
 @media (max-width: 820px) { .diagnosis-hero { align-items: flex-start; flex-direction: column; }.hero-note { max-width: none; width: 100%; }.diagnosis-grid { display: block; }.input-card { position: static; margin-bottom: 16px; }.result-card { min-height: 520px; padding: 20px 16px; }.loading-card { height: 520px; }.strength-list, .issue-fields, .method-chip-list, .history-list { grid-template-columns: 1fr; }.history-section { padding: 18px 14px; }.history-item strong { max-width: 220px; } }

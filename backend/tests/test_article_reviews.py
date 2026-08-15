@@ -223,6 +223,53 @@ def test_semantic_blocks_skip_wechat_draft_front_matter():
     assert blocks[0]["source_line_start"] > 10
 
 
+def test_semantic_blocks_skip_front_matter_for_both_initial_and_final_draft():
+    initial = (
+        "中科闻歌\n"
+        "磐石ScienceOne\n"
+        "公众号推文-初稿\n\n"
+        "中科闻歌\n"
+        "磐石ScienceOne\n"
+        "公众号推文-初稿\n\n"
+        "组会前夜，我让磐石跑通了科研全流程\n\n"
+        "作者|路人甲TM\n\n"
+        "事情是这样的。组会前一晚，导师突然问我：最近 latent VLA 这个方向有没有新论文？"
+        "我当时心里一紧，因为这个方向我只看过几篇论文。"
+    )
+    final = (
+        "磐石ScienceOne-公众号路人甲TM-初稿\n\n"
+        "发布时间：7/18\n\n"
+        "封面：\n\n"
+        "标题：\n\n"
+        "1.被arXiv按在地上摩擦之后，我找到了一个AI科研搭子\n\n"
+        "2.实测中科院团队新出的AI科研神器：从查文献到出PPT，一个对话搞定\n\n"
+        "正文：\n\n"
+        "事情是这样的。组会前一晚，导师突然问我：最近 latent VLA 这个方向有没有新论文？"
+        "我当时心里一紧，因为这个方向我只看过几篇论文。"
+    )
+
+    for text in (initial, final):
+        blocks = build_semantic_blocks(text, side="before")
+        joined = "\n".join(block["text"] for block in blocks)
+        assert joined.startswith("事情是这样的。")
+        assert "中科闻歌" not in joined
+        assert "发布时间" not in joined
+        assert "被arXiv" not in joined
+
+
+def test_semantic_blocks_keep_article_starting_with_step_heading():
+    text = (
+        "第三步，找到一个可以验证的研究问题\n\n"
+        "仅仅做完综述还不算完，为了避免导师灵魂拷问，我还要让磐石列出值得做的方向。\n"
+        "它给出了三个假设，每个假设都附有文献依据和验证方法。"
+    )
+
+    blocks = build_semantic_blocks(text, side="before")
+
+    assert blocks[0]["text"].startswith("第三步")
+    assert "仅仅做完综述" in blocks[0]["text"]
+
+
 def test_semantic_diff_distinguishes_minor_rewrite_addition_and_reorder():
     minor = build_change_groups("我们要做的事情。", "我们要做了事情！")
     assert [item["change_type"] for item in minor["groups"]] == ["minor_edit"]
