@@ -122,6 +122,19 @@ class Settings(BaseSettings):
     # 读文档时申请的 scope；offline_access 用来换取 refresh_token（否则 access_token 2h 后失效需重授权）
     FEISHU_SCOPES: str = "offline_access docx:document:readonly wiki:wiki:readonly drive:drive:readonly"
 
+    # ====== 飞书内容资讯日报（独立自建应用）======
+    # 使用 tenant_access_token 以应用身份写多维表格，不复用上面的用户 OAuth 应用。
+    FEISHU_DIGEST_ENABLED: bool = False
+    FEISHU_DIGEST_APP_ID: Optional[str] = None
+    FEISHU_DIGEST_APP_SECRET: Optional[str] = None
+    FEISHU_DIGEST_BASE_TOKEN: str = "SDIAb7BwMa20zes2WzBcODkanf9"
+    FEISHU_DIGEST_TABLE_ID: str = "tblFkFWJ5lf7AS31"
+    FEISHU_DIGEST_MAX_INFO_ITEMS: int = 120
+    FEISHU_DIGEST_MAX_XHS_ITEMS: int = 20
+    FEISHU_DIGEST_MAX_COMMERCIAL_ITEMS: int = 40
+    FEISHU_DIGEST_TRANSLATE_ENGLISH: bool = True
+    FEISHU_DIGEST_TRANSLATION_BATCH_SIZE: int = 15
+
     # ====== Embedding 配置 ======
     EMBEDDING_PROVIDER: str = "dashscope"
     EMBEDDING_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"

@@ -142,6 +142,7 @@ def collect_security_health(cost_guard_status: Optional[dict[str, Any]] = None) 
         _masked_presence("ANTHROPIC_API_KEY", settings.ANTHROPIC_API_KEY),
         _masked_presence("TONGYI_API_KEY", settings.TONGYI_API_KEY),
         _masked_presence("FEISHU_APP_SECRET", settings.FEISHU_APP_SECRET),
+        _masked_presence("FEISHU_DIGEST_APP_SECRET", settings.FEISHU_DIGEST_APP_SECRET),
         _masked_presence("ALIYUN_SMS_ACCESS_KEY_SECRET", settings.ALIYUN_SMS_ACCESS_KEY_SECRET),
         _masked_presence("WXPAY_API_V3_KEY", settings.WXPAY_API_V3_KEY),
     ]

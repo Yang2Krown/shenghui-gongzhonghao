@@ -54,6 +54,7 @@ celery_app.conf.update(
         "xhs.generate_dynamic_keywords": {"queue": "ai"},
         "xhs.evaluate_keyword_lifecycle": {"queue": "ai"},
         "xhs.*": {"queue": "scraping"},
+        "feishu_digest.*": {"queue": "default"},
     },
 )
 
@@ -70,6 +71,7 @@ import app.tasks.meeting_tasks  # noqa: F401,E402
 import app.tasks.experience_tasks  # noqa: F401,E402
 import app.tasks.content_version_tasks  # noqa: F401,E402
 import app.tasks.article_review_tasks  # noqa: F401,E402
+import app.tasks.feishu_digest_tasks  # noqa: F401,E402
 import app.core.celery_monitor  # noqa: F401,E402
 
 __all__ = ["celery_app"]

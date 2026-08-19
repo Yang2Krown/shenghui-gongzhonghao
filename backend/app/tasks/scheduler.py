@@ -16,6 +16,17 @@ from celery.schedules import crontab
 
 
 CELERY_BEAT_SCHEDULE = {
+    # ── 飞书内容资讯日报：按北京时间写入同一张多维表格 ──
+    "feishu-digest-morning": {
+        "task": "feishu_digest.publish",
+        "schedule": crontab(minute=30, hour=9),
+        "kwargs": {"wave": "morning"},
+    },
+    "feishu-digest-afternoon": {
+        "task": "feishu_digest.publish",
+        "schedule": crontab(minute=30, hour=14),
+        "kwargs": {"wave": "afternoon"},
+    },
     # ── 小红书集中采集：每天上午一波（TikHub 付费通道，本地 CLI 已弃用）──
     # 基础词按 schedule_group 分波，前端默认 1；为不依赖具体分组，覆盖 1-6 全组。
     # 每个词错峰 90s 派发，detail 兜底≈0，单波 ≈ 关键词数 次 TikHub search。
