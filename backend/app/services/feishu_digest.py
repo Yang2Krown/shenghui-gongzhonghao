@@ -29,6 +29,7 @@ PUBLIC_XHS_STATUSES = ("ready", "ready_degraded", "synced")
 CHINESE_CHAR_RE = re.compile(r"[\u4e00-\u9fff]")
 LATIN_CHAR_RE = re.compile(r"[A-Za-z]")
 URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
+LEGACY_XHS_DEDUPE_RE = re.compile(r"^\d{8}-(?:am|pm):(小红书热点):(.+)$")
 
 TRANSLATION_SYSTEM_PROMPT = """你是科技和 AI 资讯编辑。把输入中的英文标题和英文摘要翻译成简洁、自然、信息准确的中文。
 
@@ -272,6 +273,7 @@ def _base_record(
     angle: str = "",
     heat_score: float = 0,
     commercial_grade: str = "无",
+    stable_dedupe: bool = False,
 ) -> dict[str, Any]:
     push_batch = "上午 09:30" if window.wave == "morning" else "下午 14:30"
     note_parts = [
@@ -303,7 +305,11 @@ def _base_record(
         "commercial_grade": commercial_grade,
         "status": "待查看",
         "note": _text("；".join(part for part in note_parts if part), 1800),
-        "dedupe_key": f"{window.batch_key}:{category}:{entity_key}",
+        "dedupe_key": (
+            f"{category}:{entity_key}"
+            if stable_dedupe
+            else f"{window.batch_key}:{category}:{entity_key}"
+        ),
     }
 
 
@@ -415,6 +421,7 @@ async def _collect_xhs(db: AsyncSession, window: DigestWindow, limit: int) -> li
             source_time=board.created_at if board else None,
             window=window,
             entity_key=f"topic-{topic.get('topic_id') or topic.get('keyword') or topic.get('topic')}",
+            stable_dedupe=True,
             metrics=f"样本 {topic.get('sample_count') or len(notes)}；近24h新增 {new_notes}；最高赞 {likes}",
             evidence="；".join(str(item) for item in (topic.get("evidence") or [])[:3]),
             recommendation=f"{label}：近24小时新增 {new_notes} 篇，最高赞 {likes}。",
@@ -453,6 +460,7 @@ async def _collect_xhs(db: AsyncSession, window: DigestWindow, limit: int) -> li
             source_time=note.published_at or note.last_discovered_at,
             window=window,
             entity_key=f"note-{note.note_id}",
+            stable_dedupe=True,
             metrics=f"赞 {note.like_count or 0}；藏 {note.collect_count or 0}；评 {note.comment_count or 0}",
             recommendation=f"最近一次小红书采集批次（{latest_discovered:%Y-%m-%d %H:%M}）中的高质量素材，当前获赞 {note.like_count or 0}。",
             angle="爆款结构 / 用户反馈 / 内容形式",
@@ -630,8 +638,21 @@ def _cell_scalar(value: Any) -> str:
     return str(value or "")
 
 
+def _canonical_dedupe_key(value: Any) -> str:
+    """兼容旧版含早晚批次的小红书去重键。
+
+    小红书是素材池，同一笔记/话题不应因为 09:30、14:30 再写一次；
+    其他两类仍按时段内的新数据入库。
+    """
+    key = _cell_scalar(value)
+    match = LEGACY_XHS_DEDUPE_RE.match(key)
+    if match:
+        return f"{match.group(1)}:{match.group(2)}"
+    return key
+
+
 def _existing_signature(fields: dict[str, Any]) -> str:
-    dedupe = _cell_scalar(fields.get("去重键"))
+    dedupe = _canonical_dedupe_key(fields.get("去重键"))
     if dedupe:
         return f"key:{dedupe}"
     category = _cell_scalar(fields.get("内容分类"))
@@ -642,7 +663,7 @@ def _existing_signature(fields: dict[str, Any]) -> str:
 
 def _new_signature(record: dict[str, Any], *, has_dedupe_field: bool) -> str:
     if has_dedupe_field:
-        return f"key:{record['dedupe_key']}"
+        return f"key:{_canonical_dedupe_key(record['dedupe_key'])}"
     collected = int(record["collected_at"].replace(tzinfo=BJT).timestamp() * 1000)
     return f"visible:{record['category']}|{record['title']}|{collected}"
 
@@ -804,6 +825,24 @@ class FeishuBaseClient:
             if owned:
                 await client.aclose()
 
+    async def batch_delete(self, token: str, record_ids: list[str]) -> int:
+        client, owned = await self._with_client()
+        deleted = 0
+        try:
+            for start in range(0, len(record_ids), 200):
+                chunk = record_ids[start:start + 200]
+                response = await client.post(
+                    f"{OPEN_HOST}/open-apis/bitable/v1/apps/{self.base_token}/tables/{self.table_id}/records/batch_delete",
+                    json={"records": chunk},
+                    headers=self._headers(token),
+                )
+                await self._json(response, "批量删除重复记录")
+                deleted += len(chunk)
+            return deleted
+        finally:
+            if owned:
+                await client.aclose()
+
 
 async def sync_digest_records(records: list[dict[str, Any]], client: Optional[FeishuBaseClient] = None) -> dict[str, Any]:
     base = client or FeishuBaseClient()
@@ -825,6 +864,65 @@ async def sync_digest_records(records: list[dict[str, Any]], client: Optional[Fe
         "created": created,
         "skipped_existing": len(records) - len(pending),
         "field_count": len(fields),
+    }
+
+
+def _record_collected_timestamp(item: dict[str, Any]) -> int:
+    value = (item.get("fields") or {}).get("采集时间")
+    if isinstance(value, (int, float)):
+        return int(value)
+    scalar = _cell_scalar(value)
+    try:
+        return int(float(scalar))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def deduplicate_existing_xhs_records(
+    client: Optional[FeishuBaseClient] = None,
+) -> dict[str, int]:
+    """同一小红书素材只保留最新的一条，并把保留项升级为稳定去重键。"""
+    base = client or FeishuBaseClient()
+    token = await base.tenant_token()
+    items = await base.list_records(token)
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        fields = item.get("fields") or {}
+        if _cell_scalar(fields.get("内容分类")) != "小红书热点":
+            continue
+        key = _canonical_dedupe_key(fields.get("去重键"))
+        if not key:
+            continue
+        groups.setdefault(key, []).append(item)
+
+    updates: list[dict[str, Any]] = []
+    delete_ids: list[str] = []
+    duplicate_groups = 0
+    for canonical_key, group in groups.items():
+        ordered = sorted(
+            group,
+            key=lambda item: (_record_collected_timestamp(item), str(item.get("record_id") or "")),
+            reverse=True,
+        )
+        keep = ordered[0]
+        keep_id = str(keep.get("record_id") or "")
+        current_key = _cell_scalar((keep.get("fields") or {}).get("去重键"))
+        if keep_id and current_key != canonical_key:
+            updates.append({"record_id": keep_id, "fields": {"去重键": canonical_key}})
+        duplicates = [str(item.get("record_id") or "") for item in ordered[1:]]
+        duplicates = [record_id for record_id in duplicates if record_id]
+        if duplicates:
+            duplicate_groups += 1
+            delete_ids.extend(duplicates)
+
+    updated = await base.batch_update(token, updates) if updates else 0
+    deleted = await base.batch_delete(token, delete_ids) if delete_ids else 0
+    return {
+        "xhs_records_checked": sum(len(group) for group in groups.values()),
+        "duplicate_groups": duplicate_groups,
+        "records_updated": updated,
+        "records_deleted": deleted,
+        "records_kept": len(groups),
     }
 
 

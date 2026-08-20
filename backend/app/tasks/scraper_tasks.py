@@ -96,7 +96,15 @@ def fetch_platform_task(self, platform: str):
     """按 platform 单独抓（每个源一个独立任务：失败/卡死只影响自己，独立 commit + 重试）。"""
     try:
         result = asyncio.run(_run_orchestrator(platforms=[platform]))
-        logger.info(f"[{platform}] 完成：new={result.get('items_new')} dup={result.get('items_duplicate')}")
+        if result.get("sources_failed"):
+            logger.error(
+                "[%s] 抓取完成但存在失败源：failed=%s detail=%s",
+                platform,
+                result.get("sources_failed"),
+                result.get("per_source"),
+            )
+        else:
+            logger.info(f"[{platform}] 完成：new={result.get('items_new')} dup={result.get('items_duplicate')}")
         return result
     except Exception as e:
         logger.error(f"[{platform}] 抓取失败: {e}")

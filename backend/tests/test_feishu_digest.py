@@ -5,6 +5,7 @@ import pytest
 from app.core.timezone import BJT
 from app.services.feishu_digest import (
     backfill_existing_english_records,
+    deduplicate_existing_xhs_records,
     digest_window,
     needs_chinese_translation,
     record_to_feishu_fields,
@@ -210,6 +211,59 @@ class FakeBaseClient:
         return len(records)
 
 
+class FakeXhsCleanupClient:
+    def __init__(self):
+        self.updated = []
+        self.deleted = []
+
+    async def tenant_token(self):
+        return "token"
+
+    async def list_records(self, token):
+        return [
+            {
+                "record_id": "rec_old_am",
+                "fields": {
+                    "内容分类": "小红书热点",
+                    "采集时间": 1,
+                    "去重键": "20260819-am:小红书热点:note-1",
+                },
+            },
+            {
+                "record_id": "rec_old_pm",
+                "fields": {
+                    "内容分类": "小红书热点",
+                    "采集时间": 2,
+                    "去重键": "20260819-pm:小红书热点:note-1",
+                },
+            },
+            {
+                "record_id": "rec_newest",
+                "fields": {
+                    "内容分类": "小红书热点",
+                    "采集时间": 3,
+                    "去重键": "20260820-am:小红书热点:note-1",
+                },
+            },
+            {
+                "record_id": "rec_info",
+                "fields": {
+                    "内容分类": "信息选题",
+                    "采集时间": 3,
+                    "去重键": "20260820-am:信息选题:raw-1",
+                },
+            },
+        ]
+
+    async def batch_update(self, token, records):
+        self.updated.extend(records)
+        return len(records)
+
+    async def batch_delete(self, token, record_ids):
+        self.deleted.extend(record_ids)
+        return len(record_ids)
+
+
 @pytest.mark.asyncio
 async def test_sync_is_idempotent_by_dedupe_key():
     client = FakeBaseClient()
@@ -221,6 +275,41 @@ async def test_sync_is_idempotent_by_dedupe_key():
     assert result["created"] == 1
     assert result["skipped_existing"] == 1
     assert client.created[0]["标题"] == "第二条"
+
+
+@pytest.mark.asyncio
+async def test_xhs_legacy_batch_keys_are_treated_as_one_material():
+    client = FakeBaseClient()
+
+    async def existing(_token):
+        return {"key:小红书热点:note-1"}
+
+    client.existing_signatures = existing
+    record = sample_record(
+        category="小红书热点",
+        dedupe_key="20260820-am:小红书热点:note-1",
+    )
+    result = await sync_digest_records([record], client=client)
+    assert result["created"] == 0
+    assert result["skipped_existing"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cleanup_keeps_newest_xhs_record_and_deletes_older_copies():
+    client = FakeXhsCleanupClient()
+    result = await deduplicate_existing_xhs_records(client)
+    assert result == {
+        "xhs_records_checked": 3,
+        "duplicate_groups": 1,
+        "records_updated": 1,
+        "records_deleted": 2,
+        "records_kept": 1,
+    }
+    assert client.updated == [{
+        "record_id": "rec_newest",
+        "fields": {"去重键": "小红书热点:note-1"},
+    }]
+    assert set(client.deleted) == {"rec_old_am", "rec_old_pm"}
 
 
 def test_celery_schedule_runs_twice_daily():

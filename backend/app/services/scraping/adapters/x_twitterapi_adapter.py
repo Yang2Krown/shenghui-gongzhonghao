@@ -47,6 +47,10 @@ load_dotenv(Path(__file__).resolve().parents[4] / ".env")
 API_BASE = "https://api.twitterapi.io"
 
 
+class TwitterApiCreditsExhausted(RuntimeError):
+    """twitterapi.io 余额不足；同一轮后续请求应立即停止。"""
+
+
 def _api_key() -> str:
     return (os.getenv("TWITTERAPI_IO_KEY") or "").strip()
 
@@ -164,21 +168,34 @@ class XTwitterApiAdapter(SourceAdapter):
             return []
 
         sem = asyncio.Semaphore(concurrency)
+        credits_exhausted = asyncio.Event()
         async with httpx.AsyncClient(timeout=self.TIMEOUT, headers={"x-api-key": key}) as client:
             async def _one(unit: Tuple[str, str, Optional[int]]) -> List[FetchedItem]:
                 kind, value, acc_id = unit
+                if credits_exhausted.is_set():
+                    return []
                 async with sem:
+                    if credits_exhausted.is_set():
+                        return []
                     # 定速：每次请求前隔 interval 秒（+小抖动），守住 1 req / 5s 的免费档限速
                     await asyncio.sleep(interval + random.random() * 0.5)
-                    if kind == "kw":
-                        return await self._search(client, source.platform, value, limit, cfg)
-                    return await self._user_tweets(client, source.platform, value, acc_id, limit, cfg)
+                    try:
+                        if kind == "kw":
+                            return await self._search(client, source.platform, value, limit, cfg)
+                        return await self._user_tweets(client, source.platform, value, acc_id, limit, cfg)
+                    except TwitterApiCreditsExhausted:
+                        credits_exhausted.set()
+                        raise
 
             batches = await asyncio.gather(*[_one(u) for u in units], return_exceptions=True)
 
         items: List[FetchedItem] = []
         seen: set[str] = set()
+        billing_error: Optional[TwitterApiCreditsExhausted] = None
         for b in batches:
+            if isinstance(b, TwitterApiCreditsExhausted):
+                billing_error = b
+                continue
             if isinstance(b, Exception):
                 logger.warning(f"[{source.platform}] X 子任务失败: {b}")
                 continue
@@ -186,6 +203,13 @@ class XTwitterApiAdapter(SourceAdapter):
                 if it.url not in seen:
                     seen.add(it.url)
                     items.append(it)
+
+        if billing_error is not None:
+            source.auth_status = "expired"
+            logger.error("[%s] twitterapi.io 余额不足，已停止本轮剩余请求", source.platform)
+            raise billing_error
+
+        source.auth_status = "ok"
 
         logger.info(
             f"[{source.platform}] X(twitterapi) 抓回 {len(items)} 条"
@@ -247,7 +271,7 @@ class XTwitterApiAdapter(SourceAdapter):
         self, client: httpx.AsyncClient, path: str,
         params: Dict[str, Any], platform: str, label: str,
     ) -> Optional[Dict[str, Any]]:
-        """单次请求，失败返回 None 不抛——任一账号/关键词挂了不连累整批。
+        """单次请求，普通失败返回 None，余额不足则终止整批。
 
         429（限速）等 6 秒重试一次；仍失败则放弃这个单元。
         """
@@ -258,10 +282,17 @@ class XTwitterApiAdapter(SourceAdapter):
                     logger.info(f"[{platform}] {path} {label!r} 429 限速，6s 后重试")
                     await asyncio.sleep(6)
                     continue
+                if resp.status_code == 402:
+                    body = resp.text[:300]
+                    raise TwitterApiCreditsExhausted(
+                        f"twitterapi.io 余额不足（HTTP 402）: {body}"
+                    )
                 if resp.status_code != 200:
                     logger.warning(f"[{platform}] {path} {label!r} HTTP {resp.status_code}: {resp.text[:200]}")
                     return None
                 return resp.json()
+            except TwitterApiCreditsExhausted:
+                raise
             except Exception as e:
                 logger.warning(f"[{platform}] {path} {label!r} 异常: {type(e).__name__}: {e}")
                 return None
