@@ -1,4 +1,4 @@
-"""把生产信息池、小红书热点和潜在商单写入飞书多维表格。"""
+"""把生产信息池、推特动态、小红书热点和潜在商单写入飞书多维表格。"""
 
 from __future__ import annotations
 
@@ -104,6 +104,10 @@ SOURCE_GROUPS = {
 
 def source_group(source_type: str) -> str:
     return SOURCE_GROUPS.get((source_type or "").lower(), "其他信息源")
+
+
+def raw_digest_category(source_type: str) -> str:
+    return "推特动态" if (source_type or "").lower() == "x" else "信息选题"
 
 
 def _text(value: Any, limit: int = 1200) -> str:
@@ -313,7 +317,18 @@ def _base_record(
     }
 
 
-async def _collect_information(db: AsyncSession, window: DigestWindow, limit: int) -> list[dict[str, Any]]:
+async def _collect_information(
+    db: AsyncSession,
+    window: DigestWindow,
+    limit: int,
+    *,
+    twitter_only: bool = False,
+) -> list[dict[str, Any]]:
+    source_condition = (
+        SourceRegistry.source_type == "x"
+        if twitter_only
+        else ~SourceRegistry.source_type.in_(("x", "xhs", "xhs_daily"))
+    )
     rows = (await db.execute(
         select(
             RawInfo,
@@ -326,7 +341,7 @@ async def _collect_information(db: AsyncSession, window: DigestWindow, limit: in
             RawInfo.scraped_at >= window.start,
             RawInfo.scraped_at < window.end,
             ~RawInfo.commercial_level.in_(("suspected", "likely")),
-            ~SourceRegistry.source_type.in_(("xhs", "xhs_daily")),
+            source_condition,
         )
         .order_by(desc(RawInfo.scraped_at), desc(RawInfo.id))
         .limit(max(limit * 6, limit))
@@ -342,7 +357,7 @@ async def _collect_information(db: AsyncSession, window: DigestWindow, limit: in
         if heat:
             metrics += f"；互动量 {heat}"
         item = _base_record(
-            category="信息选题",
+            category=raw_digest_category(source.source_type),
             title=raw.title,
             summary=raw.summary or raw.content or "",
             source_name=display_source,
@@ -529,9 +544,15 @@ async def collect_digest_records(
 ) -> tuple[DigestWindow, list[dict[str, Any]]]:
     window = digest_window(wave, run_at)
     info = await _collect_information(db, window, settings.FEISHU_DIGEST_MAX_INFO_ITEMS)
+    twitter = await _collect_information(
+        db,
+        window,
+        settings.FEISHU_DIGEST_MAX_TWITTER_ITEMS,
+        twitter_only=True,
+    )
     xhs = await _collect_xhs(db, window, settings.FEISHU_DIGEST_MAX_XHS_ITEMS)
     commercial = await _collect_commercial(db, window, settings.FEISHU_DIGEST_MAX_COMMERCIAL_ITEMS)
-    return window, [*info, *xhs, *commercial]
+    return window, [*info, *twitter, *xhs, *commercial]
 
 
 FIELD_KEYS = {

@@ -8,6 +8,7 @@ from app.services.feishu_digest import (
     deduplicate_existing_xhs_records,
     digest_window,
     needs_chinese_translation,
+    raw_digest_category,
     record_to_feishu_fields,
     source_group,
     sync_digest_records,
@@ -64,6 +65,8 @@ def test_source_classification_is_readable():
     assert source_group("dajiala_wechat") == "重点公众号"
     assert source_group("github") == "GitHub 开源"
     assert source_group("unknown") == "其他信息源"
+    assert raw_digest_category("x") == "推特动态"
+    assert raw_digest_category("rss") == "信息选题"
 
 
 def test_translation_detection_only_targets_english_sentences():
@@ -186,6 +189,22 @@ def test_record_mapping_skips_select_value_not_present_in_schema():
     ]
     mapped = record_to_feishu_fields(sample_record(), fields)
     assert mapped == {"标题": "AI 资讯标题"}
+
+
+def test_record_mapping_writes_twitter_category_when_option_exists():
+    fields = [
+        {"field_name": "标题", "type": 1},
+        {
+            "field_name": "内容分类",
+            "type": 3,
+            "property": {"options": [{"name": "信息选题"}, {"name": "推特动态"}]},
+        },
+    ]
+    mapped = record_to_feishu_fields(
+        sample_record(category="推特动态"),
+        fields,
+    )
+    assert mapped == {"标题": "AI 资讯标题", "内容分类": "推特动态"}
 
 
 class FakeBaseClient:
