@@ -1,6 +1,7 @@
 import asyncio
 from datetime import date, datetime
 
+import httpx
 import pytest
 from xhs_cli.exceptions import NeedVerifyError, SessionExpiredError
 
@@ -84,6 +85,53 @@ def test_local_store_persists_failed_uploads(tmp_path):
     assert endpoint == "/upload" and payload == {"note": 1}
     store.uploaded(row_id)
     assert store.pending_count() == 0
+
+
+def http_conflict():
+    request = httpx.Request("POST", "https://example.test/api/results")
+    response = httpx.Response(409, request=request, json={"detail": "同一幂等键对应了不同内容"})
+    return httpx.HTTPStatusError("conflict", request=request, response=response)
+
+
+def test_pending_conflict_is_quarantined_without_blocking_later_uploads(tmp_path):
+    class FakeServer:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, _method, endpoint, _payload):
+            self.calls.append(endpoint)
+            if endpoint == "/conflict":
+                raise http_conflict()
+            return {"ok": True}
+
+    store = LocalStore(tmp_path / "agent.sqlite3")
+    store.enqueue("/conflict", {"idempotency_key": "same-key"})
+    store.enqueue("/healthy", {"idempotency_key": "next-key"})
+    agent = CollectorAgent.__new__(CollectorAgent)
+    agent.server = FakeServer()
+    agent.store = store
+
+    asyncio.run(agent.upload_pending())
+
+    assert agent.server.calls == ["/conflict", "/healthy"]
+    assert store.pending_count() == 0
+    assert store.dead_letter_count() == 1
+
+
+def test_immediate_conflict_is_quarantined_instead_of_retried(tmp_path):
+    class FakeServer:
+        def upload(self, _batch_id, _payload):
+            raise http_conflict()
+
+    store = LocalStore(tmp_path / "agent.sqlite3")
+    agent = CollectorAgent.__new__(CollectorAgent)
+    agent.server = FakeServer()
+    agent.store = store
+
+    asyncio.run(agent.safe_upload("batch-1", {"idempotency_key": "same-key"}))
+
+    assert store.pending_count() == 0
+    assert store.dead_letter_count() == 1
 
 
 def test_collector_stops_immediately_on_captcha(tmp_path, monkeypatch):

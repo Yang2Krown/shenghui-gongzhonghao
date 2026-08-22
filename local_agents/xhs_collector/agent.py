@@ -27,7 +27,7 @@ from risk import RiskBackoff
 from scheduling import build_daily_plan, build_two_wave_plan, recover_interrupted_slots, select_daily_keywords, slot_due, slot_expired
 from storage import LocalStore
 
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 PLAN_STRATEGY = "all_day_base30_plus_summary_v7"
 LEGACY_PLAN_STRATEGY = PLAN_STRATEGY
 SERVICE = "com.midonghub.gzh.xhs-collector"
@@ -113,6 +113,14 @@ class CollectorAgent:
             try:
                 await asyncio.to_thread(self.server.request, "POST", endpoint, payload)
                 self.store.uploaded(row_id)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 409:
+                    reason = f"HTTP 409: {exc.response.text[:900]}"
+                    self.store.quarantine(row_id, reason)
+                    print(f"[upload] 幂等冲突已移入隔离区: {endpoint}", file=sys.stderr, flush=True)
+                    continue
+                self.store.failed_attempt(row_id)
+                break
             except Exception:
                 self.store.failed_attempt(row_id)
                 break
@@ -121,6 +129,13 @@ class CollectorAgent:
         endpoint = f"/api/v1/xhs-agent/batches/{batch_id}/results"
         try:
             await asyncio.to_thread(self.server.upload, batch_id, payload)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 409:
+                reason = f"HTTP 409: {exc.response.text[:900]}"
+                self.store.quarantine_payload(endpoint, payload, reason)
+                print(f"[upload] 幂等冲突已移入隔离区: {endpoint}", file=sys.stderr, flush=True)
+                return
+            self.store.enqueue(endpoint, payload)
         except Exception:
             self.store.enqueue(endpoint, payload)
 
